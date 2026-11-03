@@ -7,8 +7,15 @@ import * as D from "../Backend/kai/validators/kaiDerivedMeasurementValidators.js
 import { composeEvidenceSummaryMeasurementDisclosures, validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
 import { syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 import {
+  EMPTY_CROSS_SOURCE_FORM,
+  crossSourceActivityDetail,
+  crossSourceFormProblem,
+  crossSourceHeadlineValue,
+  crossSourceRequestBody,
   derivedMeasurementBasisPath,
   derivedMeasurementInterpretationPath,
+  groupDigits,
+  reconciliationHistory,
   interpretationBody,
   pairedOutcomeMeasurementsPath,
   tabularDefinitionBody,
@@ -376,4 +383,41 @@ test("the organization's derived-measurement screen builds exactly the documente
   assert.equal(interpretationBody({ indicatorLabel: " ", meaningText: "x", scoreDirection: "", evidenceBasis: "" }, { paired: false }), null);
   assert.deepEqual(interpretationBody({ indicatorLabel: "Readiness", meaningText: "Self-rated.", scoreDirection: "", evidenceBasis: "self_reported" }, { paired: true }),
     { indicator_label: "Readiness", meaning_text: "Self-rated.", score_direction: "not_established", evidence_basis: "self_reported" });
+});
+
+test("the linkage screen requests monthly activity and a confirmed duration mapping, and shows minutes as a subtotal", () => {
+  const SV = "5c000000-0000-4000-8000-0000000000c1";
+  const REGISTER = "5c000000-0000-4000-8000-0000000000c2";
+  const form = { ...EMPTY_CROSS_SOURCE_FORM, referenceSourceVersionId: REGISTER, eventIdentifierFieldKey: "field_1", participantIdentifierFieldKey: "field_2",
+    statusFieldKey: "field_6", completedValueKey: "value_1", dateFieldKey: "field_4", registerParticipantFieldKey: "field_1" };
+  const mapping = (patch) => crossSourceRequestBody({ ...form, ...patch }, SV).mapping;
+  assert.equal(mapping({}).monthly_activity, undefined, "linked reach alone sends no activity selection");
+  assert.equal(mapping({ monthlyActivity: true }).monthly_activity, true);
+  assert.equal(crossSourceFormProblem({ ...form, durationFieldKey: "field_7" }, { reportingPeriodRecorded: true }),
+    "Confirm that the duration column records each service's duration in minutes.");
+  const confirmed = mapping({ monthlyActivity: true, durationFieldKey: "field_7", durationConfirmed: true });
+  assert.deepEqual(confirmed.duration, { field_key: "field_7", meaning: "recorded_service_duration", unit: "minutes" });
+  assert.equal(confirmed.monthly_activity, undefined, "the duration mapping itself requests the monthly breakdown");
+  for (const patch of [{ monthlyActivity: true }, { durationFieldKey: "field_7", durationConfirmed: true }]) {
+    assert.equal(D.validateCrossSourceReachMapping(mapping(patch)).ok, true, JSON.stringify(patch));
+  }
+  assert.equal(crossSourceFormProblem({ ...form, durationFieldKey: "field_7", durationConfirmed: true }, { reportingPeriodRecorded: true }), null);
+
+  const period = { period_start: "2025-04-01", period_end: "2026-03-31" };
+  const months = [{ month: "2025-04", encounter_count: 1 }, { month: "2025-05", encounter_count: 1200 }];
+  const duration = { definition: { metric: "known_recorded_service_minutes", period, duration: { field_key: "field_7", unit: "minutes", meaning: "recorded_service_duration" } },
+    measured_value: 1199, component_counts: { monthly_activity: months, eligible_encounter_count: 1201, duration_known_count: 1199, duration_missing_count: 1, duration_invalid_count: 1, known_recorded_minutes: "16755.5" } };
+  assert.equal(crossSourceHeadlineValue(duration), "16,755.5 minutes", "minutes, never the count of recorded encounters");
+  assert.deepEqual(crossSourceActivityDetail(duration).duration, { knownMinutes: "16755.5", unit: "minutes", fieldKey: "field_7", known: 1199, missing: 1, invalid: 1, subtotal: true });
+  const complete = { ...duration, component_counts: { ...duration.component_counts, duration_known_count: 1201, duration_missing_count: 0, duration_invalid_count: 0 } };
+  assert.equal(crossSourceActivityDetail(complete).duration.subtotal, false);
+  assert.equal(crossSourceHeadlineValue({ ...duration, component_counts: { ...duration.component_counts, known_recorded_minutes: null } }), "no known minutes");
+  const monthly = { definition: { metric: "monthly_eligible_encounters", period }, measured_value: 1201, component_counts: duration.component_counts };
+  assert.deepEqual(crossSourceActivityDetail(monthly), { metric: "monthly_eligible_encounters", period: { start: "2025-04-01", end: "2026-03-31" }, months, eligible: 1201 });
+  assert.equal(crossSourceHeadlineValue(monthly), "1,201");
+  assert.equal(crossSourceActivityDetail({ definition: { metric: "eligible_linked_encounters" }, component_counts: {} }), null);
+  assert.equal(groupDigits("1234567"), "1,234,567");
+
+  const jobs = [{ reconciliation_job_id: "a", primary_source_version_id: SV }, { reconciliation_job_id: "b", primary_source_version_id: "old" }, { reconciliation_job_id: "c", primary_source_version_id: "other" }];
+  assert.deepEqual(reconciliationHistory(jobs, SV, ["old"]).map(({ job, historical }) => [job.reconciliation_job_id, historical]), [["a", false], ["b", true]]);
 });

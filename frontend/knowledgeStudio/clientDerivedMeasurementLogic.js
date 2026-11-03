@@ -137,6 +137,11 @@ export const EMPTY_CROSS_SOURCE_FORM = Object.freeze({
   dateFieldKey: "",
   groupFieldKey: "",
   registerParticipantFieldKey: "",
+  // Optional activity findings: eligible encounters by service month, and
+  // the known recorded duration of a column the person confirms holds minutes.
+  monthlyActivity: false,
+  durationFieldKey: "",
+  durationConfirmed: false,
 });
 
 /** Why the linkage form cannot be sent yet, or null. */
@@ -148,6 +153,7 @@ export function crossSourceFormProblem(form, { reportingPeriodRecorded }) {
   if (!form.statusFieldKey || !form.completedValueKey) return "Choose the status field and the value that means a completed service.";
   if (!form.dateFieldKey) return "Choose the service date field.";
   if (!form.registerParticipantFieldKey) return "Choose the register field holding the same participant identifier.";
+  if (form.durationFieldKey && !form.durationConfirmed) return "Confirm that the duration column records each service's duration in minutes.";
   if (!reportingPeriodRecorded) return "This source's engagement has no recorded reporting period yet.";
   return null;
 }
@@ -167,6 +173,10 @@ export function crossSourceRequestBody(form, primarySourceVersionId) {
         ...(form.groupFieldKey ? { group_field_key: form.groupFieldKey } : {}),
       },
       register: { participant_identifier_field_key: form.registerParticipantFieldKey },
+      // A duration mapping also requests the monthly breakdown (the server's rule).
+      ...(form.durationFieldKey && form.durationConfirmed
+        ? { duration: { field_key: form.durationFieldKey, meaning: "recorded_service_duration", unit: "minutes" } }
+        : form.monthlyActivity ? { monthly_activity: true } : {}),
     },
   };
 }
@@ -194,11 +204,85 @@ const CROSS_SOURCE_METRIC_LABELS = Object.freeze({
   group_linked_encounters: "Eligible encounters",
   group_distinct_people_served: "Distinct people served",
   people_in_more_than_one_group: "People served in more than one group",
+  monthly_eligible_encounters: "Eligible service encounters by month (events, not people)",
+  known_recorded_service_minutes: "Known recorded service minutes (subtotal)",
 });
 
 export function crossSourceMetricLabel(definition) {
   const label = CROSS_SOURCE_METRIC_LABELS[definition?.metric] || "Linked reach";
   return definition?.group ? `${label} in ${definition.group.value_label}` : label;
+}
+
+/** A non-negative decimal string with its whole part grouped by thousands. */
+export function groupDigits(value) {
+  const [whole, fraction] = String(value).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
+/**
+ * The headline value of a linked measurement. A duration measurement's
+ * measured_value counts the encounters with a recorded duration, so its
+ * headline is the minutes subtotal the server recorded, with its unit.
+ */
+export function crossSourceHeadlineValue(entry) {
+  if (entry?.definition?.metric === "known_recorded_service_minutes") {
+    const minutes = entry.component_counts?.known_recorded_minutes;
+    return minutes === null || minutes === undefined ? "no known minutes" : `${groupDigits(minutes)} minutes`;
+  }
+  return groupDigits(entry?.measured_value ?? "");
+}
+
+/** "2025-04" -> "Apr 2025", for display only; the recorded month is unchanged. */
+export function monthLabel(month) {
+  const [year, number] = month.split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[Number(number) - 1] || number} ${year}`;
+}
+
+/**
+ * The activity detail of a linked measurement, from the server's recorded
+ * components only: the monthly breakdown with the eligible total, and for a
+ * duration measurement the known, missing and invalid counts and whether the
+ * minutes are a subtotal. Null for other linked measurements.
+ */
+export function crossSourceActivityDetail(entry) {
+  const counts = entry?.component_counts;
+  const metric = entry?.definition?.metric;
+  if (!counts || !["monthly_eligible_encounters", "known_recorded_service_minutes"].includes(metric)) return null;
+  const detail = {
+    metric,
+    period: entry.definition.period ? { start: entry.definition.period.period_start, end: entry.definition.period.period_end } : null,
+    months: Array.isArray(counts.monthly_activity) ? counts.monthly_activity : [],
+    eligible: counts.eligible_encounter_count,
+  };
+  if (metric !== "known_recorded_service_minutes") return detail;
+  const unrecorded = counts.duration_missing_count + counts.duration_invalid_count;
+  return {
+    ...detail,
+    duration: {
+      knownMinutes: counts.known_recorded_minutes,
+      unit: entry.definition.duration?.unit || "minutes",
+      fieldKey: entry.definition.duration?.field_key || null,
+      known: counts.duration_known_count,
+      missing: counts.duration_missing_count,
+      invalid: counts.duration_invalid_count,
+      subtotal: unrecorded > 0,
+    },
+  };
+}
+
+/**
+ * This version's reconciliations, then those of earlier versions of the same
+ * source (replaced): an earlier version's results are historical and are not
+ * offered here as current.
+ */
+export function reconciliationHistory(jobs, sourceVersionId, earlierVersionIds = []) {
+  const earlier = new Set(earlierVersionIds);
+  return [
+    ...jobs.filter((job) => job.primary_source_version_id === sourceVersionId).map((job) => ({ job, historical: false })),
+    ...jobs.filter((job) => earlier.has(job.primary_source_version_id)).map((job) => ({ job, historical: true })),
+  ];
 }
 
 /** Whether every source version a recorded measurement combines is still current. */

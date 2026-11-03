@@ -256,6 +256,23 @@ test("monthly activity and recorded duration preserve the eligible population, m
   }
   const durationRow = rowOf(metric(list, "known_recorded_service_minutes"));
   assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: durationRow }), /30\.3 known recorded minutes subtotal/);
+  // The monthly statement carries each month's count, so a generated report can state the breakdown.
+  const monthlyRow = rowOf(metric(list, "monthly_eligible_encounters"));
+  const monthlyInterpretation = { indicator_label: "Monthly eligible encounters", meaning_text: "Recorded service activity.", evidence_basis: "organization_record" };
+  for (const interpretation of [null, monthlyInterpretation]) {
+    const statement = D.composeDerivedMeasurementClaimStatement({ measurementRow: monthlyRow, interpretation });
+    assert.match(statement, /5 eligible service encounters by actual service month \(encounters, not people\), reporting period 2025-04-01 to 2026-03-31: 2025-04 1, 2025-09 2, 2025-10 1, 2026-03 1; linked to register /);
+    assert.ok(statement.includes(REFERENCE.sourceVersionId));
+    assert.ok(statement.endsWith(" Duration field field_6 was also mapped."), statement);
+  }
+  // A monthly-only finding of the same encounters keeps a distinct statement (its evidence identity).
+  const monthlyOnlyRow = { ...monthlyRow, definition: { ...monthlyRow.definition, duration: undefined }, field_keys: monthlyRow.field_keys.filter((key) => key !== "field_6") };
+  assert.notEqual(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: monthlyOnlyRow }), D.composeDerivedMeasurementEvidenceStatement({ measurementRow: monthlyRow }));
+  // A breakdown too long for the statement limit keeps the earlier wording rather than failing.
+  const longMonths = Array.from({ length: 60 }, (_, index) => ({ month: `${2021 + Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, encounter_count: 1 }));
+  const longRow = { ...monthlyRow, component_counts: { ...monthlyRow.component_counts, monthly_activity: longMonths } };
+  assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: longRow }), /The breakdown and exclusions are recorded with the measurement\./);
+  assert.equal(D.validateDerivedStatements({ measurementRow: longRow, interpretation: monthlyInterpretation }).ok, true);
   assert.ok(D.derivedMeasurementLimitationCodes({ measurementRow: durationRow }).includes("derived.known_recorded_minutes_subtotal"));
   for (const bad of [
     { ...duration, unit: "hours" }, { ...duration, meaning: "time" }, { ...duration, field_key: "field_4" },

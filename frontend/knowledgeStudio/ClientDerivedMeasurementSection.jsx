@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
-import ClientCrossSourceMeasurementSection from "./ClientCrossSourceMeasurementSection.jsx";
+import ClientCrossSourceMeasurementSection, { CrossSourceActivityDetail } from "./ClientCrossSourceMeasurementSection.jsx";
 import {
   EMPTY_INTERPRETATION_FORM,
   EMPTY_TABULAR_FORM,
   contributingSourcesCurrent,
+  crossSourceHeadlineValue,
   crossSourceMetricLabel,
   currentEvidenceOf,
   derivedMeasurementBasisPath,
@@ -37,7 +38,7 @@ function fieldLabel(field) {
  * result represents as the organization's statement and never changes its
  * numbers. The server calculates and validates everything.
  */
-export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded, linkableVersions = [], versionsById = null }) {
+export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded, linkableVersions = [], versionsById = null, earlierVersionIds = [] }) {
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "" });
   const [form, setForm] = useState(EMPTY_TABULAR_FORM);
   const [meaning, setMeaning] = useState(EMPTY_INTERPRETATION_FORM);
@@ -237,7 +238,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       ) : null}
       {data?.tabular?.available && !data.tabular.sheetKey ? (
         <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data}
-          linkableVersions={linkableVersions} versionsById={versionsById}
+          linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
       {data?.tabular && !data.tabular.available ? (
@@ -255,8 +256,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           <div key={recorded.source_derived_measurement_id} className="border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}
             data-client-derived-current={stillCurrent ? "current" : "not_current"}>
             <div className="fw-semibold">
-              {measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {recorded.measured_value}{recorded.percentage ? ` (${recorded.percentage}%)` : ""}
+              {measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {linked ? crossSourceHeadlineValue(recorded) : recorded.measured_value}{recorded.percentage ? ` (${recorded.percentage}%)` : ""}
             </div>
+            {linked ? <CrossSourceActivityDetail entry={recorded} /> : null}
             {linked ? (
               <ul className="mb-1" data-client-derived-contributing-sources="">
                 {recorded.contributing_sources.map((source) => (

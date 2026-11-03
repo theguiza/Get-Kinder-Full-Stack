@@ -3,13 +3,18 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import {
   EMPTY_CROSS_SOURCE_FORM,
+  crossSourceActivityDetail,
   crossSourceFormProblem,
+  crossSourceHeadlineValue,
   crossSourceMeasurementsPath,
   crossSourceMetricLabel,
   crossSourceReconciliationJobPath,
   crossSourceReconciliationJobsPath,
   crossSourceRequestBody,
   derivedMeasurementBasisPath,
+  groupDigits,
+  monthLabel,
+  reconciliationHistory,
   reconciliationJobSettled,
   reconciliationJobStateText,
 } from "./clientDerivedMeasurementLogic.js";
@@ -23,6 +28,51 @@ function fieldOption(field) {
 }
 
 /**
+ * The monthly breakdown, or the known recorded duration with its missing and
+ * invalid counts, of one linked measurement, exactly as the server recorded
+ * them. Known minutes are labelled a subtotal whenever any eligible encounter
+ * has no usable duration.
+ */
+export function CrossSourceActivityDetail({ entry }) {
+  const detail = crossSourceActivityDetail(entry);
+  if (!detail) return null;
+  const period = detail.period ? ` (${detail.period.start} to ${detail.period.end})` : "";
+  if (detail.duration) {
+    const d = detail.duration;
+    return (
+      <div className="small" data-client-cross-source-activity={detail.metric}>
+        <div data-client-cross-source-duration-minutes="">
+          Known recorded {d.unit}: {d.knownMinutes === null ? "none recorded" : `${groupDigits(d.knownMinutes)} ${d.unit}`}{period}
+        </div>
+        <div data-client-cross-source-duration-counts="">
+          {d.known} of {detail.eligible} eligible encounters have a recorded duration; {d.missing} missing; {d.invalid} invalid or conflicting.
+        </div>
+        {d.subtotal ? (
+          <div className="text-warning" data-client-cross-source-duration-subtotal="">
+            Subtotal only: {d.missing + d.invalid} eligible encounters have no usable recorded duration and are not included, so this is not the complete service time.
+          </div>
+        ) : (
+          <div className="text-muted" data-client-cross-source-duration-complete="">Every eligible encounter has a recorded duration value; this totals recorded values only.</div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <table className="table table-sm mb-1 small" data-client-cross-source-activity={detail.metric}>
+      <thead><tr><th>Service month</th><th>Eligible encounters</th></tr></thead>
+      <tbody>
+        {detail.months.map((item) => (
+          <tr key={item.month} data-client-cross-source-month={item.month}><td>{monthLabel(item.month)}</td><td>{groupDigits(item.encounter_count)}</td></tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr data-client-cross-source-month-total=""><th>Eligible encounters in the reporting period{period}</th><th>{groupDigits(detail.eligible)}</th></tr>
+      </tfoot>
+    </table>
+  );
+}
+
+/**
  * Cross-source linked reach from this service-event source version and a
  * participant register version, inside the Count records panel. The person
  * chooses the other current CSV version and confirms what each listed field
@@ -33,7 +83,7 @@ function fieldOption(field) {
  * measurements (meaning, limitations, claim proposal). Nothing here reads a
  * record or calculates a number.
  */
-export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, linkableVersions, versionsById, onReconciled }) {
+export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, linkableVersions, versionsById, earlierVersionIds = [], onReconciled }) {
   const [form, setForm] = useState(EMPTY_CROSS_SOURCE_FORM);
   const [register, setRegister] = useState({ status: "idle", data: null, error: "" });
   const [job, setJob] = useState(null);
@@ -55,9 +105,9 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     const result = await getJson(crossSourceReconciliationJobsPath(organizationId));
     if (!mountedRef.current) return;
     if (result.statusCode === 200 && result.body?.ok) {
-      setJobs(result.body.data.reconciliationJobs.filter((entry) => entry.primary_source_version_id === sourceVersionId));
+      setJobs(result.body.data.reconciliationJobs);
     }
-  }, [organizationId, sourceVersionId]);
+  }, [organizationId]);
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
   // The register's committed fields, read through the same basis route.
@@ -102,9 +152,17 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   const groupFields = byRole(eventFields, "categorical").filter((field) => !field.vocabulary_withheld && (field.values || []).length > 0);
   const problem = crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period) });
 
+  const durationCandidates = eventsBasis?.tabular?.available ? eventsBasis.tabular.duration_field_candidates || [] : [];
+  const history = reconciliationHistory(jobs, sourceVersionId, earlierVersionIds);
+
   const setField = (key) => (event) => {
     const value = event.target.value;
-    setForm((current) => ({ ...current, [key]: value, ...(key === "statusFieldKey" ? { completedValueKey: "" } : {}), ...(key === "referenceSourceVersionId" ? { registerParticipantFieldKey: "" } : {}) }));
+    setForm((current) => ({ ...current, [key]: value, ...(key === "statusFieldKey" ? { completedValueKey: "" } : {}),
+      ...(key === "referenceSourceVersionId" ? { registerParticipantFieldKey: "" } : {}), ...(key === "durationFieldKey" ? { durationConfirmed: false } : {}) }));
+  };
+  const setChecked = (key) => (event) => {
+    const { checked } = event.target;
+    setForm((current) => ({ ...current, [key]: checked }));
   };
   const select = (key, options, placeholder) => (
     <select className="form-select form-select-sm" value={form[key]} onChange={setField(key)} data-client-cross-source-field={key}>
@@ -189,6 +247,31 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
               {select("registerParticipantFieldKey", byRole(registerFields, "identifier").map(fieldOption), "choose a field")}
             </label>
           ) : null}
+          <div className="border rounded p-2 mt-1" data-client-cross-source-activity-options="">
+            <div className="fw-semibold">Monthly activity and recorded duration (optional)</div>
+            <div className="text-muted">
+              Selecting either records these findings for the same eligible encounters instead of linked reach; request linked reach
+              separately without them.
+            </div>
+            <label className="d-block">
+              <input type="checkbox" className="form-check-input me-1" checked={form.monthlyActivity || Boolean(form.durationFieldKey)}
+                disabled={Boolean(form.durationFieldKey)} onChange={setChecked("monthlyActivity")} data-client-cross-source-field="monthlyActivity" />
+              Count eligible encounters by service month
+            </label>
+            <label className="d-block">
+              Duration in minutes
+              {select("durationFieldKey", durationCandidates.map((field) => (
+                <option key={field.field_key} value={field.field_key}>{`Column ${field.column_position} (${field.field_key}, ${field.present_count} values, ${field.blank_count} blank)`}</option>
+              )), durationCandidates.length ? "no duration" : "no unclassified column available")}
+            </label>
+            {form.durationFieldKey ? (
+              <label className="d-block">
+                <input type="checkbox" className="form-check-input me-1" checked={form.durationConfirmed} onChange={setChecked("durationConfirmed")}
+                  data-client-cross-source-field="durationConfirmed" />
+                {`Column ${form.durationFieldKey.slice(6)} records each service's duration in minutes. Blank or non-numeric values are counted as missing or invalid, not added.`}
+              </label>
+            ) : null}
+          </div>
           <div className="text-muted" data-client-cross-source-period="">
             {eventsBasis?.reporting_period
               ? `Reporting period: ${eventsBasis.reporting_period.start} to ${eventsBasis.reporting_period.end} (the engagement's recorded period, applied by service date).`
@@ -206,8 +289,9 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
           <div>{reconciliationJobStateText(job)}</div>
           {job.error_code ? <div className="text-muted" data-client-cross-source-job-error={job.error_code}>Reason: {job.error_code.replace(/_/g, " ")}.</div> : null}
           {(job.measurements || []).map((entry) => (
-            <div key={entry.source_derived_measurement_id} data-client-cross-source-result={entry.definition?.metric}>
-              {crossSourceMetricLabel(entry.definition)}: {entry.measured_value}
+            <div key={entry.source_derived_measurement_id}>
+              <div data-client-cross-source-result={entry.definition?.metric}>{crossSourceMetricLabel(entry.definition)}: {crossSourceHeadlineValue(entry)}</div>
+              <CrossSourceActivityDetail entry={entry} />
             </div>
           ))}
           {job.measurements?.length ? (
@@ -221,15 +305,27 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
           ) : null}
         </div>
       ) : null}
-      {jobs.length > 0 ? (
+      {history.length > 0 ? (
         <div className="mt-1" data-client-cross-source-history="">
           <div className="fw-semibold">Reconciliations of this source version</div>
-          {jobs.map((entry) => (
+          {history.filter((item) => !item.historical).map(({ job: entry }) => (
             <div key={entry.reconciliation_job_id} className="text-muted" data-client-cross-source-history-job={entry.reconciliation_job_id}>
               {entry.job_state.replace(/_/g, " ")}: register {versionText(entry.reference_source_version_id)}
               {entry.error_code ? `, ${entry.error_code.replace(/_/g, " ")}` : ""}
             </div>
           ))}
+          {history.some((item) => item.historical) ? (
+            <div className="mt-1" data-client-cross-source-history-earlier="">
+              <div className="fw-semibold">Historical: reconciliations of earlier, replaced versions of this source</div>
+              <div className="text-muted">Their results are kept unchanged but are no longer current; they cannot support a claim or a new report.</div>
+              {history.filter((item) => item.historical).map(({ job: entry }) => (
+                <div key={entry.reconciliation_job_id} className="text-muted" data-client-cross-source-history-job={entry.reconciliation_job_id} data-client-cross-source-history-historical="">
+                  {entry.job_state.replace(/_/g, " ")}: service events {versionText(entry.primary_source_version_id)}, register {versionText(entry.reference_source_version_id)}
+                  {entry.error_code ? `, ${entry.error_code.replace(/_/g, " ")}` : ""}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

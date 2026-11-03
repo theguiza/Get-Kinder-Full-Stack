@@ -1033,7 +1033,23 @@ function tabularRateBody(row) {
     + `${row.numerator} of ${row.denominator} (${row.percentage}%); ${counts.other_population_record_count} of the ${row.denominator} do not.`;
 }
 
-function crossSourceBody(row) {
+// The monthly finding states each month's count, so a generated or released
+// report carries the breakdown itself. A breakdown too long for the statement
+// limit (a long reporting period) keeps the earlier wording instead. The
+// duration sentence keeps a monthly finding recorded with a duration field
+// distinct (in statement, so in evidence identity) from a monthly-only one.
+function monthlyActivityBody(row, interpretation) {
+  const c = row.component_counts;
+  const d = row.definition;
+  const lead = `${plural(c.eligible_encounter_count, "eligible service encounter")}`;
+  const durationMapped = d.duration ? ` Duration field ${d.duration.field_key} was also mapped.` : "";
+  const months = c.monthly_activity.map((item) => `${item.month} ${item.encounter_count}`).join(", ");
+  const stated = `${lead} by actual service month (encounters, not people), reporting period ${d.period.period_start} to ${d.period.period_end}: ${months}; linked to register ${d.reference_source_version_id}.${durationMapped}`;
+  if (validateComposedStatement(`Derived measurement: ${interpretationPrefix(interpretation)}${stated}`).ok) return stated;
+  return `${lead} grouped by actual service month (encounters, not people), reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}. The breakdown and exclusions are recorded with the measurement.${durationMapped}`;
+}
+
+function crossSourceBody(row, interpretation) {
   const c = row.component_counts;
   const d = row.definition;
   const events = d.mapping.events;
@@ -1045,7 +1061,7 @@ function crossSourceBody(row) {
   const scope = d.group ? ` in ${d.group.field_key} = ${d.group.value_label}` : "";
   switch (d.metric) {
     case CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY:
-      return `${plural(c.eligible_encounter_count, "eligible service encounter")} grouped by actual service month (encounters, not people), reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}. The breakdown and exclusions are recorded with the measurement.${d.duration ? ` Duration field ${d.duration.field_key} was also mapped.` : ""}`;
+      return monthlyActivityBody(row, interpretation);
     case CROSS_SOURCE_METRICS.RECORDED_DURATION:
       return `${c.duration_known_count ? `${c.known_recorded_minutes} known recorded minutes subtotal` : "No known recorded minutes subtotal is available"}, from ${c.duration_known_count} of ${c.eligible_encounter_count} eligible encounters; ${c.duration_missing_count} missing and ${c.duration_invalid_count} invalid or conflicting durations. This is not a complete service-time total. Reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}.`;
     case CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS:
@@ -1062,7 +1078,7 @@ function crossSourceBody(row) {
 }
 
 function measurementBody(row, interpretation) {
-  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceBody(row);
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceBody(row, interpretation);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) return pairedBody(row, interpretation);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE) return tabularRateBody(row);
   return tabularCountBody(row);

@@ -39,7 +39,7 @@ const FIELDS = Object.freeze([
  */
 export default function ClientSourceMeasurementPanel({
   organizationId, sourceVersionId, canProposeClaim, initialWorksheetKey = "", onWorksheetChange, onClose, onRecorded,
-  linkableVersions = [], versionsById = null,
+  linkableVersions = [], versionsById = null, earlierVersionIds = [],
 }) {
   // Every basis state names the worksheet it was read for ("" = none).
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "", worksheetKey: initialWorksheetKey });
@@ -263,7 +263,7 @@ export default function ClientSourceMeasurementPanel({
       {/* Measurement MVP: field-value measurements of the same version (and selected worksheet). */}
       {worksheetOptions.length > 1 && !selectedWorksheetKey ? null : (
         <ClientDerivedMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
-          canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} />
+          canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds} />
       )}
     </div>
   );
