@@ -110,7 +110,8 @@ async function runCedarBridgeAcceptance() {
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const {
-    crossSourceMeasurementsPath, derivedMeasurementBasisPath, derivedMeasurementInterpretationPath, pairedOutcomeMeasurementsPath, tabularMeasurementPath,
+    crossSourceMeasurementsPath, crossSourceReconciliationJobPath, crossSourceReconciliationJobsPath, derivedMeasurementBasisPath, derivedMeasurementInterpretationPath,
+    pairedOutcomeMeasurementsPath, tabularMeasurementPath,
   } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { clientInternalDraftReleasePath, clientReleasedReportMarkdownPath, coverageInternalAcceptancePath, generatedContentReviewCompletePath, generatedContentReviewStartPath } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const router = (await import("../Backend/kai/routes/sprint2IntakeApi.js")).default;
@@ -121,6 +122,8 @@ async function runCedarBridgeAcceptance() {
   const executor = await import("../Backend/kai/security/internalSecurityAssessmentExecutor.js");
   const assessor = await import("../Backend/kai/security/boundedFileSecurityAssessor.js");
   const dispatch = await import("../Backend/kai/parsing/p1FileDispatch.js");
+  const reconciliationRuntime = await import("../Backend/kai/parsing/crossSourceReconciliationJobRuntime.js");
+  const { createPostgresCrossSourceReconciliationJobRepository } = await import("../Backend/kai/parsing/postgresCrossSourceReconciliationJobRepository.js");
 
   const ambientTarget = (await ambientPool.query("SELECT current_database() AS database_name, inet_server_addr()::text AS server_addr")).rows[0];
   assert.equal(ambientTarget.database_name, RUNNER_DATABASE_NAME);
@@ -220,6 +223,8 @@ async function runCedarBridgeAcceptance() {
     }),
   }));
   const dispatcher = dispatch.getKaiP1FileDispatcher();
+  // The reconciliation worker's post-commit dispatcher (the one the request path uses).
+  const reconciliationDispatcher = reconciliationRuntime.getCrossSourceReconciliationDispatcher();
 
   const harnessSession = (req, _res, next) => {
     const match = /(?:^|;\s*)kai_harness_user=(\d+)/.exec(req.headers.cookie || "");
@@ -1263,6 +1268,12 @@ async function runCedarBridgeAcceptance() {
       return `reach_${d.group.value_label}_${d.metric === "group_linked_encounters" ? "encounters" : "people"}`;
     };
     let crossMapping = null;
+    // Waits for the post-commit dispatch, then reads the job through its route.
+    const settleReconciliation = async (queued, api = adminApi) => {
+      await reconciliationDispatcher.whenIdle();
+      const read = await api("GET", crossSourceReconciliationJobPath(ORG, queued.body.data.reconciliationJob.reconciliation_job_id));
+      return { status: read.status, job: read.body?.data?.reconciliationJob ?? null, measurements: read.body?.data?.measurements ?? [] };
+    };
     await test("18: cross-source reach - the administrator maps both uploaded sources' fields; KAI reconciles their bytes and persists both-source measurements", async () => {
       const eventsBasis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.events.sourceVersionId));
       const registerBasis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.register.sourceVersionId));
@@ -1318,10 +1329,18 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual(report.derived_measurements.cross_source_refusals.typed_answer, [422, ["cross_source_mapping_invalid"]]);
       if (refusals.withheld_group) assert.deepEqual(report.derived_measurements.cross_source_refusals.withheld_group, [422, ["cross_source_group_vocabulary_withheld"]]);
 
-      const recorded = await post(body());
-      assert.equal(recorded.status, 200, J(recorded.body));
-      assert.equal(recorded.body.data.measurements.length, 7);
-      assert.doesNotMatch(J(recorded.body), /CB\d{3}|EV\d{4}/, "no participant or event identifier in the response");
+      // The request reads no byte: it is admitted and queued (202); the worker commits.
+      const queued = await post(body());
+      assert.equal(queued.status, 202, J(queued.body));
+      assert.equal(queued.body.data.reconciliationJob.job_state, "queued");
+      assert.deepEqual(await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE measurement_family = 'cross_source_reach'"), [{ n: 0 }],
+        "nothing is calculated inside the HTTP request");
+      const recorded = await settleReconciliation(queued);
+      assert.deepEqual([recorded.status, recorded.job.job_state, recorded.job.error_code], [200, "succeeded", null], J(recorded));
+      assert.equal(recorded.measurements.length, 7);
+      assert.doesNotMatch(J(recorded), /CB\d{3}|EV\d{4}/, "no participant or event identifier in the response");
+      assert.doesNotMatch(J(queued.body), /claim_token|requested_by/, "the job's claim and requester stay in the worker");
+      report.derived_measurements.cross_source_job = { queued: queued.body.data.reconciliationJob, settled: recorded.job };
 
       // Independent decisions from the original bytes, sharing no code with KAI.
       const events = parseCsv(byKey.events.bytes.toString("utf8"));
@@ -1338,9 +1357,9 @@ async function runCedarBridgeAcceptance() {
         unmatched_rows: inFy.filter((r) => !registerIds.has(r.participant_id)).map((r) => r.row),
         people: new Set(eligible.map((r) => r.participant_id)).size,
       };
-      for (const entry of recorded.body.data.measurements) {
-        const label = labelOf(entry.measurement);
-        CROSS[label] = { measurementId: entry.measurement.source_derived_measurement_id, evidenceItemId: entry.evidenceItem.evidence_item_id };
+      for (const entry of recorded.measurements) {
+        const label = labelOf(entry);
+        CROSS[label] = { measurementId: entry.source_derived_measurement_id, evidenceItemId: entry.evidence.find((e) => e.current).evidence_item_id };
         const [row] = (await derivedRows(state.events.sourceVersionId)).filter((r) => r.source_derived_measurement_id === CROSS[label].measurementId);
         const sources = await query(
           `SELECT source_role, source_version_id::text, profile_canonical_sha256, field_keys FROM kai.source_derived_measurement_sources
@@ -1375,7 +1394,9 @@ async function runCedarBridgeAcceptance() {
       // Replay writes nothing; the audit is metadata-only.
       const before = await writeCounts();
       const replay = await post(body());
-      assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
+      assert.deepEqual([replay.status, replay.body.data.fresh, replay.body.data.reconciliationJob.job_state, replay.body.data.reconciliationJob.reconciliation_job_id],
+        [202, false, "succeeded", queued.body.data.reconciliationJob.reconciliation_job_id], "a repeated request reads the same settled job");
+      await reconciliationDispatcher.whenIdle();
       assert.deepEqual(await writeCounts(), before);
       // No audit row of the organization holds an identifier or a cell value.
       const audits = await query("SELECT * FROM kai.audit_events WHERE organization_id = $1::uuid", [ORG]);
@@ -1482,6 +1503,14 @@ async function runCedarBridgeAcceptance() {
       for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier reaches the model");
       const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${crossDraftId}/review-packet`);
       assert.equal(packet.status, 200, J(packet.body));
+      // Structured lineage: every cross-source citation names both contributing versions; a single-source one names none.
+      const packetCitations = packet.body.data.blocks.flatMap((block) => block.citations);
+      for (const label of crossLabels) {
+        const citation = packetCitations.find((c) => c.claimId === crossClaims[label]);
+        assert.deepEqual(citation.contributingSources.map((c) => [c.sourceRole, c.sourceVersionId, c.isCurrent]),
+          [["primary", state.events.sourceVersionId, true], ["reference", state.register.sourceVersionId, true]], label);
+      }
+      for (const label of REGRESSION_LABELS) assert.equal(packetCitations.find((c) => c.claimId === derivedClaims[label]).contributingSources, undefined, label);
       const clientMarkdown = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, crossDraftId));
       report.generation.cross_source_evidence_summary = { status: created.status, draft_id: crossDraftId, blocks, review_packet: packet.status, client_internal_markdown: [clientMarkdown.status, blockersOf(clientMarkdown)] };
       assert.deepEqual(report.generation.cross_source_evidence_summary.client_internal_markdown, [422, ["personal_information_not_cleared"]]);
@@ -1528,6 +1557,12 @@ async function runCedarBridgeAcceptance() {
         }
         assert.ok(released.body.includes(state.register.sourceVersionId), "the released document cites the register version through each claim");
         assert.ok(released.body.includes(state.events.sourceVersionId), "and the service-event version");
+        // Structured citations, not only claim text: each cross-source citation lists both contributing versions.
+        const contributingLines = released.body.split("\n").filter((line) => line.includes("Contributing "));
+        assert.equal(contributingLines.filter((line) => line.includes(`Contributing reference source`) && line.includes(state.register.sourceVersionId)).length, crossLabels.length, J(contributingLines));
+        assert.equal(contributingLines.filter((line) => line.includes(`Contributing primary source`) && line.includes(state.events.sourceVersionId)).length, crossLabels.length);
+        state.stageAReleasedManifestId = manifestRow.export_manifest_id;
+        state.stageAReleasedMarkdown = released.body;
         assert.doesNotMatch(released.body, /CB0\d\d|EV0\d\d/);
         delivery.released_excerpt = released.body.slice(0, 3000);
       } finally {
@@ -1652,6 +1687,480 @@ async function runCedarBridgeAcceptance() {
       }
     });
 
+
+    // =========================================================================
+    // Corrected-version challenge (Stages B-D): the package's corrected
+    // service-events file, supplied as the next version of the same logical
+    // source through the real intake, review, promotion and worker paths.
+    // =========================================================================
+    const CORRECTED_PATH = join(PACKAGE, "02_CHALLENGE_UPLOAD_LATER", "03_Service_Events_CORRECTED_VERSION.csv");
+    const correctedBytes = readFileSync(CORRECTED_PATH);
+    const corrected = { name: "03_Service_Events_CORRECTED_VERSION.csv", bytes: correctedBytes, checksum: sha256(correctedBytes) };
+    const objectKeyOf = async (intakeFileId) => (await query("SELECT storage_object_key FROM kai.intake_files WHERE intake_file_id = $1::uuid", [intakeFileId]))[0].storage_object_key;
+    const jobs = createPostgresCrossSourceReconciliationJobRepository();
+    const processJob = (reconciliationJobId, now = new Date().toISOString()) => reconciliationRuntime.processCrossSourceReconciliationJob(
+      { organizationId: ORG, reconciliationJobId }, { env: process.env, now: () => now });
+    const withWorkerDisabled = async (callback) => {
+      const previous = process.env.KAI_WORKER_ENABLED;
+      process.env.KAI_WORKER_ENABLED = "false";
+      try { return await callback(); } finally { process.env.KAI_WORKER_ENABLED = previous; }
+    };
+    const traceOf = async (claimId, audience = "internal") => {
+      const traced = await gkApi("GET", claimTraceabilityPath(ORG, claimId, audience));
+      return { status: traced.status, eligible: traced.body?.data?.eligible ?? null, reason: traced.body?.data?.traceability_conflict_reason ?? null,
+        unresolved: Object.entries(traced.body?.data?.dimensions || {}).filter(([, v]) => v.assessment_status === "unresolved").map(([k]) => k).sort() };
+    };
+    const reviewRegisterPermissions = async (allowed) => {
+      const profileId = state.register.sensitivity.intake_sensitivity_profile_id;
+      const work = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${profileId}/review-work?organization_id=${ORG}`, {});
+      const [queue] = await query(
+        `SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items
+          WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid ORDER BY created_at DESC LIMIT 1`, [ORG, profileId]);
+      const decided = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${profileId}/decision?organization_id=${ORG}`, {
+        expected_updated_at: new Date(queue.updated_at).toISOString(), review_queue_item_id: queue.review_queue_item_id, decision: "reviewed",
+        reviewed_snapshot: { ...DECISIONS.register, reviewed_allowed_use_status: allowed ? "allowed" : "not_allowed", reviewed_llm_processing_allowed: allowed },
+      });
+      assert.ok([200, 201].includes(work.status) && decided.status === 200, `review the register's permissions again: ${J([work.status, decided.status, blockersOf(decided)])}`);
+    };
+    const releaseThroughGetKinder = async (draftId) => {
+      const draftPath = `${orgPath}/generated-content-drafts/${draftId}`;
+      const delivery = { draft_id: draftId };
+      const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      try {
+        const queueOf = async (queueType) => (await query(
+          "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid ORDER BY created_at DESC",
+          [ORG, queueType, draftId]))[0];
+        const contentQueue = await queueOf("generated_content_review");
+        const started = await gkApi("POST", generatedContentReviewStartPath(ORG, draftId, contentQueue.review_queue_item_id), { expected_updated_at: new Date(contentQueue.updated_at).toISOString() });
+        const inProgress = await queueOf("generated_content_review");
+        const completed = await gkApi("POST", generatedContentReviewCompletePath(ORG, draftId, inProgress.review_queue_item_id), { expected_updated_at: new Date(inProgress.updated_at).toISOString() });
+        delivery.gk_content_review = [started.status, completed.status];
+        delivery.export_review_request = (await gkAdminApi("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" })).status;
+        for (const step of ["start", "complete"]) {
+          const queue = await queueOf("export_review");
+          delivery[`export_review_${step}`] = (await gkAdminApi("POST", `${draftPath}/export-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() })).status;
+        }
+        const exportReviewQueueItemId = (await queueOf("export_review")).review_queue_item_id;
+        delivery.limitation_snapshot = (await gkApi("POST", `${draftPath}/limitation-snapshot`, {})).status;
+        delivery.entries = await query(
+          `SELECT e.claim_id::text, e.limitation_codes FROM kai.limitation_snapshot_entries e
+             JOIN kai.limitation_snapshots s ON s.limitation_snapshot_id = e.limitation_snapshot_id
+            WHERE s.organization_id = $1::uuid AND s.generated_content_draft_id = $2::uuid`, [ORG, draftId]);
+        delivery.export_candidate = (await gkAdminApi("POST", `${draftPath}/export-candidates`, {})).status;
+        const [candidateRow] = await query("SELECT export_candidate_id::text FROM kai.export_candidates WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid", [ORG, draftId]);
+        delivery.final_release_authority = (await gkAdminApi("POST", `${orgPath}/export-candidates/${candidateRow.export_candidate_id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" })).status;
+        delivery.export_manifest = (await gkAdminApi("POST", `${orgPath}/export-candidates/${candidateRow.export_candidate_id}/export-manifests`, { export_review_queue_item_id: exportReviewQueueItemId })).status;
+        const [manifestRow] = await query("SELECT export_manifest_id::text FROM kai.export_manifests WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid", [ORG, candidateRow.export_candidate_id]);
+        delivery.export_manifest_id = manifestRow.export_manifest_id;
+        const released = await adminApi("GET", clientReleasedReportMarkdownPath(ORG, PROJECT, manifestRow.export_manifest_id));
+        delivery.client_released_markdown = released.status;
+        delivery.released = released.body;
+      } finally {
+        if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
+      }
+      return delivery;
+    };
+    const readReleased = async (exportManifestId) => {
+      const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      try {
+        return await adminApi("GET", clientReleasedReportMarkdownPath(ORG, PROJECT, exportManifestId));
+      } finally {
+        if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
+      }
+    };
+    const V1 = () => state.events.sourceVersionId;
+    const CORRECTED_STATE = {};
+
+    await test("24: Stage B - the corrected service-events file is uploaded through the intake API, scanned, profiled and reviewed like any upload", async () => {
+      const manifest = JSON.parse(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "File_Integrity_Manifest.json"), "utf8"));
+      const entry = manifest.find((candidate) => candidate.disposition === "CHALLENGE_UPLOAD_ONLY_AFTER_BASELINE");
+      assert.deepEqual([entry.relative_path, entry.sha256, entry.bytes], [`02_CHALLENGE_UPLOAD_LATER/${corrected.name}`, corrected.checksum, corrected.bytes.byteLength]);
+      // Not a seventh baseline source: the baseline was uploaded, reviewed and released first.
+      assert.ok(state.stageAReleasedManifestId, "the baseline release exists before the correction is supplied");
+      const batch = await adminApi("POST", createBatchPath(), { organization_id: ORG, engagement_id: PROJECT, batch_code: "cedar-bridge-correction", idempotency_key: `batch-${randomUUID()}` });
+      assert.ok([200, 201].includes(batch.status), J(batch.body));
+      const batchId = batch.body.data.intake_batch_id;
+      const reserved = await adminApi("POST", fileReservationsPath(batchId), {
+        organization_id: ORG, engagement_id: PROJECT, original_filename: corrected.name, file_extension: ".csv", mime_type: "text/csv",
+        file_size_bytes: corrected.bytes.byteLength, checksum: corrected.checksum, hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
+      });
+      assert.ok(reserved.status < 300, J(reserved.body));
+      const intakeFileId = reserved.body.data.intake_file_id;
+      const signed = await adminApi("POST", requestUploadUrlPath(batchId), { organization_id: ORG, engagement_id: PROJECT, intake_file_id: intakeFileId });
+      const put = await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: corrected.bytes });
+      const confirmed = await adminApi("POST", confirmUploadPath(ORG, intakeFileId), { organization_id: ORG });
+      assert.deepEqual([put.status, confirmed.status], [200, 200], J(confirmed.body));
+      await dispatcher.whenIdle();
+      const [file] = await query("SELECT file_policy_status FROM kai.intake_files WHERE intake_file_id = $1::uuid", [intakeFileId]);
+      const [profileRow] = await query("SELECT profile FROM kai.intake_file_profiles WHERE intake_file_id = $1::uuid", [intakeFileId]);
+      const [sensitivity] = await query(
+        `SELECT s.intake_sensitivity_profile_id::text, q.review_queue_item_id::text, q.updated_at FROM kai.intake_sensitivity_profiles s
+           JOIN kai.review_queue_items q ON q.target_object_id = s.intake_sensitivity_profile_id AND q.queue_type = 'sensitivity_review'
+          WHERE s.intake_file_id = $1::uuid`, [intakeFileId]);
+      assert.equal(file.file_policy_status, "passed");
+      assert.equal(profileRow.profile.status, "profiled");
+      assert.equal(profileRow.profile.counts.row_count, 246);
+      assert.doesNotMatch(J(profileRow.profile), /CB0\d\d|EV0\d\d/, "no raw value in the corrected profile");
+      // The same columns: the profile proposes the same field roles as the original version's.
+      const roles = (profile) => profile.tabular_measurement_basis.fields.map((field) => [field.field_key, field.roles]);
+      assert.deepEqual(roles(profileRow.profile), roles(state.events.profile));
+      const decided = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${sensitivity.intake_sensitivity_profile_id}/decision?organization_id=${ORG}`, {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id,
+        decision: "reviewed", reviewed_snapshot: DECISIONS.events,
+      });
+      assert.equal(decided.status, 200, J(decided.body));
+      const [candidate] = await query("SELECT intake_source_candidate_id::text, candidate_status FROM kai.intake_source_candidates WHERE intake_sensitivity_profile_id = $1::uuid",
+        [sensitivity.intake_sensitivity_profile_id]);
+      assert.equal(candidate.candidate_status, "needs_gk_review");
+      Object.assign(CORRECTED_STATE, { intakeFileId, sensitivity, candidateId: candidate.intake_source_candidate_id, profile: profileRow.profile });
+      // A reconciliation of the original version requested now and still queued when the correction is promoted.
+      const pending = await withWorkerDisabled(() => adminApi("POST", crossSourceMeasurementsPath(ORG), {
+        primary_source_version_id: V1(), reference_source_version_id: state.register.sourceVersionId,
+        mapping: { events: { ...crossMapping.events, group_field_key: undefined }, register: crossMapping.register } }));
+      assert.deepEqual([pending.status, pending.body.data.reconciliationJob.job_state], [202, "queued"], J(pending.body));
+      CORRECTED_STATE.pendingOriginalJobId = pending.body.data.reconciliationJob.reconciliation_job_id;
+      report.corrected_version = { file: corrected.name, sha256: corrected.checksum, intake_file_id: intakeFileId, policy: file.file_policy_status,
+        profile_records: profileRow.profile.counts.row_count, sensitivity_decision: decided.status };
+    });
+
+    await test("25: Stage B - authorized promotion makes it the successor version of the same logical source; refused attempts change nothing", async () => {
+      const promote = (body, api = adminApi) => api("POST", sourceCandidateDecisionPath(ORG, CORRECTED_STATE.candidateId), body);
+      const successor = { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: V1() };
+      const snapshot = async () => (await query(`SELECT
+          (SELECT count(*) FROM kai.sources WHERE organization_id = $1::uuid)::int AS sources,
+          (SELECT count(*) FROM kai.source_versions WHERE organization_id = $1::uuid)::int AS versions,
+          (SELECT count(*) FROM kai.intake_promotion_decisions WHERE organization_id = $1::uuid)::int AS decisions,
+          (SELECT is_current FROM kai.source_versions WHERE source_version_id = $2::uuid) AS original_current`, [ORG, V1()]))[0];
+      const before = await snapshot();
+      const refusals = {
+        outsider: await promote(successor, outsiderApi),
+        unknown_predecessor: await promote({ ...successor, supersedes_source_version_id: randomUUID() }),
+        workbook_predecessor: await promote({ ...successor, supersedes_source_version_id: state.workbook.sourceVersionId }),
+        different_reviewed_type: await promote({ ...successor, reviewed_source_type: "organization_secondary_record" }),
+        rejection_naming_predecessor: await promote({ outcome: "rejected", supersedes_source_version_id: V1() }),
+        uppercase_identifier: await promote({ ...successor, supersedes_source_version_id: V1().toUpperCase() }),
+      };
+      const summary = Object.fromEntries(Object.entries(refusals).map(([key, value]) => [key, [value.status, value.body?.data?.exact_verification_phase ?? blockersOf(value)]]));
+      report.corrected_version.promotion_refusals = summary;
+      assert.ok(refusals.outsider.status >= 400 && refusals.outsider.status < 500, J(summary));
+      assert.equal(refusals.unknown_predecessor.status, 404, J(summary));
+      assert.deepEqual(summary.workbook_predecessor, [422, "source_promotion_successor_invalid"]);
+      assert.deepEqual(summary.different_reviewed_type, [422, "source_promotion_successor_invalid"]);
+      assert.deepEqual(summary.rejection_naming_predecessor, [422, ["supersedes_source_version_not_allowed_for_outcome"]]);
+      assert.deepEqual(summary.uppercase_identifier, [422, ["invalid_uuid_field"]]);
+      assert.deepEqual(await snapshot(), before, "a refused or failed promotion writes nothing; the original stays current");
+
+      // The authorized decision, then an identical retry.
+      const promoted = await promote(successor);
+      assert.equal(promoted.status, 200, J(promoted.body));
+      assert.equal(promoted.body.data.superseded_source_version_id, V1());
+      const V2 = promoted.body.data.source_version.source_version_id;
+      assert.equal(promoted.body.data.source.source_id, state.events.sourceId, "the same logical source");
+      const retried = await promote(successor);
+      assert.deepEqual([retried.status, retried.body.data.replayed, retried.body.data.superseded_source_version_id, retried.body.data.source_version.source_version_id],
+        [200, true, V1(), V2]);
+      // A retry naming another predecessor is a different request for an already-decided candidate.
+      assert.equal((await promote({ ...successor, supersedes_source_version_id: state.register.sourceVersionId })).status, 409);
+      const after = await snapshot();
+      assert.deepEqual([after.sources, after.versions, after.decisions, after.original_current], [before.sources, before.versions + 1, before.decisions + 1, false]);
+      const versions = await query("SELECT source_version_id::text, is_current FROM kai.source_versions WHERE source_id = $1::uuid ORDER BY created_at", [state.events.sourceId]);
+      assert.deepEqual(versions, [{ source_version_id: V1(), is_current: false }, { source_version_id: V2, is_current: true }]);
+      const audits = await query("SELECT metadata FROM kai.audit_events WHERE organization_id = $1::uuid AND reason_code = 'source_version_superseded'", [ORG]);
+      assert.equal(audits.length, 1, "one supersession audit; the retry wrote none");
+      assert.deepEqual([audits[0].metadata.source_version_id, audits[0].metadata.superseded_source_version_id, audits[0].metadata.source_id], [V2, V1(), state.events.sourceId]);
+      assert.doesNotMatch(J(audits), /CB\d{3}|EV\d{4}/);
+      // Data Sources shows one source with its current and earlier version.
+      const listed = await adminApi("GET", `${orgPath}/sources`);
+      const eventsSource = listed.body.data.sources.find((source) => source.source_id === state.events.sourceId);
+      assert.deepEqual(eventsSource.source_versions.map((version) => [version.source_version_id, version.is_current]).sort(),
+        [[V1(), false], [V2, true]].sort());
+      CORRECTED_STATE.sourceVersionId = V2;
+      Object.assign(report.corrected_version, { source_id: state.events.sourceId, superseded_source_version_id: V1(), source_version_id: V2,
+        promotion: [promoted.status, retried.status], versions });
+      stage("events", "superseded_by_corrected_version", "earlier version", { successor_source_version_id: V2 });
+    });
+
+    await test("26: Stage B - findings from the superseded version are no longer current; unrelated evidence stays eligible; the earlier release is historical", async () => {
+      const outcome = { old_cross_source: {}, old_single_source_events: {}, unaffected: {} };
+      for (const label of crossLabels) outcome.old_cross_source[label] = await traceOf(crossClaims[label]);
+      for (const label of DERIVED_CLAIM_LABELS) {
+        (label.startsWith("events_") ? outcome.old_single_source_events : outcome.unaffected)[label] = await traceOf(derivedClaims[label]);
+      }
+      for (const value of Object.values(outcome.old_cross_source)) assert.deepEqual([value.status, value.reason], [409, "source_version_not_current"], J(outcome));
+      for (const value of Object.values(outcome.old_single_source_events)) assert.deepEqual([value.status, value.reason], [409, "source_version_not_current"], J(outcome));
+      for (const [label, value] of Object.entries(outcome.unaffected)) assert.equal(value.eligible, true, `${label} does not depend on the service events: ${J(value)}`);
+      const generated = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: [crossClaims.reach_encounters], idempotency_key: `cedar-old-${randomUUID()}`, engagement_id: PROJECT });
+      outcome.generation_from_old_claim = [generated.status, blockersOf(generated)];
+      assert.ok(generated.status >= 400, J(outcome.generation_from_old_claim));
+      outcome.interpret_old = (await adminApi("POST", derivedMeasurementInterpretationPath(ORG, CROSS.reach_people.measurementId),
+        { indicator_label: "People served", meaning_text: "Human-stated for this synthetic acceptance: a restatement.", evidence_basis: "organization_record" })).status;
+      outcome.basis_of_old = (await adminApi("GET", derivedMeasurementBasisPath(ORG, V1()))).status;
+      outcome.reconcile_old = (await adminApi("POST", crossSourceMeasurementsPath(ORG), { primary_source_version_id: V1(), reference_source_version_id: state.register.sourceVersionId, mapping: crossMapping })).status;
+      assert.ok(outcome.interpret_old >= 400 && outcome.basis_of_old >= 400 && outcome.reconcile_old >= 400, J(outcome));
+      // The queued reconciliation of the original version: the worker revalidates currentness before committing anything.
+      const before = await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [V1()]);
+      const settled = await processJob(CORRECTED_STATE.pendingOriginalJobId);
+      outcome.pending_original_job = [settled.outcome, settled.code];
+      assert.equal(settled.outcome, "failed", J(settled));
+      assert.deepEqual(await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [V1()]), before);
+      const pendingRead = await adminApi("GET", crossSourceReconciliationJobPath(ORG, CORRECTED_STATE.pendingOriginalJobId));
+      assert.deepEqual([pendingRead.status, pendingRead.body.data.reconciliationJob.job_state, pendingRead.body.data.measurements], [200, "failed", []]);
+      // The original measurements and their evidence rows are kept exactly as recorded.
+      const original = await derivedRows(V1());
+      assert.ok(original.some((row) => row.source_derived_measurement_id === CROSS.reach_encounters.measurementId && row.measured_value === 222));
+      // The earlier release is kept, cites the original version, and is identified as historical rather than served as current.
+      const [manifest] = await query("SELECT count(*)::int AS n FROM kai.export_manifests WHERE export_manifest_id = $1::uuid", [state.stageAReleasedManifestId]);
+      assert.equal(manifest.n, 1);
+      const historical = await readReleased(state.stageAReleasedManifestId);
+      outcome.stage_a_release = { status: historical.status, data: historical.body?.data ?? null };
+      assert.equal(historical.status, 409, J(historical.body));
+      assert.deepEqual([historical.body.data.released_report_state, historical.body.data.reason], ["historical", "released_report_cites_superseded_source_version"]);
+      const cited = Object.fromEntries(historical.body.data.cited_source_versions.map((version) => [version.source_version_id, version]));
+      assert.deepEqual([cited[V1()].is_current, cited[V1()].current_source_version_id], [false, CORRECTED_STATE.sourceVersionId]);
+      assert.deepEqual([cited[state.register.sourceVersionId].is_current, cited[state.register.sourceVersionId].citation_role], [true, "reference"]);
+      assert.ok(state.stageAReleasedMarkdown.includes(V1()), "the original release's own text cites the original version");
+      report.corrected_version.invalidation = outcome;
+    });
+
+    let correctedJob = null;
+    await test("27: Stage C - the worker path on the corrected version: permission withdrawal, checksum mismatch, an unreadable object retried, a lost lease timed out", async () => {
+      const body = { primary_source_version_id: CORRECTED_STATE.sourceVersionId, reference_source_version_id: state.register.sourceVersionId, mapping: crossMapping };
+      const lifecycle = [];
+      const request = () => withWorkerDisabled(() => adminApi("POST", crossSourceMeasurementsPath(ORG), body));
+      // Unauthorized: another person cannot request or read this organization's job.
+      const outsiderPost = await outsiderApi("POST", crossSourceMeasurementsPath(ORG), body);
+      assert.ok(outsiderPost.status >= 400 && outsiderPost.status < 500);
+      const first = await request();
+      assert.deepEqual([first.status, first.body.data.reconciliationJob.job_state, first.body.data.fresh], [202, "queued", true], J(first.body));
+      const jobId = first.body.data.reconciliationJob.reconciliation_job_id;
+      const outsiderRead = await outsiderApi("GET", crossSourceReconciliationJobPath(ORG, jobId));
+      assert.ok(outsiderRead.status >= 400 && outsiderRead.status < 500);
+      const measurementsOfV2 = async () => (await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [CORRECTED_STATE.sourceVersionId]))[0].n;
+      // 1. The register's allowed use is withdrawn after the request: the worker's revalidation refuses it.
+      await reviewRegisterPermissions(false);
+      let attempt = await processJob(jobId);
+      lifecycle.push(["permission_withdrawn", attempt.outcome, attempt.code]);
+      assert.equal(attempt.outcome, "failed", J(attempt));
+      assert.equal(await measurementsOfV2(), 0);
+      await reviewRegisterPermissions(true);
+      // 2. The register's stored object no longer matches its verified checksum: failed, never retried.
+      const registerKey = await objectKeyOf(state.register.intakeFileId);
+      const registerObject = objects.get(registerKey);
+      const tampered = Buffer.from(registerObject.bytes);
+      tampered[tampered.length - 3] = tampered[tampered.length - 3] === 0x31 ? 0x32 : 0x31;
+      objects.set(registerKey, { ...registerObject, bytes: tampered });
+      const second = await request();
+      assert.deepEqual([second.status, second.body.data.reconciliationJob.reconciliation_job_id, second.body.data.requeued], [202, jobId, true], "a repeated request re-queues the same job");
+      attempt = await processJob(jobId);
+      lifecycle.push(["checksum_mismatch", attempt.outcome, attempt.code]);
+      assert.deepEqual([attempt.outcome, attempt.code], ["failed", "cross_source_checksum_mismatch"]);
+      objects.set(registerKey, registerObject);
+      assert.equal(await measurementsOfV2(), 0);
+      // 3. The corrected version's object cannot be read: retried after its cooldown.
+      const eventsKey = await objectKeyOf(CORRECTED_STATE.intakeFileId);
+      const eventsObject = objects.get(eventsKey);
+      objects.delete(eventsKey);
+      await request();
+      const t0 = Date.now();
+      const at = (seconds) => new Date(t0 + seconds * 1000).toISOString();
+      attempt = await processJob(jobId, at(0));
+      lifecycle.push(["object_unreadable", attempt.outcome, attempt.code, attempt.job?.attempt_count]);
+      assert.deepEqual([attempt.outcome, attempt.code, attempt.job.attempt_count], ["retry_scheduled", "cross_source_bytes_unavailable", 1]);
+      assert.equal((await processJob(jobId, at(30))).outcome, "deferred", "not before its cooldown");
+      objects.set(eventsKey, eventsObject);
+      // 4. A worker claims the retry and is lost: its lease expires, and the next attempt takes over.
+      const lost = await jobs.claim({ organizationId: ORG, reconciliationJobId: jobId, now: at(61) });
+      assert.deepEqual([lost.decision, lost.job.attempt_count], ["claimed", 2]);
+      assert.equal((await processJob(jobId, at(120))).outcome, "busy", "the lease is still held");
+      const due = await jobs.listDue({ now: at(61 + 301) });
+      assert.ok(due.some((row) => row.reconciliation_job_id === jobId), "the sweep finds the expired lease");
+      attempt = await processJob(jobId, at(61 + 302));
+      lifecycle.push(["lease_expired_then_succeeded", attempt.outcome, attempt.code, attempt.job?.attempt_count]);
+      assert.deepEqual([attempt.outcome, attempt.job.attempt_count, attempt.job.measurement_ids.length], ["succeeded", 3, 7]);
+      // The lost worker's claim token can no longer commit or fail the job.
+      const stale = await jobs.completeFailed({ organizationId: ORG, reconciliationJobId: jobId, claimToken: lost.job.claim_token, errorCode: "system_error", retryable: true, now: at(400) });
+      assert.equal(stale.acknowledged, false);
+      // A duplicate request now reads the succeeded job and writes nothing.
+      const countsBefore = await writeCounts();
+      const duplicate = await adminApi("POST", crossSourceMeasurementsPath(ORG), body);
+      await reconciliationDispatcher.whenIdle();
+      assert.deepEqual([duplicate.status, duplicate.body.data.reconciliationJob.job_state, duplicate.body.data.fresh], [202, "succeeded", false]);
+      assert.deepEqual(await writeCounts(), countsBefore);
+      correctedJob = await adminApi("GET", crossSourceReconciliationJobPath(ORG, jobId));
+      assert.equal(correctedJob.status, 200);
+      report.corrected_version.worker_lifecycle = lifecycle;
+      report.corrected_version.job = correctedJob.body.data.reconciliationJob;
+    });
+
+    const CORRECTED_CROSS = {};
+    await test("28: Stage C - independent recalculation: every metric recalculated from the corrected bytes, both contributing versions, nothing mixed", async () => {
+      const measurements = correctedJob.body.data.measurements;
+      assert.equal(measurements.length, 7);
+      // Independent decisions from the corrected bytes, sharing no code with KAI.
+      const events = parseCsv(corrected.bytes.toString("utf8"));
+      const registerIds = new Set(parseCsv(byKey.register.bytes.toString("utf8")).map((r) => r.participant_id));
+      const rowsById = new Map();
+      events.forEach((r, index) => rowsById.set(r.event_id, [...(rowsById.get(r.event_id) || []), { ...r, row: index + 2 }]));
+      const firsts = [...rowsById.values()].map((copies) => copies[0]);
+      const completed = firsts.filter((r) => r.delivery_status === "completed");
+      const inFy = completed.filter((r) => r.service_date >= "2025-04-01" && r.service_date <= "2026-03-31");
+      const eligible = inFy.filter((r) => registerIds.has(r.participant_id));
+      const people = (list) => new Set(list.map((r) => r.participant_id));
+      const ds = eligible.filter((r) => r.program_code === "DS");
+      const en = eligible.filter((r) => r.program_code === "EN");
+      const independent = {
+        reach_encounters: eligible.length, reach_people: people(eligible).size, reach_DS_encounters: ds.length, reach_DS_people: people(ds).size,
+        reach_EN_encounters: en.length, reach_EN_people: people(en).size, reach_both: [...people(ds)].filter((id) => people(en).has(id)).length,
+      };
+      const values = {};
+      for (const entry of measurements) {
+        const label = labelOf(entry);
+        CORRECTED_CROSS[label] = { measurementId: entry.source_derived_measurement_id, evidenceItemId: entry.evidence.find((e) => e.current).evidence_item_id };
+        values[label] = entry.measured_value;
+        assert.equal(entry.measured_value, independent[label], `${label} equals the independent reading of the corrected file`);
+        assert.deepEqual(entry.contributing_sources.map((s) => [s.source_role, s.source_version_id, s.is_current]),
+          [["primary", CORRECTED_STATE.sourceVersionId, true], ["reference", state.register.sourceVersionId, true]], label);
+        assert.equal(entry.definition.reference_source_version_id, state.register.sourceVersionId);
+        assert.deepEqual(entry.exclusions.unmatched_participant_identifier.rows, inFy.filter((r) => !registerIds.has(r.participant_id)).map((r) => r.row));
+        assert.deepEqual(entry.exclusions.completed_outside_period.rows, completed.filter((r) => !inFy.includes(r)).map((r) => r.row));
+        report.derived_measurements[`corrected_${label}`] = { ...entry, persisted: true, source: `${corrected.name} + ${byKey.register.name}`, calculation_method: entry.calculation_method };
+      }
+      // No measurement of the corrected version cites the original version, and the original rows are unchanged.
+      const rowsOfV2 = await derivedRows(CORRECTED_STATE.sourceVersionId);
+      assert.ok(rowsOfV2.every((row) => row.source_version_id === CORRECTED_STATE.sourceVersionId));
+      assert.doesNotMatch(J(rowsOfV2.map((row) => [row.definition, row.contributing_sources])), new RegExp(V1()));
+      const originalValues = Object.fromEntries(crossLabels.map((label) => [label, report.derived_measurements[label].measured_value]));
+      const after = Object.fromEntries((await derivedRows(V1())).filter((row) => Object.values(CROSS).some((c) => c.measurementId === row.source_derived_measurement_id))
+        .map((row) => [Object.keys(CROSS).find((label) => CROSS[label].measurementId === row.source_derived_measurement_id), row.measured_value]));
+      assert.deepEqual(after, originalValues, "the original measurements are kept as recorded");
+      const funnel = measurements.find((entry) => entry.definition.metric === "distinct_people_served").component_counts;
+      const before = report.derived_measurements.cross_source_funnel;
+      const changed = Object.fromEntries(Object.keys(funnel).filter((key) => key !== "groups" && J(funnel[key]) !== J(before[key])).map((key) => [key, [before[key], funnel[key]]]));
+      report.corrected_version.recalculation = { original: originalValues, corrected: values, independent, funnel_changes: changed };
+      console.log(`Cedar Bridge corrected recalculation: ${J(report.corrected_version.recalculation)}`);
+      assert.deepEqual(crossLabels.map((label) => values[label]), [223, 80, 118, 51, 105, 39, 10]);
+      // What changed is exactly what the corrected rows change; everything else is recalculated to the same value.
+      assert.deepEqual(changed, { unmatched_event_count: [1, 0], unmatched_identity_count: [1, 0], eligible_encounter_count: [222, 223] });
+      assert.doesNotMatch(J(correctedJob.body), /CB\d{3}|EV\d{4}/);
+    });
+
+    const correctedClaims = {};
+    await test("29: Stage D - the corrected measurements' meanings, evidence and claims through the existing review; old and new claims stay distinct", async () => {
+      for (const label of crossLabels) {
+        const [indicatorLabel, meaning] = report.human_supplied_semantics.cross_source[label];
+        const stated = await adminApi("POST", derivedMeasurementInterpretationPath(ORG, CORRECTED_CROSS[label].measurementId),
+          { indicator_label: indicatorLabel, meaning_text: `Human-stated for this synthetic acceptance: ${meaning}`, evidence_basis: "organization_record" });
+        assert.equal(stated.status, 200, `${label}: ${J(stated.body)}`);
+        CORRECTED_CROSS[label].evidenceItemId = stated.body.data.evidenceItem.evidence_item_id;
+        const proposed = await adminApi("POST", claimProposalPath(ORG, CORRECTED_CROSS[label].evidenceItemId), {});
+        assert.ok([200, 201].includes(proposed.status), `${label}: ${J(proposed.body)}`);
+        const claimId = proposed.body.data.claim.claim_id;
+        assert.notEqual(claimId, crossClaims[label], "a new claim, not the old one reused");
+        assert.equal((await traceOf(claimId)).eligible, false, "Get Kinder review is required again");
+        const queueOf = async (queueType, targetId) => (await query(
+          "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
+          [ORG, queueType, targetId]))[0];
+        const evidenceQueue = await queueOf("evidence_review", CORRECTED_CROSS[label].evidenceItemId);
+        await gkApi("POST", evidenceReviewCompletePath(ORG, CORRECTED_CROSS[label].evidenceItemId, evidenceQueue.review_queue_item_id),
+          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+        const claimQueue = await queueOf("claim_review", claimId);
+        await gkApi("POST", claimReviewCompletePath(ORG, claimId, claimQueue.review_queue_item_id),
+          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        for (const dimensionKey of (await traceOf(claimId)).unresolved) await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, dimensionKey), {});
+        const after = await traceOf(claimId);
+        assert.equal(after.eligible, true, `${label}: ${J(after)}`);
+        assert.deepEqual([(await traceOf(claimId, "funder")).eligible, (await traceOf(claimId, "public")).eligible], [false, false]);
+        const [row] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
+        assert.ok(row.statement.includes(String(report.corrected_version.recalculation.corrected[label])) && row.statement.includes(state.register.sourceVersionId), row.statement);
+        correctedClaims[label] = claimId;
+        report.claims[`corrected:${label}`] = { claim_id: claimId, statement: row.statement, traceability_after_review: after };
+        // The old claim stays not current.
+        assert.deepEqual([(await traceOf(crossClaims[label])).status, (await traceOf(crossClaims[label])).reason], [409, "source_version_not_current"]);
+      }
+    });
+
+    await test("30: Stage D - a new cited Evidence Summary, Get Kinder's review and release; the client receives the updated report; the earlier one stays historical", async () => {
+      const REGRESSION = ["paired_field_6"];
+      const claimIds = [...crossLabels.map((label) => correctedClaims[label]), ...REGRESSION.map((label) => derivedClaims[label])];
+      const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: claimIds, idempotency_key: `cedar-corrected-${randomUUID()}`, engagement_id: PROJECT });
+      assert.equal(created.status, 201, J(created.body));
+      const draftId = created.body.data.generatedContentDraftId;
+      const blocks = await query(
+        `SELECT b.ordinal, b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [draftId]);
+      for (const label of crossLabels) {
+        const block = blocks.find((b) => b.claim_id === correctedClaims[label]);
+        assert.equal(block.evidence_item_id, CORRECTED_CROSS[label].evidenceItemId);
+        assert.ok(block.text.includes(String(report.corrected_version.recalculation.corrected[label])), block.text);
+        assert.match(block.text, /linked to the participant register by matching identifier values exactly/);
+      }
+      assert.ok(!blocks.some((b) => Object.values(crossClaims).includes(b.claim_id)), "no superseded claim is generated from");
+      for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/);
+      const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${draftId}/review-packet`);
+      assert.equal(packet.status, 200, J(packet.body));
+      const packetCitations = packet.body.data.blocks.flatMap((block) => block.citations);
+      for (const label of crossLabels) {
+        assert.deepEqual(packetCitations.find((c) => c.claimId === correctedClaims[label]).contributingSources.map((c) => [c.sourceRole, c.sourceVersionId, c.isCurrent]),
+          [["primary", CORRECTED_STATE.sourceVersionId, true], ["reference", state.register.sourceVersionId, true]], label);
+      }
+      const delivery = await releaseThroughGetKinder(draftId);
+      const { released, entries, ...statuses } = delivery;
+      report.generation.corrected_delivery = { ...statuses, released_excerpt: typeof released === "string" ? released.slice(0, 3000) : released };
+      assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
+        delivery.limitation_snapshot, delivery.export_candidate, delivery.final_release_authority, delivery.export_manifest, delivery.client_released_markdown],
+        [[200, 200], 201, 200, 200, 201, 201, 201, 201, 200], J(statuses));
+      for (const label of crossLabels) {
+        assert.ok(released.includes(correctedClaims[label]), `${label} is in the released document`);
+        assert.ok(!released.includes(crossClaims[label]), `${label}: the superseded claim is not`);
+      }
+      const contributingLines = released.split("\n").filter((line) => line.includes("Contributing "));
+      assert.equal(contributingLines.filter((line) => line.includes("Contributing primary source") && line.includes(CORRECTED_STATE.sourceVersionId)).length, crossLabels.length);
+      assert.equal(contributingLines.filter((line) => line.includes("Contributing reference source") && line.includes(state.register.sourceVersionId)).length, crossLabels.length);
+      assert.ok(!released.includes(V1()), "the updated report cites only the corrected version of the service events");
+      assert.doesNotMatch(released, /CB0\d\d|EV0\d\d/);
+      for (const label of crossLabels) {
+        assert.ok(released.includes(String(report.corrected_version.recalculation.corrected[label])), `${label}: its value is in the released document`);
+        const entry = entries.find((candidate) => candidate.claim_id === correctedClaims[label]);
+        assert.ok(entry?.limitation_codes.includes("derived.cross_source_linked"), J(entry));
+      }
+      // Both releases stay identifiable: the new one is current, the earlier one historical with its original lineage.
+      const historical = await readReleased(state.stageAReleasedManifestId);
+      assert.deepEqual([historical.status, historical.body.data.released_report_state], [409, "historical"]);
+      assert.equal((await readReleased(delivery.export_manifest_id)).status, 200);
+      report.corrected_version.releases = { historical: state.stageAReleasedManifestId, current: delivery.export_manifest_id };
+    });
+
+    await test("31: the answer-key comparison after the correction: the challenge metric by method, P01's population, and the final tally", () => {
+      const expected = Object.fromEntries(parseCsv(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "Expected_Metrics.csv"), "utf8")).map((row) => [row.metric_id, row]));
+      const challenge = report.derived_measurements.corrected_reach_encounters;
+      const methodValid = challenge.calculation_method === "kai_cross_source_linked_reach_v1" && challenge.definition.metric === "eligible_linked_encounters"
+        && J(challenge.contributing_sources.map((s) => s.source_version_id)) === J([CORRECTED_STATE.sourceVersionId, state.register.sourceVersionId])
+        && challenge.definition.period.period_start === "2025-04-01" && challenge.definition.period.period_end === "2026-03-31" && challenge.definition.period.precision === "day";
+      const expectedV2 = Number(expected.V2_ELIGIBLE_ENCOUNTERS.expected_value);
+      // P01 is the roster's distinct participant identifiers (registered people), not people reached: it is matched only by the register component.
+      const p01 = report.comparison_cross_source.find((c) => c.metric_id === "P01");
+      const p01Population = { required: expected.P01.denominator_or_scope, rule: expected.P01.calculation_rule,
+        kai_component: "register_distinct_identifier_count", kai_reached_people: report.derived_measurements.reach_people.measured_value,
+        reached_is_a_different_population: true };
+      const rows = report.comparison_cross_source.map((row) => (row.metric_id !== "V2_ELIGIBLE_ENCOUNTERS" ? row : {
+        metric_id: row.metric_id, expected: expectedV2, actual: challenge.measured_value, previous_difference: row.difference,
+        difference: challenge.measured_value === expectedV2 && methodValid ? "match" : challenge.measured_value === expectedV2 ? "number_matches_method_differs" : "incorrect",
+        capability: "corrected_source_version", method_valid: methodValid, contributing_sources: challenge.contributing_sources, period: challenge.definition.period,
+        persisted: true, claim_id: correctedClaims.reach_encounters, superseded_source_version_id: V1(),
+      }));
+      report.comparison_final = rows;
+      report.p01_definition = { ...p01Population, verdict: p01.difference, calculation: p01.calculation };
+      const tally = rows.reduce((acc, c) => ({ ...acc, [c.difference]: (acc[c.difference] ?? 0) + 1 }), {});
+      report.comparison_tally.final = tally;
+      console.log(`Cedar Bridge final comparison tally: ${J(tally)}; P01: ${J(report.p01_definition)}`);
+      assert.equal(rows.find((c) => c.metric_id === "V2_ELIGIBLE_ENCOUNTERS").difference, "match");
+      assert.equal(p01.difference, "match");
+      assert.match(p01.calculation, /distinct register participant identifiers/);
+      assert.equal(rows.length, 73);
+    });
   } finally {
     if (REPORT_PATH) writeFileSync(REPORT_PATH, `${J(report, null, 2)}\n`);
     restoreRuntime();
