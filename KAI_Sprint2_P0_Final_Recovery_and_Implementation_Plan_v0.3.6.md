@@ -46117,3 +46117,43 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 **Verification (TOOL_VERIFIED):** focused calculation, worker and derived-measurement tests 27/27; full `npm test` 6,000 tests, 5,876 passed, 0 failed, 124 skipped; API contract 71/71; Cedar Bridge disposable runner 35/35 twice, 0 failed or skipped. The runner applied 85 normal-chain migrations, verified the two production-history-only refusals, rolled back and reapplied the three relevant migrations to identical fingerprints, and passed both existing schema verifiers. The final connected rerun includes unit and source-profile assertions. No attributable implementation defect was encountered or application change required. `git diff --check` and complete diff inspection precede the local commit.
 
 **Status:** B3_COMPLETE_LOCALLY; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### B4: monthly activity and duration UI, evidence and report delivery (2026-11-03)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Execute Package B4: Monthly Activity and Duration UI, Evidence and Report Delivery" authorizes local implementation, synthetic and disposable loopback acceptance, and local commits. Excluded: A1/A2/A3/A4, new measurement types, lifecycle, permission or review changes, migrations, push, deploy, production or shared databases, persistent flags, real client data and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `ad93638`, clean. Every Node/npm command used the non-listening loopback `DATABASE_URL` sentinel; the runners created and removed their own loopback PostgreSQL clusters.
+
+**Gap found and repaired (TOOL_VERIFIED):** the B1/B2 monthly statement said the breakdown was "recorded with the measurement" but never stated it, so no generated or released report could contain the monthly counts. It now states each month's count ("2025-04 1, 2025-05 5, ...") whenever that fits the existing 500-character statement limit with the stated meaning; otherwise it keeps the earlier wording. The "Duration field ... was also mapped" sentence is kept: evidence identity is the statement fingerprint, and the first connected run proved that without it a monthly-only request collides with the duration request's monthly evidence (`conflict_current_state_changed`). That defect was introduced and fixed in this package. No arithmetic, schema, route, lifecycle or authorization change.
+
+**UI (existing "Link to a participant register" section in Count records):**
+- An optional "Monthly activity and recorded duration" block. It offers a monthly checkbox and a duration select listing only the columns KAI did not classify (`duration_field_candidates`, by position, with present and blank counts). Choosing a column requires the person to confirm that it records minutes before anything can be sent. The body carries `duration {field_key, meaning: recorded_service_duration, unit: minutes}` or `monthly_activity: true`.
+- Settled and recorded results show all months with the eligible total and period. Duration shows known minutes with the unit, known of eligible, missing and invalid counts, and "Subtotal only ... not the complete service time" whenever any eligible encounter lacks a usable duration. The duration headline is the minutes subtotal, never `measured_value` (the count of encounters with a duration).
+- The existing contributing-version list, the not-current indication, the limitation list and "Propose a claim" are reused. Reconciliations of earlier, replaced versions of the same source are listed as historical. Their values are not served, consistent with the existing rule that superseded versions are identified, not read.
+
+**Browser acceptance (TOOL_VERIFIED, customer XLSX runner with `KAI_CEDAR_BRIDGE_PACKAGE`: 40/40, new test O on its first run; test N unchanged and passing with hoisted helpers):**
+- On the uploaded Cedar Bridge register and service events (truthful decision: personal information present), the administrator selects the register and each field in the built bundle. The duration select offers field_7 and not the classified fields. An unconfirmed duration blocks submission. The exact POST body is asserted, then 202 `queued`, then the polled job reaching `succeeded`.
+- The page and responses equal an independent calculation from the bytes, which itself equals the established values: 1, 5, 1, 7, 12, 14, 18, 20, 36, 31, 35, 42 = 222; 219 recorded, 3 missing, 0 invalid; 16,755 known minutes, shown as a subtotal.
+- After reload: both contributing versions are current, the limitations include `derived.known_recorded_minutes_subtotal`, `derived.encounters_not_people` and `derived.cross_source_linked`, and both claims are proposed through the UI. The claims state every month and the minutes subtotal and are not yet eligible (Get Kinder review applies).
+- Refusals: contributor, client reviewer and another organization's administrator get 403 on request and read. Invalid duration mappings (hours, unstated meaning, mapped date field, classified field) return 422 and nothing is queued.
+- The corrected events are promoted as the successor. The original version is shown as "Earlier version" with no Count records, its claims return 409 `source_version_not_current`, its job is listed as historical, and its results are retained unchanged and not shown as current.
+- The corrected reconciliation through the same controls shows 1, 5, 1, 6, 12, 15, 18, 21, 36, 31, 35, 42 = 223; 220 recorded, 3 missing; 16,815 minutes. It persists after reload, and its duration claim is proposed.
+
+**Generation, review and release (TOOL_VERIFIED, Cedar runner 37/37: the 35 earlier tests plus 23b and 30b):**
+- The B1/B2 and B3 reviewed activity claims each produce an internal Evidence Summary. The stored blocks state every month, the eligible total, the period, "encounters, not people", the minutes subtotal from 219 of 222 (220 of 223) with 3 missing, the subtotal disclosure and the register version.
+- A model reply asserting complete service time is refused (VAL-GEN-008), as is an invented minutes total (VAL-GEN-004). The review packet names both contributing versions as current. The client's own Markdown stays closed (`personal_information_not_cleared`).
+- Get Kinder's existing content review, export review, limitation snapshot, candidate, release authority and manifest then deliver the document to the client route (200). It contains the claims, the months, the minutes and missing count, "not a complete service-time total", two contributing primary and two contributing reference lines, the subtotal, encounter and linkage limitation codes, and no identifier.
+- After correction the original activity release reads 409 `historical`. The corrected release is 200 and cites neither the original version nor its claims.
+- The model is the deterministic stub, so this verifies the governed pathway, not real-model writing quality.
+
+**Verification (TOOL_VERIFIED):** focused cross-source and job tests 17/17 and derived tests 11/11. `npm test`: 6,001 tests, 5,877 passed, 0 failed, 124 skipped. API contract: 71/71. Measurement-to-released-report browser: 13/13. Measured report selection browser: 17/17. P2-01M runner: 2/2 and 77 tests (67 passed, 10 skipped: 9 normal-chain, 1 needing the Cedar workbook variable), all verifiers PASS. `npm run build` passed (bundle committed). `git diff --check` passed.
+
+**Limitations (NOT_CONFIRMED):**
+1. A queued or running job state is shown as the POST and poll responses report it; on this data the worker settled within the first poll, so `in_progress`/`retry_scheduled`/`failed` rendering was not observed in the browser in this package (existing Stage C/test N cover those states at API level).
+2. Earlier-version results are identified as historical but their values are not readable in the UI (unchanged policy; serving superseded results needs an owner decision).
+3. A reporting period whose monthly breakdown cannot fit the statement limit falls back to the earlier wording, so its reports would not list the months.
+4. An activity request records only the activity findings; linked reach needs its own request (B1/B2 design), which the UI states.
+5. The complete-service-time rule is lexical.
+6. Nothing was pushed, deployed, migrated or verified in production.
+
+**Status:** B4_COMPLETE_LOCALLY; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
