@@ -18,4 +18,3 @@ export function publicReconciliationJob(job) {
     completed_at: job.completed_at,
   };
 }
-
