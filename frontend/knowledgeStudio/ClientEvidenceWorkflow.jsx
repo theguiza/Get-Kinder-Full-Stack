@@ -367,6 +367,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [measuring, setMeasuring] = useState(null);
   useEffect(() => { setMeasuring(null); }, [organizationId, engagementId]);
   const openMeasurement = measuring && measuring.contextKey === contextKey ? measuring.sourceVersionId : null;
+  // Every governed version by id (display facts only), and the current CSV
+  // versions a service-event version may be linked to or a successor may replace.
+  const allVersions = sources.items.flatMap((source) => source.sourceVersions.map((version) => ({ ...version, reviewedSourceType: source.reviewedSourceType })));
+  const versionsById = new Map(allVersions.map((version) => [version.sourceVersionId, version]));
+  const currentVersions = allVersions.filter((version) => version.isCurrent && isRouteUuid(version.sourceVersionId));
   const [reviewing, setReviewing] = useState(null);
   useEffect(() => { setReviewing(null); }, [organizationId, engagementId]);
   const openReview = reviewing && reviewing.contextKey === contextKey ? reviewing.claimId : null;
@@ -563,6 +568,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               safeFilename={openPreparation.file.safeFilename}
               onClose={() => setPreparation(null)}
               onDecisionRecorded={preparationRecorded}
+              replaceableVersions={currentVersions}
             />
           ) : null}
         </div>
@@ -674,7 +680,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                           sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
                           initialWorksheetKey={measuring.worksheetKey || ""}
                           onWorksheetChange={(worksheetKey) => setMeasuring((current) => (current ? { ...current, worksheetKey } : current))}
-                          onClose={() => setMeasuring(null)} onRecorded={refresh} />
+                          onClose={() => setMeasuring(null)} onRecorded={refresh}
+                          linkableVersions={currentVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && candidate.profileFormat === "csv")}
+                          versionsById={versionsById} />
                       </div>
                     ) : null}
                   </div>

@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
+import ClientCrossSourceMeasurementSection from "./ClientCrossSourceMeasurementSection.jsx";
 import {
   EMPTY_INTERPRETATION_FORM,
   EMPTY_TABULAR_FORM,
+  contributingSourcesCurrent,
+  crossSourceMetricLabel,
   currentEvidenceOf,
   derivedMeasurementBasisPath,
   derivedMeasurementInterpretationPath,
@@ -34,7 +37,7 @@ function fieldLabel(field) {
  * result represents as the organization's statement and never changes its
  * numbers. The server calculates and validates everything.
  */
-export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded }) {
+export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded, linkableVersions = [], versionsById = null }) {
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "" });
   const [form, setForm] = useState(EMPTY_TABULAR_FORM);
   const [meaning, setMeaning] = useState(EMPTY_INTERPRETATION_FORM);
@@ -232,6 +235,11 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           </button>
         </form>
       ) : null}
+      {data?.tabular?.available && !data.tabular.sheetKey ? (
+        <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data}
+          linkableVersions={linkableVersions} versionsById={versionsById}
+          onReconciled={() => { onRecorded?.(); load(); }} />
+      ) : null}
       {data?.tabular && !data.tabular.available ? (
         <div className="text-muted mb-2" data-client-derived-tabular-unavailable="">
           {data.tabular.blockers?.[0]?.message || "KAI kept no field values it can measure for this source version. Upload it again as a new intake version to measure field values."}
@@ -241,9 +249,32 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
         const current = currentEvidenceOf(recorded);
         const paired = recorded.measurement_family === "paired_outcome_change";
+        const linked = recorded.measurement_family === "cross_source_reach";
+        const stillCurrent = contributingSourcesCurrent(recorded);
         return (
-          <div key={recorded.source_derived_measurement_id} className="border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}>
-            <div className="fw-semibold">{measurementFamilyLabel(recorded.measurement_family)}: {recorded.measured_value}{recorded.percentage ? ` (${recorded.percentage}%)` : ""}</div>
+          <div key={recorded.source_derived_measurement_id} className="border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}
+            data-client-derived-current={stillCurrent ? "current" : "not_current"}>
+            <div className="fw-semibold">
+              {measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {recorded.measured_value}{recorded.percentage ? ` (${recorded.percentage}%)` : ""}
+            </div>
+            {linked ? (
+              <ul className="mb-1" data-client-derived-contributing-sources="">
+                {recorded.contributing_sources.map((source) => (
+                  <li key={source.source_version_id} data-client-derived-contributing-source={source.source_role} data-client-derived-contributing-current={source.is_current ? "current" : "not_current"}>
+                    {source.source_role === "primary" ? "Service events" : "Participant register"}: {versionsById?.get(source.source_version_id)?.safeFilename || "source version"} {source.source_version_id}
+                    {source.is_current ? "" : " (replaced by a newer version)"}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {!stillCurrent ? (
+              <div className="text-danger" data-client-derived-not-current="">
+                No longer current: a source version it was calculated from has been replaced. It cannot support a claim or a new report; reconcile the current versions instead.
+              </div>
+            ) : null}
+            {recorded.category_labels_withheld ? (
+              <div className="text-warning" data-client-derived-labels-withheld="">Recorded from category values KAI now withholds; it cannot be stated or used.</div>
+            ) : null}
             {current?.interpretation
               ? <div data-client-derived-meaning-state="stated">Meaning stated by your organization: {current.interpretation.indicator_label}. {current.interpretation.meaning_text}</div>
               : <div data-client-derived-meaning-state="proposed">Meaning proposed, not stated by your organization.</div>}

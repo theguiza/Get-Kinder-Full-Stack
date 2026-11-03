@@ -493,6 +493,11 @@ export function sourcePromotionResultMessage(data) {
   const status = data?.promotion_decision?.decision_status;
   const handoff = data?.evidence_extraction_handoff;
   const replayed = data?.replayed === true ? " (already recorded; nothing new was written)" : "";
+  // A successor version: the version it replaced is now an earlier version.
+  const succession = typeof data?.superseded_source_version_id === "string" ? " as the new current version; the version it replaced is now an earlier version" : "";
+  if (status === "promoted" && succession) {
+    return `Source promoted${succession}${replayed}. Measurements and claims from the earlier version are no longer current.`;
+  }
   if (status === "promoted") {
     if (handoff?.status === "created" || handoff?.status === "replayed") {
       return `Source promoted${replayed}. Evidence extraction ${handoff.status === "created" ? "created" : "already had"} ${handoff.evidence_item_count ?? 0} evidence item(s), awaiting Get Kinder evidence review.`;
@@ -514,6 +519,7 @@ const SOURCE_PROMOTION_PHASE_MESSAGES = Object.freeze({
     "this file's recorded sensitivity and allowed-use restrictions do not permit promotion",
   source_promotion_allowed_use_not_allowed: "this file's effective allowed use is not_allowed",
   source_promotion_reviewed_source_type_invalid: "the reviewed source type is not one of the allowed types",
+  source_promotion_successor_invalid: "this file cannot replace that source: it must be the same kind of file and the same reviewed source type",
   source_promotion_candidate_review_incomplete: "the candidate or its review item is not in a state that can take this decision",
 });
 

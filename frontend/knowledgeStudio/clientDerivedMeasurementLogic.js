@@ -117,3 +117,92 @@ export function measurementFamilyLabel(family) {
 export function currentEvidenceOf(recorded) {
   return (recorded?.evidence || []).find((entry) => entry.current === true) || null;
 }
+
+// Cross-source linked reach is queued: the POST returns the reconciliation job
+// (202), which is read until it settles. The worker, not this page, reads the files.
+export function crossSourceReconciliationJobsPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/cross-source-reconciliation-jobs`;
+}
+
+export function crossSourceReconciliationJobPath(organizationId, reconciliationJobId) {
+  return `${crossSourceReconciliationJobsPath(organizationId)}/${encodeURIComponent(reconciliationJobId)}`;
+}
+
+export const EMPTY_CROSS_SOURCE_FORM = Object.freeze({
+  referenceSourceVersionId: "",
+  eventIdentifierFieldKey: "",
+  participantIdentifierFieldKey: "",
+  statusFieldKey: "",
+  completedValueKey: "",
+  dateFieldKey: "",
+  groupFieldKey: "",
+  registerParticipantFieldKey: "",
+});
+
+/** Why the linkage form cannot be sent yet, or null. */
+export function crossSourceFormProblem(form, { reportingPeriodRecorded }) {
+  if (!form.referenceSourceVersionId) return "Choose the participant register source version to link.";
+  if (!form.eventIdentifierFieldKey) return "Choose the field that identifies each service event.";
+  if (!form.participantIdentifierFieldKey) return "Choose the field that identifies the participant of each event.";
+  if (form.eventIdentifierFieldKey === form.participantIdentifierFieldKey) return "The event and participant fields must be different fields.";
+  if (!form.statusFieldKey || !form.completedValueKey) return "Choose the status field and the value that means a completed service.";
+  if (!form.dateFieldKey) return "Choose the service date field.";
+  if (!form.registerParticipantFieldKey) return "Choose the register field holding the same participant identifier.";
+  if (!reportingPeriodRecorded) return "This source's engagement has no recorded reporting period yet.";
+  return null;
+}
+
+/** The POST body: both version ids and the person's mapping; nothing else is sent. */
+export function crossSourceRequestBody(form, primarySourceVersionId) {
+  return {
+    primary_source_version_id: primarySourceVersionId,
+    reference_source_version_id: form.referenceSourceVersionId,
+    mapping: {
+      events: {
+        event_identifier_field_key: form.eventIdentifierFieldKey,
+        participant_identifier_field_key: form.participantIdentifierFieldKey,
+        status_field_key: form.statusFieldKey,
+        completed_value_key: form.completedValueKey,
+        date_field_key: form.dateFieldKey,
+        ...(form.groupFieldKey ? { group_field_key: form.groupFieldKey } : {}),
+      },
+      register: { participant_identifier_field_key: form.registerParticipantFieldKey },
+    },
+  };
+}
+
+const JOB_STATE_TEXT = Object.freeze({
+  queued: "Queued: KAI will reconcile the two source versions shortly.",
+  in_progress: "Reconciling the two source versions...",
+  retry_scheduled: "A temporary problem interrupted the reconciliation; KAI will try again.",
+  succeeded: "Reconciled. The measurements below are recorded; their evidence still needs review.",
+  failed: "KAI could not reconcile these source versions.",
+  exhausted: "KAI could not reach the source files after several attempts. Request it again later.",
+});
+
+export function reconciliationJobStateText(job) {
+  return JOB_STATE_TEXT[job?.job_state] || "Unknown reconciliation state.";
+}
+
+export function reconciliationJobSettled(job) {
+  return ["succeeded", "failed", "exhausted"].includes(job?.job_state);
+}
+
+const CROSS_SOURCE_METRIC_LABELS = Object.freeze({
+  eligible_linked_encounters: "Eligible service encounters (events, not people)",
+  distinct_people_served: "Distinct registered people served",
+  group_linked_encounters: "Eligible encounters",
+  group_distinct_people_served: "Distinct people served",
+  people_in_more_than_one_group: "People served in more than one group",
+});
+
+export function crossSourceMetricLabel(definition) {
+  const label = CROSS_SOURCE_METRIC_LABELS[definition?.metric] || "Linked reach";
+  return definition?.group ? `${label} in ${definition.group.value_label}` : label;
+}
+
+/** Whether every source version a recorded measurement combines is still current. */
+export function contributingSourcesCurrent(recorded) {
+  const sources = Array.isArray(recorded?.contributing_sources) ? recorded.contributing_sources : [];
+  return sources.every((source) => source.is_current === true);
+}

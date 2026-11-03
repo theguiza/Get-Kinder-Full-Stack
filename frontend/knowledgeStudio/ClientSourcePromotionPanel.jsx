@@ -47,7 +47,7 @@ const CONFIRMATION_REQUIRED = "Confirm the source authorization above before pro
  * attempt without it marks and focuses the confirmation, and a different
  * candidate, proposed type, or set of recorded restrictions clears it.
  */
-export default function ClientSourcePromotionPanel({ organizationId, engagementId, intakeFileId, safeFilename, onClose, onDecisionRecorded }) {
+export default function ClientSourcePromotionPanel({ organizationId, engagementId, intakeFileId, safeFilename, onClose, onDecisionRecorded, replaceableVersions = [] }) {
   const [lookup, setLookup] = useState({ status: "loading", candidateId: "", error: "" });
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState("");
@@ -56,6 +56,9 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
   const [confirmed, setConfirmed] = useState(false);
   const [confirmationMissing, setConfirmationMissing] = useState(false);
   const [restrictions, setRestrictions] = useState({ status: "loading", lines: [] });
+  // Source-version workflow: a corrected file promoted as the next version of
+  // a current source (optional). The server checks the type and format.
+  const [supersedes, setSupersedes] = useState("");
   const mountedRef = useRef(true);
   const confirmRef = useRef(null);
 
@@ -104,7 +107,7 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
   useEffect(() => {
     setConfirmed(false);
     setConfirmationMissing(false);
-  }, [confirmedCandidateId, confirmedProposedType, confirmedRestrictions]);
+  }, [confirmedCandidateId, confirmedProposedType, confirmedRestrictions, supersedes]);
 
   useEffect(() => {
     (async () => {
@@ -135,7 +138,8 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
     }
     setBusy(true);
     setResult(null);
-    const response = await postJson(sourceCandidateDecisionPath(organizationId, candidateId), payload);
+    const body = payload?.outcome === "promoted" && supersedes ? { ...payload, supersedes_source_version_id: supersedes } : payload;
+    const response = await postJson(sourceCandidateDecisionPath(organizationId, candidateId), body);
     if (!mountedRef.current) return;
     setBusy(false);
     const recorded = response.statusCode === 200 && response.body?.ok;
@@ -144,7 +148,7 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
       : { kind: "warning", text: sourcePromotionFailureMessage(response) });
     await loadDetail(candidateId);
     if (recorded && mountedRef.current) onDecisionRecorded?.();
-  }, [organizationId, detail, lookup.candidateId, busy, confirmed, loadDetail, onDecisionRecorded]);
+  }, [organizationId, detail, lookup.candidateId, busy, confirmed, supersedes, loadDetail, onDecisionRecorded]);
 
   const confirmId = `client-source-authorization-confirm-${intakeFileId}`;
   const authorization = detail?.decision_controls_enabled ? (
@@ -153,6 +157,19 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
       <ul className="mb-1" id={`${confirmId}-statement`}>
         <li>Source: {safeFilename} (this file&rsquo;s source candidate, proposed type &ldquo;{detail.source_candidate.proposed_source_type}&rdquo;; you choose the reviewed source type in this decision).</li>
         <li>Intended use: {SOURCE_AUTHORIZATION_INTENDED_USE}</li>
+        <li>
+          This file is
+          <select className="form-select form-select-sm d-inline-block w-auto ms-1" value={supersedes} data-client-source-supersedes=""
+            onChange={(event) => setSupersedes(event.target.value)}>
+            <option value="">a new source</option>
+            {replaceableVersions.map((version) => (
+              <option key={version.sourceVersionId} value={version.sourceVersionId}>{`the corrected next version of ${version.safeFilename || version.sourceVersionId}`}</option>
+            ))}
+          </select>
+          {supersedes ? (
+            <span data-client-source-supersedes-statement=""> - the current version becomes an earlier version; findings calculated from it stop being current, and reports already released keep citing it.</span>
+          ) : null}
+        </li>
         <li>
           Restrictions recorded by the sensitivity &amp; allowed-use review:
           {restrictions.status === "loading" ? " loading..." : null}
