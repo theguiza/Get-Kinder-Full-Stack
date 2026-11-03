@@ -45922,3 +45922,146 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 10. Free Assessment composition.
 
 **Status:** MEASUREMENT_INTEGRATION_REPAIRED_AND_CROSS_SOURCE_REACH_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
+
+### Cross-source correction lifecycle: corrected Cedar Bridge source to a reviewed, released report (2026-11-03)
+
+**Owner authorization (USER_CONFIRMED):**
+- The owner prompt "KAI — Complete and Prove the Cross-Source Correction Lifecycle" authorizes local implementation, synthetic acceptance and local commits.
+- The owner separately approved, in this session, one additive migration (+ rollback), applied only to disposable local PostgreSQL, for the reconciliation job table.
+- Excluded: pushes, deployment, production or shared databases, persistent flags, credentials, cloud/tenant/environment changes, destructive actions, real client data, `00_KAI_CURRENT_STATE.md`, durations/months/targets/narrative extraction and Free Assessment composition.
+
+**Start (TOOL_VERIFIED):** `main` at `6287c5e`, clean. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command. Runners used their own disposable loopback clusters, one at a time.
+
+**Commits:**
+- `6becc82` label screen
+- `22b35eb` queued reconciliation and migration
+- `d459e7e` successor promotion
+- `af468d7` structured citations and historical releases
+- `7d31534` UI
+- `2654edf` packet and audit allowlists
+- `5c27733` Cedar Stages B–D
+- the browser test N and runner commit
+- an EOF whitespace fix
+- this entry
+
+**Acceptance definitions (TOOL_VERIFIED from the package's answer key, outside the application):**
+- Eligible completed encounter: a distinct `event_id`, `completed`, FY date, roster-linked; one copy of an exact duplicate. Distinct people reached = distinct roster IDs among eligible events.
+- **P01 = `COUNT DISTINCT participant_id` over the roster: registered people, not people reached.** KAI matches it only by the reconciliation's `register_distinct_identifier_count` component, never by `distinct_people_served`.
+  - On Cedar both are 80, but they are different populations.
+  - A pure test with a registered person who has no eligible encounter proves the two numbers diverge.
+- V2_ELIGIBLE_ENCOUNTERS = 223. An independent script on the corrected file shows exactly three changed rows:
+  - EV0092 CB999→CB077;
+  - EV0090 cancelled→completed;
+  - EV0081 completed→cancelled.
+
+**1. Category labels (Storage contract VAL-INT-004; DP Operating Model §7/§14).**
+- `categoryVocabularyWithheldReason` (tabularMeasurementBasis.js) withholds a whole vocabulary that has:
+  - a sensitive word;
+  - a capitalized single word that is not a listed operational word;
+  - two or more capitalized words;
+  - or plain lower-case single words only, none of them operational.
+- Sentence-case descriptions, snake_case and upper-case codes are kept.
+- The profiler applies it at commit, and every reader applies it again (`screenedField`), so labels a stored profile listed under the earlier rule are never offered, selected or matched.
+- A recorded measurement holding such labels:
+  - fails the claim basis and ordinary authority;
+  - gets P2-06 409 `derived_measurement_category_label_withheld` (so no generation or release);
+  - is refused interpretation;
+  - has its labels and claim statement masked in the basis read.
+- Tests: neutral-header first names, full names, lower-case names, one name among operational labels, legacy profile and legacy measurement.
+- Trade-off: title-case single words ("Digital") and lower-case single-word vocabularies ("literacy/mentoring") are now withheld. Data-dictionary field sensitivity is pinned `unknown` by CHECK, so it cannot discriminate. Every Cedar label used by a measurement is kept, and all earlier Cedar results are unchanged.
+
+**2. Non-blocking reconciliation (Storage contract §9).**
+- Migration `kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs` (+ rollback, Plan A position 87) adds `kai.cross_source_reconciliation_jobs`. It holds identities, both profile SHAs, the validated mapping with its period, a request fingerprint (unique per organization), state, attempts, claim token/lease, a safe error code and the committed measurement ids.
+- The POST reads no byte. It admits, loads both versions, resolves the mapping and records the job in one transaction (202), then dispatches it in process after commit. The per-minute P1 cron also sweeps due jobs.
+- One attempt claims under a lease, then commits in one transaction:
+  - it re-asserts the claim and the profiles and period requested;
+  - it revalidates currentness, profile binding and allowed use (shared loader);
+  - it reads both versions' bytes through the P1 exact-version reader (checksum and size verified);
+  - it commits the measurements with the job's completion.
+- Failures:
+  - `system_error` and an unreadable object retry (1 then 5 minutes; three attempts), and an expired lease counts as an attempt;
+  - a refusal, a checksum/size mismatch (new additive `integrity_failure_kind` on the byte source's failure) or a source changed since the request fails at once.
+- A repeated request reads the same job; after failure or exhaustion it re-queues it.
+- GET routes return one job (with its committed measurements) or the organization's jobs. The claim token and requester never leave the worker.
+
+**3. Source-version supersession.**
+- The existing source-candidate decision accepts `supersedes_source_version_id` with `promoted`.
+- Inside the promotion transaction:
+  - the predecessor's candidate is locked (the lock every measurement/evidence write takes);
+  - the predecessor version is locked and must be this organization's current version of the same reviewed type and file format;
+  - it is marked not current, and the reviewed candidate becomes the new current version of the same `source_id`;
+  - one extra required audit, `source_version_superseded`, is written (source, new and superseded version).
+- Refused or failed attempts write nothing. An identical retry replays; a retry naming another predecessor is a 409. No new schema was needed.
+
+**4. Structured citations and historical releases.**
+- Multi-source citations carry `contributingSources` (role, source, version and, in the packet, currentness) in all of these:
+  - the GK review packet;
+  - the internal report citations;
+  - the export candidate's canonical citations;
+  - the manifest appendix (Markdown, PDF, DOCX; CSV keeps its fixed columns).
+- Single-source citations, and every existing candidate fingerprint, are unchanged.
+- A release citing a superseded version still fails the currentness gate and is never served as current. Its read returns 409 with:
+  - `released_report_state: "historical"`;
+  - the manifest id;
+  - each cited version's currentness and its source's current version.
+- Nothing released is rewritten.
+
+**5. UI.**
+- Count records on a current CSV version has "Link to a participant register":
+  - field and value selects come from both committed profiles, and the period shown is the recorded one;
+  - the queued job is followed until it settles, showing safe errors, results, exclusions and the register's distinct participants, plus job history with each version's currentness.
+- Recorded linked reach shows both contributing versions and "No longer current" when one is replaced. Claims are proposed through the existing control.
+- The client promotion panel offers "the corrected next version of …" inside the confirmed authorization.
+
+**Cedar Bridge (TOOL_VERIFIED, runner 33/33: the 25 earlier tests, with 18, 20 and 21 strengthened, plus Stages B–D in 24–31):**
+- **Stage A.** The baseline is unchanged:
+  - 222 / 80 / DS 118 and 51 / EN 104 and 39 / 10 in both;
+  - claims are reviewed, and the cited Evidence Summary is released to the client route (200);
+  - the review packet and release name both contributing versions structurally.
+- **Stage B.**
+  - Intake: the corrected file matches the manifest sha256, passes intake, profiles 246 rows with the same field roles and receives the same sensitivity decision.
+  - Refused promotions (each writes nothing): outsider (403), unknown predecessor (404), workbook predecessor (422 `source_promotion_successor_invalid`), different reviewed type (422), rejection naming a predecessor (422), upper-case id (422).
+  - Successor promotion returns 200: same `source_id`, the original version earlier and the new one current, one supersession audit, a replay that writes nothing and a 409 for a different predecessor.
+  - Not current afterwards (409 `source_version_not_current`): the old cross-source and single-source events claims. Generation, interpretation, the basis read and a reconciliation of the old version are refused.
+  - Paired and follow-up claims stay eligible.
+  - A queued job on the original version fails at commit (`conflict_current_state_changed`) and writes nothing.
+  - The Stage A release stays retained and reads as historical (original events version not current, current = corrected; the register reference current).
+- **Stage C, worker path on the corrected version.**
+  - Withdrawn register permission: failed `allowed_use_not_allowed`.
+  - Tampered register object: failed `cross_source_checksum_mismatch`.
+  - Missing object: `retry_scheduled` `cross_source_bytes_unavailable`, then deferred.
+  - A lost worker's claim is busy until its lease expires; the sweep then finds it, and attempt 3 succeeds. The lost token can no longer settle the job.
+  - A duplicate request writes nothing. Outsiders cannot request or read jobs.
+- **Stage C, recalculation.**
+  - **223 eligible encounters**, 80 people, DS 118/51, EN 105/39, 10 in both, each equal to an independent reading of the corrected bytes.
+  - Only `eligible_encounter_count` (222→223) and the unmatched event and identity counts (1→0) change; every other funnel figure is recalculated to the same value.
+  - Both contributors are the corrected events version and the register. No corrected measurement cites the original version, and the original measurements are unchanged.
+- **Stage D.**
+  - Meanings, new claims (distinct from the old) and Get Kinder's evidence, claim and coverage review; internal-eligible, funder/public closed.
+  - New Evidence Summary (7 corrected + 1 paired): the review packet names both current contributors.
+  - Release: GK content review, export review, snapshot, candidate, release and manifest, then the client route returns 200. The document contains the new claims and values, contributing lines for the corrected events version and the register, and no old claim or original version.
+  - The earlier release stays historical.
+- **Answer key** (read only after KAI's results): V2_ELIGIBLE_ENCOUNTERS matches by method and P01 matches by its population. **Final tally: 41 match, 0 different definition, 32 unavailable, 0 out of scope** (previously 40 / 0 / 32 / 1; V2 was out of scope).
+
+**Verification (TOOL_VERIFIED):**
+- Customer XLSX browser acceptance: 39/39, including new test N:
+  - the cross-source controls in the built bundle, with the exact POST body, the 202 job and its polled reads;
+  - results equal to an independent calculation, persistence after reload, claim proposal, and 403/404 for a contributor and another organization's administrator;
+  - successor promotion of a corrected register in the source review panel, then the not-current indication, a P2-06 409, and the replaced register no longer offered.
+- Plan A normal chain: 87 migrations, 2/2, 43 tests (41 passed, 2 runner-seed skips), 4/4, "proof passed".
+- P2-01M runner (with `KAI_CEDAR_BRIDGE_WORKBOOK`): 2/2, 2/2, 77 tests (68 passed, 9 normal-chain skips). Both verifiers PASS; 12/12 weakenings rejected; the job migration applies twice with no row changed.
+- Cedar runner: the job, cross-source and derived migrations roll back to their prior schema fingerprints and re-apply identically; both read-only verifiers PASS.
+- Knowledge-studio runners: source promotion 13/13, measurement-to-released-report 13/13, internal factual review 17/17, measured report selection 17/17. Plan A assembled 23/23. P1-04 runner 12/12.
+- `npm test`: 5,999 tests, 5,875 passed, 0 failed, 124 skipped. API contract: 71/71. `npm run build` passed (bundle committed). `git diff --check` passed.
+
+**Limitations and actions not performed (NOT_CONFIRMED):**
+1. **Not done:** nothing was pushed, deployed or migrated in production. Production needs both earlier Measurement MVP migrations and this one, plus the verifiers; there is no read-only pgAdmin verifier for the job table yet.
+2. **Label screen:** it is shape-based. Lower-case names among operational words, or names identical to operational words, are not detected. Withheld legitimate vocabularies can still be counted as a whole field. No per-field classification is possible while the dictionary sensitivity is pinned.
+3. **Worker revalidation:** the worker revalidates sources (currentness, profile, allowed use) at commit. It does not re-resolve the requester's membership; actor authorization is enforced at request time.
+4. **Earlier releases:** a historical release is identified, not served. Reading its original text needs a separate owner decision on serving superseded releases.
+5. **Library reads:** claim and evidence library reads still display statements of legacy measurements recorded from labels now withheld. Those measurements cannot be used, generated from or released.
+6. **CSV manifest:** it lists the primary citation only (fixed columns).
+7. **Concurrency:** two different successor candidates racing for one predecessor are serialized by row locks (one wins and the other gets a 409). This was verified by reasoning and lock order, not by a dedicated concurrent integration test.
+8. **Model quality:** the model remains a deterministic stub, so semantic quality of a real provider is unverified.
+
+**Status:** CROSS_SOURCE_CORRECTION_LIFECYCLE_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
