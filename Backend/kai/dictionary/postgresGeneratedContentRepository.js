@@ -738,6 +738,8 @@ async function readExistingState(tx, { organizationId, idempotencyKey }) {
         `SELECT c.generated_content_citation_id::text AS generated_content_citation_id,
                 c.generated_content_block_id::text AS generated_content_block_id,
                 c.organization_id::text AS organization_id, c.claim_id::text AS claim_id,
+                (SELECT e.evidence_type FROM kai.evidence_items e
+                  WHERE e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id) AS evidence_type,
                 c.evidence_item_id::text AS evidence_item_id
            FROM kai.generated_content_citations c
            JOIN kai.generated_content_blocks b
@@ -810,6 +812,8 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
                 c.organization_id::text AS organization_id,
                 c.claim_id::text AS claim_id,
                 c.evidence_item_id::text AS evidence_item_id,
+                (SELECT e.evidence_type FROM kai.evidence_items e
+                  WHERE e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id) AS evidence_type,
                 b.ordinal AS block_ordinal
            FROM kai.generated_content_citations c
            JOIN kai.generated_content_blocks b
@@ -1091,6 +1095,23 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
     && typeof data.evidence.evidence_review_status === "string";
 }
 
+// The contributing source versions of each cited derived measurement that
+// combines several (the citation rows carry each evidence item's type, so
+// only derived evidence, whose tables exist, is read).
+async function readCitedContributingSources(tx, { organizationId, evidenceItemIds }) {
+  const contributors = new Map();
+  for (const evidenceItemId of evidenceItemIds) {
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
+    const sources = Array.isArray(derivedRow?.contributing_sources) ? derivedRow.contributing_sources : [];
+    if (sources.length > 0) {
+      contributors.set(evidenceItemId, sources.map((source) => ({
+        sourceRole: source.source_role, sourceId: source.source_id, sourceVersionId: source.source_version_id, isCurrent: source.is_current === true,
+      })));
+    }
+  }
+  return contributors;
+}
+
 async function toReviewPacket(tx, state, input, validation, evaluator, { boardReportingDiagnostics = false } = {}) {
   const evaluatedByClaim = new Map();
   const uniqueClaimIds = [...new Set(state.citations.map((citation) => citation.claim_id))].sort();
@@ -1114,6 +1135,10 @@ async function toReviewPacket(tx, state, input, validation, evaluator, { boardRe
     }
     evaluatedByClaim.set(claimId, result.data);
   }
+  const contributorsByEvidence = await readCitedContributingSources(tx, {
+    organizationId: input.organizationId,
+    evidenceItemIds: [...new Set(state.citations.filter((citation) => citation.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((citation) => citation.evidence_item_id))],
+  });
 
   const blocks = state.blocks.map((block) => {
     const citations = validation.citationsByBlock.get(block.generated_content_block_id).map((citation) => {
@@ -1131,6 +1156,8 @@ async function toReviewPacket(tx, state, input, validation, evaluator, { boardRe
         sourceId: evaluated.source.source_id,
         sourceCode: evaluated.source.source_code ?? null,
         sourceVersionId: evaluated.source_version.source_version_id,
+        // Every version a multi-source measurement combines (absent otherwise).
+        ...(contributorsByEvidence.has(citation.evidence_item_id) ? { contributingSources: contributorsByEvidence.get(citation.evidence_item_id) } : {}),
         supportStrength: evaluated.evidence.support_strength,
         claimReviewStatus: evaluated.claim.claim_review_status,
         evidenceReviewStatus: evaluated.evidence.evidence_review_status,
@@ -1909,6 +1936,8 @@ async function readReviewPacketStatesBatch(tx, { organizationId, generatedConten
                 c.organization_id::text AS organization_id,
                 c.claim_id::text AS claim_id,
                 c.evidence_item_id::text AS evidence_item_id,
+                (SELECT e.evidence_type FROM kai.evidence_items e
+                  WHERE e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id) AS evidence_type,
                 b.ordinal AS block_ordinal
            FROM kai.generated_content_citations c
            JOIN kai.generated_content_blocks b

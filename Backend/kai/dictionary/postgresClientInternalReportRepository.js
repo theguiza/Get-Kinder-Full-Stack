@@ -239,6 +239,8 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
                 sourceId: citation.sourceId,
                 sourceCode: citation.sourceCode,
                 sourceVersionId: citation.sourceVersionId,
+                // Every version a multi-source measurement combines, structurally.
+                ...(Array.isArray(citation.contributingSources) ? { contributingSources: citation.contributingSources.map((source) => ({ ...source })) } : {}),
                 worksheetKey: facts[index]?.measurement?.worksheetKey || null,
                 worksheetName: facts[index]?.measurement?.worksheetName || null,
                 calculationMethod: facts[index]?.measurement?.calculationMethod || null,

@@ -122,6 +122,9 @@ export function serializeExportManifestRenderModelToPdf(renderModel) {
         + `source ${normalizeScalar(citation.sourceId)}; `
         + `source version ${normalizeScalar(citation.sourceVersionId)}.`,
     );
+    for (const source of citation.contributingSources || []) {
+      bulletText(doc, `Contributing ${normalizeScalar(source.sourceRole)} source ${normalizeScalar(source.sourceId)}; source version ${normalizeScalar(source.sourceVersionId)}.`);
+    }
   }
 
   heading(doc, "Limitations and Method Notes");

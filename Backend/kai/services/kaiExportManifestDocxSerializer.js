@@ -89,6 +89,9 @@ export function serializeExportManifestRenderModelToDocx(renderModel) {
         + `source ${normalizeScalar(citation.sourceId)}; `
         + `source version ${normalizeScalar(citation.sourceVersionId)}.`,
     ));
+    for (const source of citation.contributingSources || []) {
+      children.push(bulletParagraph(`Contributing ${normalizeScalar(source.sourceRole)} source ${normalizeScalar(source.sourceId)}; source version ${normalizeScalar(source.sourceVersionId)}.`));
+    }
   }
 
   children.push(headingParagraph("Limitations and Method Notes"));

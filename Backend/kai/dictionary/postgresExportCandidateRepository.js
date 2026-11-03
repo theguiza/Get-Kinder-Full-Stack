@@ -385,7 +385,7 @@ async function loadCanonicalGraph(tx, { organizationId, generatedContentDraftId 
   const citationRows = await tx.query(
     `SELECT b.generated_content_block_id::text AS generated_content_block_id,
             c.claim_id::text AS claim_id, c.evidence_item_id::text AS evidence_item_id,
-            e.source_id::text AS source_id, e.source_version_id::text AS source_version_id
+            e.source_id::text AS source_id, e.source_version_id::text AS source_version_id, e.evidence_type
        FROM kai.generated_content_blocks b
        JOIN kai.generated_content_citations c
          ON c.generated_content_block_id = b.generated_content_block_id
@@ -394,6 +394,19 @@ async function loadCanonicalGraph(tx, { organizationId, generatedContentDraftId 
       WHERE b.organization_id = $1::uuid AND b.generated_content_draft_id = $2::uuid`,
     [organizationId, generatedContentDraftId],
   );
+  // A measurement combining several source versions cites every one of them
+  // structurally: its evidence item names the primary version, and its
+  // contributing sources name the primary and each reference version.
+  for (const citation of citationRows.rows) {
+    if (citation.evidence_type !== DERIVED_MEASUREMENT_EVIDENCE_TYPE) continue;
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: citation.evidence_item_id }, tx);
+    const contributors = Array.isArray(derivedRow?.contributing_sources) ? derivedRow.contributing_sources : [];
+    if (contributors.length > 0) {
+      citation.contributing_sources = contributors
+        .map((source) => ({ sourceRole: source.source_role, sourceId: source.source_id, sourceVersionId: source.source_version_id }))
+        .sort((a, b) => (a.sourceRole === b.sourceRole ? (a.sourceVersionId < b.sourceVersionId ? -1 : 1) : a.sourceRole < b.sourceRole ? -1 : 1));
+    }
+  }
   const citationsByBlock = new Map();
   for (const citation of citationRows.rows) {
     if (!citationsByBlock.has(citation.generated_content_block_id)) citationsByBlock.set(citation.generated_content_block_id, []);
@@ -438,6 +451,9 @@ function buildCanonicalRepresentation({ organizationId, generatedContentDraftId,
         evidenceItemId: citation.evidence_item_id,
         sourceId: citation.source_id,
         sourceVersionId: citation.source_version_id,
+        // Present only for a multi-source measurement, so every single-source
+        // citation - and every existing candidate's fingerprint - is unchanged.
+        ...(citation.contributing_sources ? { contributingSources: citation.contributing_sources } : {}),
       })),
     })),
     limitations,

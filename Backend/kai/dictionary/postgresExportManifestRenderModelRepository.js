@@ -107,6 +107,8 @@ function composeRenderModel({ manifest, candidate, representation, context = nul
           evidenceItemId: citation.evidenceItemId,
           sourceId: citation.sourceId,
           sourceVersionId: citation.sourceVersionId,
+          // Every source version a multi-source measurement combines.
+          ...(Array.isArray(citation.contributingSources) ? { contributingSources: citation.contributingSources.map((source) => ({ ...source })) } : {}),
         };
         const key = citationKey(normalized);
         if (!citationsByKey.has(key)) {

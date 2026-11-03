@@ -879,7 +879,33 @@ export async function getClientReleasedReportMarkdown(input, dependencies = {}) 
   const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
   if ((await readDraftEngagement(organizationId, scope.generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
   const rendered = await renderModelRepository.composeExportManifestRenderModel({ organizationId, exportManifestId });
-  if (!rendered.ok) return buildKaiError(rendered.error?.code || "system_error");
+  if (!rendered.ok) {
+    // A release whose cited source versions have since been replaced through
+    // the source-version workflow is historical: it is kept exactly as
+    // released and is never served as current evidence. The reader is told
+    // so, with its original provenance and the versions now current.
+    if (rendered.error?.code === "conflict_current_state_changed" && typeof releasedReportRepository.readReleasedReportSourceProvenance === "function") {
+      const provenance = await releasedReportRepository.readReleasedReportSourceProvenance({ organizationId, exportManifestId });
+      const superseded = (provenance?.citedSourceVersions || []).filter((version) => !version.isCurrent && version.currentSourceVersionId);
+      if (superseded.length > 0) {
+        return buildKaiError("conflict_current_state_changed", {
+          data: {
+            released_report_state: "historical",
+            reason: "released_report_cites_superseded_source_version",
+            export_manifest_id: exportManifestId,
+            cited_source_versions: provenance.citedSourceVersions.map((version) => ({
+              source_id: version.sourceId,
+              source_version_id: version.sourceVersionId,
+              citation_role: version.role,
+              is_current: version.isCurrent,
+              current_source_version_id: version.currentSourceVersionId,
+            })),
+          },
+        });
+      }
+    }
+    return buildKaiError(rendered.error?.code || "system_error");
+  }
   return {
     ok: true,
     data: {

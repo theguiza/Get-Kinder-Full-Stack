@@ -77,6 +77,9 @@ export function serializeExportManifestRenderModelToMarkdown(renderModel) {
       "",
       `- ${citationMarker(citation.citationRef)} Claim ${inlineCode(citation.claimId)}; evidence ${inlineCode(citation.evidenceItemId)}; source ${inlineCode(citation.sourceId)}; source version ${inlineCode(citation.sourceVersionId)}.`,
     );
+    for (const source of citation.contributingSources || []) {
+      lines.push(`  - Contributing ${normalizeScalar(source.sourceRole)} source ${inlineCode(source.sourceId)}; source version ${inlineCode(source.sourceVersionId)}.`);
+    }
   }
   if (renderModel.citations.length === 0) lines.push("", "- none");
 
