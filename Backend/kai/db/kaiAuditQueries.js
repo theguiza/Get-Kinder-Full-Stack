@@ -87,6 +87,10 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "grant_response_packet_export_manifest_id",
   "grant_response_packet_export_candidate_id",
   "board_reporting_candidate_id",
+  // Source-version supersession: the logical source, its new current version and the version it replaced.
+  "source_id",
+  "source_version_id",
+  "superseded_source_version_id",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [

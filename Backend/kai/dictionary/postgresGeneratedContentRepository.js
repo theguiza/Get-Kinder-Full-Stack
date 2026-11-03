@@ -901,7 +901,8 @@ function validateImmutableGraphRows(state, { organizationId, generatedContentDra
   const runKeys = new Set(["generation_run_id", "organization_id", "engagement_id", "request_fingerprint", "content_type", "requested_audience"]);
   const draftKeys = new Set(["generated_content_draft_id", "generation_run_id", "organization_id", "content_type", "requested_audience", "draft_status", "review_status"]);
   const blockKeys = new Set(["generated_content_block_id", "generated_content_draft_id", "organization_id", "ordinal", "text"]);
-  const citationKeys = new Set(["generated_content_citation_id", "generated_content_block_id", "organization_id", "claim_id", "evidence_item_id", "block_ordinal"]);
+  // evidence_type: the cited evidence item's own type, read so a multi-source measurement's contributors can be cited.
+  const citationKeys = new Set(["generated_content_citation_id", "generated_content_block_id", "organization_id", "claim_id", "evidence_item_id", "evidence_type", "block_ordinal"]);
   if (!state?.run || !state?.draft) return false;
   if (!hasOnlyAllowedKeys(state.run, runKeys) || !hasOnlyAllowedKeys(state.draft, draftKeys)) return "system_error";
   if (!state.blocks.every((block) => hasOnlyAllowedKeys(block, blockKeys))) return "system_error";

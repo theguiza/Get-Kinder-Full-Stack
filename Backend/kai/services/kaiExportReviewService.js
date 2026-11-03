@@ -9,6 +9,17 @@ import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueu
 import { isLimitationCodeSet } from "../dictionary/exportCandidateContract.js";
 import { createProductionMetadataOnlyAuditForGeneratedDraftExportReview } from "./kaiMetadataOnlyAuditComposition.js";
 
+const CONTRIBUTING_SOURCE_ROLES = new Set(["primary", "reference"]);
+const CONTRIBUTING_SOURCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+// Exactly the role, source and version (and currentness) of each version a measurement combines.
+function isContributingSourceList(value) {
+  return Array.isArray(value) && value.length >= 2 && value.length <= 8 && value.every((source) => source && typeof source === "object"
+    && Object.keys(source).every((key) => ["sourceRole", "sourceId", "sourceVersionId", "isCurrent"].includes(key))
+    && CONTRIBUTING_SOURCE_ROLES.has(source.sourceRole) && CONTRIBUTING_SOURCE_UUID.test(source.sourceId) && CONTRIBUTING_SOURCE_UUID.test(source.sourceVersionId)
+    && (source.isCurrent === undefined || typeof source.isCurrent === "boolean"));
+}
+
 const EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"]);
 const REQUEST_EXPORT_REVIEW_OPERATION = "request_generated_draft_export_review";
 const GET_EXPORT_REVIEW_PACKET_OPERATION = "get_generated_draft_export_review_packet";
@@ -411,7 +422,11 @@ function isGeneratedDraftExportReviewPacketDto(data) {
     if (!Array.isArray(block.citations) || block.citations.length < 1) return false;
     for (const citation of block.citations) {
       const citationHasId = Object.prototype.hasOwnProperty.call(citation, "generatedContentCitationId");
-      if (!hasExactKeys(citation, citationHasId ? CITATION_KEYS_WITH_ID : CITATION_KEYS)) return false;
+      // A multi-source measurement's citation also names every contributing version.
+      const contributed = Object.prototype.hasOwnProperty.call(citation, "contributingSources");
+      const citationKeys = citationHasId ? CITATION_KEYS_WITH_ID : CITATION_KEYS;
+      if (!hasExactKeys(citation, contributed ? new Set([...citationKeys, "contributingSources"]) : citationKeys)) return false;
+      if (contributed && !isContributingSourceList(citation.contributingSources)) return false;
       if (citationHasId && !UUID_PATTERN.test(citation.generatedContentCitationId)) return false;
       if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) return false;
       if (!UUID_PATTERN.test(citation.sourceId) || !UUID_PATTERN.test(citation.sourceVersionId)) return false;
