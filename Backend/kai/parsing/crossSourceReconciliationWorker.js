@@ -66,7 +66,10 @@ export function createCrossSourceReconciliationWorker({
       return refusal("cross_source_bytes_unavailable");
     }
     const bytes = read?.ok === true ? read.data?.bytes : null;
-    if (!bytes || sha256(bytes) !== checksum) return refusal("cross_source_bytes_unavailable");
+    if (!bytes && ["checksum_mismatch", "size_mismatch"].includes(read?.error?.integrity_failure_kind)) return refusal("cross_source_checksum_mismatch");
+    if (!bytes) return refusal("cross_source_bytes_unavailable");
+    // Bytes that are not the profiled version are never reconciled or retried.
+    if (sha256(bytes) !== checksum) return refusal("cross_source_checksum_mismatch");
     const records = readTrustedCsvRecords({ bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), declaredMime: facts.mime_type });
     if (!records) return refusal("cross_source_csv_not_readable");
     return { ok: true, records };

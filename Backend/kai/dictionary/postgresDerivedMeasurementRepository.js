@@ -25,6 +25,8 @@ import {
   derivedMeasurementLocatorCoordinates,
   describeDerivedLimitationCode,
   describeTabularMeasurementOptions,
+  derivedMeasurementLabelsAdmitted,
+  withholdDerivedMeasurementLabels,
   resolveCrossSourceReachMapping,
   validateDerivedMeasurementInterpretation,
   validateDerivedStatements,
@@ -392,10 +394,26 @@ function sameContributingSources(rows, sources) {
 }
 
 // Maps a reconciliation worker refusal to the shared blocker shape.
+// Both cross-source versions through the shared loader, and the person's
+// mapping resolved against both committed profiles and the recorded period.
+async function admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping }) {
+  const primary = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: primarySourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+  if (!primary.ok) return primary;
+  const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+  if (!reference.ok) return reference;
+  const reportingPeriod = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
+  const resolved = resolveCrossSourceReachMapping({
+    eventsProfile: primary.fileProfileRow.profile, registerProfile: reference.fileProfileRow.profile, mapping, reportingPeriod,
+  });
+  if (!resolved.ok) return { ok: false, failure: failure(resolved.code, resolved.blockers) };
+  return { ok: true, primary, reference, resolved };
+}
+
 const WORKER_REFUSALS = Object.freeze({
   cross_source_upload_not_eligible: ["A linked source's upload is no longer a confirmed, passed upload of the profiled file.", "Upload the file again as a new intake version."],
   cross_source_bytes_unavailable: ["KAI could not read a linked source version's verified bytes.", "Try again; if it persists, upload the file again as a new intake version."],
   cross_source_csv_not_readable: ["A linked source version could not be read as the CSV table KAI profiled.", "Upload the file again as a new intake version."],
+  cross_source_checksum_mismatch: ["A linked source version's stored bytes do not match the file KAI profiled.", "Upload the file again as a new intake version."],
 });
 
 function withCaught(run, body) {
@@ -504,21 +522,26 @@ export function createPostgresDerivedMeasurementRepository({
         )).rows : [];
         const recorded = new Map();
         for (const row of rows) {
+          // Labels an earlier profile listed but the current screen withholds
+          // are not returned, and neither are statements carrying them.
+          const labelsAdmitted = derivedMeasurementLabelsAdmitted(row);
+          const shown = labelsAdmitted ? row : { ...row, ...withholdDerivedMeasurementLabels(row) };
           const entry = recorded.get(row.source_derived_measurement_id) ?? {
             source_derived_measurement_id: row.source_derived_measurement_id,
             worksheet_key: row.worksheet_key,
             measurement_family: row.measurement_family,
             calculation_method: row.calculation_method,
-            definition: row.definition,
+            definition: shown.definition,
             field_keys: row.field_keys,
             measured_value: row.measured_value,
             numerator: row.numerator,
             denominator: row.denominator,
             percentage: row.percentage,
-            component_counts: row.component_counts,
+            component_counts: shown.component_counts,
             exclusions: row.exclusions,
             contributing_sources: row.contributing_sources ?? [],
             current_interpretation_id: row.current_interpretation_id,
+            ...(labelsAdmitted ? {} : { category_labels_withheld: true }),
             evidence: [],
           };
           const current = (row.interpretation_id ?? null) === (row.current_interpretation_id ?? null);
@@ -528,7 +551,10 @@ export function createPostgresDerivedMeasurementRepository({
               ? { interpretation_id: row.interpretation_id, indicator_label: row.indicator_label, meaning_text: row.meaning_text, score_direction: row.score_direction, evidence_basis: row.evidence_basis }
               : null,
             current,
-            claim: claims.find((claim) => claim.evidence_item_id === row.evidence_item_id) ?? null,
+            claim: (() => {
+              const claim = claims.find((candidate) => candidate.evidence_item_id === row.evidence_item_id) ?? null;
+              return claim && !labelsAdmitted ? { ...claim, statement: null } : claim;
+            })(),
             limitations: derivedMeasurementLimitationCodes({ measurementRow: row, dimensions: null })
               .map((code) => ({ code, description: describeDerivedLimitationCode(code) })),
           });
@@ -611,22 +637,52 @@ export function createPostgresDerivedMeasurementRepository({
     // period. Both versions pass the same loader as every measurement; the
     // reconciliation worker alone reads their verified bytes and returns
     // counts only. Every resulting measurement records both versions.
-    async recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, actorUserId, now }) {
+    // The HTTP side of a cross-source measurement: both versions pass the
+    // shared loader (lineage, currentness, effective allowed use, bound
+    // profile) and the mapping resolves against both committed profiles and
+    // the recorded period - no byte is read - and then, in the same
+    // transaction, `enqueue` records the reconciliation job.
+    async requestCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, enqueue }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      if (primarySourceVersionId === referenceSourceVersionId) {
+        return refusal("validation_blocker", "cross_source_same_version", "A cross-source measurement links two different source versions.", "Select the service-event version and the participant register version.", "cross_source_mapping");
+      }
+      return withCaught(run, async (tx) => {
+        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping });
+        if (!admitted.ok) return admitted.failure;
+        const { primary, reference, resolved } = admitted;
+        return success(await enqueue(tx, {
+          primaryProfileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256,
+          referenceProfileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256,
+          period: resolved.resolved.period,
+        }));
+      });
+    },
+
+    // The worker side: in one transaction, `fence.before` re-asserts the job
+    // claim and the profiles it was requested against, the shared loader
+    // revalidates both versions, the reconciliation worker reads and checks
+    // their bytes, and the measurements and `fence.after` (the job's
+    // completion) commit together or not at all.
+    async recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, actorUserId, now, fence = null }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       if (!crossSourceReconciliationWorker) return failure("validation_blocker");
       if (primarySourceVersionId === referenceSourceVersionId) {
         return refusal("validation_blocker", "cross_source_same_version", "A cross-source measurement links two different source versions.", "Select the service-event version and the participant register version.", "cross_source_mapping");
       }
       return withCaught(run, async (tx) => {
-        const primary = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: primarySourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
-        if (!primary.ok) return primary.failure;
-        const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
-        if (!reference.ok) return reference.failure;
-        const reportingPeriod = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
-        const resolved = resolveCrossSourceReachMapping({
-          eventsProfile: primary.fileProfileRow.profile, registerProfile: reference.fileProfileRow.profile, mapping, reportingPeriod,
-        });
-        if (!resolved.ok) return failure(resolved.code, resolved.blockers);
+        if (fence) {
+          const fenced = await fence.before(tx);
+          if (fenced) return fenced;
+        }
+        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping });
+        if (!admitted.ok) return admitted.failure;
+        const { primary, reference, resolved } = admitted;
+        if (fence && !fence.profilesMatch({
+          primary: primary.fileProfileRow.profile_canonical_sha256, reference: reference.fileProfileRow.profile_canonical_sha256, period: resolved.resolved.period,
+        })) {
+          return refusal("conflict_current_state_changed", "cross_source_source_changed", "A linked source changed after the reconciliation was requested.", "Request the reconciliation again for the current versions.", "cross_source_mapping");
+        }
         const reconciled = await crossSourceReconciliationWorker.reconcile(tx, {
           organizationId,
           events: { intakeFileId: primary.fileProfileRow.intake_file_id, checksum: primary.fileProfileRow.checksum },
@@ -658,6 +714,7 @@ export function createPostgresDerivedMeasurementRepository({
           ],
         });
         if (recorded.refused) return recorded.refused;
+        if (fence) await fence.after(tx, recorded.results.map((entry) => entry.measurement.source_derived_measurement_id));
         return success({
           sourceVersion: rowToSourceVersionRecord(primary.sourceVersionRow),
           referenceSourceVersion: rowToSourceVersionRecord(reference.sourceVersionRow),
@@ -686,6 +743,11 @@ export function createPostgresDerivedMeasurementRepository({
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
         if (fileProfileRow.profile_canonical_sha256 !== measurementRow.profile_canonical_sha256 || !derivedMeasurementArithmeticHolds(measurementRow)) {
           return failure("conflict_current_state_changed");
+        }
+        if (!derivedMeasurementLabelsAdmitted(measurementRow)) {
+          return refusal("validation_blocker", "derived_measurement_category_label_withheld",
+            "This measurement was recorded from category labels KAI now withholds, so it cannot be stated again.",
+            "Record the measurement again from a field whose values KAI lists.", "derived_measurement");
         }
         // A cross-source measurement is interpreted only while its reference
         // version still passes the same loader and is bound to its profile.

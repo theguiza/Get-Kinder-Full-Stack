@@ -140,7 +140,7 @@ export function sendServiceResult(res, result, successStatus = 200) {
 }
 
 const EXACT_VERIFICATION_PHASE_PATTERN =
-  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|upload_url_storage_provider_not_gcs|upload_url_object_key_missing|upload_url_mime_type_missing|upload_url_lifecycle_repository_missing|upload_url_gcs_provider_missing|upload_url_gcs_provider_disabled|upload_url_gcs_provider_signed_url_capability_missing|upload_url_gcs_provider_max_upload_size_missing|upload_url_gcs_provider_unclassified_storage_not_configured|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_allowed_use_not_allowed|source_promotion_candidate_review_incomplete|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02)$/;
+  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|upload_url_storage_provider_not_gcs|upload_url_object_key_missing|upload_url_mime_type_missing|upload_url_lifecycle_repository_missing|upload_url_gcs_provider_missing|upload_url_gcs_provider_disabled|upload_url_gcs_provider_signed_url_capability_missing|upload_url_gcs_provider_max_upload_size_missing|upload_url_gcs_provider_unclassified_storage_not_configured|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_allowed_use_not_allowed|source_promotion_candidate_review_incomplete|source_promotion_successor_invalid|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02|source_promotion_predecessor_version_read_23514|source_promotion_predecessor_version_read_p0001|source_promotion_predecessor_version_read_22p02|source_promotion_successor_file_format_read_23514|source_promotion_successor_file_format_read_p0001|source_promotion_successor_file_format_read_22p02|source_promotion_predecessor_version_retire_23514|source_promotion_predecessor_version_retire_p0001|source_promotion_predecessor_version_retire_22p02)$/;
 
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
@@ -298,7 +298,7 @@ function sanitizeServiceData(data) {
   }
   if (
     typeof data.traceability_conflict_reason === "string"
-    && /^(claim_evidence_link_mismatch|source_version_not_current|derived_measurement_interpretation_superseded|derived_measurement_contributing_source_not_current|derived_measurement_contributing_source_not_permitted|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
+    && /^(claim_evidence_link_mismatch|source_version_not_current|derived_measurement_interpretation_superseded|derived_measurement_contributing_source_not_current|derived_measurement_contributing_source_not_permitted|derived_measurement_category_label_withheld|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
   ) {
     sanitized.traceability_conflict_reason = data.traceability_conflict_reason;
   }
@@ -350,7 +350,35 @@ function sanitizeServiceData(data) {
   }
   const duplicateResolution = sanitizeDuplicateResolution(data.duplicate_resolution);
   if (duplicateResolution) sanitized.duplicate_resolution = duplicateResolution;
+  const historicalRelease = sanitizeHistoricalReleasedReport(data);
+  if (historicalRelease) Object.assign(sanitized, historicalRelease);
   return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
+const HISTORICAL_CITATION_ROLE_PATTERN = /^(evidence|primary|reference)$/;
+const isLowerUuid = (value) => typeof value === "string" && KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase();
+
+// A released report cites a source version since replaced through the
+// source-version workflow: only the fixed state and reason, the manifest id
+// and each cited version's identity and currentness pass.
+function sanitizeHistoricalReleasedReport(data) {
+  if (data.released_report_state !== "historical" || data.reason !== "released_report_cites_superseded_source_version") return null;
+  if (!isLowerUuid(data.export_manifest_id) || !Array.isArray(data.cited_source_versions)) return null;
+  const cited = data.cited_source_versions.slice(0, 50).filter((version) => isLowerUuid(version?.source_id) && isLowerUuid(version?.source_version_id)
+    && HISTORICAL_CITATION_ROLE_PATTERN.test(version?.citation_role ?? "") && typeof version?.is_current === "boolean"
+    && (version.current_source_version_id === null || isLowerUuid(version.current_source_version_id)));
+  return {
+    released_report_state: "historical",
+    reason: "released_report_cites_superseded_source_version",
+    export_manifest_id: data.export_manifest_id,
+    cited_source_versions: cited.map((version) => ({
+      source_id: version.source_id,
+      source_version_id: version.source_version_id,
+      citation_role: version.citation_role,
+      is_current: version.is_current,
+      current_source_version_id: version.current_source_version_id,
+    })),
+  };
 }
 
 const DUPLICATE_RESOLUTION_STATUS_PATTERN = /^(duplicate_in_batch|duplicate_in_other_batch|duplicate_in_other_engagement)$/;
@@ -2948,6 +2976,8 @@ router.post(
 
 // Cross-source linked reach: the service-event version and the participant
 // register version are named in the JSON body with the person's mapping.
+// The request reads no source byte: it is admitted and queued (202), and the
+// reconciliation worker commits the measurements; the job is read below.
 router.post(
   "/admin/organizations/:organizationId/cross-source-measurements",
   sprint2ActorContextMiddleware,
@@ -2967,7 +2997,40 @@ router.post(
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getSourceMeasurementService();
-      return service.recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping: payload?.mapping, actorContext, now });
+      return service.requestCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping: payload?.mapping, actorContext, now });
+    }, 202);
+  },
+);
+
+router.get(
+  "/admin/organizations/:organizationId/cross-source-reconciliation-jobs",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+      return sendKaiError(res, "validation_blocker", { blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")] });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.listCrossSourceReconciliationJobs({ organizationId, actorContext });
+    });
+  },
+);
+
+router.get(
+  "/admin/organizations/:organizationId/cross-source-reconciliation-jobs/:reconciliationJobId",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const reconciliationJobId = typeof req.params?.reconciliationJobId === "string" ? req.params.reconciliationJobId : "";
+    if (![organizationId, reconciliationJobId].every((value) => KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase())) {
+      return sendKaiError(res, "validation_blocker", { blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_reconciliation_job_id")] });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.getCrossSourceReconciliationJob({ organizationId, reconciliationJobId, actorContext });
     });
   },
 );

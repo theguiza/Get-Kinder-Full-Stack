@@ -170,6 +170,8 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Measurement MVP: cross-source linked reach of two promoted source
     // versions (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/cross-source-measurements",
+    "/admin/organizations/:organizationId/cross-source-reconciliation-jobs",
+    "/admin/organizations/:organizationId/cross-source-reconciliation-jobs/:reconciliationJobId",
     // KAI data-dictionary entries: read-only safe DTO surface over governed
     // dictionary fields, additive, and every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",

@@ -3,6 +3,7 @@ import { areKaiSprint2WorkerFeaturesEnabled } from "../config/kaiSprint2Config.j
 import { createKaiIntakeRuntimeDependencies } from "../services/kaiIntakeRuntimeService.js";
 import { runKaiP1WorkerTick } from "./p1WorkerRuntime.js";
 import { classifyKaiP1DispatchResult } from "./p1FileDispatch.js";
+import { runCrossSourceReconciliationTick } from "./crossSourceReconciliationJobRuntime.js";
 
 // Recovery is checked every minute while the application scheduler runs;
 // this is a polling cadence, not a completion guarantee. Immediate
@@ -41,7 +42,8 @@ function tickSummaryLine(entries) {
 }
 
 /**
- * Registers the P1 worker tick on the repository's existing in-process
+ * Registers the P1 worker tick (and, after it, the cross-source
+ * reconciliation sweep) on the repository's existing in-process
  * node-cron scheduling model. Introduces no new Render worker, Procfile,
  * queue, child process, or HTTP route.
  *
@@ -61,6 +63,8 @@ export function registerKaiP1WorkerCron({
   schedule = DEFAULT_SCHEDULE,
   timezone = DEFAULT_TIMEZONE,
   runTick = runKaiP1WorkerTick,
+  // Queued cross-source reconciliation jobs ride the same tick, after P1.
+  runReconciliationTick = runCrossSourceReconciliationTick,
   createRuntimeDependencies = createKaiIntakeRuntimeDependencies,
   log = (line) => console.log(line),
 } = {}) {
@@ -90,8 +94,20 @@ export function registerKaiP1WorkerCron({
         } else if (result.data?.activated?.length) {
           log(tickSummaryLine(result.data.activated));
         }
+
       } catch {
         log(`${LOG_PREFIX} tick failed`);
+      }
+      // Its own failure never affects the P1 tick, and the P1 tick's never skips it.
+      try {
+        const reconciliation = await runReconciliationTick({ ...runtimeDependencies, env });
+        if (reconciliation?.ok !== true) {
+          log(`${LOG_PREFIX} reconciliation sweep failed`);
+        } else if (reconciliation.data?.attempted?.length) {
+          log(`${LOG_PREFIX} reconciliation jobs=${reconciliation.data.attempted.length}`);
+        }
+      } catch {
+        log(`${LOG_PREFIX} reconciliation sweep failed`);
       } finally {
         tickInFlight = false;
       }

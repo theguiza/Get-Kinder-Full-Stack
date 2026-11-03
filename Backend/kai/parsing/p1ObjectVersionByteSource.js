@@ -75,7 +75,11 @@ export function createP1ObjectVersionByteSource({
         ...(signal ? { signal } : {}),
       });
       if (verified?.ok !== true) {
-        return { ok: false, data: null, error: { code: "byte_source_unavailable" } };
+        // The integrity kind (for example checksum_mismatch) is additive: P1
+        // keys on the code alone; the reconciliation worker never retries
+        // bytes that are not the profiled version.
+        const kind = verified?.integrity_failure?.kind;
+        return { ok: false, data: null, error: { code: "byte_source_unavailable", ...(typeof kind === "string" ? { integrity_failure_kind: kind } : {}) } };
       }
       return { ok: true, data: { bytes: verified.data.bytes }, error: null };
     },

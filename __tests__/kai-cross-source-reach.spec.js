@@ -318,7 +318,9 @@ test("the reconciliation worker reads only verified, eligible bytes and returns 
   assert.deepEqual(Object.keys(result).sort(), ["ok", "reconciliation"]);
   assert.ok(!/P0\d|E0\d|person_ref/.test(JSON.stringify(result)));
   assert.equal((await make({ eligible: (key) => key !== "register" }).reconcile(null, input)).reason, "cross_source_upload_not_eligible");
-  assert.equal((await make({ bytes: (key) => (key === "events" ? bytesOf(EVENT_ROWS.slice(0, 5)) : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_bytes_unavailable");
+  // Bytes that are not the profiled version are refused as a checksum mismatch (never retried); an unreadable object is retryable.
+  assert.equal((await make({ bytes: (key) => (key === "events" ? bytesOf(EVENT_ROWS.slice(0, 5)) : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_checksum_mismatch");
+  assert.equal((await make({ bytes: (key) => (key === "events" ? null : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_bytes_unavailable");
   assert.equal((await make({ factOverrides: { events: { file_extension: ".xlsx" } } }).reconcile(null, input)).reason, "cross_source_upload_not_eligible");
 });
 
@@ -333,6 +335,84 @@ test("only the reconciliation worker reads source bytes: the measurement reposit
       assert.ok(!source.includes(forbidden), `${path} references ${forbidden}`);
     }
   }
+  // The HTTP service composes no worker at all; the queued job runtime is the one place.
   const service = readFileSync(new URL("../Backend/kai/services/kaiSourceMeasurementService.js", import.meta.url), "utf8");
-  assert.equal((service.match(/createCrossSourceReconciliationWorker\(/g) || []).length, 1, "the worker is composed in one place");
+  assert.equal((service.match(/createCrossSourceReconciliationWorker\(/g) || []).length, 0, "the request path composes no byte reader");
+  const runtime = readFileSync(new URL("../Backend/kai/parsing/crossSourceReconciliationJobRuntime.js", import.meta.url), "utf8");
+  assert.equal((runtime.match(/createCrossSourceReconciliationWorker\(/g) || []).length, 1, "the worker is composed in one place");
+  for (const forbidden of ["p1ObjectVersionByteSource", "readTrustedCsvRecords", "readObjectVersion", "reconcileLinkedReach", "storageAdapter"]) {
+    assert.ok(!runtime.includes(forbidden), `the job runtime references ${forbidden}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P01 and reach are different populations: the register's distinct
+// identifiers count registered people; distinct people served count only
+// registered people with an eligible encounter. P05 is registered (twice) but
+// has only dropped sessions, so the two numbers differ here.
+test("P01 population: registered people and people reached are counted separately and differ when someone registered has no eligible encounter", async () => {
+  const { reconciliation, measurements: list } = await measurements();
+  const registered = new Set(REGISTER_ROWS.slice(1).map((row) => row[0]));
+  const expected = independent();
+  assert.equal(reconciliation.counts.register_distinct_identifier_count, registered.size);
+  assert.equal(reconciliation.counts.register_record_count, REGISTER_ROWS.length - 1, "a repeated register row is one person, not two");
+  assert.equal(metric(list, "distinct_people_served").measuredValue, expected.people);
+  assert.ok(registered.size > expected.people, "someone registered was not reached");
+  assert.ok(registered.has("P05") && !EVENT_ROWS.slice(1).some((row) => row[1] === "P05" && row[4] === "done"));
+  // The roster count is a funnel component, never stated as people reached.
+  assert.notEqual(metric(list, "distinct_people_served").measuredValue, reconciliation.counts.register_distinct_identifier_count);
+});
+
+// A profile committed under the earlier label rule may list names; every
+// reader applies the current screen, so none of them is offered, matched,
+// stated or released.
+test("legacy stored labels: a vocabulary an older profile listed is withheld at every read and every recorded use", async () => {
+  const { eventsProfile, registerProfile, mapping } = await resolvedMapping();
+  const legacy = JSON.parse(JSON.stringify(eventsProfile));
+  const group = legacy.tabular_measurement_basis.fields.find((field) => field.field_key === "field_3");
+  group.categorical.values = group.categorical.values.map((value, index) => ({ ...value, label: ["Sofia", "Tariq"][index] }));
+  const options = D.describeTabularMeasurementOptions(legacy, null);
+  const listed = options.fields.find((field) => field.field_key === "field_3");
+  assert.deepEqual([listed.values, listed.vocabulary_withheld], [[], "ambiguous_category_value"]);
+  assert.doesNotMatch(JSON.stringify(options), /Sofia|Tariq/);
+  const refused = D.resolveCrossSourceReachMapping({ eventsProfile: legacy, registerProfile, mapping, reportingPeriod: PERIOD });
+  assert.equal(refused.blockers[0].blocking_reason, "cross_source_group_vocabulary_withheld");
+  // A measurement already recorded from such a vocabulary.
+  const { measurements: list } = await measurements();
+  const recorded = rowOf(metric(list, "group_linked_encounters", "AA"));
+  const relabelled = JSON.parse(JSON.stringify(recorded));
+  relabelled.definition.group.value_label = "Sofia";
+  relabelled.definition.mapping.events.groups = relabelled.definition.mapping.events.groups.map((g, index) => ({ ...g, label: ["Sofia", "Tariq"][index] }));
+  relabelled.component_counts.groups = relabelled.component_counts.groups.map((g, index) => ({ ...g, label: ["Sofia", "Tariq"][index] }));
+  assert.equal(D.derivedMeasurementLabelsAdmitted(recorded), true);
+  assert.equal(D.derivedMeasurementLabelsAdmitted(relabelled), false);
+  const masked = D.withholdDerivedMeasurementLabels(relabelled);
+  assert.doesNotMatch(JSON.stringify(masked), /Sofia|Tariq/);
+  assert.equal(masked.definition.mapping.events.completed_value_label, D.WITHHELD_CATEGORY_LABEL, "an operational label is masked too, so no partial vocabulary is shown");
+  const statement = D.composeDerivedMeasurementEvidenceStatement({ measurementRow: relabelled, interpretation: null });
+  const basis = D.validateDerivedMeasurementClaimBasis({
+    evidenceItemRow: { evidence_type: D.DERIVED_MEASUREMENT_EVIDENCE_TYPE, data_class: "source_derived_aggregate", evidence_item_id: "e1", organization_id: "o1", source_version_id: PRIMARY_VERSION, statement },
+    locatorRow: null, sourceVersionRow: { profile_canonical_sha256: "a".repeat(64) },
+    measurementRow: { ...relabelled, evidence_item_id: "e1", organization_id: "o1", source_version_id: PRIMARY_VERSION, profile_canonical_sha256: "a".repeat(64) },
+  });
+  assert.equal(basis.ok, false, "no claim can be proposed from it");
+});
+
+// The reconciliation's cost is linear in the rows: a 100,000-row service-event
+// file (the P0 row limit) reconciles in the worker without any request waiting.
+test("a bounded large synthetic service-event file reconciles exactly", async () => {
+  const { resolved } = await resolvedMapping();
+  const rows = [EVENT_ROWS[0]];
+  for (let index = 0; index < 100000; index += 1) {
+    rows.push([`X${index}`, `P0${(index % 5) + 1}`, index % 2 ? "AA" : "BB", "2025-06-15", index % 10 === 0 ? "dropped" : "done", "30"]);
+  }
+  const started = Date.now();
+  const reconciliation = reconcileLinkedReach({ eventRecords: rows, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  const elapsed = Date.now() - started;
+  assert.equal(reconciliation.counts.physical_record_count, 100000);
+  assert.equal(reconciliation.counts.completed_event_count, 90000);
+  assert.equal(reconciliation.counts.eligible_encounter_count, 90000);
+  assert.equal(reconciliation.counts.distinct_person_count, 5);
+  assert.ok(elapsed < 20000, `reconciled 100,000 rows in ${elapsed} ms`);
+  assert.doesNotMatch(JSON.stringify(reconciliation), /X\d+|P0\d/);
 });

@@ -988,6 +988,7 @@ test("an overlapping cron fire is skipped rather than queued, and a failed or th
     cronLib,
     createRuntimeDependencies: () => ({}),
     runTick: () => outcomes[ticks++](),
+    runReconciliationTick: async () => ({ ok: true, data: { attempted: [] }, error: null }),
     log: (line) => lines.push(line),
   });
 
@@ -1006,6 +1007,32 @@ test("an overlapping cron fire is skipped rather than queued, and a failed or th
     "[kai-p1-worker] tick failed",
     "[kai-p1-worker] candidates=5 completed_through_p1_05=1 deferred=1 busy=1 exhausted=1 rejected=1",
   ]);
+});
+
+test("the cross-source reconciliation sweep rides the same cron tick: counts only, and a failing sweep never stops the P1 tick", async () => {
+  let handler;
+  const cronLib = { schedule: (expression, callback) => { handler = callback; return {}; } };
+  const lines = [];
+  const sweeps = [
+    () => Promise.resolve({ ok: true, data: { attempted: [{ outcome: "succeeded", code: null }, { outcome: "failed", code: "cross_source_checksum_mismatch" }] }, error: null }),
+    () => Promise.reject(new Error("connect ECONNREFUSED 10.0.0.1:5432 org a5d17c5a")),
+    () => Promise.resolve({ ok: true, data: { attempted: [] }, error: null }),
+  ];
+  let p1Ticks = 0;
+  let sweepCount = 0;
+  registerKaiP1WorkerCron({
+    env: ENABLED_ENV,
+    cronLib,
+    createRuntimeDependencies: () => ({}),
+    runTick: async () => { p1Ticks += 1; return { ok: true, data: { activated: [] }, error: null }; },
+    runReconciliationTick: () => sweeps[sweepCount++](),
+    log: (line) => lines.push(line),
+  });
+  await handler();
+  await handler();
+  await handler();
+  assert.deepEqual([p1Ticks, sweepCount], [3, 3]);
+  assert.deepEqual(lines, ["[kai-p1-worker] reconciliation jobs=2", "[kai-p1-worker] reconciliation sweep failed"]);
 });
 
 test("P1-06 and later stay unreachable from the new recovery, guard, and cron modules", () => {
