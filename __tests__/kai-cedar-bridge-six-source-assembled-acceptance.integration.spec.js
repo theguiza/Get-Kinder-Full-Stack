@@ -1428,6 +1428,7 @@ async function runCedarBridgeAcceptance() {
       stage("register", "cross_source_reach:reference", "linked by the service events", { primary_source_version_id: state.events.sourceVersionId });
     });
 
+    const activityOriginal = {};
     await test("18b: original-source monthly activity and recorded duration are persisted with both-source lineage", async () => {
       const basis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.events.sourceVersionId));
       assert.equal(basis.status, 200);
@@ -1485,6 +1486,7 @@ async function runCedarBridgeAcceptance() {
         assert.equal(traced.body?.data?.eligible, false, "ordinary review and both-source sensitivity still apply");
         const evidenceId = stated.body.data.evidenceItem.evidence_item_id;
         const claimId = proposed.body.data.claim.claim_id;
+        activityOriginal[entry.definition.metric] = { measurement: entry, evidenceId, claimId };
         const queue = async (kind, id) => (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid", [ORG, kind, id]))[0];
         const evidenceQueue = await queue("evidence_review", evidenceId);
         const evidenceReview = await gkApi("POST", evidenceReviewCompletePath(ORG, evidenceId, evidenceQueue.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
@@ -1968,6 +1970,13 @@ async function runCedarBridgeAcceptance() {
       for (const label of DERIVED_CLAIM_LABELS) {
         (label.startsWith("events_") ? outcome.old_single_source_events : outcome.unaffected)[label] = await traceOf(derivedClaims[label]);
       }
+      outcome.old_activity = {};
+      for (const [metric, item] of Object.entries(activityOriginal)) {
+        outcome.old_activity[metric] = await traceOf(item.claimId);
+        assert.deepEqual([outcome.old_activity[metric].status, outcome.old_activity[metric].reason], [409, "source_version_not_current"]);
+        const proposed = await adminApi("POST", claimProposalPath(ORG, item.evidenceId), {});
+        assert.ok(proposed.status >= 400, J(proposed.body));
+      }
       for (const value of Object.values(outcome.old_cross_source)) assert.deepEqual([value.status, value.reason], [409, "source_version_not_current"], J(outcome));
       for (const value of Object.values(outcome.old_single_source_events)) assert.deepEqual([value.status, value.reason], [409, "source_version_not_current"], J(outcome));
       for (const [label, value] of Object.entries(outcome.unaffected)) assert.equal(value.eligible, true, `${label} does not depend on the service events: ${J(value)}`);
@@ -2124,6 +2133,81 @@ async function runCedarBridgeAcceptance() {
       // What changed is exactly what the corrected rows change; everything else is recalculated to the same value.
       assert.deepEqual(changed, { unmatched_event_count: [1, 0], unmatched_identity_count: [1, 0], eligible_encounter_count: [222, 223] });
       assert.doesNotMatch(J(correctedJob.body), /CB\d{3}|EV\d{4}/);
+    });
+
+    await test("28b: corrected monthly activity and duration retain exact source lineage and governed evidence", async () => {
+      const mapping = { ...crossMapping, duration: { field_key: "field_7", meaning: "recorded_service_duration", unit: "minutes" } };
+      const body = { primary_source_version_id: CORRECTED_STATE.sourceVersionId, reference_source_version_id: state.register.sourceVersionId, mapping };
+      const queued = await adminApi("POST", crossSourceMeasurementsPath(ORG), body);
+      assert.equal(queued.status, 202, J(queued.body));
+      const result = await settleReconciliation(queued);
+      assert.deepEqual([result.status, result.job.job_state, result.measurements.length], [200, "succeeded", 2], J(result));
+      const monthly = result.measurements.find((m) => m.definition.metric === "monthly_eligible_encounters");
+      const duration = result.measurements.find((m) => m.definition.metric === "known_recorded_service_minutes");
+      assert.ok(monthly && duration, J(result));
+      assert.equal(duration.definition.duration.unit, "minutes");
+      // Independently read the actual corrected bytes; the answer key is not an input.
+      const register = new Set(parseCsv(byKey.register.bytes.toString("utf8")).map((r) => r.participant_id));
+      const copies = new Map();
+      for (const event of parseCsv(corrected.bytes.toString("utf8"))) copies.set(event.event_id, [...(copies.get(event.event_id) || []), event]);
+      const eligibleGroups = [...copies.values()].filter((list) => new Set(list.map((r) => JSON.stringify([r.participant_id, r.delivery_status, r.service_date, r.program_code]))).size === 1)
+        .filter((list) => { const r = list[0]; return r.delivery_status === "completed" && r.service_date >= "2025-04-01" && r.service_date <= "2026-03-31" && register.has(r.participant_id); });
+      const months = new Map();
+      let known = 0, missing = 0, invalid = 0, minutes = 0n;
+      for (const group of eligibleGroups) {
+        const event = group[0], month = event.service_date.slice(0, 7);
+        months.set(month, (months.get(month) || 0) + 1);
+        const values = group.map((r) => r.duration_minutes.trim());
+        if (new Set(values).size !== 1) invalid++;
+        else if (!values[0]) missing++;
+        else if (!/^\d+$/.test(values[0])) { throw new Error("Independent fixture calculation requires integer minutes"); }
+        else { known++; minutes += BigInt(values[0]); }
+      }
+      const expectedMonths = [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, encounter_count]) => ({ month, encounter_count }));
+      assert.equal(eligibleGroups.length, 223);
+      assert.deepEqual(monthly.component_counts.monthly_activity, expectedMonths);
+      assert.deepEqual([monthly.measured_value, duration.measured_value, duration.component_counts.duration_missing_count, duration.component_counts.duration_invalid_count, duration.component_counts.known_recorded_minutes],
+        [eligibleGroups.length, known, missing, invalid, String(minutes)]);
+      assert.equal(monthly.measured_value, report.corrected_version.recalculation.corrected.reach_encounters);
+      const activity = {};
+      for (const entry of [monthly, duration]) {
+        const metric = entry.definition.metric;
+        assert.deepEqual(entry.contributing_sources.map((s) => [s.source_role, s.source_version_id, s.is_current]), [["primary", CORRECTED_STATE.sourceVersionId, true], ["reference", state.register.sourceVersionId, true]]);
+        assert.equal(entry.definition.reference_source_version_id, state.register.sourceVersionId);
+        for (const source of entry.contributing_sources) assert.equal(source.profile_canonical_sha256, source.bound_profile_canonical_sha256);
+        const [persisted] = (await derivedRows(CORRECTED_STATE.sourceVersionId)).filter((r) => r.source_derived_measurement_id === entry.source_derived_measurement_id);
+        assert.ok(persisted);
+        assert.doesNotMatch(J([persisted.definition, entry.contributing_sources]), new RegExp(V1()));
+        const old = activityOriginal[metric];
+        const [historical] = (await derivedRows(V1())).filter((r) => r.source_derived_measurement_id === old.measurement.source_derived_measurement_id);
+        assert.deepEqual(historical.component_counts, old.measurement.component_counts);
+        const stated = await adminApi("POST", derivedMeasurementInterpretationPath(ORG, entry.source_derived_measurement_id), { indicator_label: metric === "monthly_eligible_encounters" ? "Monthly eligible encounters" : "Known recorded minutes", meaning_text: "Human-stated recorded service activity in the reporting period.", evidence_basis: "organization_record" });
+        assert.equal(stated.status, 200, J(stated.body));
+        const evidenceId = stated.body.data.evidenceItem.evidence_item_id;
+        const proposed = await adminApi("POST", claimProposalPath(ORG, evidenceId), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        const claimId = proposed.body.data.claim.claim_id;
+        assert.notEqual(claimId, old.claimId);
+        assert.equal((await traceOf(claimId)).eligible, false);
+        const queue = async (kind, id) => (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid", [ORG, kind, id]))[0];
+        const eq = await queue("evidence_review", evidenceId);
+        const er = await gkApi("POST", evidenceReviewCompletePath(ORG, evidenceId, eq.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(eq.updated_at).toISOString(), decision: "supported" }));
+        assert.equal(er.status, 200, J(er.body));
+        const cq = await queue("claim_review", claimId);
+        const cr = await gkApi("POST", claimReviewCompletePath(ORG, claimId, cq.review_queue_item_id), claimReviewDecisionBody({ expectedUpdatedAt: new Date(cq.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        assert.equal(cr.status, 200, J(cr.body));
+        for (const dimension of (await traceOf(claimId)).unresolved) await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, dimension), {});
+        const trace = await traceOf(claimId);
+        assert.equal(trace.eligible, true, J(trace));
+        activity[metric] = { measurement_id: entry.source_derived_measurement_id, evidence_id: evidenceId, claim_id: claimId, traceability: trace, contributing_sources: entry.contributing_sources, components: entry.component_counts };
+      }
+      const before = await writeCounts();
+      const replay = await adminApi("POST", crossSourceMeasurementsPath(ORG), body);
+      assert.deepEqual([replay.status, replay.body.data.fresh, replay.body.data.reconciliationJob.reconciliation_job_id], [202, false, queued.body.data.reconciliationJob.reconciliation_job_id]);
+      await reconciliationDispatcher.whenIdle();
+      assert.deepEqual(await writeCounts(), before);
+      report.corrected_version.activity = { months: monthly.component_counts.monthly_activity, eligible: monthly.measured_value, known: duration.measured_value, missing: duration.component_counts.duration_missing_count, invalid: duration.component_counts.duration_invalid_count, minutes: duration.component_counts.known_recorded_minutes, measurements: activity };
+      console.log(`Cedar Bridge corrected activity: ${J(report.corrected_version.activity)}`);
     });
 
     const correctedClaims = {};
