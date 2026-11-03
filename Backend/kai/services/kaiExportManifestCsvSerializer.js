@@ -42,6 +42,20 @@ function limitationCodesByCitationRef(renderModel) {
   return byCitationRef;
 }
 
+// Every source version a citation names: its own source first (the only one a
+// single-source citation has), then each other contributing source of a
+// multi-source measurement. Joined by ";" like limitation_codes, so the header
+// and the one-row-per-citation contract are unchanged.
+function citedSources(citation) {
+  const sources = [{ sourceId: citation.sourceId, sourceVersionId: citation.sourceVersionId }];
+  const contributors = Array.isArray(citation.contributingSources) ? citation.contributingSources : [];
+  for (const source of contributors) {
+    if (sources.some((cited) => cited.sourceVersionId === source.sourceVersionId)) continue;
+    sources.push({ sourceId: source.sourceId, sourceVersionId: source.sourceVersionId });
+  }
+  return sources;
+}
+
 export function serializeExportManifestRenderModelToCsv(renderModel) {
   if (!validateRenderModel(renderModel)) {
     throw new TypeError("A valid export manifest render-model DTO is required.");
@@ -51,12 +65,13 @@ export function serializeExportManifestRenderModelToCsv(renderModel) {
   const lines = [csvRow(CSV_HEADER)];
   for (const citation of renderModel.citations) {
     const codes = codesByCitationRef.get(citation.citationRef) || [];
+    const sources = citedSources(citation);
     lines.push(csvRow([
       citation.citationRef,
       citation.claimId,
       citation.evidenceItemId,
-      citation.sourceId,
-      citation.sourceVersionId,
+      sources.map((source) => source.sourceId).join(";"),
+      sources.map((source) => source.sourceVersionId).join(";"),
       codes.join(";"),
     ]));
   }

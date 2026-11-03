@@ -264,6 +264,14 @@ async function runCedarBridgeAcceptance() {
   const orgPath = `${BASE_PATH}/admin/organizations/${ORG}`;
   const COCKPIT = `${BASE_PATH}/admin/review-cockpit`;
   const blockersOf = (response) => (response.body?.blockers || response.body?.error?.blockers || []).map((b) => b.blocking_reason || b.code || b.reason);
+  // The released manifest's CSV evidence appendix: claim id -> its source_version_id cell (header pinned).
+  const csvRowsByClaim = (response) => {
+    assert.equal(response.status, 200, J(response.body));
+    const [header, ...rows] = response.body.split("\r\n").filter(Boolean).map((line) => line.split(","));
+    assert.deepEqual(header, ["citation_ref", "claim_id", "evidence_item_id", "source_id", "source_version_id", "limitation_codes"]);
+    for (const row of rows) assert.equal(row.length, 6, J(row));
+    return Object.fromEntries(rows.map((row) => [row[1], row[4]]));
+  };
 
   // The boundary report: what each file and each finding actually reached.
   const report = {
@@ -1643,6 +1651,12 @@ async function runCedarBridgeAcceptance() {
         const contributingLines = released.body.split("\n").filter((line) => line.includes("Contributing "));
         assert.equal(contributingLines.filter((line) => line.includes(`Contributing reference source`) && line.includes(state.register.sourceVersionId)).length, crossLabels.length, J(contributingLines));
         assert.equal(contributingLines.filter((line) => line.includes(`Contributing primary source`) && line.includes(state.events.sourceVersionId)).length, crossLabels.length);
+        // A3: the CSV evidence appendix names both contributing versions too, in its existing columns.
+        const csv = await gkAdminApi("GET", `${orgPath}/export-manifests/${manifestRow.export_manifest_id}/csv`);
+        delivery.csv_rows = csvRowsByClaim(csv);
+        for (const label of crossLabels) assert.equal(delivery.csv_rows[crossClaims[label]], `${state.events.sourceVersionId};${state.register.sourceVersionId}`, label);
+        const singleSource = Object.entries(delivery.csv_rows).filter(([claimId]) => !Object.values(crossClaims).includes(claimId));
+        assert.ok(singleSource.length > 0 && singleSource.every(([, versions]) => !versions.includes(";")), J(singleSource));
         state.stageAReleasedManifestId = manifestRow.export_manifest_id;
         state.stageAReleasedMarkdown = released.body;
         assert.doesNotMatch(released.body, /CB0\d\d|EV0\d\d/);
@@ -1848,6 +1862,15 @@ async function runCedarBridgeAcceptance() {
       process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
       try {
         return await adminApi("GET", clientReleasedReportMarkdownPath(ORG, PROJECT, exportManifestId));
+      } finally {
+        if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
+      }
+    };
+    const readManifestCsv = async (exportManifestId) => {
+      const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      try {
+        return await gkAdminApi("GET", `${orgPath}/export-manifests/${exportManifestId}/csv`);
       } finally {
         if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
       }
@@ -2370,6 +2393,10 @@ async function runCedarBridgeAcceptance() {
       assert.equal(contributingLines.filter((line) => line.includes("Contributing primary source") && line.includes(CORRECTED_STATE.sourceVersionId)).length, crossLabels.length);
       assert.equal(contributingLines.filter((line) => line.includes("Contributing reference source") && line.includes(state.register.sourceVersionId)).length, crossLabels.length);
       assert.ok(!released.includes(V1()), "the updated report cites only the corrected version of the service events");
+      const csvRows = csvRowsByClaim(await readManifestCsv(delivery.export_manifest_id));
+      for (const label of crossLabels) assert.equal(csvRows[correctedClaims[label]], `${CORRECTED_STATE.sourceVersionId};${state.register.sourceVersionId}`, label);
+      for (const label of REGRESSION) assert.doesNotMatch(csvRows[derivedClaims[label]], /;/, label);
+      assert.ok(!Object.values(csvRows).some((versions) => versions.includes(V1())), "the CSV appendix does not cite the replaced version");
       assert.doesNotMatch(released, /CB0\d\d|EV0\d\d/);
       for (const label of crossLabels) {
         assert.ok(released.includes(String(report.corrected_version.recalculation.corrected[label])), `${label}: its value is in the released document`);

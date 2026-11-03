@@ -243,6 +243,48 @@ test("authentication failure and malformed identifiers do not call the CSV servi
   assert.deepEqual(scenario.serviceCalls, []);
 });
 
+test("a cross-source manifest downloads through the route with the established header, one row per citation, and both contributing versions", async (t) => {
+  const ids = Object.fromEntries(["claimA", "evidenceA", "sourceA", "versionA", "claimX", "evidenceX", "sourceB", "versionB"]
+    .map((key, index) => [key, `00000000-0000-4000-8000-0000000009${String(index + 10)}`]));
+  const model = {
+    renderModelContractVersion: "kai-sprint2-p3-21-export-manifest-render-model-v1",
+    exportCandidate: {},
+    content: { blocks: [] },
+    citations: [
+      { citationRef: "CIT-001", claimId: ids.claimA, evidenceItemId: ids.evidenceA, sourceId: ids.sourceA, sourceVersionId: ids.versionA },
+      { citationRef: "CIT-002", claimId: ids.claimX, evidenceItemId: ids.evidenceX, sourceId: ids.sourceA, sourceVersionId: ids.versionA, contributingSources: [
+        { sourceRole: "primary", sourceId: ids.sourceA, sourceVersionId: ids.versionA },
+        { sourceRole: "reference", sourceId: ids.sourceB, sourceVersionId: ids.versionB },
+      ] },
+    ],
+    limitations: [],
+    methodNotes: { limitationEntries: [{ citationRef: "CIT-002", limitationCodes: ["b_code", "a_code"] }] },
+  };
+  const restoreFeatureFlag = withFeatureFlagEnabled();
+  const restoreService = intakeRouteTestables.setIntakeServiceForTest({
+    serializeExportManifestToCsv: (input) => serializeExportManifestToCsv(input, {
+      composeExportManifestRenderModel: async () => ({ ok: true, data: model, error: null }),
+    }),
+  });
+  const scenario = createScenario();
+  const server = await listen(createApplication(() => scenario));
+  t.after(async () => {
+    restoreService();
+    restoreFeatureFlag();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const response = await requestDownload(server, downloadPath());
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["content-type"], "text/csv; charset=utf-8");
+  assert.equal(response.bodyText, [
+    csv.trimEnd(),
+    `CIT-001,${ids.claimA},${ids.evidenceA},${ids.sourceA},${ids.versionA},`,
+    `CIT-002,${ids.claimX},${ids.evidenceX},${ids.sourceA};${ids.sourceB},${ids.versionA};${ids.versionB},a_code;b_code`,
+    "",
+  ].join("\r\n"));
+});
+
 test("AI/system actors are denied by the existing governed CSV wrapper before rendering", async () => {
   let renderCalls = 0;
   const result = await serializeExportManifestToCsv(

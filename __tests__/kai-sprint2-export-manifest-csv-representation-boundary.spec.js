@@ -112,6 +112,76 @@ test("no citation is dropped or orphaned, and row order is deterministic across 
   assert.deepEqual(refs, model.citations.map((citation) => citation.citationRef));
 });
 
+// A3: a multi-source measurement's citation, as the export candidate's
+// representation carries it (primary and reference contributing sources).
+const CLAIM_X = "00000000-0000-4000-8000-000000000905";
+const EVIDENCE_X = "00000000-0000-4000-8000-000000000906";
+const SOURCE_VERSION_A_CORRECTED = "00000000-0000-4000-8000-000000000b03";
+
+function crossSourceRenderModel(primaryVersionId, blockText = "Cross-source block.") {
+  return __exportManifestRenderModelRepositoryTestables.composeRenderModel({
+    manifest: { export_manifest_id: MANIFEST, organization_id: ORG, export_candidate_id: CANDIDATE, effective_authority_decision_id: DECISION,
+      effective_authority_decision_type: "export_authority_granted", fingerprint_contract_version: "v", canonical_fingerprint: "a".repeat(64), created_at: "2026-09-06T10:20:00.000Z" },
+    candidate: { exportCandidateId: CANDIDATE, generatedContentDraftId: DRAFT, contentType: "evidence_summary", requestedAudience: "internal",
+      limitationSnapshotId: SNAPSHOT, fingerprintContractVersion: "v", canonicalFingerprint: "b".repeat(64) },
+    representation: {
+      organizationId: ORG, generatedContentDraftId: DRAFT, contentType: "evidence_summary", requestedAudience: "internal",
+      blocks: [{
+        ordinal: 1,
+        text: blockText,
+        citations: [
+          { claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, sourceId: SOURCE_A, sourceVersionId: SOURCE_VERSION_A },
+          { claimId: CLAIM_X, evidenceItemId: EVIDENCE_X, sourceId: SOURCE_A, sourceVersionId: primaryVersionId, contributingSources: [
+            { sourceRole: "primary", sourceId: SOURCE_A, sourceVersionId: primaryVersionId },
+            { sourceRole: "reference", sourceId: SOURCE_B, sourceVersionId: SOURCE_VERSION_B },
+          ] },
+        ],
+      }],
+      limitations: [
+        { claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: ["self_reported"] },
+        { claimId: CLAIM_X, evidenceItemId: EVIDENCE_X, limitationCodes: ["linkage_exact_identifier_match"] },
+      ],
+    },
+  });
+}
+
+test("a multi-source citation names every contributing source version in the existing columns, its own version first", () => {
+  const model = crossSourceRenderModel(SOURCE_VERSION_A);
+  const rows = parseCsv(serializeExportManifestRenderModelToCsv(model));
+
+  assert.deepEqual(rows[0], __exportManifestCsvSerializerTestables.CSV_HEADER);
+  assert.equal(rows.length, 1 + model.citations.length, "still one row per citation");
+  for (const row of rows) assert.equal(row.length, 6);
+  assert.deepEqual(rows[2], ["CIT-002", CLAIM_X, EVIDENCE_X, `${SOURCE_A};${SOURCE_B}`, `${SOURCE_VERSION_A};${SOURCE_VERSION_B}`, "linkage_exact_identifier_match"]);
+  // Pairs align by position, and the first pair is the value the column carried before.
+  const [sourceIds, versionIds] = [rows[2][3].split(";"), rows[2][4].split(";")];
+  assert.deepEqual(sourceIds.map((id, i) => [id, versionIds[i]]), [[SOURCE_A, SOURCE_VERSION_A], [SOURCE_B, SOURCE_VERSION_B]]);
+  assert.deepEqual(rows[1], ["CIT-001", CLAIM_A, EVIDENCE_A, SOURCE_A, SOURCE_VERSION_A, "self_reported"], "the single-source row is unchanged");
+});
+
+test("a corrected multi-source citation names the corrected version and the reference, never the version it replaced", () => {
+  const csv = serializeExportManifestRenderModelToCsv(crossSourceRenderModel(SOURCE_VERSION_A_CORRECTED));
+  const row = parseCsv(csv)[2];
+  assert.deepEqual(row.slice(3, 5), [`${SOURCE_A};${SOURCE_B}`, `${SOURCE_VERSION_A_CORRECTED};${SOURCE_VERSION_B}`]);
+  assert.equal(row[4].includes(SOURCE_VERSION_A), false);
+});
+
+test("cited source versions come only from structured citations, never from block text", () => {
+  const prose = `Linked to ${SOURCE_VERSION_A_CORRECTED} and source ${SOURCE_B}.`;
+  const csv = serializeExportManifestRenderModelToCsv(crossSourceRenderModel(SOURCE_VERSION_A, prose));
+  assert.equal(csv.includes(SOURCE_VERSION_A_CORRECTED), false);
+  assert.equal(csv, serializeExportManifestRenderModelToCsv(crossSourceRenderModel(SOURCE_VERSION_A)));
+});
+
+test("single-source CSV bytes are exactly the established v1 output", () => {
+  assert.equal(serializeExportManifestRenderModelToCsv(renderModel()), [
+    "citation_ref,claim_id,evidence_item_id,source_id,source_version_id,limitation_codes",
+    `CIT-001,${CLAIM_A},${EVIDENCE_A},${SOURCE_A},${SOURCE_VERSION_A},sample_size_small;self_reported`,
+    `CIT-002,${CLAIM_B},${EVIDENCE_B},${SOURCE_B},${SOURCE_VERSION_B},`,
+    "",
+  ].join("\r\n"));
+});
+
 test("CSV field values containing commas, quotes, or newlines are correctly escaped", () => {
   const model = renderModel({
     citations: [
