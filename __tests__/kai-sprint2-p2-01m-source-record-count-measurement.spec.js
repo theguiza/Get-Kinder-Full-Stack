@@ -191,7 +191,10 @@ test("XLSX: single-worksheet compatibility and explicit selection for multi-work
   // everything else stays redacted.
   const withoutTabularBasis = (profile) => ({ ...profile, sheets: profile.sheets.map(({ tabular_measurement_basis: _basis, ...sheet }) => sheet) });
   assert.doesNotMatch(JSON.stringify([current, values, inline].map(withoutTabularBasis)), /literacy|mentoring|2026-09|"a","b"/, "no cell value is stored in the profile");
-  assert.deepEqual(current.sheets[0].tabular_measurement_basis.fields.find((field) => field.field_key === "field_2").categorical.values.map((value) => value.label), ["literacy", "mentoring"]);
+  // Plain lower-case single words, none an operational word, look like names written in lower case: the vocabulary is withheld.
+  assert.deepEqual(current.sheets[0].tabular_measurement_basis.fields.find((field) => field.field_key === "field_2").categorical,
+    { values: [], withheld_record_count: 5, vocabulary_withheld: "ambiguous_category_value" });
+  assert.doesNotMatch(JSON.stringify(current), /literacy|mentoring/, "the withheld labels are not stored anywhere in the profile");
   assert.doesNotMatch(JSON.stringify(current.sheets[0].tabular_measurement_basis), /2026-09-|"a","b"/, "the basis keeps months and listed labels only");
 });
 

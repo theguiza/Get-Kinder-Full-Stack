@@ -28,7 +28,8 @@ import {
   dimensionResultRequiresGap,
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
-import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent,
+  derivedMeasurementLabelsAdmitted, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
@@ -542,6 +543,10 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
     if (!derivedEvidenceIsCurrent(derivedRow)) return failureWithReason("derived_measurement_interpretation_superseded");
     if (!derivedContributingSourcesCurrent(derivedRow)) return failureWithReason("derived_measurement_contributing_source_not_current");
+    // A label an earlier profile listed but the current screen withholds
+    // (for example a personal name under a neutral header) never reaches
+    // generation or release through this measurement.
+    if (!derivedMeasurementLabelsAdmitted(derivedRow)) return failureWithReason("derived_measurement_category_label_withheld");
     const referenceProfileIds = (derivedRow.contributing_sources || [])
       .filter((source) => source.source_role === "reference")
       .map((source) => source.intake_sensitivity_profile_id);

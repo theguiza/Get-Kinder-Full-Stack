@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { CROSS_SOURCE_REACH_BASIS_VERSION, CROSS_SOURCE_REACH_METHOD } from "../parsing/crossSourceReachReconciliation.js";
 import { PAIRED_OUTCOME_CALCULATION_METHOD } from "../profiling/pairedOutcomeBasis.js";
-import { TABULAR_MEASUREMENT_BASIS_VERSION } from "../profiling/tabularMeasurementBasis.js";
+import { TABULAR_MEASUREMENT_BASIS_VERSION, categoryVocabularyWithheldReason } from "../profiling/tabularMeasurementBasis.js";
 import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
 import { derivePairedOutcomeMeasurements } from "./kaiPairedOutcomeMeasurementValidators.js";
 import {
@@ -247,8 +247,20 @@ function tabularBasisOf(profile, worksheetKey) {
   return { ok: true, basis: sheet.tabular_measurement_basis, sheetKey: sheet.sheet_key };
 }
 
+// A committed field as a reader may use it: a vocabulary the current label
+// screen withholds - including one an earlier profile listed under an older
+// rule - is exposed, selected and matched as withheld, never by its labels.
+function screenedField(field) {
+  const categorical = field?.categorical;
+  if (!categorical || categorical.vocabulary_withheld || !Array.isArray(categorical.values) || categorical.values.length === 0) return field;
+  const reason = categoryVocabularyWithheldReason(categorical.values.map((value) => value.label));
+  if (!reason) return field;
+  const listedRecords = categorical.values.reduce((total, value) => total + (Number(value.record_count) || 0), 0);
+  return { ...field, categorical: { values: [], withheld_record_count: (Number(categorical.withheld_record_count) || 0) + listedRecords, vocabulary_withheld: reason } };
+}
+
 function fieldOf(basis, fieldKey) {
-  return (basis.fields || []).find((field) => field.field_key === fieldKey) ?? null;
+  return screenedField((basis.fields || []).find((field) => field.field_key === fieldKey) ?? null);
 }
 
 /**
@@ -563,7 +575,7 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
     available: true,
     record_count: basis.record_count,
     exact_duplicates: basis.exact_duplicates,
-    fields: basis.fields.filter((field) => field.roles.length > 0).map((field) => ({
+    fields: basis.fields.filter((field) => field.roles.length > 0).map(screenedField).map((field) => ({
       field_key: field.field_key,
       column_position: Number(field.field_key.slice(6)),
       role: field.roles[0],
@@ -814,6 +826,52 @@ function crossSourceFunnelHolds(row) {
 }
 
 /**
+ * Whether every category label a recorded measurement holds (its condition
+ * and population values, a linkage's completed value and group labels) still
+ * passes the label screen. A measurement recorded from a vocabulary an older
+ * profile listed fails closed: its evidence cannot support a claim, be
+ * generated from or be released, and its labels are not returned.
+ */
+export function derivedMeasurementCategoryLabels(row) {
+  const definition = isPlainObject(row?.definition) ? row.definition : {};
+  const labels = [];
+  for (const condition of [...(Array.isArray(definition.conditions) ? definition.conditions : []), ...(Array.isArray(definition.population) ? definition.population : [])]) {
+    if (typeof condition?.value_label === "string") labels.push(condition.value_label);
+  }
+  const events = definition.mapping?.events;
+  if (typeof events?.completed_value_label === "string") labels.push(events.completed_value_label);
+  for (const group of Array.isArray(events?.groups) ? events.groups : []) if (typeof group?.label === "string") labels.push(group.label);
+  if (typeof definition.group?.value_label === "string") labels.push(definition.group.value_label);
+  for (const group of Array.isArray(row?.component_counts?.groups) ? row.component_counts.groups : []) if (typeof group?.label === "string") labels.push(group.label);
+  return labels;
+}
+
+export function derivedMeasurementLabelsAdmitted(row) {
+  return categoryVocabularyWithheldReason(derivedMeasurementCategoryLabels(row), { wholeVocabulary: false }) === null;
+}
+
+export const WITHHELD_CATEGORY_LABEL = "[withheld]";
+
+/**
+ * A recorded measurement's definition and group table with every category
+ * label replaced, for a reader that must not see labels the screen withholds.
+ */
+export function withholdDerivedMeasurementLabels(row) {
+  const mask = (value) => (typeof value === "string" ? WITHHELD_CATEGORY_LABEL : value);
+  const definition = JSON.parse(JSON.stringify(row.definition ?? {}));
+  for (const condition of [...(definition.conditions ?? []), ...(definition.population ?? [])]) if (condition && "value_label" in condition) condition.value_label = mask(condition.value_label);
+  if (definition.mapping?.events) {
+    if ("completed_value_label" in definition.mapping.events) definition.mapping.events.completed_value_label = mask(definition.mapping.events.completed_value_label);
+    for (const group of definition.mapping.events.groups ?? []) group.label = mask(group.label);
+  }
+  if (definition.group && "value_label" in definition.group) definition.group.value_label = mask(definition.group.value_label);
+  const componentCounts = row.component_counts && Array.isArray(row.component_counts.groups)
+    ? { ...row.component_counts, groups: row.component_counts.groups.map((group) => ({ ...group, label: mask(group.label) })) }
+    : row.component_counts;
+  return { definition, component_counts: componentCounts };
+}
+
+/**
  * Whether every source a measurement combines is still the current version
  * it was calculated from: for a cross-source measurement, exactly its
  * primary and its reference version, each current and still bound to the
@@ -1034,6 +1092,7 @@ export function validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorR
     && locatorMatches(locatorRow, measurementRow)
     && derivedEvidenceIsCurrent(measurementRow)
     && derivedContributingSourcesCurrent(measurementRow)
+    && derivedMeasurementLabelsAdmitted(measurementRow)
     && measurementRow.profile_canonical_sha256 === sourceVersionRow?.profile_canonical_sha256
     && evidenceItemRow.statement === composeDerivedMeasurementEvidenceStatement({ measurementRow, interpretation: interpretationOf(measurementRow) });
   if (!ok) {

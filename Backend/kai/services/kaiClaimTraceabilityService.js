@@ -36,6 +36,7 @@ const TRACEABILITY_CONFLICT_REASONS = new Set([
   "derived_measurement_interpretation_superseded",
   "derived_measurement_contributing_source_not_current",
   "derived_measurement_contributing_source_not_permitted",
+  "derived_measurement_category_label_withheld",
   "gap_dimension_requires_missing_p204_state",
   "gap_followup_queue_mismatch",
   "conflict_queue_count_mismatch",

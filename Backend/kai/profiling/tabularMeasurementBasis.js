@@ -83,6 +83,56 @@ const SENSITIVE_CATEGORY_VALUE_WORDS = new Set([
 ]);
 // A header ending in "by" (recorded by, entered by, referred by) names a person.
 const PERSON_ROLE_HEADER_SUFFIX = "by";
+// Operational one-word labels a vocabulary may hold in any case. A label's
+// shape, frequency or low cardinality never makes it safe: a capitalized
+// single word ("Maria") or a run of capitalized words ("Maria Lopez") is how a
+// personal name looks under any header, so outside this list it withholds the
+// whole field, and so does a vocabulary made only of plain lower-case words
+// none of which is listed here (names written in lower case look the same).
+// Sentence-case descriptions ("Started paid work"), snake_case codes
+// ("no_show") and upper-case codes ("DS") are kept.
+const OPERATIONAL_CATEGORY_WORDS = new Set([
+  "yes", "no", "unknown", "none", "other", "true", "false", "na",
+  "completed", "complete", "incomplete", "cancelled", "canceled", "pending", "active", "inactive", "exited",
+  "open", "closed", "scheduled", "attended", "missed", "declined", "accepted", "rejected", "approved",
+  "withdrawn", "enrolled", "waitlisted", "answered", "unanswered", "responded", "partial", "full",
+  "baseline", "followup", "intake", "exit", "online", "virtual", "remote", "hybrid", "group", "individual",
+  "new", "returning", "low", "medium", "high", "draft", "final", "current", "former", "internal", "external",
+  "done", "dropped", "finished", "started", "ongoing", "paused", "suspended", "referred", "passed", "failed",
+  "present", "absent", "late", "excused", "noshow", "booked", "confirmed", "rescheduled", "expired", "valid", "invalid",
+]);
+const TITLE_CASE_WORD_RE = /^[A-Z][a-z]+$/;
+const LOWER_CASE_WORD_RE = /^[a-z]+$/;
+
+function labelWords(label) {
+  return String(label).split(/[ _'()&/-]+/).filter(Boolean);
+}
+
+/**
+ * Why a category vocabulary may not be listed, or null. Shared by the
+ * profiler (what a new profile commits) and by every reader of a committed
+ * profile's labels (what an existing profile may still expose), so a label
+ * admitted under an earlier rule is withheld the same way. One sensitive or
+ * name-shaped label withholds the whole field: its other labels describe the
+ * same attribute. `wholeVocabulary: false` screens labels already selected
+ * from a vocabulary (a recorded measurement's), where the all-lower-case
+ * vocabulary rule cannot be judged.
+ */
+export function categoryVocabularyWithheldReason(labels, { wholeVocabulary = true } = {}) {
+  const list = [...labels].map(String);
+  if (list.some((label) => headerWords(label).some((word) => SENSITIVE_CATEGORY_VALUE_WORDS.has(word)))) return "sensitive_category_value";
+  const nameShaped = (label) => {
+    const words = labelWords(label);
+    const titled = words.filter((word) => TITLE_CASE_WORD_RE.test(word));
+    if (words.length === 1) return titled.length === 1 && !OPERATIONAL_CATEGORY_WORDS.has(words[0].toLowerCase());
+    return titled.length >= 2;
+  };
+  if (list.some(nameShaped)) return "ambiguous_category_value";
+  if (wholeVocabulary && list.length > 0 && list.every((label) => LOWER_CASE_WORD_RE.test(label)) && !list.some((label) => OPERATIONAL_CATEGORY_WORDS.has(label))) {
+    return "ambiguous_category_value";
+  }
+  return null;
+}
 // Worksheet cell types whose stored value is text (CSV values are all text).
 const TEXT_CELL_TYPES = new Set(["s", "inlineStr", "str", "text"]);
 
@@ -172,9 +222,10 @@ function classifyField(records, position, header) {
         result.categorical = { values: [], withheld_record_count: values.length, vocabulary_withheld: "personal_attribute_field" };
         return result;
       }
-      if ([...counts.keys()].some((label) => headerWords(label).some((word) => SENSITIVE_CATEGORY_VALUE_WORDS.has(word)))) {
+      const withheld = categoryVocabularyWithheldReason(counts.keys());
+      if (withheld) {
         result.roles.push("categorical");
-        result.categorical = { values: [], withheld_record_count: values.length, vocabulary_withheld: "sensitive_category_value" };
+        result.categorical = { values: [], withheld_record_count: values.length, vocabulary_withheld: withheld };
         return result;
       }
       const listed = [...counts.entries()]

@@ -167,18 +167,27 @@ test("definition refusals: unsupported units, combinations, unlisted values, rol
 // sensitive attribute, or free text are withheld field by field, whatever
 // their shape, and never reach the options a person reads, a definition, a
 // statement or the committed profile.
+// Columns 10-13 close the lexical gap: personal names under neutral headers
+// (capitalized, full and lower-case) and a mixed vocabulary in which one
+// name sits among operational labels. A capitalized single word is withheld
+// unless it is a listed operational word: by shape "Digital" cannot be told
+// from "Priya", so the programme column keeps sentence-case and code labels.
 const SENSITIVE_ROWS = [
-  ["session_ref", "status", "programme", "coach", "Gender", "recorded_by", "cohort_group", "quality_note", "session_date"],
+  ["session_ref", "status", "programme", "coach", "Gender", "recorded_by", "cohort_group", "quality_note", "session_date", "group", "team", "pod", "outcome"],
   ...Array.from({ length: 8 }, (_, index) => [
     `S${index + 10}`,
     ["done", "missed"][index % 2],
-    ["Digital", "Careers"][index % 2],
+    ["Digital skills", "Career coaching"][index % 2],
     ["Priya", "Daniel"][index % 2],
     ["Female", "Male"][index % 2],
     ["Maria", "Ahmed"][index % 2],
     ["Refugee", "Citizen"][index % 2],
     ["Good", "Late start"][index % 2],
     `2025-0${(index % 8) + 1}-15`,
+    ["Sofia", "Tariq"][index % 2],
+    ["Ana Lopez", "Wei Chen"][index % 2],
+    ["maria", "ahmed"][index % 2],
+    ["completed", "completed", "Omar", "no_show"][index % 4],
   ]),
 ];
 
@@ -187,13 +196,17 @@ test("profile category retention: ordinary labels are kept; personal, sensitive 
   const basis = profile.tabular_measurement_basis;
   const field = (key) => basis.fields.find((candidate) => candidate.field_key === key);
   assert.deepEqual(field("field_2").categorical.values.map((value) => value.label), ["done", "missed"]);
-  assert.deepEqual(field("field_3").categorical.values.map((value) => value.label), ["Careers", "Digital"]);
+  assert.deepEqual(field("field_3").categorical.values.map((value) => value.label), ["Career coaching", "Digital skills"]);
   const withheld = {
     field_4: "personal_attribute_field", // a person (coach)
     field_5: "personal_attribute_field", // a protected attribute (gender)
     field_6: "personal_attribute_field", // who recorded it
     field_7: "sensitive_category_value", // an innocuous header with a sensitive vocabulary
     field_8: "personal_attribute_field", // free text
+    field_10: "ambiguous_category_value", // first names under a neutral header
+    field_11: "ambiguous_category_value", // full names under a neutral header
+    field_12: "ambiguous_category_value", // lower-case names: no operational word among them
+    field_13: "ambiguous_category_value", // one name among operational labels withholds the field
   };
   for (const [key, reasonCode] of Object.entries(withheld)) {
     assert.deepEqual(field(key).roles, ["categorical"], key);
@@ -202,10 +215,10 @@ test("profile category retention: ordinary labels are kept; personal, sensitive 
   }
   // Committed profile: no withheld label anywhere, while the kept ones remain.
   const committed = JSON.stringify(profile);
-  for (const label of ["Priya", "Daniel", "Female", "Male", "Maria", "Ahmed", "Refugee", "Citizen", "Late start", "Good"]) {
+  for (const label of ["Priya", "Daniel", "Female", "Male", "Maria", "Ahmed", "Refugee", "Citizen", "Late start", "Good", "Sofia", "Tariq", "Ana Lopez", "Wei Chen", "maria", "ahmed", "Omar"]) {
     assert.ok(!committed.includes(label), `committed profile holds ${label}`);
   }
-  for (const label of ["done", "missed", "Careers", "Digital"]) assert.ok(committed.includes(`"${label}"`), label);
+  for (const label of ["done", "missed", "Career coaching", "Digital skills"]) assert.ok(committed.includes(`"${label}"`), label);
   // The read model a person sees: the field is listed with its withheld reason and no value to choose.
   const options = D.describeTabularMeasurementOptions(profile, null);
   assert.deepEqual(options.fields.find((entry) => entry.field_key === "field_4"), {
