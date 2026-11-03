@@ -625,12 +625,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           Sources appear here once an uploaded file has been reviewed and promoted. Extract evidence from a source version
           to see what it supports, or count its records under your own definition of what one record represents.
         </div>
-        {sources.status === "loading" ? <div className="text-muted small">Loading sources...</div> : null}
+        {sources.status === "loading" && sources.items.length === 0 ? <div className="text-muted small">Loading sources...</div> : null}
         {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
         {sources.status === "success" && sources.items.length === 0 ? (
           <div className="text-muted small">No promoted sources yet. Upload data in Files; each file is reviewed before it becomes a source.</div>
         ) : null}
-        {sources.status === "success" && sources.items.length > 0 ? (
+        {/* A refresh after a recorded measurement keeps the loaded list (and an open panel with its confirmation) mounted. */}
+        {(sources.status === "success" || sources.status === "loading") && sources.items.length > 0 ? (
           <ul className="list-group">
             {sources.items.map((source) => (
               <li key={source.sourceId} className="list-group-item" data-client-source={source.sourceId}>

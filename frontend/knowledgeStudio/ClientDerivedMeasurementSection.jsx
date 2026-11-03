@@ -19,7 +19,10 @@ import {
 const ROLE_LABELS = Object.freeze({ identifier: "identifier", categorical: "category", date: "date" });
 
 function fieldLabel(field) {
-  return `Column ${field.column_position} (${field.field_key}, ${ROLE_LABELS[field.role] || field.role})`;
+  // A field whose values describe a person, a sensitive attribute or free text
+  // keeps no labels in the profile, so it can be counted only as a whole.
+  const withheld = field.vocabulary_withheld ? ", values withheld" : "";
+  return `Column ${field.column_position} (${field.field_key}, ${ROLE_LABELS[field.role] || field.role}${withheld})`;
 }
 
 /**
@@ -235,7 +238,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         </div>
       ) : null}
 
-      {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || "")).map((recorded) => {
+      {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
         const current = currentEvidenceOf(recorded);
         const paired = recorded.measurement_family === "paired_outcome_change";
         return (
@@ -266,18 +269,18 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
               <form onSubmit={(event) => clarify(event, recorded)} data-client-derived-clarify-form="">
                 <label className="d-block">
                   Indicator label
-                  <input className="form-control form-control-sm" value={clarifyForm.indicatorLabel}
+                  <input className="form-control form-control-sm" value={clarifyForm.indicatorLabel} data-client-derived-clarify-field="indicatorLabel"
                     onChange={(event) => setClarifyForm((value) => ({ ...value, indicatorLabel: event.target.value }))} />
                 </label>
                 <label className="d-block">
                   What it represents
-                  <input className="form-control form-control-sm" value={clarifyForm.meaningText}
+                  <input className="form-control form-control-sm" value={clarifyForm.meaningText} data-client-derived-clarify-field="meaningText"
                     onChange={(event) => setClarifyForm((value) => ({ ...value, meaningText: event.target.value }))} />
                 </label>
                 {paired ? (
                   <label className="d-block">
                     Is a higher score better?
-                    <select className="form-select form-select-sm" value={clarifyForm.scoreDirection}
+                    <select className="form-select form-select-sm" value={clarifyForm.scoreDirection} data-client-derived-clarify-field="scoreDirection"
                       onChange={(event) => setClarifyForm((value) => ({ ...value, scoreDirection: event.target.value }))}>
                       <option value="">not established</option>
                       <option value="higher_is_better">higher is better</option>
@@ -287,14 +290,14 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 ) : null}
                 <label className="d-block">
                   Where the values come from
-                  <select className="form-select form-select-sm" value={clarifyForm.evidenceBasis}
+                  <select className="form-select form-select-sm" value={clarifyForm.evidenceBasis} data-client-derived-clarify-field="evidenceBasis"
                     onChange={(event) => setClarifyForm((value) => ({ ...value, evidenceBasis: event.target.value }))}>
                     <option value="not_established">not stated</option>
                     <option value="self_reported">self-reported by the people recorded</option>
                     <option value="organization_record">the organization's own records</option>
                   </select>
                 </label>
-                <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(pending) || !interpretationBody(clarifyForm, { paired })}>
+                <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(pending) || !interpretationBody(clarifyForm, { paired })} data-client-derived-clarify-submit="">
                   {pending === "clarify" ? "Recording..." : "Record meaning"}
                 </button>
               </form>

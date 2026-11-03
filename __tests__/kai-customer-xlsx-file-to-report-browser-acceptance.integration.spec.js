@@ -155,7 +155,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     if (message.sessionId !== sessionId) return;
     const { method, params } = message;
     if (method === "Network.requestWillBeSent" && params.type !== "Document" && /\/api\/|\/synthetic-storage\//.test(params.request.url)) {
-      const entry = { url: params.request.url, method: params.request.method, status: null, done: false };
+      const entry = { url: params.request.url, method: params.request.method, status: null, done: false, requestId: params.requestId, postData: params.request.postData ?? null };
       requests.push(entry);
       byId.set(params.requestId, entry);
     } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
@@ -242,7 +242,13 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
     return el ? el.innerText : null;
   })()`);
+  // The response body the browser received for one captured request.
+  const responseBody = async (entry) => {
+    const { body, base64Encoded } = await browser.send("Network.getResponseBody", { requestId: entry.requestId }, sessionId);
+    return JSON.parse(base64Encoded ? Buffer.from(body, "base64").toString("utf8") : body);
+  };
   return {
+    responseBody,
     requests: () => requests.slice(),
     mark: () => requests.length,
     requestsSince: (mark) => requests.slice(mark),
@@ -345,7 +351,9 @@ async function runXlsxAcceptance() {
   const { deriveRecordCountMeasurement } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
   const { batchFilesPath, confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
-  const { derivedMeasurementBasisPath } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
+  const {
+    derivedMeasurementBasisPath, derivedMeasurementInterpretationPath, pairedOutcomeMeasurementsPath, tabularMeasurementPath,
+  } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { organizationFactualReviewPath } = await import("../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
 
@@ -3037,6 +3045,185 @@ async function runXlsxAcceptance() {
       assert.notEqual(projected.evidence_review_status, "unreviewed", J(projected));
       assert.equal(await storyCategoryOf(intakeSensitivityProfileId), "present");
       results.l3 = { historicalDraft: historicalId, historicalRead: [refused.status, refusedReasons], afterNegativeSheet5Decision: after, sheet5EvidenceReviewStatus: projected.evidence_review_status };
+    });
+
+    // M: the Measurement MVP controls in Count records, operated through the
+    // mounted application: keep a proposed paired outcome, state and correct
+    // its meaning, record a rate, reload, propose the claim, and be refused.
+    await test("M: in Count records the administrator keeps a paired outcome, states and corrects its meaning, records a rate, reloads and proposes the claim; invalid and unauthorized actions are refused", async () => {
+      // Synthetic learners L01-L14, each with a pre and a post observation of one instrument version.
+      const pre = [2, 3, 1, 4, 2, 3, 3, 2, 1, 4, 2, 5, 3, 2];
+      const post = [4, 3, 2, 3, 2, 5, 4, 2, 3, 4, 1, 5, 4, 3];
+      const rows = [["obs_ref", "learner_id", "phase", "survey_version", "confidence_score", "session_status"]];
+      pre.forEach((value, index) => {
+        const learner = `L${String(index + 1).padStart(2, "0")}`;
+        rows.push([`O${String(index * 2 + 1).padStart(2, "0")}`, learner, "pre", "A", value, index % 3 === 0 ? "missed" : "attended"]);
+        rows.push([`O${String(index * 2 + 2).padStart(2, "0")}`, learner, "post", "A", post[index], "attended"]);
+      });
+      // Independent arithmetic, sharing no code with KAI.
+      const expectedPaired = { pairs: pre.length, increased: pre.filter((v, i) => post[i] > v).length, unchanged: pre.filter((v, i) => post[i] === v).length };
+      const attended = rows.slice(1).filter((row) => row[5] === "attended").length;
+      const file = customerFile("learning-log-measurement-controls.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Learning_Log", rows }] }));
+      const fileId = await apiUpload(adminApi, file, ids.batchId);
+      await dispatcher.whenIdle();
+      const sv = (await decideAndPromote(adminApi, fileId)).source_version_id;
+      const section = `[data-client-derived-measurements="${sv}"]`;
+      const setSelect = (selector, value) => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${J(selector)});
+        if (!el) return false;
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      })()`);
+      const posts = async (mark) => Promise.all(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map(async (r) => ({
+        path: new URL(r.url).pathname + new URL(r.url).search, status: r.status, request: r.postData ? JSON.parse(r.postData) : null, response: await adminPage.responseBody(r),
+      })));
+      const noticeText = () => textOf(adminPage, `${section} [data-client-derived-notice]`);
+      const waitNotice = async (pattern, description) => {
+        await adminPage.waitFor(async () => Boolean(await noticeText()), description);
+        assert.match(await noticeText(), pattern, description);
+      };
+
+      await openCountRecords(sv);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-paired]`)), "proposed paired results");
+      assert.match(await textOf(adminPage, `${section} [data-client-derived-paired-field="field_5"]`),
+        new RegExp(`${expectedPaired.increased} of ${expectedPaired.pairs} comparable pairs .* whether higher is better is not established`));
+
+      // 1. Keep (select and retain) the proposed paired outcome.
+      let mark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Keep these results as evidence");
+      await waitNotice(/proposed results kept as evidence/, "paired kept");
+      await adminPage.idle();
+      const [kept] = await posts(mark);
+      assert.deepEqual([kept.path, kept.status, kept.request], [pairedOutcomeMeasurementsPath(ORG_X, sv, null), 200, {}]);
+      const pairedMeasurement = kept.response.data.measurements.find((entry) => entry.measurement.field_keys.includes("field_5")).measurement;
+      assert.deepEqual([pairedMeasurement.numerator, pairedMeasurement.denominator, pairedMeasurement.component_counts.unchanged_count],
+        [expectedPaired.increased, expectedPaired.pairs, expectedPaired.unchanged]);
+      const recorded = `${section} [data-client-derived-recorded="${pairedMeasurement.source_derived_measurement_id}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${recorded} [data-client-derived-meaning-state="proposed"]`)), "meaning proposed");
+
+      // 2. State its meaning, then correct it; the arithmetic does not change.
+      const clarify = async ({ label, meaning, direction }) => {
+        await adminPage.clickIn(`${recorded} [data-client-derived-clarify]`, "Clarify meaning");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${recorded} [data-client-derived-clarify-form]`)), "clarify form");
+        assert.ok(await setInput(adminPage, `${recorded} [data-client-derived-clarify-field="indicatorLabel"]`, label));
+        assert.ok(await setInput(adminPage, `${recorded} [data-client-derived-clarify-field="meaningText"]`, meaning));
+        assert.ok(await setSelect(`${recorded} [data-client-derived-clarify-field="scoreDirection"]`, direction));
+        assert.ok(await setSelect(`${recorded} [data-client-derived-clarify-field="evidenceBasis"]`, "self_reported"));
+        const before = adminPage.mark();
+        await adminPage.clickIn(`${recorded} [data-client-derived-clarify-submit]`, "Record meaning");
+        await waitNotice(/Meaning recorded\. The numbers are unchanged/, "meaning recorded");
+        await adminPage.idle();
+        return (await posts(before))[0];
+      };
+      const stated = await clarify({ label: "Learner confidence", meaning: "Self-rated confidence on a 1 to 5 scale.", direction: "" });
+      assert.deepEqual([stated.path, stated.status], [derivedMeasurementInterpretationPath(ORG_X, pairedMeasurement.source_derived_measurement_id), 200]);
+      assert.deepEqual(stated.request, { indicator_label: "Learner confidence", meaning_text: "Self-rated confidence on a 1 to 5 scale.", score_direction: "not_established", evidence_basis: "self_reported" });
+      const corrected = await clarify({ label: "Learner confidence", meaning: "Self-rated confidence on a 1 to 5 scale.", direction: "higher_is_better" });
+      assert.equal(corrected.status, 200);
+      assert.equal(corrected.response.data.supersededInterpretationId, stated.response.data.interpretation.interpretation_id, "the correction supersedes the stated meaning");
+      for (const response of [stated.response, corrected.response]) {
+        assert.deepEqual([response.data.measurement.source_derived_measurement_id, response.data.measurement.numerator, response.data.measurement.denominator, response.data.measurement.percentage],
+          [pairedMeasurement.source_derived_measurement_id, pairedMeasurement.numerator, pairedMeasurement.denominator, pairedMeasurement.percentage], "a meaning never changes the arithmetic");
+      }
+      assert.notEqual(corrected.response.data.evidenceItem.evidence_item_id, stated.response.data.evidenceItem.evidence_item_id, "a corrected meaning is new evidence");
+
+      // 3. Invalid: the form refuses an incomplete rate, and the server refuses a population on the numerator's field.
+      assert.ok(await setSelect(`${section} [data-client-derived-field="operation"]`, "rate"));
+      assert.ok(await setSelect(`${section} [data-client-derived-field="categoryFieldKey"]`, "field_6"));
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-problem]`)), "the form names what is missing");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)}).disabled`), true);
+      const basis = await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, null));
+      const status = basis.body.data.tabular.fields.find((field) => field.field_key === "field_6");
+      const attendedKey = status.values.find((value) => value.label === "attended").value_key;
+      const missedKey = status.values.find((value) => value.label === "missed").value_key;
+      assert.ok(await setSelect(`${section} [data-client-derived-field="categoryValueKey"]`, attendedKey));
+      assert.ok(await setSelect(`${section} [data-client-derived-field="populationFieldKey"]`, "field_6"));
+      assert.ok(await setSelect(`${section} [data-client-derived-field="populationValueKey"]`, missedKey));
+      // The form refuses it before sending; the server refuses the same body from the signed-in page.
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-problem]`)), "the form names the invalid population");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)}).disabled`), true);
+      const invalidProblem = await textOf(adminPage, `${section} [data-client-derived-problem]`);
+      const invalidResponse = await adminPage.api("POST", tabularMeasurementPath(ORG_X, sv, null), {
+        definition: { operation: "rate", conditions: [{ kind: "category", field_key: "field_6", value_key: attendedKey }], population: [{ kind: "category", field_key: "field_6", value_key: missedKey }] },
+      });
+      const refused = { status: invalidResponse.status, response: invalidResponse.body };
+      assert.deepEqual([refused.status, refused.response.blockers?.[0]?.blocking_reason], [422, "tabular_rate_population_same_field"]);
+
+      // 4. A valid rate (attended among all records) with its stated meaning.
+      assert.ok(await setSelect(`${section} [data-client-derived-field="populationFieldKey"]`, ""));
+      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="indicatorLabel"]`, "Attended sessions"));
+      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="meaningText"]`, "Sessions the learner attended."));
+      assert.ok(await setSelect(`${section} [data-client-derived-meaning="evidenceBasis"]`, "organization_record"));
+      mark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-derived-record-tabular]`, "Calculate and record");
+      await waitNotice(/Measurement recorded: \d+ \(\d+\.\d\d%\)/, "rate recorded");
+      await adminPage.idle();
+      const [rate] = await posts(mark);
+      assert.deepEqual([rate.path, rate.status], [tabularMeasurementPath(ORG_X, sv, null), 200]);
+      assert.deepEqual(rate.request, {
+        definition: { operation: "rate", conditions: [{ kind: "category", field_key: "field_6", value_key: attendedKey }], population: [] },
+        interpretation: { indicator_label: "Attended sessions", meaning_text: "Sessions the learner attended.", evidence_basis: "organization_record" },
+      });
+      const rateMeasurement = rate.response.data.measurement;
+      assert.deepEqual([rateMeasurement.numerator, rateMeasurement.denominator], [attended, rows.length - 1]);
+
+      // 5. Reload: both measurements, their meanings and limitations come back from the server.
+      await openCountRecords(sv);
+      const rateRow = `${section} [data-client-derived-recorded="${rateMeasurement.source_derived_measurement_id}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, rateRow)) && Boolean(await textOf(adminPage, recorded)), "recorded measurements after reload");
+      const limitations = async (row) => adminPage.evaluate(`[...document.querySelectorAll(${J(`${row} [data-client-derived-limitation]`)})].map((el) => el.getAttribute("data-client-derived-limitation"))`);
+      assert.ok((await limitations(recorded)).includes("derived.direction_human_stated"), "the corrected direction is current");
+      assert.ok((await limitations(recorded)).includes("derived.matched_subset_only"));
+      assert.ok((await limitations(rateRow)).includes("derived.measured_population_only"));
+      assert.match(await textOf(adminPage, `${recorded} [data-client-derived-meaning-state="stated"]`), /Learner confidence/);
+      assert.match(await textOf(adminPage, rateRow), new RegExp(`${attended} \\(${rateMeasurement.percentage}%\\)`));
+
+      // 6. Propose the paired outcome's claim from its current evidence; retrieve it and its traceability.
+      const evidenceId = corrected.response.data.evidenceItem.evidence_item_id;
+      mark = adminPage.mark();
+      await adminPage.clickIn(`${recorded} [data-client-derived-propose-claim="${evidenceId}"]`, "Propose a claim");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${recorded} [data-client-derived-claim]`)), "claim shown");
+      await adminPage.idle();
+      const [proposed] = (await posts(mark));
+      assert.deepEqual([proposed.path, [200, 201].includes(proposed.status)], [claimProposalPath(ORG_X, evidenceId), true]);
+      const claimId = proposed.response.data.claim.claim_id;
+      assert.ok(proposed.response.data.claim.statement.includes(`${pairedMeasurement.numerator} of ${pairedMeasurement.denominator}`), proposed.response.data.claim.statement);
+      const traced = await adminPage.api("GET", claimTraceabilityPath(ORG_X, claimId, "internal"));
+      assert.equal(traced.status, 200, J(traced.body));
+      assert.ok(J(traced.body.data).includes(claimId), "the traceability read is the proposed claim's");
+      assert.equal(typeof traced.body.data.eligible, "boolean");
+      const [link] = await query("SELECT c.evidence_item_id::text, e.source_version_id::text FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE c.claim_id = $1::uuid", [claimId]);
+      assert.deepEqual([link.evidence_item_id, link.source_version_id], [evidenceId, sv], "the claim cites the measurement's current evidence on this version");
+      // Evidence stated under the superseded meaning is no longer current.
+      const staleEvidence = stated.response.data.evidenceItem.evidence_item_id;
+      const staleClaim = await adminPage.api("POST", claimProposalPath(ORG_X, staleEvidence), {});
+      assert.ok(staleClaim.status >= 400, J(staleClaim.body));
+
+      // 7. Unauthorized: a contributor and another organization's administrator, from their own signed-in pages.
+      const before = (await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n;
+      const refusedBy = {};
+      for (const [label, legacyUserId] of [["contributor", USERS.contributor], ["other_organization_admin", USERS.adminY]]) {
+        const page = await openPage(browser, { baseUrl, legacyUserId });
+        try {
+          await page.goto("/impact-library");
+          refusedBy[label] = {
+            paired: (await page.api("POST", pairedOutcomeMeasurementsPath(ORG_X, sv, null), {})).status,
+            tabular: (await page.api("POST", tabularMeasurementPath(ORG_X, sv, null), { definition: { operation: "count" } })).status,
+            interpretation: (await page.api("POST", derivedMeasurementInterpretationPath(ORG_X, pairedMeasurement.source_derived_measurement_id),
+              { indicator_label: "Other", meaning_text: "Another meaning.", evidence_basis: "not_established" })).status,
+            basis: (await page.api("GET", derivedMeasurementBasisPath(ORG_X, sv, null))).status,
+          };
+        } finally {
+          await page.close();
+        }
+      }
+      for (const [label, statuses] of Object.entries(refusedBy)) {
+        for (const [action, statusCode] of Object.entries(statuses)) assert.ok(statusCode === 403 || statusCode === 404, `${label} ${action}: ${statusCode}`);
+      }
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n, before, "nothing was written");
+      results.measurementControls = { sourceVersionId: sv, paired: [pairedMeasurement.numerator, pairedMeasurement.denominator], rate: [rateMeasurement.numerator, rateMeasurement.denominator, rateMeasurement.percentage],
+        claimId, refusedBy, invalid: { form: invalidProblem, server: [refused.status, refused.response.blockers?.[0]?.blocking_reason] } };
     });
 
     await test("summary", async () => {

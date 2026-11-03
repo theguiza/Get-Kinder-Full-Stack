@@ -106,6 +106,7 @@ const FAMILY_LABELS = Object.freeze({
   paired_outcome_change: "Paired baseline/follow-up outcome",
   tabular_count: "Count",
   tabular_rate: "Rate",
+  cross_source_reach: "Linked reach (service events and participant register)",
 });
 
 export function measurementFamilyLabel(family) {
