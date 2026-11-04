@@ -46266,3 +46266,109 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 **Limitations (NOT_CONFIRMED):** the new lateral read-model SQL was not executed on PostgreSQL (no runner-owned database authorized); production file-to-source assignments, the targeted source version of the reported POST, and deployed behaviour were not observed. No push or deployment.
 
 **Status:** CEDAR_EXISTING_FILE_NO_EXTRACTABLE_EVIDENCE_REPAIRED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### Existing-file content to evidence: document-statement evidence from promoted PDF/TXT sources (2026-11-04)
+
+**Authorization (USER_CONFIRMED):** owner prompt "KAI — Continue the Existing-File Content-to-Evidence Implementation". It authorizes:
+- inspecting the narrative-document path;
+- implementing the demonstrated missing capability within the existing source, locator, evidence, claim and review model;
+- reconciling the November 4 extraction controls;
+- tests and local commits.
+
+During the session the owner separately approved (USER_CONFIRMED) one disposable, loopback-only local PostgreSQL cluster. It ran the full Plan A chain including the new migration, its rollback round trip, the November 4 read-model SQL and the document persistence, and was then destroyed. The same approval was applied to the existing disposable-cluster runners that apply the full chain. Excluded: production and shared databases, migrations outside disposable clusters, push, deploy, flags, tenants, credentials, browser automation and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `88c4aeda`, clean. Every Node/npm command used the non-listening loopback sentinel `DATABASE_URL`.
+
+**Condition established: C (TOOL_VERIFIED).** No operation converted profiled narrative content into evidence:
+- **Profiling stores no text.** The P1 profile of a PDF (mupdf worker) or TXT (`profileText`) keeps counts and redacted shapes only, with 0 dictionary fields.
+- **P2-01 has nothing to compose from.** It composes one `dictionary_field_presence_fact` per field.
+- **The schema refused every narrative shape.** Before this package it admitted only:
+  - `evidence_items_p2_01_evidence_type_check`: field presence, record count and derived measurement;
+  - `evidence_items_p2_01_data_class_check`: metadata and aggregate;
+  - `evidence_items_p2_01m_type_class_pairing_check`: pairings of those;
+  - `source_locators_p2_01_locator_type_check`: column, data records and derived fields;
+  - `source_locators_p2_01_coordinates_check`: no page, line or excerpt shape.
+- **P2-03 would mis-state a claim.** It composed every non-measurement claim from `coordinates.column_name`.
+- **88c4aeda read the field count as impossibility.** It treated `current_dictionary_field_count = 0` as "KAI cannot create evidence from its content".
+- **The entry points disagreed.**
+  - The Data Sources "Extract evidence" button was offered for every version, including earlier and zero-field ones.
+  - The Impact Evidence Library button reported "Evidence extracted: 0 evidence item(s)" for a zero-write call.
+
+**Implemented (TOOL_VERIFIED; commits `6aa00ea2`, `f3d4d174`, `c02a482b`):**
+1. **Content access.**
+   - A `text` operation in `pdfAssessorWorkerThread.js` runs only after the same `assessOpenedPdfDocument`. Encrypted, textless and active/embedded-content PDFs are refused.
+   - `runPdfTextWorkerBoundary` reuses the profiling boundary: identity check, 25 MB gate, single permit, fixed timeout and exact-shape validation, plus a 200-page / 1,000,000-character bound.
+   - `readTrustedTextLines` decodes TXT exactly as the profiler does.
+   - `parsing/documentContentReader.js` follows the cross-source worker: P1 share lock, eligibility facts, P1 exact-version byte source, and a sha256 check against the profiled checksum. Text never leaves the call and is never persisted except as selected excerpts.
+2. **Extraction (`validators/kaiDocumentEvidenceValidators.js`, pure and deterministic, no model).**
+   - Paragraphs come with locators: TXT line ranges; PDF page and the profiler's block numbering, with wrapped prose joined only when a block stops mid-sentence.
+   - Paragraphs (or sentence windows of at most 340 characters) are kept verbatim apart from whitespace.
+   - Excluded:
+     - incomplete or verbless text (headings, labels, table cells, running headers);
+     - instruction-like text (prompt injection);
+     - contact details, URLs and the statement-CHECK words;
+     - duplicates and over-long sentences.
+   - Signals and limitation codes come from the excerpt: source-reported, interpretation/guidance, uncertainty, self-reported.
+   - Assertion kind: reported fact, limitation, or interpretation/guidance.
+   - Statement: `Source document statement (<page/blocks | lines>, <sentences>): "<excerpt>"`. Locator: `document_text_span` coordinates (numbers, the excerpt SHA-256 and the method only).
+3. **Persistence.** `postgresDocumentEvidenceRepository.js`:
+   - It reads the profiled format first; non-document versions go to the unchanged P2-01.
+   - For a document it reuses the shared loader (lineage, currentness, permission predicate, effective allowed use, bound profile).
+   - It writes the locator, evidence item and P2-01 review queue item, with one required audit (`extract_document_statement_evidence`). Replay writes nothing.
+   - A schema without the new CHECK values gives outcome `document_evidence_not_enabled` with no byte read. No complete statement gives `no_supportable_statements` with no write.
+   - The existing `/evidence-extraction` service routes document versions here, so the promotion handoff, Use for impact and both direct buttons reach one operation. Authorization and tenant checks are unchanged and precede it.
+4. **Claims.** P2-03 validates that the evidence statement recomposes from the excerpt whose hash the locator binds (a tampered statement is refused). It states `Source-reported, not independently verified (<location>): "<excerpt>"`. The claim stays internal-only and needs_gk_review.
+5. **Availability.**
+   - `evidenceExtractionCapability` (document_statements / document_statements_not_enabled / field_presence / none / unknown) is computed from the format, the field count and a `pg_constraint` capability probe in both the pipeline read model and the Data Sources read.
+   - The pipeline reason `document_evidence_not_enabled` is added, and `no_extractable_evidence` is now limited to non-document zero-field sources.
+   - The Data Sources button appears only for current versions that can write, otherwise it shows a reason.
+   - All entry points share one result message. Use for impact stops after an extraction that returns no evidence.
+6. **Schema (written; applied only to disposable clusters).** `migrations/kai_sprint2_document_statement_evidence.sql` + rollback, appended to the Plan A chain. It widens exactly the five CHECKs above by one value or branch each and adds no table, column or row. The rollback refuses once document evidence exists.
+   - The P2-01M XLSX method verifier is now aware of this migration: with it installed, the four widened CHECKs are verified by behaviour; without it, the data-class CHECK must still match its pinned md5.
+   - The six-source runner rolls this migration back first.
+
+**Content proof (TOOL_VERIFIED; synthetic fixtures read from outside the repository).**
+- The original FY2025-26 PDF is still blocked: `pdf_active_or_embedded_content` at upload and in the text worker.
+- Operations Notes TXT: 29 statements. Expected line independently located in the raw file: "No independently verified employment records were obtained for this test period." It is persisted at `text_lines` line 26, inside the window that begins "A limited number of informal check-ins were attempted…", which keeps its population and limitation qualifiers. Its claim reads "Source-reported, not independently verified (line 26): …".
+- Verified survey PDF: 13 statements. The page was independently located with mupdf page text: page 3, "The Followups sheet describes selected participants contacted during February–March 2026. It is a convenience sample of attempted check-ins, not a census or a representative survey of the full registered cohort."
+  - The response-rate denominator statement keeps "29 answered / 38 attempted = 76.3%" with its nonresponse caveat.
+  - The verbless table cell "An improvement rate among all 80 registered people." (under "Not established by these surveys") is not extracted.
+- Programme Review PDF: 29 statements. The EB13 manager estimate is kept with "Internal working estimate", "Preliminary reach estimate requiring reconciliation" and "at least 100".
+- Section F's "They are not a grant of model-processing permission, a source-promotion decision or a reviewer approval." is evidence text, not an approval. All evidence stays needs_gk_review.
+
+**Verification (TOOL_VERIFIED).**
+- **Unit and spec:**
+  - `kai-document-statement-evidence.spec.js` 18/18 (mutations of the instruction screen and of the finite-verb rule each fail a test);
+  - `kai-existing-file-no-extractable-evidence.spec.js` 7/7, updated to document-aware states;
+  - PDF profiling boundary 5/5;
+  - Data Sources and client-admin DTO specs 36/36, with the new safe field `evidence_extraction_capability`.
+- **Full suite and checks:** `npm test` 6,050 tests, 5,925 pass, 0 fail, 125 skipped. `npm run verify:kai-sprint2-api-contract` 71/71. `npm run build` passed (bundle updated). `git diff --check` clean.
+- **Disposable PostgreSQL** (`scripts/kai-document-statement-evidence-local-postgres.js`, 11/11):
+  - 86 of the 88 chain migrations applied; the two production-history migrations refused as designed.
+  - XLSX method and derived verifiers OVERALL PASS with the migration applied.
+  - Rollback restored schema fingerprint `fae54b248227639620482ea312187384`; re-apply reproduced `6ce0ea58caa630d7b3736cf1deb5d0e8`.
+  - Phase A (rolled back), through the real intake, P1, Review Cockpit decisions and promotion: the November 4 pipeline SQL and the Data Sources SQL return `document_evidence_not_enabled` and not offered, and extraction writes nothing.
+  - Phase B (applied):
+    - pipeline ready, and the extraction route persists 71 statements under the real CHECKs;
+    - replay writes nothing, and the CSV field-presence response is unchanged;
+    - the real Impact Evidence Library lists the items as needs_gk_review;
+    - GK evidence review, then claim proposal and claim replay;
+    - an outsider gets 403; a non-current version gets 409 with no write;
+    - the rollback refuses with evidence present.
+- **Other disposable-cluster runners:**
+  - Cedar six-source 37/37.
+  - Plan A normal chain: 2/2, 43 tests (40 pass, 0 fail, 3 skipped), 4/4, "proof passed".
+  - P2-01M runner: verifiers PASS. Its main spec has 7 failures that are identical by name at `88c4aeda` in a clean worktree (pre-existing P2-06 public coverage, impact-facts and client Generated Drafts expectations).
+
+**Observed, not changed (TOOL_VERIFIED, pre-existing):** the PDF worker admits one PDF operation at a time. A PDF confirmed while another PDF is being profiled reaches `pre_assessment_failure` and is left pending with the existing "retry security check" action. The same applies to a document extraction during a PDF operation; that now returns `document_text_temporarily_unavailable`, a try-again message with no write.
+
+**Limitations (NOT_RUN / NOT_CONFIRMED):**
+- The customer XLSX runner needs a local Chrome (NOT_RUN).
+- The new migration is not applied to production; the pgAdmin packet and its verifier md5 are not built.
+- Production file mapping, deployed behaviour and the user experience are not observed.
+- A zero-statement document is offered extraction again after a reload; it writes nothing and says why.
+- The extractor is lexical: it may admit a rare verb-bearing table fragment, or drop a statement written without a recognised verb.
+- MD stays on field presence (heading `column` facts), as decided earlier.
+- Narrative statements reach internal use only through Get Kinder's evidence, claim and coverage review. No conflict-candidate route was added.
+
+**Status:** DOCUMENT_STATEMENT_EVIDENCE_IMPLEMENTED_AND_VERIFIED_ON_DISPOSABLE_POSTGRESQL; MIGRATION_NOT_APPLIED_OUTSIDE_DISPOSABLE_CLUSTERS; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
