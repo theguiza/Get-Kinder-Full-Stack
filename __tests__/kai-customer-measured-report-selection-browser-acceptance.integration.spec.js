@@ -37,7 +37,7 @@ import { join } from "node:path";
  *   this process to a deterministic response;
  * - KAI_PUBLIC_EXPORT_ENABLED=true in this test process only;
  * - the stale-source refusal flips source_versions.is_current (no application
- *   operation supersedes a source version).
+ *   operation is used for this deliberately inconsistent-state negative).
  */
 
 const RUNNER_DATABASE_URL = process.env.KAI_CLIENT_BROWSER_ACCEPTANCE_DATABASE_URL;
@@ -928,7 +928,7 @@ async function runBrowserAcceptance() {
       });
       assert.equal(funder.status, 403, JSON.stringify(funder.body));
       outcomes.funderGeneration = funder.status;
-      // Injected state (labeled): no application operation supersedes a source version.
+      // Injected orphaned non-current state (no successor), restored below. The final test exercises actual successor promotion.
       await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       const stale = await fetchText(adminPage, path);
       assert.equal(stale.status, 409, stale.body);
@@ -1576,6 +1576,89 @@ async function runBrowserAcceptance() {
         acceptance: "Knowledge Studio generation/save/read and client released receipt PASS; GK review/release exercised at API boundary", screenshots: ["01-action-group.png", "02-saved-assessment.png", "03-released-assessment.png"] };
       writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2));
       console.log(`[knowledge-studio-assessment] ${JSON.stringify(proof)}`);
+    });
+    await test("Source currentness: independent files stay current; explicit replacement preserves history, prevents stale selection and repeated 409s, and current findings still generate", async () => {
+      const [original] = await query("SELECT source_id::text, is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
+      assert.equal(original.is_current, true);
+      const independent = await seedProfiledFile({ fileId: "21000000-0000-4000-8000-0000000000e6", filename: "independent-sessions.csv", checksumChar: "7" });
+      const independentCandidate = await reachReviewableSourceCandidate(independent.sensitivityProfileId);
+      assert.equal((await gkReviewerPage.api("POST", decisionPath(independentCandidate), { outcome: "promoted", reviewed_source_type: "organization_primary_record" })).status, 200);
+      const [separateVersion] = await query("SELECT source_id::text, source_version_id::text, is_current FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [independentCandidate]);
+      assert.equal(separateVersion.is_current, true);
+      assert.notEqual(separateVersion.source_id, original.source_id, "an independent upload does not merge source histories");
+      assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [ids.sourceVersionId]))[0].is_current, true);
+      // Keep a valid selection open while another authorized operation replaces
+      // its source. The subsequent write must diagnose the read/write race.
+      await openDataSources(PROJECT_X2);
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${ids.claimId}"] input[type=checkbox]`)) !== null, "the current original claim");
+      await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Select before source replacement");
+      const draftsBeforeRace = await draftIds();
+      const modelCallsBeforeRace = modelCalls.length;
+      const corrected = await seedProfiledFile({ fileId: "21000000-0000-4000-8000-0000000000e7", filename: "corrected-sessions.csv", checksumChar: "8" });
+      const correctedCandidate = await reachReviewableSourceCandidate(corrected.sensitivityProfileId);
+      const replaced = await gkReviewerPage.api("POST", decisionPath(correctedCandidate), { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: ids.sourceVersionId });
+      assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+      const [successor] = await query("SELECT source_id::text, source_version_id::text, is_current FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [correctedCandidate]);
+      assert.equal(successor.source_id, original.source_id);
+      assert.equal(successor.is_current, true);
+      const [old] = await query(`SELECT sv.is_current, f.upload_state, f.file_policy_status FROM kai.source_versions sv
+        JOIN kai.intake_source_candidates c ON c.intake_source_candidate_id = sv.intake_source_candidate_id AND c.organization_id = sv.organization_id
+        JOIN kai.intake_files f ON f.intake_file_id = c.intake_file_id AND f.organization_id = c.organization_id
+        WHERE sv.source_version_id = $1::uuid`, [ids.sourceVersionId]);
+      assert.deepEqual(old, { is_current: false, upload_state: "confirmed", file_policy_status: "passed" }, "a retained valid upload and a retired governed version are distinct");
+      const [audit] = await query(`SELECT count(*)::int AS count FROM kai.audit_events WHERE organization_id = $1::uuid
+        AND reason_code = 'source_version_superseded' AND metadata->>'superseded_source_version_id' = $2`, [ORG_X, ids.sourceVersionId]);
+      assert.equal(audit.count, 1);
+      const raceMark = adminPage.mark();
+      await adminPage.clickButton("Generate Free Impact Assessment");
+      await adminPage.waitFor(async () => /recorded as non-current/.test(await textOf(adminPage, "[data-client-workflow-notice]") || ""), "the precise currentness failure after the source changed");
+      await adminPage.idle();
+      assert.equal(adminPage.requestsSince(raceMark).find((entry) => entry.method === "POST" && entry.url.endsWith("/generated-content-drafts/free-impact-assessment"))?.status, 409);
+      assert.deepEqual(await draftIds(), draftsBeforeRace);
+      assert.equal(modelCalls.length, modelCallsBeforeRace);
+      assert.equal(await textOf(adminPage, `[data-client-claim="${ids.claimId}"] input[type=checkbox]`), null, "the fresh diagnostic prevents another stale submission");
+      const stale = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
+      assert.deepEqual([stale.status, stale.body.data.traceability_conflict_reason], [409, "source_version_not_current"]);
+      const refused = await adminPage.api("POST", `${BASE_PATH}/admin/organizations/${ORG_X}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: [ids.claimId], engagement_id: PROJECT_X2, idempotency_key: "source-currentness-old-still-refused",
+      });
+      assert.equal(refused.status, 409, "a direct request cannot promote stale lineage to current");
+      const row = `[data-client-claim="${ids.claimId}"]`;
+      const auditCount = async () => (await query("SELECT count(*)::int AS count FROM kai.audit_events"))[0].count;
+      const beforeReads = await auditCount();
+      for (let reload = 0; reload < 2; reload++) {
+        const mark = adminPage.mark();
+        await openDataSources(PROJECT_X2);
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, row)), "the retained claim");
+        await adminPage.idle();
+        assert.match(await textOf(adminPage, row), /recorded as non-current/);
+        assert.doesNotMatch(await textOf(adminPage, row), /has been replaced by a newer version/);
+        assert.equal(await textOf(adminPage, `${row} input[type=checkbox]`), null, "non-current claims cannot poison draft selection");
+        assert.equal(await textOf(adminPage, `[data-client-claim-gap-followups="${ids.claimId}"]`), null, "gap generation cannot fix a source version");
+        assert.equal(adminPage.requestsSince(mark).filter((entry) => entry.url.includes(`/claims/${ids.claimId}/traceability?`)).length, 0, "the authoritative currentness read avoids redundant failing diagnostic requests");
+      }
+      assert.equal(await auditCount(), beforeReads, "repeated reads never repair or approve state");
+      const measured = await adminPage.api("POST", sourceRecordCountMeasurementPath(ORG_X, successor.source_version_id), measurementDefinitionBody({
+        countedUnit: "programme session", unitLabel: "programme sessions", definitionText: "Each row of the session log records one delivered programme session.",
+        inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
+        periodStart: "2026-09-01", periodEnd: "2026-09-30",
+      }));
+      created(measured, "current-version measurement");
+      const [measurement] = await query("SELECT evidence_item_id::text FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [successor.source_version_id]);
+      const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, measurement.evidence_item_id), {});
+      created(proposed, "current-version claim");
+      const currentClaimId = proposed.body.data.claim.claim_id;
+      await openDataSources(PROJECT_X2);
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${currentClaimId}"] input[type=checkbox]`)) !== null, "the current finding");
+      await adminPage.clickIn(`[data-client-claim="${currentClaimId}"] input[type=checkbox]`, "Select the current finding");
+      const mark = adminPage.mark();
+      const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created");
+      const sent = adminPage.requestsSince(mark).find((entry) => entry.method === "POST" && entry.url.endsWith("/generated-content-drafts/free-impact-assessment"));
+      assert.deepEqual(JSON.parse(sent.postData).claim_ids, [currentClaimId]);
+      assert.deepEqual([...new Set((await draftState(draftId)).cited_claim_ids)], [currentClaimId]);
+      assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [separateVersion.source_version_id]))[0].is_current, true);
+      assert.deepEqual(adminPage.exceptions, []);
+      console.log(`[source-currentness-proof] ${JSON.stringify({ retainedUpload: old, originalVersion: ids.sourceVersionId, independentVersion: separateVersion.source_version_id, successor, staleStatus: stale.status, supersessionAudits: audit.count, currentClaimId, draftId, reloadsWithoutDiagnostic409: 2 })}`);
     });
   } finally {
     await browser.close();

@@ -448,13 +448,18 @@ test("stale source versions and other known conflicts are never labelled as miss
     assert.deepEqual(diagnosis, { status: "blocked", claimId: CLAIM, reason }, reason);
     const text = internalDraftFailureMessage(generationRefusal, { canGenerateGapFollowups: true, diagnosis, claimLabel: "Sessions delivered" });
     assert.doesNotMatch(text, /Generate gap follow-ups/, reason);
-    assert.match(text, new RegExp(`\\(${reason}\\)\\. Ask Get Kinder to reconcile it\\. Nothing was created\\.$`), reason);
+    if (reason === "source_version_not_current") {
+      assert.match(text, /recorded as non-current.*source-version history needs investigation.*Nothing was created/);
+      assert.doesNotMatch(text, /Ask Get Kinder to reconcile it/);
+    } else {
+      assert.match(text, new RegExp(`\\(${reason}\\)\\. Ask Get Kinder to reconcile it\\. Nothing was created\\.$`), reason);
+    }
   }
   const stale = internalDraftFailureMessage(generationRefusal, {
     canGenerateGapFollowups: true,
     diagnosis: internalDraftTraceabilityDiagnosis([{ claimId: CLAIM, result: conflictRead("source_version_not_current") }]),
   });
-  assert.match(stale, /^A selected claim cannot be drafted from: the source version its evidence comes from has been replaced by a newer version/);
+  assert.match(stale, /^A selected claim cannot be drafted from: the source version its evidence comes from is recorded as non-current/);
 });
 
 test("unknown or unavailable traceability failures receive a neutral message", () => {

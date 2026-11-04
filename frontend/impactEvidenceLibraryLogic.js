@@ -2657,6 +2657,7 @@ export function projectCandidateClaims(dto) {
     evidenceReviewStatus: claim.evidenceReviewStatus ?? null,
     evidenceSourceId: claim.evidenceSourceId ?? null,
     evidenceSourceVersionId: claim.evidenceSourceVersionId ?? null,
+    evidenceSourceVersionIsCurrent: claim.evidenceSourceVersionIsCurrent ?? null,
     evidenceInternalOnly: claim.evidenceInternalOnly ?? null,
     evidencePublicUseAllowed: claim.evidencePublicUseAllowed ?? null,
     evidenceFunderUseAllowed: claim.evidenceFunderUseAllowed ?? null,

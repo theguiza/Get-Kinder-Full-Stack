@@ -118,6 +118,7 @@ function responseClaimCandidate(row, organizationId, { clientProjection = false 
     || !isOptionalMachineToken(row.evidence_review_status ?? null)
     || !isOptionalUuid(row.evidence_source_id ?? null)
     || !isOptionalUuid(row.evidence_source_version_id ?? null)
+    || !isOptionalBoolean(row.evidence_source_version_is_current ?? null)
     || !isOptionalBoolean(row.evidence_internal_only ?? null)
     || !isOptionalBoolean(row.evidence_public_use_allowed ?? null)
     || !isOptionalBoolean(row.evidence_funder_use_allowed ?? null)
@@ -148,6 +149,7 @@ function responseClaimCandidate(row, organizationId, { clientProjection = false 
     evidenceReviewStatus: row.evidence_review_status ?? null,
     evidenceSourceId: row.evidence_source_id ?? null,
     evidenceSourceVersionId: row.evidence_source_version_id ?? null,
+    evidenceSourceVersionIsCurrent: row.evidence_source_version_is_current ?? null,
     evidenceInternalOnly: row.evidence_internal_only ?? null,
     evidencePublicUseAllowed: row.evidence_public_use_allowed ?? null,
     evidenceFunderUseAllowed: row.evidence_funder_use_allowed ?? null,

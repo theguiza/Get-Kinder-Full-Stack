@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   claimGapFollowupsPath,
@@ -40,6 +40,7 @@ import {
   claimsToDiagnose,
   claimProposalResultMessage,
   claimSelectabilityMessage,
+  claimSourceVersionUnavailable,
   extractionResultMessage,
   gapFollowupFailureMessage,
   gapFollowupResultMessage,
@@ -246,11 +247,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   // usable (to say why). Read-only; cleared on every refresh and organization.
   const [diagnostics, setDiagnostics] = useState({ key: "", byClaim: new Map() });
   const diagnosticsKey = `${organizationId}:${refreshToken}`;
-  const claimDiagnostics = diagnostics.key === diagnosticsKey ? diagnostics.byClaim : new Map();
+  const claimDiagnostics = useMemo(() => diagnostics.key === diagnosticsKey ? diagnostics.byClaim : new Map(), [diagnostics, diagnosticsKey]);
   const diagnoseClaims = useCallback(async (claimIds) => {
     const key = diagnosticsKey;
+    const reads = [];
     for (const claimId of claimIds) {
       const result = await getJson(claimTraceabilityPath(organizationId, claimId, "internal"));
+      reads.push({ claimId, result });
       const diagnosis = claimUseDiagnosis(result);
       setDiagnostics((current) => {
         if (current.key !== key && current.key !== "") return current;
@@ -259,6 +262,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         return { key, byClaim };
       });
     }
+    return reads;
   }, [organizationId, diagnosticsKey]);
   const diagnosedOnceRef = useRef(new Set());
   useEffect(() => {
@@ -277,10 +281,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     // claimDiagnostics/internalUseIndex are derived from the listed state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [access.readClaimTraceabilityDiagnostics, claims.status, claims.items, internalUse.status, selectedClaimIds, diagnoseClaims]);
-  const useOfClaim = (claimId) => claimInternalUse(claimId, internalUseIndex, claimDiagnostics);
+  const useOfClaim = (claimId) => claimSourceVersionUnavailable(claims.items.find((claim) => claim.claimId === claimId), claimDiagnostics.get(claimId))
+    ? "not_usable" : claimInternalUse(claimId, internalUseIndex, claimDiagnostics);
   useEffect(() => {
-    if (claims.status === "success") setSelectedClaimIds((current) => retainSelectableClaimIds(current, claims.items));
-  }, [claims.status, claims.items]);
+    if (claims.status === "success") setSelectedClaimIds((current) => retainSelectableClaimIds(current, claims.items, claimDiagnostics));
+  }, [claims.status, claims.items, claimDiagnostics]);
 
   const runWrite = useCallback(async (label, path, body, onSuccess, failureText = errorText) => {
     const requestContext = contextRef.current;
@@ -321,13 +326,14 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const unadmittedClaimIds = claims.items
     .filter((claim) => !claimDraftAdmitted(claim, claimDiagnostics.get(claim.claimId)))
     .map((claim) => claim.claimId);
+  const unavailableSourceClaimIds = claims.items.filter((claim) => claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))).map((claim) => claim.claimId);
   const readiness = internalDraftReadiness({
     canGenerate: access.generateDrafts, engagementId, selectedClaimIds,
-    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unadmittedClaimIds,
+    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unadmittedClaimIds, unavailableSourceClaimIds,
   });
   const assessmentReadiness = internalDraftReadiness({
     canGenerate: access.generateDrafts, engagementId, selectedClaimIds,
-    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete,
+    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unavailableSourceClaimIds,
   });
   const kindOfClaim = (claimId) => claimKind(claims.items.find((claim) => claim.claimId === claimId));
   const selectionUse = selectionReportUsability(selectedClaimIds, useOfClaim, kindOfClaim);
@@ -335,13 +341,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   // Read-only: one client-safe internal traceability GET per selected claim.
   const explainDraftFailure = async (result, claimIds) => {
     const canGenerateGapFollowups = access.generateClaimGapFollowups;
-    if (!isInternalDraftTraceabilityRefusal(result) || access.readClaimTraceabilityDiagnostics !== true) {
+    const stateConflict = result?.statusCode === 409 && result?.body?.error?.code === "conflict_current_state_changed";
+    if ((!isInternalDraftTraceabilityRefusal(result) && !stateConflict) || access.readClaimTraceabilityDiagnostics !== true) {
       return internalDraftFailureMessage(result, { canGenerateGapFollowups });
     }
-    const reads = [];
-    for (const claimId of claimIds) {
-      reads.push({ claimId, result: await getJson(claimTraceabilityPath(organizationId, claimId, "internal")) });
-    }
+    const reads = await diagnoseClaims(claimIds);
     const diagnosis = internalDraftTraceabilityDiagnosis(reads);
     const claim = claims.items.find((item) => item.claimId === diagnosis.claimId);
     return internalDraftFailureMessage(result, {
@@ -772,7 +776,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           Measured findings come first: a report needs at least one. Structural facts only say which columns a source has and are not
           offered as impact findings. Using a claim here does not approve it for funders or the public.
           {access.generateClaimGapFollowups
-            ? " Generate a claim's gap follow-ups before drafting from it; they record open questions and resolve nothing."
+            ? " Draft generation evaluates missing claim gaps automatically; it does not approve the claim."
             : null}
         </div>
         {claims.status === "loading" ? <div className="text-muted small">Loading claims...</div> : null}
@@ -781,10 +785,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         {claims.status === "success" && claims.items.length > 0 ? (
           <ul className="list-group">
             {orderedClaims.map((claim) => {
-              const selectability = claimInternalDraftSelectability(claim);
+              const selectability = claimInternalDraftSelectability(claim, claimDiagnostics.get(claim.claimId));
               const kind = claimKind(claim);
               const use = useOfClaim(claim.claimId);
-              const diagnosis = claimDiagnostics.get(claim.claimId);
+              const diagnosis = claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))
+                ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
               return (
                 <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}
                   data-client-claim-kind={kind} data-client-claim-internal-use={use}>
@@ -826,7 +831,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                     </button>
                   ) : null}
                   {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
-                  {access.reviewMeasuredClaimFactualContent && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
+                  {access.reviewMeasuredClaimFactualContent && !claimSourceVersionUnavailable(claim, diagnosis) && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
                     <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
                       onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
                       {use === "not_usable" ? "View review status" : "View measurement"}

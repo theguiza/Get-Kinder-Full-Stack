@@ -171,7 +171,7 @@ test("a claim omitted from a truncated impact-facts read is resolved by its own 
   // The actual condition is named; review wording appears only for a review blocker, with the ordinary rule beside it.
   assert.match(claimNotUsableMessage(blocked), /^Not usable in internal reports now: the ordinary record-count rule does not cover it/);
   assert.match(claimNotUsableMessage(blocked), /Processing permissions/);
-  assert.match(claimNotUsableMessage(stale), /replaced by a newer version/);
+  assert.match(claimNotUsableMessage(stale), /recorded as non-current/);
   const followup = { status: "not_usable", blockerCodes: ["client_followup_unresolved"], conflictReason: null };
   assert.match(claimNotUsableMessage(followup), /follow-up question about it is unanswered\.$/);
   assert.doesNotMatch(claimNotUsableMessage(followup), /Get Kinder/, "no review request where a review would not resolve the condition");
@@ -353,4 +353,55 @@ test("UI wiring: library reads keep completeness and continue from the cursor; p
   assert.match(drafts, /isStructuralOnlyDraft\(draft\)/);
   assert.doesNotMatch(drafts, /claim review: \$\{/);
   assert.match(drafts, /const nextActions = structuralOnly \? \[\] : internalDraftFactualReviewNextActions\(view\.blockedReasons\);/);
+});
+
+test("a recorded non-current source remains visible but cannot be selected, queued for redundant diagnostics, or submitted for an assessment", () => {
+  for (const type of ["source_record_count_measurement", "source_derived_measurement", "source_document_statement"]) {
+    const old = claim(21, type, { evidenceSourceVersionIsCurrent: false });
+    const current = claim(22, type, { evidenceSourceVersionIsCurrent: true });
+    assert.deepEqual(claimInternalDraftSelectability(old), { selectable: false, reason: "source_version_not_current" });
+    assert.equal(claimInternalDraftSelectability(current).selectable, true);
+    assert.deepEqual(claimsToDiagnose({ claims: [old, current], impactFacts: null }), [current.claimId]);
+    assert.deepEqual(retainSelectableClaimIds([old.claimId, current.claimId], [old, current]), [current.claimId]);
+    assert.equal(claimDraftAdmitted(old, null), false);
+    assert.deepEqual(internalDraftReadiness({ canGenerate: true, engagementId: ENGAGEMENT,
+      selectedClaimIds: [old.claimId, current.claimId], claims: [old, current] }), { ready: false, reason: "source_version_not_current" });
+    assert.doesNotMatch(claimSelectabilityMessage("source_version_not_current"), /has been replaced/);
+  }
+});
+
+test("a fresh stale-source diagnostic overrides an earlier current list read without granting eligibility to current or unknown versions", () => {
+  const diagnostic = { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" };
+  const current = { ...MEASURED, evidenceSourceVersionIsCurrent: true };
+  assert.equal(claimInternalDraftSelectability(current, diagnostic).selectable, false);
+  assert.equal(claimDraftAdmitted(current, diagnostic), false);
+  assert.deepEqual(retainSelectableClaimIds([current.claimId], [current], new Map([[current.claimId, diagnostic]])), []);
+  assert.deepEqual(internalDraftReadiness({ canGenerate: true, engagementId: ENGAGEMENT,
+    selectedClaimIds: [current.claimId], claims: [current], unavailableSourceClaimIds: [current.claimId] }), { ready: false, reason: "source_version_not_current" });
+  const unknown = { ...current, evidenceSourceVersionIsCurrent: null };
+  assert.deepEqual(claimsToDiagnose({ claims: [unknown], impactFacts: null }), [unknown.claimId]);
+  assert.equal(claimInternalUse(current.claimId, null), "unknown", "being current does not establish factual eligibility");
+});
+
+test("the Claim Library preserves Boolean source currentness through the client projection and refuses a malformed flag", async () => {
+  const actorContext = { actorType: "human", actorUserId: id(900),
+    organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active" }] };
+  const row = (n, flag) => ({ claim_id: id(n), organization_id: ORG, evidence_item_id: id(100+n), claim_type: "finding", claim_status: "proposed",
+    claim_review_status: "needs_gk_review", claim_strength: "unassessed", review_queue_items: [], evidence_source_version_is_current: flag });
+  const result = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
+    env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, false), row(2, true), row(3, null)],
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(projectCandidateClaims(result.data).map((item) => item.evidenceSourceVersionIsCurrent), [false, true, null]);
+  const malformed = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
+    env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, "false")],
+  });
+  assert.equal(malformed.error.code, "system_error");
+});
+
+
+test("a generation conflict is explained only from its fresh authoritative diagnostic", () => {
+  const result = { statusCode: 409, body: { error: { code: "conflict_current_state_changed", message: "Current resource state changed." } } };
+  assert.match(internalDraftFailureMessage(result, { diagnosis: { status: "blocked", claimId: MEASURED.claimId, reason: "source_version_not_current" } }), /recorded as non-current.*source-version history needs investigation/);
+  assert.equal(internalDraftFailureMessage(result, { diagnosis: { status: "unknown" } }), "Current resource state changed.");
 });

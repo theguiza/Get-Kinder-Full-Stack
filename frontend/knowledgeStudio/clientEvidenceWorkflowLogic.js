@@ -65,10 +65,15 @@ export function claimKind(claim) {
   return "other";
 }
 
-export function claimInternalDraftSelectability(claim) {
+export function claimSourceVersionUnavailable(claim, diagnosis) {
+  return claim?.evidenceSourceVersionIsCurrent === false || diagnosis?.conflictReason === "source_version_not_current";
+}
+
+export function claimInternalDraftSelectability(claim, diagnosis) {
   if (!isRouteUuid(claim?.claimId) || !isRouteUuid(claim?.evidenceItemId)) {
     return { selectable: false, reason: "invalid_claim" };
   }
+  if (claimSourceVersionUnavailable(claim, diagnosis)) return { selectable: false, reason: "source_version_not_current" };
   if (claim.claimStrength === TERMINAL_NOT_SUPPORTED) return { selectable: false, reason: "reviewed_not_supported" };
   if (claimKind(claim) === "structural") return { selectable: false, reason: "structural_fact" };
   return { selectable: true, reason: null };
@@ -79,7 +84,7 @@ export function claimInternalDraftSelectability(claim) {
 // when none exists the customer is sent to Count records instead of drafting
 // from metadata. "None exists" is concluded only from a complete read
 // (`claimsComplete`); claims not loaded yet are unknown, never absent.
-export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds, claims, claimsComplete = true, unadmittedClaimIds = [] }) {
+export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds, claims, claimsComplete = true, unadmittedClaimIds = [], unavailableSourceClaimIds = [] }) {
   if (canGenerate !== true) return { ready: false, reason: "not_authorized" };
   if (!isRouteUuid(engagementId)) return { ready: false, reason: "no_project" };
   const substantive = Array.isArray(claims)
@@ -90,6 +95,8 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
   }
   if (!Array.isArray(selectedClaimIds) || selectedClaimIds.length === 0) return { ready: false, reason: "no_claims_selected" };
   if (substantive && !selectedClaimIds.some((claimId) => substantive.has(claimId))) return { ready: false, reason: "no_measured_claim_selected" };
+  if (selectedClaimIds.some((id) => unavailableSourceClaimIds.includes(id)
+    || (Array.isArray(claims) && claims.some((claim) => claim.claimId === id && claimSourceVersionUnavailable(claim))))) return { ready: false, reason: "source_version_not_current" };
   if (selectedClaimIds.length > 20) return { ready: false, reason: "too_many_claims" };
   if (selectedClaimIds.some((claimId) => unadmittedClaimIds.includes(claimId))) return { ready: false, reason: "measured_claim_not_usable" };
   return { ready: true, reason: null };
@@ -100,12 +107,14 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
 // P2-06 evaluation says in advance that it is not. A missing P2-04 state is
 // not determinate: generation records it itself before evaluating.
 export function claimDraftAdmitted(claim, diagnosis) {
+  if (claimSourceVersionUnavailable(claim, diagnosis)) return false;
   if (claimKind(claim) !== "measurement" || diagnosis?.status !== "not_usable") return true;
   return diagnosis.blockerCodes.includes("p204_evaluation_required")
     || (diagnosis.blockerCodes.length === 0 && diagnosis.conflictReason === "gap_dimension_requires_missing_p204_state");
 }
 
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
+  source_version_not_current: "A selected claim uses a source version recorded as non-current. Select findings from a current source version. If this file should still be current, its source-version history needs investigation.",
   not_authorized: "Your role does not include internal draft generation for this organization.",
   no_project: "Select a Project above: each draft belongs to one Project.",
   no_measured_claim: "No measured finding yet. In Data Sources, use Count records on your source to record what one record represents and its "
@@ -123,6 +132,7 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
 });
 
 export function claimSelectabilityMessage(reason) {
+  if (reason === "source_version_not_current") return "This claim's source version is recorded as non-current. It is kept for reference and cannot be used in a new draft. Select a finding from the current version; if this file should still be current, its source-version history needs investigation.";
   if (reason === "reviewed_not_supported") return "Get Kinder review found this claim not supported, so it cannot be used in a draft.";
   if (reason === "structural_fact") {
     return "Structural fact: it says a source has this column, not a measured result, so it is not offered as an impact finding.";
@@ -178,7 +188,7 @@ export function claimUseDiagnosis(result) {
 export function claimsToDiagnose({ claims, impactFacts, diagnostics, selectedClaimIds = [], limit = 25 }) {
   const known = diagnostics instanceof Map ? diagnostics : new Map();
   const wanted = (Array.isArray(claims) ? claims : [])
-    .filter((claim) => isRouteUuid(claim?.claimId) && !known.has(claim.claimId))
+    .filter((claim) => isRouteUuid(claim?.claimId) && !known.has(claim.claimId) && !claimSourceVersionUnavailable(claim))
     .filter((claim) => (claimKind(claim) !== "structural" || selectedClaimIds.includes(claim.claimId))
       && claimInternalUse(claim.claimId, impactFacts) !== "usable")
     .map((claim) => claim.claimId);
@@ -300,9 +310,9 @@ export function claimIdsByEvidenceItem(claims) {
 }
 
 // Drops selections the current claim list no longer admits.
-export function retainSelectableClaimIds(selectedClaimIds, claims) {
+export function retainSelectableClaimIds(selectedClaimIds, claims, diagnostics = null) {
   const admitted = new Set((Array.isArray(claims) ? claims : [])
-    .filter((claim) => claimInternalDraftSelectability(claim).selectable)
+    .filter((claim) => claimInternalDraftSelectability(claim, diagnostics?.get(claim.claimId)).selectable)
     .map((claim) => claim.claimId));
   return (Array.isArray(selectedClaimIds) ? selectedClaimIds : []).filter((claimId) => admitted.has(claimId));
 }
@@ -364,7 +374,7 @@ export function isInternalDraftTraceabilityRefusal(result) {
 // Only a missing P2-04 state is fixed by generating gap follow-ups.
 const TRACEABILITY_CONFLICT_EXPLANATIONS = Object.freeze({
   gap_dimension_requires_missing_p204_state: "its coverage gap follow-ups have not been generated yet",
-  source_version_not_current: "the source version its evidence comes from has been replaced by a newer version",
+  source_version_not_current: "the source version its evidence comes from is recorded as non-current",
   gap_followup_queue_mismatch: "its recorded gap follow-ups no longer match its current evidence",
   claim_evidence_link_mismatch: "its link to its evidence is not consistent",
   conflict_queue_count_mismatch: "its potential-conflict review records are not consistent",
@@ -399,7 +409,9 @@ export function internalDraftTraceabilityDiagnosis(reads) {
 // diagnosis above when one is available, and neutrally otherwise; only a
 // missing P2-04 state is answered with "Generate gap follow-ups".
 export function internalDraftFailureMessage(result, { canGenerateGapFollowups = false, diagnosis = null, claimLabel = "" } = {}) {
-  if (isInternalDraftTraceabilityRefusal(result)) {
+  const diagnosedStateConflict = result?.statusCode === 409
+    && result?.body?.error?.code === "conflict_current_state_changed" && diagnosis?.status === "blocked";
+  if (isInternalDraftTraceabilityRefusal(result) || diagnosedStateConflict) {
     if (diagnosis?.status !== "blocked") {
       return "A selected claim did not pass its traceability checks, so no draft was created. "
         + "The reason is not available here.";
@@ -413,6 +425,10 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
           ? "Use \"Generate gap follow-ups\" on that claim, then try again. "
           : "Get Kinder must generate them first. ")
         + "Nothing was created.";
+    }
+    if (diagnosis.reason === "source_version_not_current") {
+      return `${label} cannot be drafted from: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.reason]} (source_version_not_current). `
+        + "Select a finding from the current version. If this file should still be current, its source-version history needs investigation. Nothing was created.";
     }
     if (diagnosis.reason) {
       return `${label} cannot be drafted from: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.reason]} `
@@ -685,7 +701,7 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   story_testimonial_not_cleared: "A cited source is not recorded as free of stories or testimonials.",
   small_cell_risk_not_cleared: "A cited source is not recorded as free of small-cell re-identification risk.",
   cited_claims_not_currently_eligible: "At least one cited claim is not currently eligible for internal use.",
-  source_version_not_current: "A cited source has been replaced by a newer version.",
+  source_version_not_current: "A cited source version is recorded as non-current.",
   processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
 
@@ -709,7 +725,7 @@ export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved 
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
   cited_claims_not_currently_eligible: "Each cited claim's current condition is shown on it under Claims for internal drafts. A new draft from claims "
     + "marked \"Usable in internal reports now\" is usable immediately; this draft becomes available only once every claim it cites is usable.",
-  source_version_not_current: "Ask Get Kinder to reconcile the cited source version, then reload this draft.",
+  source_version_not_current: "Use findings from a current source version in a new draft. If the cited file should still be current, investigate its source-version history.",
   processing_permission_not_established: "Ask Get Kinder to review the cited source's current processing permission, then reload this draft.",
 });
 

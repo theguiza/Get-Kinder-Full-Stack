@@ -32,6 +32,7 @@ export async function listClaimLibraryReviewCandidates(
             e.evidence_review_status AS evidence_review_status,
             e.source_id::text AS evidence_source_id,
             e.source_version_id::text AS evidence_source_version_id,
+            sv.is_current AS evidence_source_version_is_current,
             e.internal_only AS evidence_internal_only,
             e.public_use_allowed AS evidence_public_use_allowed,
             e.funder_use_allowed AS evidence_funder_use_allowed,
@@ -59,12 +60,16 @@ export async function listClaimLibraryReviewCandidates(
        LEFT JOIN kai.evidence_items e
          ON e.evidence_item_id = c.evidence_item_id
         AND e.organization_id = c.organization_id
+       LEFT JOIN kai.source_versions sv
+         ON sv.organization_id = e.organization_id
+        AND sv.source_id = e.source_id
+        AND sv.source_version_id = e.source_version_id
       WHERE c.organization_id = $1::uuid
         ${cursorClause}
       GROUP BY c.claim_id, c.organization_id, c.evidence_item_id, c.claim_type,
                c.claim_status, c.claim_review_status, c.claim_strength, c.statement,
                e.statement, e.evidence_type, e.support_strength, e.evidence_review_status,
-               e.source_id, e.source_version_id, e.internal_only,
+               e.source_id, e.source_version_id, sv.is_current, e.internal_only,
                e.public_use_allowed, e.funder_use_allowed
       ORDER BY claim_id ASC
       LIMIT $2::int`,
