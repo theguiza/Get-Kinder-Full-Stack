@@ -9,6 +9,8 @@
  *
  * The six original synthetic files are read from outside the repository:
  *   KAI_CEDAR_BRIDGE_PACKAGE=<.../KAI_Synthetic_Impact_Evidence_Project>
+ * Optional, for the spec's Stage E narrative-document journey (passed through):
+ *   KAI_CEDAR_BRIDGE_SURVEY_PDF, KAI_CEDAR_BRIDGE_ORIGINAL_PDF
  * The spec verifies them against the package's integrity manifest, uploads
  * them through the real intake API, and compares KAI's results with the
  * package's independent answer key only after KAI has produced them. Nothing

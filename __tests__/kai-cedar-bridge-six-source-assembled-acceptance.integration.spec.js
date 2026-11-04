@@ -11,7 +11,12 @@ import { Readable } from "node:stream";
  * runner's disposable loopback PostgreSQL (the Plan A normal migration chain).
  * Run only by
  *   KAI_CEDAR_BRIDGE_PACKAGE=<package root> node scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js
- * Skipped otherwise.
+ * Skipped otherwise. Stage E (tests D1-D4: the narrative documents through
+ * evidence, review, claims, generation and release) also needs
+ *   KAI_CEDAR_BRIDGE_SURVEY_PDF=<.../Cedar_Bridge_Survey_Results_Verified.pdf>
+ *   KAI_CEDAR_BRIDGE_ORIGINAL_PDF=<.../Cedar_Bridge_Survey_Results_FY2025-26.pdf>
+ * and is skipped without them. With KAI_CEDAR_BRIDGE_REPORT=<path>.json the
+ * released Stage E document is also written to <path>.released-assessment.md.
  *
  * Real: the intake API (batch, reservation, signed upload, confirmation), the
  * bounded security assessment, the P1 worker and profiler on the original
@@ -2453,6 +2458,299 @@ async function runCedarBridgeAcceptance() {
       assert.equal(p01.difference, "match");
       assert.match(p01.calculation, /distinct register participant identifiers/);
       assert.equal(rows.length, 73);
+    });
+
+    // -------------------------------------------------------------------------
+    // Stage E (2026-11-04): the narrative documents in the same connected
+    // journey. The Operations Notes TXT and the Programme Review PDF were
+    // promoted in test 3 (the promotion handoff already read their text); the
+    // verified survey PDF is uploaded now through the same intake, and the
+    // original FY2025-26 PDF stays blocked by the PDF security assessor. Their
+    // statements go through Get Kinder's existing evidence and claim review
+    // and are generated and released next to the current measured findings.
+    const { canOfferEvidenceExtraction, claimGapFollowupsPath, evidenceLibraryCandidatesPath, organizationSourcesPath, projectOrganizationSources } = await import("../frontend/impactEvidenceLibraryLogic.js");
+    const { clientEvidencePipelinePath, projectClientEvidencePipeline } = await import("../frontend/knowledgeStudio/clientEvidencePipelineLogic.js");
+    const SURVEY_PDF = process.env.KAI_CEDAR_BRIDGE_SURVEY_PDF;
+    const ORIGINAL_PDF = process.env.KAI_CEDAR_BRIDGE_ORIGINAL_PDF;
+    const DOCUMENT_KEYS = ["notes", "review", "survey"];
+    const documentState = { notes: state.notes, review: state.review, survey: {}, original: {} };
+    // Statements located in the raw files by this test (not by KAI): the
+    // TXT by its line, the PDFs by mupdf's plain page text.
+    const DOCUMENT_ANCHORS = {
+      employment_not_verified: { key: "notes", text: "No independently verified employment records were obtained for this test period." },
+      no_participant_story: { key: "notes", text: "No direct participant story in the team's raw case conversations has been provided for this test" },
+      cross_programme_referral: { key: "notes", text: "Facilitators sometimes referred people to Digital Skills sessions and later saw them again in an EN appointment." },
+      missing_duration: { key: "notes", text: "When the duration field is missing, coordinators cannot reliably reconstruct the number of delivered minutes" },
+      convenience_sample: { key: "survey", text: "It is a convenience sample of attempted check-ins, not a census or a representative survey of the full registered cohort." },
+      manager_estimate: { key: "review", text: "at least 100 distinct participants" },
+    };
+    // The claims Get Kinder reviews for the assessment: the manager estimate
+    // (EB13, UNSUPPORTED_CONFLICT) is deliberately not proposed as a claim.
+    const CLAIMED_ANCHORS = ["employment_not_verified", "no_participant_story", "cross_programme_referral", "missing_duration", "convenience_sample"];
+    const documentClaims = {};
+    const documentRows = async (key) => query(
+      `SELECT e.evidence_item_id::text, e.source_version_id::text, e.statement, e.evidence_review_status, l.coordinates
+         FROM kai.evidence_items e JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+        WHERE e.organization_id = $1::uuid AND e.source_version_id = $2::uuid AND e.evidence_type = 'source_document_statement'
+        ORDER BY e.created_at, e.evidence_item_id`, [ORG, documentState[key].sourceVersionId]);
+    const documentCounts = async () => (await query(`SELECT
+        (SELECT count(*) FROM kai.evidence_items WHERE organization_id = $1::uuid AND evidence_type = 'source_document_statement')::int AS evidence,
+        (SELECT count(*) FROM kai.source_locators l JOIN kai.source_versions v ON v.source_version_id = l.source_version_id
+          WHERE v.organization_id = $1::uuid AND l.locator_type = 'document_text_span')::int AS locators,
+        (SELECT count(*) FROM kai.audit_events WHERE organization_id = $1::uuid AND action = 'extract_document_statement_evidence')::int AS audits`, [ORG]))[0];
+    report.documents = {};
+
+    const uploadOne = async ({ path, name }) => {
+      const bytes = readFileSync(path);
+      const batch = await adminApi("POST", createBatchPath(), { organization_id: ORG, engagement_id: PROJECT, batch_code: `cedar-${randomUUID().slice(0, 8)}`, idempotency_key: `batch-${randomUUID()}` });
+      const reserved = await adminApi("POST", fileReservationsPath(batch.body.data.intake_batch_id), {
+        organization_id: ORG, engagement_id: PROJECT, original_filename: name, file_extension: ".pdf", mime_type: "application/pdf",
+        file_size_bytes: bytes.byteLength, checksum: sha256(bytes), hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
+      });
+      assert.ok(reserved.status < 300, `${name}: ${J(reserved.body)}`);
+      const intakeFileId = reserved.body.data.intake_file_id;
+      const signed = await adminApi("POST", requestUploadUrlPath(batch.body.data.intake_batch_id), { organization_id: ORG, engagement_id: PROJECT, intake_file_id: intakeFileId });
+      await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: bytes });
+      const confirmed = await adminApi("POST", confirmUploadPath(ORG, intakeFileId), { organization_id: ORG });
+      assert.equal(confirmed.status, 200, `${name}: ${J(confirmed.body)}`);
+      // One PDF at a time: the PDF worker admits one PDF operation at once.
+      await dispatcher.whenIdle();
+      const [file] = await query("SELECT file_policy_status FROM kai.intake_files WHERE intake_file_id = $1::uuid", [intakeFileId]);
+      const [profile] = await query("SELECT profile FROM kai.intake_file_profiles WHERE intake_file_id = $1::uuid", [intakeFileId]);
+      const [sensitivity] = await query(
+        `SELECT s.intake_sensitivity_profile_id::text, q.review_queue_item_id::text, q.updated_at FROM kai.intake_sensitivity_profiles s
+           JOIN kai.review_queue_items q ON q.target_object_id = s.intake_sensitivity_profile_id AND q.queue_type = 'sensitivity_review'
+          WHERE s.intake_file_id = $1::uuid`, [intakeFileId]);
+      return { bytes, intakeFileId, policy: file.file_policy_status, profile: profile?.profile ?? null, sensitivity };
+    };
+
+    await test("D1: the verified survey PDF goes through the same intake, security check, P1 worker and promotion; the original FY2025-26 PDF stays blocked", { skip: !SURVEY_PDF || !ORIGINAL_PDF ? "KAI_CEDAR_BRIDGE_SURVEY_PDF / KAI_CEDAR_BRIDGE_ORIGINAL_PDF not set" : false }, async () => {
+      const original = await uploadOne({ path: ORIGINAL_PDF, name: "Cedar_Bridge_Survey_Results_FY2025-26.pdf" });
+      Object.assign(documentState.original, original);
+      assert.deepEqual([original.policy, original.profile, original.sensitivity], ["blocked", null, undefined], "embedded content keeps the original PDF out");
+      const [diagnostic] = await query(
+        "SELECT reason_code, metadata->>'blocker_code' AS blocker FROM kai.audit_events WHERE organization_id = $1::uuid AND metadata->>'object_id' = $2 ORDER BY created_at DESC LIMIT 1",
+        [ORG, original.intakeFileId]);
+      const survey = await uploadOne({ path: SURVEY_PDF, name: "Cedar_Bridge_Survey_Results_Verified.pdf" });
+      Object.assign(documentState.survey, survey);
+      assert.notEqual(survey.bytes.equals(original.bytes), true);
+      assert.deepEqual([survey.policy, survey.profile?.status, survey.profile?.format], ["passed", "profiled", "pdf"]);
+      assert.doesNotMatch(J(survey.profile), /convenience sample|attempted check-ins/, "the P1 profile stores no document text");
+      const decided = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${survey.sensitivity.intake_sensitivity_profile_id}/decision?organization_id=${ORG}`, {
+        expected_updated_at: new Date(survey.sensitivity.updated_at).toISOString(), review_queue_item_id: survey.sensitivity.review_queue_item_id,
+        decision: "reviewed", reviewed_snapshot: ABSENT,
+      });
+      assert.equal(decided.status, 200, J(decided.body));
+      const [candidate] = await query("SELECT intake_source_candidate_id::text FROM kai.intake_source_candidates WHERE intake_sensitivity_profile_id = $1::uuid", [survey.sensitivity.intake_sensitivity_profile_id]);
+      const promoted = await adminApi("POST", sourceCandidateDecisionPath(ORG, candidate.intake_source_candidate_id), { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
+      assert.equal(promoted.status, 200, J(promoted.body));
+      const [version] = await query("SELECT source_version_id::text, source_id::text FROM kai.source_versions WHERE intake_sensitivity_profile_id = $1::uuid", [survey.sensitivity.intake_sensitivity_profile_id]);
+      Object.assign(documentState.survey, { sourceVersionId: version.source_version_id, sourceId: version.source_id, handoff: promoted.body.data?.evidence_extraction_handoff ?? null });
+      report.documents.original_fy2025_26_pdf = { sha256: sha256(original.bytes), policy: original.policy, last_audit: diagnostic ?? null };
+      report.documents.survey_upload = { sha256: sha256(survey.bytes), policy: survey.policy, pages: survey.profile?.counts ?? null, handoff: documentState.survey.handoff };
+    });
+
+    await test("D2: the documents' own text becomes cited evidence on their existing versions (no re-upload); replay and reload change nothing", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      // The TXT and Programme Review PDF are the versions promoted in test 3:
+      // the promotion handoff read them; nothing was uploaded again.
+      for (const key of ["notes", "review"]) {
+        assert.ok(SOURCES.some((source) => source.key === key) && documentState[key].sourceVersionId, key);
+        assert.equal(state[key].profile.format, key === "notes" ? "txt" : "pdf");
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.data_dictionary_fields f JOIN kai.data_dictionaries d ON d.data_dictionary_id = f.data_dictionary_id WHERE d.intake_file_id = $1::uuid", [state[key].intakeFileId]))[0].n, 0,
+          `${key}: zero dictionary fields`);
+      }
+      const extracted = {};
+      for (const key of DOCUMENT_KEYS) {
+        const rows = await documentRows(key);
+        extracted[key] = rows;
+        assert.ok(rows.length > 0, `${key}: statements persisted`);
+      }
+      // Independent location of each anchor in the raw bytes.
+      const mupdf = await import("mupdf");
+      const pdfPageOf = (bytes, text) => {
+        const doc = mupdf.Document.openDocument(new Uint8Array(bytes), "application/pdf");
+        let page = 0;
+        for (let i = 0; i < doc.countPages(); i += 1) if (doc.loadPage(i).toStructuredText().asText().replace(/\s+/g, " ").includes(text)) page = i + 1;
+        doc.destroy();
+        return page;
+      };
+      const rawBytes = { notes: byKey.notes.bytes, review: byKey.review.bytes, survey: documentState.survey.bytes };
+      const anchors = {};
+      for (const [label, anchor] of Object.entries(DOCUMENT_ANCHORS)) {
+        const row = extracted[anchor.key].find((candidate) => candidate.statement.includes(anchor.text));
+        assert.ok(row, `${label}: the independently chosen statement is evidence`);
+        const independent = anchor.key === "notes"
+          ? { unit: "text_lines", line: rawBytes.notes.toString("utf8").split("\n").findIndex((line) => line.includes(anchor.text)) + 1 }
+          : { unit: "pdf_page_blocks", page: pdfPageOf(rawBytes[anchor.key], anchor.text) };
+        if (independent.unit === "text_lines") {
+          assert.ok(row.coordinates.line_start <= independent.line && independent.line <= row.coordinates.line_end, `${label}: ${J(row.coordinates)} vs line ${independent.line}`);
+        } else {
+          assert.equal(row.coordinates.page_number, independent.page, `${label}: page`);
+        }
+        assert.equal(row.evidence_review_status, "needs_gk_review");
+        anchors[label] = { ...anchor, evidence_item_id: row.evidence_item_id, source_version_id: row.source_version_id, statement: row.statement, coordinates: row.coordinates, independent };
+      }
+      assert.match(anchors.manager_estimate.statement, /Preliminary reach estimate requiring reconciliation|Internal working estimate/, "EB13 keeps its qualifiers");
+      assert.equal(extracted.survey.some((row) => row.statement.includes("An improvement rate among all 80 registered people")), false, "a verbless table cell is not a statement");
+      documentState.anchors = anchors;
+
+      // Repeated extraction on every document version writes nothing.
+      const before = await documentCounts();
+      for (const key of DOCUMENT_KEYS) {
+        const replay = await adminApi("POST", evidenceExtractionPath(ORG, documentState[key].sourceVersionId), {});
+        assert.equal(replay.status, 200, J(replay.body));
+        assert.deepEqual([replay.body.data.documentEvidence.outcome, replay.body.data.replayed, replay.body.data.evidenceItems.length],
+          ["statements_extracted", true, extracted[key].length], key);
+      }
+      assert.deepEqual(await documentCounts(), before, "no duplicate evidence, locator or audit");
+
+      // A reload: the pipeline and Data Sources reads show the documents at
+      // Get Kinder's evidence review and never offer extraction again.
+      const pipelineRead = await adminApi("GET", clientEvidencePipelinePath(ORG, PROJECT));
+      assert.equal(pipelineRead.status, 200, J(pipelineRead.body));
+      const pipelineView = projectClientEvidencePipeline(pipelineRead.body.data, PROJECT);
+      const sourcesRead = await adminApi("GET", organizationSourcesPath(ORG));
+      assert.equal(sourcesRead.status, 200, J(sourcesRead.body));
+      const versions = projectOrganizationSources(sourcesRead.body.data).flatMap((source) => source.sourceVersions);
+      const reload = {};
+      for (const key of DOCUMENT_KEYS) {
+        const file = pipelineView.files.find((candidate) => candidate.intakeFileId === documentState[key].intakeFileId);
+        const version = versions.find((candidate) => candidate.sourceVersionId === documentState[key].sourceVersionId);
+        reload[key] = { stage: file.currentStage, reason: file.reason, next_action: file.nextAction, capability: version.evidenceExtractionCapability, offered: canOfferEvidenceExtraction(version) };
+        assert.notEqual(file.nextAction, "extract_evidence", key);
+        assert.equal(file.reason, "evidence_awaiting_review", key);
+      }
+      const originalFile = pipelineView.files.find((candidate) => candidate.intakeFileId === documentState.original.intakeFileId);
+      reload.original = { stage: originalFile.currentStage, status: originalFile.currentStatus, reason: originalFile.reason, next_action: originalFile.nextAction };
+      assert.equal(originalFile.currentStatus, "failed", J(originalFile));
+
+      // The real Impact Evidence Library lists every statement for review.
+      const seen = [];
+      let after = null;
+      do {
+        const page = await gkApi("GET", evidenceLibraryCandidatesPath(ORG, after));
+        assert.equal(page.status, 200, J(page.body));
+        seen.push(...page.body.data.items);
+        after = page.body.data.nextAfterEvidenceItemId;
+      } while (after);
+      const listed = seen.filter((item) => item.evidenceType === "source_document_statement");
+      assert.equal(listed.length, before.evidence);
+      for (const anchor of Object.values(anchors)) assert.ok(listed.some((item) => item.evidenceItemId === anchor.evidence_item_id));
+      report.documents.extraction = {
+        statements: Object.fromEntries(DOCUMENT_KEYS.map((key) => [key, extracted[key].length])), totals: before,
+        anchors: Object.fromEntries(Object.entries(anchors).map(([label, a]) => [label, { source: a.key, coordinates: a.coordinates, independent: a.independent, statement: a.statement }])),
+        reload, library_listed: listed.length,
+      };
+      console.log(`Cedar Bridge documents: ${J(report.documents.extraction.statements)}; reload ${J(reload)}`);
+    });
+
+    await test("D3: Get Kinder reviews the chosen statements; the administrator's claims restate them as source-reported and become internally eligible", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      const queueOf = async (queueType, targetId) => (await query(
+        "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
+        [ORG, queueType, targetId]))[0];
+      const claims = {};
+      // One synthetic client reviewer of the organization (test setup, as the
+      // Get Kinder reviewer above): only client_reviewer completes follow-ups.
+      await query("INSERT INTO public.userdata (id) VALUES (989) ON CONFLICT DO NOTHING");
+      const reviewerUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 989, email: "user989@cedar.test" });
+      await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_reviewer', 'active')", [ORG, reviewerUser.user_id]);
+      await query("INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = 'client_reviewer' ON CONFLICT DO NOTHING", [reviewerUser.user_id]);
+      const clientReviewerApi = client(989);
+      for (const label of CLAIMED_ANCHORS) {
+        const anchor = documentState.anchors[label];
+        const evidenceQueue = await queueOf("evidence_review", anchor.evidence_item_id);
+        const evidence = await gkApi("POST", evidenceReviewCompletePath(ORG, anchor.evidence_item_id, evidenceQueue.review_queue_item_id),
+          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+        assert.ok([200, 201].includes(evidence.status), `${label}: ${J(evidence.body)}`);
+        const proposed = await adminApi("POST", claimProposalPath(ORG, anchor.evidence_item_id), {});
+        assert.ok([200, 201].includes(proposed.status), `${label}: ${J(proposed.body)}`);
+        const claimId = proposed.body.data.claim.claim_id;
+        const p204 = await adminApi("POST", claimGapFollowupsPath(ORG, claimId), {});
+        const gaps = await query("SELECT dimension_key, assessment_status FROM kai.gap_log_items WHERE claim_id = $1::uuid ORDER BY dimension_key", [claimId]);
+        const followups = await query("SELECT dimension_key FROM kai.client_followup_items WHERE claim_id = $1::uuid ORDER BY dimension_key", [claimId]);
+        const initial = await traceOf(claimId);
+        assert.equal(p204.status, 200, `${label}: ${J(p204.body)}`);
+        assert.equal(initial.eligible, false, `${label}: Get Kinder's claim review is required`);
+        const claimQueue = await queueOf("claim_review", claimId);
+        const reviewed = await gkApi("POST", claimReviewCompletePath(ORG, claimId, claimQueue.review_queue_item_id),
+          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        assert.ok([200, 201].includes(reviewed.status), `${label}: ${J(reviewed.body)}`);
+        // The existing P2-04 routed the client-answerable coverage questions
+        // (as for every non-measured claim); the organization's client
+        // reviewer completes each through the existing P2-11 route.
+        const completedFollowups = [];
+        for (const followup of followups) {
+          const [item] = await query("SELECT client_followup_item_id::text FROM kai.client_followup_items WHERE claim_id = $1::uuid AND dimension_key = $2", [claimId, followup.dimension_key]);
+          const [followupQueue] = await query("SELECT updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'client_followup' AND target_object_id = $2::uuid", [ORG, item.client_followup_item_id]);
+          const completed = await clientReviewerApi("POST", `${orgPath}/claims/${claimId}/client-followups/${item.client_followup_item_id}/complete`, { expected_updated_at: new Date(followupQueue.updated_at).toISOString() });
+          assert.ok([200, 201].includes(completed.status), `${label} ${followup.dimension_key}: ${J(completed.body)}`);
+          completedFollowups.push(followup.dimension_key);
+        }
+        const accepted = [];
+        for (const dimensionKey of (await traceOf(claimId)).unresolved) accepted.push([dimensionKey, (await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, dimensionKey), {})).status]);
+        const traced = await traceOf(claimId);
+        if (!traced.eligible) assert.fail(`${label}: ${J((await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"))).body?.data?.blockerCodes)}`);
+        const [row] = await query("SELECT statement, internal_only, public_use_allowed, funder_use_allowed FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
+        assert.match(row.statement, /^Source-reported, not independently verified \((?:line|lines|page)[^)]*\): "/, row.statement);
+        assert.ok(row.statement.includes(anchor.text), `${label}: the claim quotes the excerpt`);
+        assert.equal(traced.eligible, true, `${label}: ${J(traced)}`);
+        assert.deepEqual([(await traceOf(claimId, "funder")).eligible, (await traceOf(claimId, "public")).eligible, row.internal_only], [false, false, true]);
+        claims[label] = { claim_id: claimId, evidence_item_id: anchor.evidence_item_id, statement: row.statement, p204_gaps: gaps, client_followups_completed: completedFollowups, coverage_accepted: accepted };
+        documentClaims[label] = claimId;
+      }
+      // The manager estimate stays evidence awaiting review; no claim exists for it.
+      const [estimate] = await query("SELECT evidence_review_status, (SELECT count(*)::int FROM kai.claims c WHERE c.evidence_item_id = e.evidence_item_id) AS claims FROM kai.evidence_items e WHERE evidence_item_id = $1::uuid",
+        [documentState.anchors.manager_estimate.evidence_item_id]);
+      assert.deepEqual([estimate.evidence_review_status, estimate.claims], ["needs_gk_review", 0]);
+      report.documents.claims = claims;
+    });
+
+    await test("D4: one internal Evidence Summary cites the document statements with the current measured findings; Get Kinder releases it and the client receives it", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      const measured = ["reach_encounters", "reach_people", "reach_DS_people", "reach_EN_people", "reach_both"].map((label) => correctedClaims[label]);
+      for (const claimId of measured) assert.equal((await traceOf(claimId)).eligible, true);
+      const claimIds = [...measured, ...CLAIMED_ANCHORS.map((label) => documentClaims[label])];
+      const callsBefore = modelCalls.length;
+      const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: claimIds, idempotency_key: `cedar-assessment-${randomUUID()}`, engagement_id: PROJECT });
+      report.documents.generation = { status: created.status, blockers: blockersOf(created), claim_ids: claimIds };
+      assert.equal(created.status, 201, J(created.body));
+      assert.equal(modelCalls.length, callsBefore + 1);
+      const sent = modelCalls.at(-1).claims;
+      for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier reaches the model");
+      const draftId = created.body.data.generatedContentDraftId;
+      const blocks = await query(
+        `SELECT b.ordinal, b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [draftId]);
+      for (const label of CLAIMED_ANCHORS) {
+        const block = blocks.find((candidate) => candidate.claim_id === documentClaims[label]);
+        assert.ok(block, `${label}: cited`);
+        assert.equal(block.evidence_item_id, documentState.anchors[label].evidence_item_id);
+        assert.ok(block.text.includes(DOCUMENT_ANCHORS[label].text), `${label}: the excerpt is kept verbatim`);
+      }
+      const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${draftId}/review-packet`);
+      assert.equal(packet.status, 200, J(packet.body));
+      const delivery = await releaseThroughGetKinder(draftId);
+      const { released, entries, ...statuses } = delivery;
+      assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
+        delivery.limitation_snapshot, delivery.export_candidate, delivery.final_release_authority, delivery.export_manifest, delivery.client_released_markdown],
+        [[200, 200], 201, 200, 200, 201, 201, 201, 201, 200], J(statuses));
+      assert.equal(typeof released, "string");
+      for (const label of CLAIMED_ANCHORS) {
+        assert.ok(released.includes(documentClaims[label]), `${label}: claim in the released document`);
+        assert.ok(released.includes(documentState.anchors[label].source_version_id), `${label}: its source version is cited`);
+      }
+      for (const claimId of measured) assert.ok(released.includes(claimId));
+      assert.doesNotMatch(released, /CB0\d\d|EV0\d\d|FU0\d\d/);
+      const csvRows = csvRowsByClaim(await readManifestCsv(delivery.export_manifest_id));
+      for (const label of CLAIMED_ANCHORS) assert.equal(csvRows[documentClaims[label]], documentState.anchors[label].source_version_id, label);
+      const markdownPath = REPORT_PATH ? REPORT_PATH.replace(/\.json$/, "") + ".released-assessment.md" : null;
+      if (markdownPath) writeFileSync(markdownPath, released);
+      report.documents.generation = {
+        ...report.documents.generation, draft_id: draftId, model_request_limitation_codes: sent.map((claim) => [claim.claimId, claim.limitationCodes]),
+        blocks: blocks.map((b) => ({ ordinal: b.ordinal, claim_id: b.claim_id, evidence_item_id: b.evidence_item_id, text: b.text })),
+        delivery: statuses, limitation_entries: entries, released_markdown_path: markdownPath, released_characters: released.length,
+      };
+      console.log(`Cedar Bridge assessment release: ${J(statuses)}; markdown ${markdownPath}`);
     });
   } finally {
     if (REPORT_PATH) writeFileSync(REPORT_PATH, `${J(report, null, 2)}\n`);
