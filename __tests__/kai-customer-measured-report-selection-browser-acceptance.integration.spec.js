@@ -257,6 +257,35 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     clickIn,
     tabLabels,
     selectProject,
+    async clickControl(selector, label = null) {
+      await browser.send("Page.bringToFront", {}, sessionId);
+      const point = await evaluate(`(() => {
+        const el = ${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === ${JSON.stringify(label)})`};
+        if (!el || el.disabled || el.offsetParent === null) return null;
+        el.scrollIntoView({ block: "center" });
+        const rect = el.getBoundingClientRect();
+        const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+        const target = document.elementFromPoint(x, y);
+        return el === target || el.contains(target) ? { x, y } : null;
+      })()`);
+      assert.ok(point, `visible enabled unobstructed control: ${label || selector}`);
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await browser.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 }, sessionId);
+      }
+    },
+    // Use the harness's select/change interaction only after checking the
+    // actual control and server-populated option are visible and enabled.
+    async selectOption(selector, value) {
+      const selected = await evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el || el.disabled || el.offsetParent === null
+          || ![...el.options].some((option) => option.value === ${JSON.stringify(value)} && !option.disabled)) return false;
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.value === ${JSON.stringify(value)};
+      })()`);
+      assert.ok(selected, `visible enabled select option: ${selector} / ${value}`);
+    },
     api,
     async intercept(patterns, handler) {
       interceptor = handler;
@@ -571,7 +600,7 @@ async function runBrowserAcceptance() {
     await adminPage.idle();
     await adminPage.clickTab("Data Sources");
     await adminPage.idle();
-    await adminPage.selectProject(engagementId);
+    if (engagementId !== null) await adminPage.selectProject(engagementId);
     await adminPage.idle();
   };
   const created = (response, label) => assert.ok([200, 201].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
@@ -672,9 +701,9 @@ async function runBrowserAcceptance() {
        JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id AND r.organization_id = d.organization_id
       WHERE d.organization_id = $1::uuid AND r.engagement_id = $2::uuid AND d.requested_audience = 'internal'
         AND d.content_type IN ('evidence_summary', 'impact_narrative')`, [ORG_X, engagementId]))[0].n;
-  const generateInUi = async (buttonLabel, createdText) => {
+  const generateInUi = async (buttonLabel, createdText, click = () => adminPage.clickButton(buttonLabel)) => {
     const before = await draftIds();
-    await adminPage.clickButton(buttonLabel);
+    await click();
     // A new draft row, or the UI reporting a replay (which then fails below).
     await adminPage.waitFor(async () => (await draftIds()).length > before.length || (await adminPage.text()).includes(`${createdText.replace(/ created$/, "")} already created`), `${buttonLabel} result`);
     await adminPage.idle();
@@ -1675,7 +1704,7 @@ async function runBrowserAcceptance() {
         // P1 upload persistence is simulated as in the existing fixture. The
         // actual sensitivity decision and explicit source replacement are real.
         const candidate = await reachReviewableSourceCandidate(file.sensitivityProfileId, { reviewed_story_testimonial_status: "present" });
-        const body = { outcome: "promoted", reviewed_source_type: "organization_primary_record", ...(predecessor ? { supersedes_source_version_id: predecessor } : {}) };
+        const body = { outcome: "promoted", reviewed_source_type: "public_record", ...(predecessor ? { supersedes_source_version_id: predecessor } : {}) };
         const promoted = await gkReviewerPage.api("POST", decisionPath(candidate), body);
         created(promoted, "workbook promotion");
         const [version] = await query("SELECT source_version_id::text, source_id::text FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [candidate]);
@@ -1726,6 +1755,12 @@ async function runBrowserAcceptance() {
         derivedClaimIds.push(proposed.body.data.claim.claim_id);
         assert.deepEqual([proposed.body.data.claim.claim_review_status, proposed.body.data.claim.claim_strength], ["needs_gk_review", "unassessed"]);
       }
+      // Begin with the owner's already-extracted state. Count records must
+      // work without needing another extraction or an active Project.
+      const extraction = await adminPage.api("POST", evidenceExtractionPath(ORG_X, current.source_version_id), {});
+      created(extraction, "current workbook extraction");
+      const extractedCount = extraction.body.data.evidenceItems.length;
+      assert.ok(extractedCount > 0);
       const measurementPath = sourceRecordCountMeasurementPath(ORG_X, current.source_version_id, "sheet_1");
       const before = await adminPage.api("GET", measurementPath);
       assert.equal(before.status, 200);
@@ -1733,28 +1768,82 @@ async function runBrowserAcceptance() {
       const oldRow = `[data-client-claim="${historicalClaimId}"]`;
       const openRecovery = async () => {
         await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-recover-current-count="${historicalClaimId}"]`)) !== null, "the historical finding's current-version recovery control");
-        await adminPage.clickIn(`[data-client-recover-current-count="${historicalClaimId}"]`, "Count records on current version");
+        await adminPage.clickControl(`[data-client-recover-current-count="${historicalClaimId}"]`);
         const panel = `[data-client-source-measurement="${current.source_version_id}"]`;
         await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-worksheet-select]`)) !== null, "the current workbook worksheet selector");
-        await adminPage.evaluate(`(() => { const el = document.querySelector('${panel} [data-client-source-measurement-worksheet-select]'); el.value = "sheet_1"; el.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+        await adminPage.selectOption(`${panel} [data-client-source-measurement-worksheet-select]`, "sheet_1");
         await adminPage.waitFor(async () => /Counted records = data records minus blank records = 5/.test(await textOf(adminPage, panel) || ""), "the authoritative current sheet_1 count");
         return panel;
       };
       const readMark = adminPage.mark();
-      await openDataSources(PROJECT_X2);
+      await openDataSources(null);
+      const proofDir = "/tmp/kai-current-sheet1-recovery-proof";
+      mkdirSync(proofDir, { recursive: true });
+      const buttonState = (selector) => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        return el ? { label: el.innerText.trim(), disabled: el.disabled, visible: el.offsetParent !== null } : null;
+      })()`);
+      const generationButtons = () => adminPage.evaluate(`[...document.querySelectorAll("button")]
+        .filter((el) => /^Generate (Free Impact Assessment|internal evidence summary|internal impact narrative)$/.test(el.innerText.trim()))
+        .map((el) => ({ label: el.innerText.trim(), disabled: el.disabled }))`);
+      const initialControls = {
+        project: await adminPage.evaluate(`(() => { const el = document.getElementById("gk-shell-project-select"); return { value: el.value, disabled: el.disabled, label: el.selectedOptions[0].text }; })()`),
+        recovery: await buttonState(`[data-client-recover-current-count="${historicalClaimId}"]`),
+        count: await buttonState(`[data-client-open-source-measurement="${current.source_version_id}"]`),
+        extraction: await buttonState(`[data-client-extract-evidence="${current.source_version_id}"]`),
+        generation: await generationButtons(),
+      };
+      assert.deepEqual(initialControls.project, { value: "", disabled: false, label: "All organizational knowledge" });
+      for (const control of [initialControls.recovery, initialControls.count, initialControls.extraction]) {
+        assert.equal(control?.visible, true);
+        assert.equal(control.disabled, false);
+      }
+      assert.equal(initialControls.generation.length, 3);
+      assert.ok(initialControls.generation.every((control) => control.disabled));
+      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /Select a Project above/);
+      assert.match(await adminPage.text(), /0\/20 claims selected/);
+      await adminPage.screenshot(join(proofDir, "initial-controls.png"));
+      // Identify the exact emitter with an explicit Extract evidence click.
+      // This is a replay, not a measurement and not necessary for recovery.
+      const evidenceIds = async () => query("SELECT evidence_item_id::text FROM kai.evidence_items WHERE source_version_id = $1::uuid ORDER BY evidence_item_id", [current.source_version_id]);
+      const beforeReplay = await evidenceIds();
+      await adminPage.clickControl(`[data-client-extract-evidence="${current.source_version_id}"]`);
+      await adminPage.waitForText(`Evidence was already extracted from this source version (${extractedCount} evidence item(s)). Nothing new was written.`);
+      await adminPage.idle();
+      assert.deepEqual(await evidenceIds(), beforeReplay);
+      assert.equal((await adminPage.api("GET", measurementPath)).body.data.recorded, null, "extraction does not establish a record-count definition or measurement");
+      const recoveryMark = adminPage.mark();
       const panel = await openRecovery();
+      assert.equal(await adminPage.evaluate(`document.getElementById("gk-shell-project-select").value`), "", "recovery is accessible without a Project");
+      assert.deepEqual(await buttonState(`${panel} [data-client-source-measurement-submit]`), { label: "Record definition and count", disabled: true, visible: true });
+      await adminPage.screenshot(join(proofDir, "current-sheet1-empty-definition.png"));
+      // Owner's continued interaction: Calculate and record under Measure
+      // field values stores a different count on the same worksheet. It does
+      // not complete or replace the human-defined P2-01M count above it.
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-derived-record-tabular]`)) !== null, "the field-value calculation control");
+      await adminPage.clickControl(`${panel} [data-client-derived-record-tabular]`);
+      await adminPage.waitForText("Measurement recorded: 5.");
+      await adminPage.idle();
+      assert.match(await textOf(adminPage, panel), /Count: 5/);
+      assert.equal((await adminPage.api("GET", measurementPath)).body.data.recorded, null, "the separate field-value count does not establish a record-count definition");
+      assert.equal((await buttonState(`${panel} [data-client-source-measurement-submit]`)).disabled, true);
+      assert.equal(await adminPage.evaluate(`document.querySelector('${panel} [data-client-source-measurement-field="countedUnit"]').value`), "");
+      const [fieldValueCount] = await query("SELECT l.evidence_item_id::text FROM kai.source_derived_measurements m JOIN kai.evidence_derived_measurements l USING (organization_id, source_derived_measurement_id) WHERE m.organization_id = $1::uuid AND m.source_version_id = $2::uuid AND m.worksheet_key = 'sheet_1'", [ORG_X, current.source_version_id]);
+      assert.ok(fieldValueCount);
       assert.equal(await textOf(adminPage, `${oldRow} input[type=checkbox]`), null);
       for (const [field, value] of Object.entries({ countedUnit: "programme session", unitLabel: "programme sessions",
         definitionText: "Each row of the session log records one delivered programme session.",
         inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
         periodStart: "2026-09-01", periodEnd: "2026-09-30" })) assert.ok(await setInput(adminPage, `${panel} [data-client-source-measurement-field="${field}"]`, value));
-      await adminPage.clickIn(`${panel} [data-client-source-measurement-field="periodAttested"]`, "attest current definition period");
-      await adminPage.clickIn(`${panel} [data-client-source-measurement-submit]`, "Record definition and count");
+      await adminPage.clickControl(`${panel} [data-client-source-measurement-field="periodAttested"]`);
+      assert.equal((await buttonState(`${panel} [data-client-source-measurement-submit]`)).disabled, false, "the organization's definition enables counting");
+      await adminPage.clickControl(`${panel} [data-client-source-measurement-submit]`);
       await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-value]`)) !== null, "the recorded current measurement");
       await adminPage.idle();
       const recorded = await adminPage.api("GET", measurementPath);
       assert.equal(recorded.body.data.recorded.claim, null);
       const currentEvidenceId = recorded.body.data.recorded.measurement.evidence_item_id;
+      assert.notEqual(currentEvidenceId, fieldValueCount.evidence_item_id, "each operation preserves its own evidence lineage");
       assert.equal(Number(recorded.body.data.recorded.measurement.measured_value), 5);
       const measurements = async () => query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND worksheet_key = 'sheet_1'", [ORG_X, current.source_version_id]);
       const recordedRows = await measurements();
@@ -1764,7 +1853,7 @@ async function runBrowserAcceptance() {
       await openDataSources(PROJECT_X2);
       await openRecovery();
       assert.equal(await textOf(adminPage, `${panel} [data-client-source-measurement-submit]`), null);
-      await adminPage.clickIn(`${panel} [data-client-source-measurement-propose-claim="${currentEvidenceId}"]`, "Propose a claim from this measurement");
+      await adminPage.clickControl(`${panel} [data-client-source-measurement-propose-claim="${currentEvidenceId}"]`);
       await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-claim]`)) !== null, "the proposed current sheet_1 claim");
       const after = await adminPage.api("GET", measurementPath);
       const currentClaimId = after.body.data.recorded.claim.claim_id;
@@ -1775,13 +1864,20 @@ async function runBrowserAcceptance() {
       assert.deepEqual([traced.status, traced.body.data.eligible, traced.body.data.claim.claim_review_status], [200, true, "needs_gk_review"], "the existing count-only internal authority requires no new GK factual approval");
       const decisions = await query(`SELECT decision_id FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG_X, currentClaimId]);
       assert.equal(decisions.length, 0, "historical review is never copied");
-      await openDataSources(PROJECT_X2);
+      await openDataSources(null);
+      await adminPage.selectOption("#gk-shell-project-select", PROJECT_X2);
+      await adminPage.idle();
+      assert.equal(await adminPage.evaluate(`document.getElementById("gk-shell-project-select").value`), PROJECT_X2);
+      assert.ok((await generationButtons()).every((control) => control.disabled), "a Project alone does not select a claim");
+      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /Select at least one claim/);
       for (const id of [currentClaimId, ...derivedClaimIds]) {
         await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${id}"] input[type=checkbox]`)) !== null, "the explicit current selection");
-        await adminPage.clickIn(`[data-client-claim="${id}"] input[type=checkbox]`, "Select current finding for assessment");
+        await adminPage.clickControl(`[data-client-claim="${id}"] input[type=checkbox]`);
       }
+      assert.equal((await generationButtons()).find((control) => control.label === "Generate Free Impact Assessment").disabled, false);
+      await adminPage.screenshot(join(proofDir, "ready-for-assessment.png"));
       const callsBefore = modelCalls.length;
-      const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created");
+      const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created", () => adminPage.clickControl(null, "Generate Free Impact Assessment"));
       const state = await draftState(draftId);
       assert.equal(modelCalls.length, callsBefore, "count-only assertions never reach the model");
       assert.deepEqual([...new Set(state.cited_claim_ids)], [currentClaimId]);
@@ -1831,8 +1927,6 @@ async function runBrowserAcceptance() {
       assert.equal(pdf.status, 200);
       assert.equal(pdf.type, "application/pdf");
       assert.ok(pdf.bytes > 1000);
-      const proofDir = "/tmp/kai-current-sheet1-recovery-proof";
-      mkdirSync(proofDir, { recursive: true });
       writeFileSync(join(proofDir, "released-assessment.pdf"), Buffer.from(pdf.base64, "base64"));
       writeFileSync(join(proofDir, "released-assessment.md"), released);
       delete pdf.base64;
@@ -1843,7 +1937,11 @@ async function runBrowserAcceptance() {
       assert.equal(auditCount, 1);
       created(await gkReviewerPage.api("POST", decisionPath(current.candidate), current.body), "replacement replay");
       assert.equal((await query("SELECT count(*)::int AS count FROM kai.audit_events WHERE organization_id = $1::uuid AND reason_code = 'source_version_superseded' AND metadata->>'superseded_source_version_id' = $2", [ORG_X, historical.source_version_id]))[0].count, 1);
-      const proof = { fixture: "synthetic identical-content three-worksheet workbook", historical, historicalClaimId, current, derivedClaimIds, currentEvidenceId, currentClaimId,
+      assert.equal(adminPage.requestsSince(recoveryMark).filter((request) => request.method === "POST" && request.url.includes("/evidence-extraction")).length, 0, "recovery never re-extracts evidence");
+      const recoveryRequests = adminPage.requestsSince(recoveryMark).filter((request) => request.url.includes(`/${current.source_version_id}/record-count-measurement`));
+      assert.ok(recoveryRequests.some((request) => request.method === "POST" && request.url.endsWith("?worksheet_key=sheet_1")));
+      assert.ok(recoveryRequests.filter((request) => request.method === "POST").every((request) => request.url.endsWith("?worksheet_key=sheet_1")), "only the chosen worksheet is counted");
+      const proof = { fixture: "synthetic identical-content three-worksheet workbook", initialControls, extractedCount, fieldValueCountEvidenceId: fieldValueCount.evidence_item_id, recoveryExtractionRequests: 0, projectSelection: PROJECT_X2, historical, historicalClaimId, current, derivedClaimIds, currentEvidenceId, currentClaimId,
         count: 5, draftId, manifestId: manifest.id, pdf, historicalReadRequests: 0, modelCalls: 0,
         review: "historical supported decisions retained; current count internal authority requires no additional factual approval; GK draft/export review and release use real authenticated APIs" };
       writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2));
