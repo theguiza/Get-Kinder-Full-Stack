@@ -18,6 +18,7 @@ import {
   DOCUMENT_EVIDENCE_DATA_CLASS,
   DOCUMENT_EVIDENCE_LOCATOR_TYPE,
   DOCUMENT_EVIDENCE_TYPE,
+  DOCUMENT_STATEMENTS_NONE_FOUND_REASON,
   composeDocumentClaimStatement,
   documentExcerptSha256,
   documentLimitationCodes,
@@ -100,6 +101,7 @@ async function textPdfBytes(paragraphs) {
  */
 function createStore({ format, bytes, isCurrent = true, schemaReady = true, allowedUse = "allowed" }) {
   const state = { locators: [], evidence: [], queue: [], statements: [], byteReads: 0 };
+  const audits = [];
   let sequence = 0;
   const uuid = (prefix) => `${prefix}-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
   const checksum = sha256(bytes);
@@ -109,6 +111,9 @@ function createStore({ format, bytes, isCurrent = true, schemaReady = true, allo
     const text = sql.trim();
     state.statements.push(text);
     if (text.includes("pg_catalog.pg_constraint")) return { rows: [{ ready: schemaReady }] };
+    if (text.includes("FROM kai.audit_events")) {
+      return { rows: [{ recorded: audits.some((event) => event.organization_id === params[0] && event.source_version_id === params[1] && event.reason_code === DOCUMENT_STATEMENTS_NONE_FOUND_REASON) }] };
+    }
     if (/^INSERT INTO kai\.source_locators/.test(text)) {
       const [organizationId, sourceVersionId, locatorType, coordinates, fingerprint] = params;
       if (state.locators.some((row) => row.organization_id === organizationId && row.source_version_id === sourceVersionId && row.locator_fingerprint === fingerprint)) return { rows: [] };
@@ -172,7 +177,6 @@ function createStore({ format, bytes, isCurrent = true, schemaReady = true, allo
       storage_provider: "local", storage_object_key: "synthetic", file_extension: format === "pdf" ? ".pdf" : ".txt", mime_type: format === "pdf" ? "application/pdf" : "text/plain",
     }),
   });
-  const audits = [];
   const repository = createPostgresDocumentEvidenceRepository({
     runInTransaction: async (callback) => callback({ query: async (sql, params) => query(sql, params) }),
     insertAuditEvent: async (event) => { audits.push(event); return { ok: true }; },
@@ -349,15 +353,27 @@ test("restricted content (contact details, URLs, credentials) is excluded from e
   assert.equal(exclusions.restricted_content, 4);
 });
 
-test("a document with no complete statement yields no evidence, writes nothing, and says why", async () => {
+test("a document with no complete statement yields no evidence, records the completed read once, and says why", async () => {
   const bytes = new TextEncoder().encode("CEDAR BRIDGE\n\nSECTION A - DELIVERY\n\n62\nAssessed people\n\nTable 3: outcomes by month\n");
   const { state, repository, audits } = createStore({ format: "txt", bytes });
   const result = await extract(repository);
   assert.equal(result.ok, true);
   assert.deepEqual([result.data.evidenceItems.length, result.data.replayed, result.data.documentEvidence.outcome], [0, false, "no_supportable_statements"]);
-  assert.deepEqual([state.evidence.length, state.locators.length, state.queue.length, audits.length], [0, 0, 0, 0]);
+  assert.deepEqual([state.evidence.length, state.locators.length, state.queue.length], [0, 0, 0]);
+  // The only committed trace: one metadata-only audit of the completed read,
+  // bound to this version and the extractor method (what a reload reads).
+  assert.equal(audits.length, 1);
+  assert.deepEqual(
+    [audits[0].operation, audits[0].reason_code, audits[0].object_type, audits[0].object_id, audits[0].source_version_id, audits[0].actor_type],
+    ["extract_document_statement_evidence", DOCUMENT_STATEMENTS_NONE_FOUND_REASON, "source_version", SOURCE_VERSION, SOURCE_VERSION, "human"],
+  );
+  assert.match(DOCUMENT_STATEMENTS_NONE_FOUND_REASON, /kai_document_statement_excerpt_v1$/);
   assert.equal(evidenceExtractionResultMessage(result.data), NO_SUPPORTABLE_STATEMENTS_MESSAGE);
   assert.doesNotMatch(NO_SUPPORTABLE_STATEMENTS_MESSAGE, /already/);
+  // A repeated call (for example from a stale page) reads again, writes
+  // nothing and records nothing more.
+  const again = await extract(repository);
+  assert.deepEqual([again.data.documentEvidence.outcome, again.data.evidenceItems.length, audits.length, state.evidence.length], ["no_supportable_statements", 0, 1, 0]);
 });
 
 test("a superseded source version is refused before any byte is read; its earlier evidence never becomes current", async () => {
@@ -484,8 +500,15 @@ test("pipeline, Data Sources and Use for impact agree on what extraction can do 
     { format: "csv", fields: 6, supported: true, capability: "field_presence", reason: "evidence_extraction_ready", offered: true },
     { format: "xlsx", fields: 10, supported: false, capability: "field_presence", reason: "evidence_extraction_ready", offered: true },
     { format: "markdown", fields: 0, supported: true, capability: "none", reason: "no_extractable_evidence", offered: false },
+    // After a reload: this version's text was already read and held no
+    // complete statement (its none-found audit), so nothing offers it again.
+    { format: "pdf", fields: 0, supported: true, noneFound: true, capability: "document_statements_none_found", reason: "no_supportable_statements", offered: false },
+    { format: "txt", fields: 0, supported: false, noneFound: true, capability: "document_statements_not_enabled", reason: "document_evidence_not_enabled", offered: false },
   ];
-  const rows = cases.map((entry, i) => pipelineRow(i + 1, { current_profile_format: entry.format, current_dictionary_field_count: entry.fields, document_evidence_supported: entry.supported }));
+  const rows = cases.map((entry, i) => pipelineRow(i + 1, {
+    current_profile_format: entry.format, current_dictionary_field_count: entry.fields, document_evidence_supported: entry.supported,
+    current_document_statements_none_found: entry.noneFound === true,
+  }));
   const result = await getClientEvidencePipeline(
     { organizationId: ORG, engagementId: ENGAGEMENT, actorContext: boundAdminActor() },
     {
@@ -502,7 +525,7 @@ test("pipeline, Data Sources and Use for impact agree on what extraction can do 
     source_versions: cases.map((entry, i) => ({
       source_version_id: `7${i}000000-0000-4000-8000-000000000001`, source_id: SOURCE, is_current: true, created_at: NOW, engagement_id: ENGAGEMENT, safe_filename: `file-${i + 1}`,
       profile_format: entry.format, has_xlsx_record_count_basis: false,
-      evidence_extraction_capability: evidenceExtractionCapability({ profileFormat: entry.format, dictionaryFieldCount: entry.fields, documentEvidenceSupported: entry.supported }),
+      evidence_extraction_capability: evidenceExtractionCapability({ profileFormat: entry.format, dictionaryFieldCount: entry.fields, documentEvidenceSupported: entry.supported, documentStatementsNoneFound: entry.noneFound === true }),
     })),
   }] });
   const access = { extractEvidence: true, reviewSensitivity: true, promoteSource: true };

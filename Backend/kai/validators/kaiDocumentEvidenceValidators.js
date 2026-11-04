@@ -33,6 +33,30 @@ export const DOCUMENT_EVIDENCE_OPERATION = "extract_document_statement_evidence"
 export const DOCUMENT_EVIDENCE_FORMATS = Object.freeze(["pdf", "txt"]);
 
 /**
+ * A completed read of a document version that found no complete statement
+ * writes no evidence, so the only committed trace of it is this required,
+ * metadata-only audit (reason code bound to the extractor method). The read
+ * models use it so that, after a reload, the same immutable version under
+ * the same method is not offered an extraction that cannot write anything.
+ * A later extractor method has a different reason code and is offered again.
+ */
+export const DOCUMENT_STATEMENTS_NONE_FOUND_REASON = `document_statements_none_found:${DOCUMENT_EVIDENCE_METHOD}`;
+
+/**
+ * SQL predicate (no bind parameters): a none-found audit exists for the
+ * source version `versionIdSql` of organization `organizationIdSql`.
+ */
+export function documentStatementsNoneFoundSql(organizationIdSql, versionIdSql) {
+  return `EXISTS (
+    SELECT 1 FROM kai.audit_events nf
+     WHERE nf.organization_id = ${organizationIdSql}
+       AND nf.action = '${DOCUMENT_EVIDENCE_OPERATION}'
+       AND nf.reason_code = '${DOCUMENT_STATEMENTS_NONE_FOUND_REASON}'
+       AND nf.metadata->>'source_version_id' = (${versionIdSql})::text
+  )`;
+}
+
+/**
  * Whether the installed schema admits document-statement evidence: the
  * evidence-type and locator-type CHECKs name it (they do once the additive
  * document-evidence migration is applied, and do not before). Read models
@@ -60,15 +84,18 @@ export const DOCUMENT_EVIDENCE_SCHEMA_READY_SQL = `(
  * schema admits document-statement evidence:
  * - `document_statements`: a PDF or plain-text document, readable for
  *   statements now;
+ * - `document_statements_none_found`: such a document whose text this
+ *   extractor method already read and found no complete statement in;
  * - `document_statements_not_enabled`: such a document, but the
  *   document-evidence schema change is not installed;
  * - `field_presence`: committed dictionary fields (P2-01);
  * - `none`: neither (nothing extraction could write);
  * - `unknown`: the inputs are not known (an older read without them).
  */
-export function evidenceExtractionCapability({ profileFormat, dictionaryFieldCount, documentEvidenceSupported }) {
+export function evidenceExtractionCapability({ profileFormat, dictionaryFieldCount, documentEvidenceSupported, documentStatementsNoneFound = false }) {
   if (DOCUMENT_EVIDENCE_FORMATS.includes(profileFormat)) {
-    return documentEvidenceSupported === true ? "document_statements" : "document_statements_not_enabled";
+    if (documentEvidenceSupported !== true) return "document_statements_not_enabled";
+    return documentStatementsNoneFound === true ? "document_statements_none_found" : "document_statements";
   }
   if (Number.isSafeInteger(dictionaryFieldCount) && dictionaryFieldCount > 0) return "field_presence";
   if (dictionaryFieldCount === 0) return "none";

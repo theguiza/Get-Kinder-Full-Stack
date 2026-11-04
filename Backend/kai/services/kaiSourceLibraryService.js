@@ -63,6 +63,7 @@ function toSafeSourceVersion(row) {
       profileFormat: row.profile_format,
       dictionaryFieldCount: row.dictionary_field_count,
       documentEvidenceSupported: row.document_evidence_supported,
+      documentStatementsNoneFound: row.document_statements_none_found,
     }),
   };
 }

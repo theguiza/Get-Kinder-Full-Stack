@@ -1,5 +1,5 @@
 import pool from "./kaiDb.js";
-import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL } from "../validators/kaiDocumentEvidenceValidators.js";
+import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL, documentStatementsNoneFoundSql } from "../validators/kaiDocumentEvidenceValidators.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 import { MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION } from "../validators/kaiSourceMeasurementValidators.js";
 
@@ -1372,7 +1372,8 @@ export async function listScopedSourceVersionsForSourceIds({ organizationId, sou
             (SELECT count(*)::int FROM kai.data_dictionary_fields df
               WHERE df.organization_id = c.organization_id
                 AND df.data_dictionary_id = c.data_dictionary_id) AS dictionary_field_count,
-            ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported
+            ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
+            ${documentStatementsNoneFoundSql("sv.organization_id", "sv.source_version_id")} AS document_statements_none_found
        FROM kai.source_versions sv
        JOIN kai.intake_source_candidates c
          ON c.organization_id = sv.organization_id

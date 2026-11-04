@@ -16,6 +16,8 @@ import {
   DOCUMENT_EVIDENCE_SCHEMA_READY_SQL,
   DOCUMENT_EVIDENCE_TYPE,
   DOCUMENT_EVIDENCE_VALIDATOR_KEY,
+  DOCUMENT_STATEMENTS_NONE_FOUND_REASON,
+  documentStatementsNoneFoundSql,
   identifyDocumentStatementCandidates,
   isDocumentLocatorCoordinates,
 } from "../validators/kaiDocumentEvidenceValidators.js";
@@ -275,6 +277,32 @@ export function createPostgresDocumentEvidenceRepository({
             created_at: now,
           }, tx);
           if (audit?.ok !== true) throw new RequiredMeasurementAuditRejectedError();
+        } else if (evidenceItems.length === 0) {
+          // Nothing could be written, so the completed read is recorded once
+          // (per version and extractor method) as a metadata-only audit: it
+          // is how every read model knows, after a reload, that extracting
+          // this immutable version again cannot write anything.
+          const recorded = (await tx.query(
+            `SELECT ${documentStatementsNoneFoundSql("$1::uuid", "$2::uuid")} AS recorded`,
+            [organizationId, sourceVersionId],
+          )).rows[0]?.recorded === true;
+          if (!recorded) {
+            const audit = await insertAuditEvent({
+              operation: DOCUMENT_EVIDENCE_OPERATION,
+              operation_type: DOCUMENT_EVIDENCE_OPERATION,
+              actor_user_id: actorUserId,
+              actor_type: "human",
+              organization_id: organizationId,
+              object_type: "source_version",
+              target_object_type: "source_version",
+              object_id: sourceVersionId,
+              source_version_id: sourceVersionId,
+              reason_code: DOCUMENT_STATEMENTS_NONE_FOUND_REASON,
+              validator_key: DOCUMENT_EVIDENCE_VALIDATOR_KEY,
+              created_at: now,
+            }, tx);
+            if (audit?.ok !== true) throw new RequiredMeasurementAuditRejectedError();
+          }
         }
         return success(documentResult({
           sourceVersionRow,

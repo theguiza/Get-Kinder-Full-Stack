@@ -661,7 +661,7 @@ export function evidenceExtractionPath(organizationId, sourceVersionId) {
 // (server rule: evidenceExtractionCapability). Every entry point offers the
 // action only where it can write, and reports a result the same way.
 export const EVIDENCE_EXTRACTION_CAPABILITIES = new Set([
-  "field_presence", "document_statements", "document_statements_not_enabled", "none", "unknown",
+  "field_presence", "document_statements", "document_statements_not_enabled", "document_statements_none_found", "none", "unknown",
 ]);
 
 export function canOfferEvidenceExtraction(version) {
@@ -671,6 +671,7 @@ export function canOfferEvidenceExtraction(version) {
 
 export const EXTRACTION_UNAVAILABLE_MESSAGES = Object.freeze({
   document_statements_not_enabled: "Evidence from document text is not yet available in this KAI installation.",
+  document_statements_none_found: "KAI read this document's text and found no complete statement it could cite as evidence; extracting again would not change this.",
   none: "No evidence can be extracted: this file is not a PDF or plain-text document and has no data fields.",
 });
 

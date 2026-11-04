@@ -1,5 +1,5 @@
 import pool from "./kaiDb.js";
-import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL } from "../validators/kaiDocumentEvidenceValidators.js";
+import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL, documentStatementsNoneFoundSql } from "../validators/kaiDocumentEvidenceValidators.js";
 
 /**
  * Read-only, organization + engagement scoped lineage counts for the client
@@ -136,6 +136,9 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             -- the document-statement path can write it.
             dfc.current_profile_format,
             ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
+            -- Every current version's text was already read by this
+            -- extractor method and held no complete statement (its audit).
+            dfc.current_document_statements_none_found,
             COALESCE(e.evidence_count, 0)::int AS evidence_item_count,
             COALESCE(e.evidence_needs_review_count, 0)::int AS evidence_needs_review_count,
             COALESCE(e.evidence_reviewed_count, 0)::int AS evidence_reviewed_count,
@@ -238,7 +241,8 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
        ) sv ON true
        LEFT JOIN LATERAL (
          SELECT count(df.data_dictionary_field_id)::int AS current_dictionary_field_count,
-                min(fp.profile->>'format') AS current_profile_format
+                min(fp.profile->>'format') AS current_profile_format,
+                bool_and(${documentStatementsNoneFoundSql("v.organization_id", "v.source_version_id")}) AS current_document_statements_none_found
            FROM kai.source_versions v
            JOIN kai.intake_source_candidates ic
              ON ic.organization_id = v.organization_id

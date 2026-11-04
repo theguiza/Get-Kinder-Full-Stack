@@ -153,6 +153,7 @@ const PIPELINE_REASONS = Object.freeze([
   "evidence_extraction_pending",
   "no_extractable_evidence",
   "document_evidence_not_enabled",
+  "no_supportable_statements",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -397,6 +398,7 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     profileFormat: row.current_profile_format,
     dictionaryFieldCount: row.current_dictionary_field_count,
     documentEvidenceSupported: row.document_evidence_supported,
+    documentStatementsNoneFound: row.current_document_statements_none_found,
   });
   if (evidence > 0) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
@@ -408,6 +410,10 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     // document-evidence schema change is installed that extraction cannot
     // write, so it is not offered as a step waiting on anyone.
     stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "document_evidence_not_enabled" }));
+  } else if (extractionCapability === "document_statements_none_found") {
+    // The document's text was already read by this extractor method and held
+    // no complete statement it could cite: extracting again would write nothing.
+    stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "no_supportable_statements" }));
   } else if (extractionCapability === "none") {
     // Not a document, and no committed data-dictionary field: P2-01 composes
     // one evidence item per field, so extraction could never write anything.

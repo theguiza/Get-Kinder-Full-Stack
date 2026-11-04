@@ -77,6 +77,7 @@ export const PIPELINE_REASONS = Object.freeze([
   "evidence_extraction_pending",
   "no_extractable_evidence",
   "document_evidence_not_enabled",
+  "no_supportable_statements",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -286,6 +287,10 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
         return "No action required from you. This file's source is promoted, but KAI cannot create evidence from it: "
           + "it is not a PDF or plain-text document and it has no data fields. Extracting evidence again would not change this.";
       }
+      if (file.reason === "no_supportable_statements") {
+        return "No action required from you. KAI read this document's text and found no complete statement it could cite as evidence "
+          + "(headings, labels, table cells and instruction-like text are not used). Extracting evidence again would not change this.";
+      }
       if (file.reason === "document_evidence_not_enabled") {
         return "No action required from you. This document's source is promoted. Evidence from document text is not yet available "
           + "in this KAI installation, so no evidence can be created from it yet; nothing is waiting on you.";
@@ -315,6 +320,7 @@ const REASON_MESSAGES = Object.freeze({
   evidence_extraction_pending: (n) => `The source from ${pluralFiles(n)} has been promoted. Get Kinder has not yet created evidence from it.`,
   no_extractable_evidence: (n) => `The source from ${pluralFiles(n)} has been promoted, but KAI cannot create evidence from ${n === 1 ? "it" : "them"}: ${n === 1 ? "it is" : "they are"} not a PDF or plain-text document and ${n === 1 ? "has" : "have"} no data fields.`,
   document_evidence_not_enabled: (n) => `The source from ${pluralFiles(n)} has been promoted. Evidence from document text is not yet available in this KAI installation, so no evidence can be created from ${n === 1 ? "it" : "them"} yet.`,
+  no_supportable_statements: (n) => `The source from ${pluralFiles(n)} has been promoted. KAI read ${n === 1 ? "its" : "their"} text and found no complete statement it could cite as evidence, so no evidence was created.`,
   evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
   impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
   not_currently_eligible: (n) => `Evidence from ${pluralFiles(n)} was reviewed but is not currently usable as an Impact Fact. Contact Get Kinder for details.`,

@@ -382,6 +382,61 @@ async function runDocumentEvidenceAcceptance() {
       assert.deepEqual(await counts(), before);
     });
 
+    await test("B3b: a document with no complete statement: the promotion handoff reads it once; after a reload nothing offers extraction again", async () => {
+      // Synthetic, headings and labels only (no complete sentence anywhere).
+      const bytes = Buffer.from("CEDAR BRIDGE\n\nSECTION A - DELIVERY\n\n62\nAssessed people\n\nTable 3: outcomes by month\n\nAPPENDIX\n", "utf8");
+      const name = "Cedar_Bridge_Headings_Only.txt";
+      const batch = await adminApi("POST", createBatchPath(), { organization_id: ORG, engagement_id: PROJECT, batch_code: "cedar-headings", idempotency_key: `batch-${randomUUID()}` });
+      const reserved = await adminApi("POST", fileReservationsPath(batch.body.data.intake_batch_id), {
+        organization_id: ORG, engagement_id: PROJECT, original_filename: name, file_extension: ".txt", mime_type: "text/plain",
+        file_size_bytes: bytes.byteLength, checksum: sha256(bytes), hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
+      });
+      assert.ok(reserved.status < 300, J(reserved.body));
+      const intakeFileId = reserved.body.data.intake_file_id;
+      const signed = await adminApi("POST", requestUploadUrlPath(batch.body.data.intake_batch_id), { organization_id: ORG, engagement_id: PROJECT, intake_file_id: intakeFileId });
+      await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: bytes });
+      assert.equal((await adminApi("POST", confirmUploadPath(ORG, intakeFileId), { organization_id: ORG })).status, 200);
+      await dispatcher.whenIdle();
+      const [sensitivity] = await query(
+        `SELECT s.intake_sensitivity_profile_id::text, q.review_queue_item_id::text, q.updated_at FROM kai.intake_sensitivity_profiles s
+           JOIN kai.review_queue_items q ON q.target_object_id = s.intake_sensitivity_profile_id AND q.queue_type = 'sensitivity_review'
+          WHERE s.intake_file_id = $1::uuid`, [intakeFileId]);
+      const decided = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${sensitivity.intake_sensitivity_profile_id}/decision?organization_id=${ORG}`, {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: ABSENT,
+      });
+      assert.equal(decided.status, 200, J(decided.body));
+      const [candidate] = await query("SELECT intake_source_candidate_id::text FROM kai.intake_source_candidates WHERE intake_sensitivity_profile_id = $1::uuid", [sensitivity.intake_sensitivity_profile_id]);
+      const before = await counts();
+      const promoted = await adminApi("POST", sourceCandidateDecisionPath(ORG, candidate.intake_source_candidate_id), { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
+      assert.equal(promoted.status, 200, J(promoted.body));
+      const [version] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE intake_sensitivity_profile_id = $1::uuid", [sensitivity.intake_sensitivity_profile_id]);
+      state.headings = { intakeFileId, sourceVersionId: version.source_version_id };
+      assert.equal(promoted.body.data?.evidence_extraction_handoff?.evidence_item_count, 0, J(promoted.body.data?.evidence_extraction_handoff));
+      // The handoff's completed read is recorded once (metadata only); no evidence, locator or queue item.
+      const afterHandoff = await counts();
+      assert.deepEqual([afterHandoff.document_evidence, afterHandoff.locators, afterHandoff.queue, afterHandoff.document_audits],
+        [before.document_evidence, before.locators, before.queue, before.document_audits + 1]);
+      const [audit] = await query(
+        `SELECT reason_code, object_type::text, metadata->>'source_version_id' AS source_version_id, metadata->>'object_type' AS target, actor_type::text
+           FROM kai.audit_events WHERE organization_id = $1::uuid AND action = 'extract_document_statement_evidence' ORDER BY created_at DESC LIMIT 1`, [ORG]);
+      assert.deepEqual([audit.reason_code, audit.source_version_id, audit.target, audit.actor_type],
+        ["document_statements_none_found:kai_document_statement_excerpt_v1", version.source_version_id, "source_version", "human"]);
+      // A reload: the pipeline SQL and the Data Sources SQL read that state.
+      const data = await pipeline();
+      const file = data.files.find((candidate) => candidate.intakeFileId === intakeFileId);
+      assert.deepEqual([file.currentStage, file.currentStatus, file.nextAction, file.reason], ["evidence_extraction", "closed", "none", "no_supportable_statements"]);
+      const version0 = versionOf(await versions(), "headings");
+      assert.equal(version0.evidenceExtractionCapability, "document_statements_none_found");
+      assert.equal(canOfferEvidenceExtraction(version0), false);
+      // The documents that do hold statements are unaffected.
+      for (const key of DOCUMENTS) assert.equal(versionOf(await versions(), key).evidenceExtractionCapability, "document_statements", key);
+      // A stale page's direct POST reads again, writes nothing and records nothing more.
+      const again = await adminApi("POST", evidenceExtractionPath(ORG, version.source_version_id), {});
+      assert.equal(again.status, 200, J(again.body));
+      assert.deepEqual([again.body.data.documentEvidence.outcome, again.body.data.evidenceItems.length], ["no_supportable_statements", 0]);
+      assert.deepEqual(await counts(), afterHandoff);
+    });
+
     await test("B4: the real Impact Evidence Library read lists the document evidence for review; the pipeline moves the documents to Get Kinder's evidence review", async () => {
       const seen = [];
       let after = null;
