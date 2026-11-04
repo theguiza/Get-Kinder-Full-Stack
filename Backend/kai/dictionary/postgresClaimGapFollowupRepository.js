@@ -656,9 +656,24 @@ function validateExistingRoutingRows({ gapRows, followupRows, queueRows, claimRo
       gapRow: gapByDim.get(dimensionKey),
       claimRow,
       followupWritePlan: followupRow ? rowToFollowupRoutingPlan(followupRow) : null,
-      queueWritePlan: queueRow ? rowToQueueRoutingPlan(queueRow) : null,
+      queueWritePlan: queueRow ? existingQueueRoutingPlan(queueRow) : null,
     });
   }
+}
+
+// KAI P2-11: a follow-up an authorized client_reviewer has completed keeps
+// the routing P2-04 wrote; only its status pair moved to resolved/resolved
+// (queueRowsMatchExpectation admits exactly that pair and the original one).
+// Its routing contract is therefore checked against the pair P2-04 wrote, so
+// a replay - including the one internal generation runs first - does not
+// read a completed follow-up as a changed state. Every other column, and any
+// other status, is still checked exactly.
+function existingQueueRoutingPlan(queueRow) {
+  const plan = rowToQueueRoutingPlan(queueRow);
+  if (plan.queue_status === CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS && plan.review_status === CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS) {
+    return { ...plan, queue_status: CLIENT_FOLLOWUP_QUEUE_STATUS, review_status: CLIENT_FOLLOWUP_REVIEW_STATUS };
+  }
+  return plan;
 }
 
 /**

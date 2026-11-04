@@ -546,3 +546,44 @@ test("P2-04 repository claim-gap-followup payload still declares object_type = c
   assert.ok(capturedDb, "prepareMetadataOnlyAudit must receive the repository's own tx as db");
   assert.equal(typeof capturedDb.query, "function");
 });
+
+test("P2-04 replay after a client reviewer completed the follow-up (P2-11 resolved pair) is a replay, not a changed state; any other status still conflicts", async () => {
+  // The rows a fresh P2-04 write produces for the definition_clarity gap.
+  const gap = fakeQueryHandler("INSERT INTO kai.gap_log_items").rows[0];
+  const followup = fakeQueryHandler("INSERT INTO kai.client_followup_items").rows[0];
+  const openQueue = fakeQueryHandler("INSERT INTO kai.review_queue_items").rows[0];
+  let queue = openQueue;
+  const provider = createFakeTransactionProvider((sql, params) => {
+    if (sql.includes("FROM kai.gap_log_items")) return { rows: [{ ...gap }], rowCount: 1 };
+    if (sql.includes("FROM kai.client_followup_items")) return { rows: [{ ...followup }], rowCount: 1 };
+    if (sql.includes("queue_type = 'client_followup'") && sql.startsWith("SELECT")) return { rows: [{ ...queue }], rowCount: 1 };
+    if (/^(INSERT|UPDATE|DELETE)\b/.test(sql)) throw new Error(`unexpected write on replay: ${sql}`);
+    return fakeQueryHandler(sql, params);
+  });
+  const repository = createPostgresClaimGapFollowupRepository({ runInTransaction: runInTransactionFor(provider), computeDimensions: computeDimensionsForTesting });
+  const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) };
+  const replay = () => repository.generateClaimGapsAndFollowups({ organizationId: ORG, claimId: CLAIM, actorUserId: "user-1", now: NOW, metadataOnlyAudit });
+
+  let result = await replay();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.replayed, true);
+
+  // Completed through P2-11: the same routing, status pair resolved/resolved.
+  queue = { ...openQueue, queue_status: "resolved", review_status: "resolved" };
+  result = await replay();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual([result.data.replayed, result.data.reviewQueueItems[0].queue_status], [true, "resolved"]);
+
+  // Any other status pair, or a changed routing column, is still a changed state.
+  for (const changed of [
+    { ...openQueue, queue_status: "resolved", review_status: "proposed" },
+    { ...openQueue, queue_status: "cancelled", review_status: "resolved" },
+    { ...openQueue, queue_status: "resolved", review_status: "resolved", required_action: "Something else." },
+    { ...openQueue, queue_status: "resolved", review_status: "resolved", assigned_to: "90000000-0000-4000-8000-000000000001" },
+  ]) {
+    queue = changed;
+    result = await replay();
+    assert.equal(result.ok, false, JSON.stringify(changed));
+    assert.equal(result.error.code, "conflict_current_state_changed");
+  }
+});
