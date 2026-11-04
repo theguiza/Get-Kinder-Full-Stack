@@ -2,6 +2,9 @@
 -- Execute the complete file in the owner's existing pgAdmin Query Tool.
 -- Pins are from the actual migrations on disposable PostgreSQL 16.
 -- Exact catalog drift (including extra indexes) stops for review, never repair.
+-- Keep the status SELECT last so pgAdmin displays its result grid.
+-- After reviewing the grid, execute COMMIT separately to close this read-only
+-- transaction. Do not append COMMIT to this script: it returns no result rows.
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog, kai, public;
 SET LOCAL statement_timeout = '15s';
@@ -93,4 +96,3 @@ SELECT 'OVERALL', CASE WHEN bool_or(status = 'STOP_INCOMPATIBLE') THEN 'STOP_INC
        'Apply only REQUIRED: reach, then jobs. Retain the committed derived/document migrations. Run all existing verifiers.'
   FROM result
 ORDER BY capability;
-COMMIT;
