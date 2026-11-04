@@ -302,6 +302,69 @@ function isExactPdfProfile(profile) {
   return true;
 }
 
+const PDF_TEXT_NOT_PROFILABLE_REASONS = Object.freeze(new Set([
+  ...PDF_PROFILE_NOT_PROFILABLE_REASONS,
+  "pdf_text_limit_exceeded",
+]));
+export const PDF_TEXT_MAXIMUM_PAGES = 200;
+export const PDF_TEXT_MAXIMUM_CHARACTERS = 1_000_000;
+
+function isExactPdfTextNotProfilable(result) {
+  return (
+    result &&
+    typeof result === "object" &&
+    Object.keys(result).length === 3 &&
+    result.status === "not_profilable" &&
+    result.format === "pdf" &&
+    PDF_TEXT_NOT_PROFILABLE_REASONS.has(result.reason)
+  );
+}
+
+// The exact text shape the worker's text operation posts: pages numbered
+// 1..n in order, each with its text blocks (block indexes increasing, as the
+// profile numbers them) and their lines as strings, within the text bounds.
+function isExactPdfText(text) {
+  if (!text || typeof text !== "object") return false;
+  if (Object.keys(text).join("\0") !== "status\0format\0pages") return false;
+  if (text.status !== "extracted" || text.format !== "pdf") return false;
+  if (!Array.isArray(text.pages) || text.pages.length === 0 || text.pages.length > PDF_TEXT_MAXIMUM_PAGES) return false;
+  let characters = 0;
+  for (let index = 0; index < text.pages.length; index += 1) {
+    const page = text.pages[index];
+    if (!page || typeof page !== "object" || Object.keys(page).join("\0") !== "page_number\0blocks") return false;
+    if (page.page_number !== index + 1 || !Array.isArray(page.blocks)) return false;
+    let previousBlockIndex = 0;
+    for (const block of page.blocks) {
+      if (!block || typeof block !== "object" || Object.keys(block).join("\0") !== "block_index\0lines") return false;
+      if (!Number.isSafeInteger(block.block_index) || block.block_index <= previousBlockIndex) return false;
+      previousBlockIndex = block.block_index;
+      if (!Array.isArray(block.lines) || block.lines.length === 0) return false;
+      for (const line of block.lines) {
+        if (typeof line !== "string") return false;
+        characters += line.length;
+        if (characters > PDF_TEXT_MAXIMUM_CHARACTERS) return false;
+      }
+    }
+  }
+  return true;
+}
+
+const PDF_PROFILE_OPERATION = Object.freeze({
+  operation: "profile",
+  okType: "kai_pdf_profile_worker_ok",
+  notProfilableType: "kai_pdf_profile_worker_not_profilable",
+  okResult: (message) => (isExactPdfProfile(message.profile) ? message.profile : null),
+  isNotProfilable: isExactPdfProfileNotProfilable,
+});
+
+const PDF_TEXT_OPERATION = Object.freeze({
+  operation: "text",
+  okType: "kai_pdf_text_worker_ok",
+  notProfilableType: "kai_pdf_text_worker_not_profilable",
+  okResult: (message) => (isExactPdfText(message.text) ? message.text : null),
+  isNotProfilable: isExactPdfTextNotProfilable,
+});
+
 function pdfProfileNotProfilable(reason) {
   return withGovernance({
     status: "not_profilable",
@@ -458,7 +521,7 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
   });
 }
 
-async function runPdfProfilingWorkerBoundaryInternal(input = {}, options = {}) {
+async function runPdfProfilingWorkerBoundaryInternal(input = {}, options = {}, spec = PDF_PROFILE_OPERATION) {
   const bytes = input.bytes;
   if (!isAcceptedByteInput(bytes)) {
     throw new TypeError("runPdfProfilingWorkerBoundary accepts only Buffer or Uint8Array bytes.");
@@ -557,17 +620,18 @@ async function runPdfProfilingWorkerBoundaryInternal(input = {}, options = {}) {
 
       onWorkerMessageForTest?.(message);
 
-      if (message?.type === "kai_pdf_profile_worker_ok") {
-        if (isExactPdfProfile(message.profile)) {
-          settle(withGovernance(message.profile));
+      if (message?.type === spec.okType) {
+        const okResult = spec.okResult(message);
+        if (okResult) {
+          settle(withGovernance(okResult));
           return;
         }
         settle(pdfProfileWorkerFailure());
         return;
       }
 
-      if (message?.type === "kai_pdf_profile_worker_not_profilable") {
-        if (isExactPdfProfileNotProfilable(message.result)) {
+      if (message?.type === spec.notProfilableType) {
+        if (spec.isNotProfilable(message.result)) {
           settle(withGovernance(message.result));
           return;
         }
@@ -602,7 +666,7 @@ async function runPdfProfilingWorkerBoundaryInternal(input = {}, options = {}) {
         settle(PDF_PROFILE_TIMEOUT_RESULT);
       });
       worker = createWorker(ownedBytes, {
-        operation: "profile",
+        operation: spec.operation,
         trustedMetadata: {
           extension,
           declaredMime,
@@ -630,10 +694,23 @@ export async function runPdfProfilingWorkerBoundary(input) {
   return await runPdfProfilingWorkerBoundaryInternal(input);
 }
 
+/**
+ * The governed text read of one already-profiled PDF for a caller that cites its statements:
+ * the same identity check, pre-parse byte gate, single worker permit, fixed
+ * parent timeout and in-worker security assessment as profiling (an
+ * encrypted, textless or active/embedded-content PDF is refused, never
+ * read), returning the text lines of each page's text blocks. The text is
+ * returned to the caller only; nothing here persists it.
+ */
+export async function runPdfTextWorkerBoundary(input) {
+  return await runPdfProfilingWorkerBoundaryInternal(input, {}, PDF_TEXT_OPERATION);
+}
+
 export const __testables = Object.freeze({
   createResultLatch,
   isExactPdfProfile,
   isExactPdfProfileNotProfilable,
+  isExactPdfText,
   isExactPdfBlockResult,
   getDefaultWorkerUrlProtocol() {
     return PDF_WORKER_THREAD_URL.protocol;
@@ -654,5 +731,8 @@ export const __testables = Object.freeze({
   },
   async runPdfProfilingWorkerBoundaryWithTestControls(input, options) {
     return await runPdfProfilingWorkerBoundaryInternal(input, options);
+  },
+  async runPdfTextWorkerBoundaryWithTestControls(input, options) {
+    return await runPdfProfilingWorkerBoundaryInternal(input, options, PDF_TEXT_OPERATION);
   },
 });

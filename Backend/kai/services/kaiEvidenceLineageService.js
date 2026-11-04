@@ -3,6 +3,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresEvidenceLineageRepository } from "../dictionary/postgresEvidenceLineageRepository.js";
+import { createDefaultDocumentEvidenceRepository } from "../dictionary/postgresDocumentEvidenceRepository.js";
 
 // client_admin (owner decision 2026-10-18): an active organization administrator
 // of this exact organization, stored or binding-derived, may extract evidence.
@@ -104,6 +105,32 @@ export async function extractEvidenceFromSourceVersion(input, dependencies = {})
   });
   if (tenant.severity === "blocker") {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  // Document-statement evidence (2026-11-04): a promoted PDF or plain-text
+  // version has no dictionary fields, so the same human-initiated extraction
+  // reads its governed text instead. Composition stays production-only unless
+  // a caller injects the document repository: a caller injecting only the
+  // field-presence repository keeps exactly the earlier behaviour.
+  const documentEvidenceRepository = dependencies.documentEvidenceRepository
+    || (dependencies.evidenceLineageRepository ? null : await createDefaultDocumentEvidenceRepository());
+  if (documentEvidenceRepository) {
+    const documentResult = await documentEvidenceRepository.extractDocumentEvidence({
+      organizationId: input.organizationId,
+      sourceVersionId: input.sourceVersionId,
+      actorUserId: actorContext.actorUserId,
+      now: input.now,
+    });
+    if (!documentResult.ok) {
+      return buildKaiError(documentResult.error.code, {
+        status: documentResult.error.status,
+        ...(Array.isArray(documentResult.error.blockers) ? { blockers: documentResult.error.blockers } : {}),
+      });
+    }
+    if (documentResult.data?.applicable !== false) {
+      const { applicable, ...data } = documentResult.data;
+      return { ok: true, data, error: null };
+    }
   }
 
   const evidenceLineageRepository = dependencies.evidenceLineageRepository || createPostgresEvidenceLineageRepository();

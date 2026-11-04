@@ -1070,6 +1070,26 @@ export function readTrustedCsvRecords({ bytes, extension = ".csv", declaredMime 
   }
 }
 
+/**
+ * The lines of trusted plain-text bytes, decoded exactly as the profiler
+ * decodes them (the same file-type agreement and strict UTF-8), or null
+ * when the profiler would refuse them. Line numbers are the profiler's
+ * `line_position` (1-based, split on "\n"). Only a worker that already holds
+ * a source version's verified bytes calls this; nothing it returns is
+ * persisted by this module.
+ */
+export function readTrustedTextLines({ bytes, extension = ".txt", declaredMime = "text/plain" } = {}) {
+  if (!(bytes instanceof Uint8Array)) return null;
+  try {
+    const typeResult = detectP0FileTypeAgreement({ extension, declaredMime, bytes });
+    if (typeResult.policy !== "allow") return null;
+    const text = decodeTrustedUtf8(bytes);
+    return text.length === 0 ? [] : text.split(/\n/).map((line) => line.replace(/\r$/, ""));
+  } catch {
+    return null;
+  }
+}
+
 export async function profileLocalTrustedFile(input = {}) {
   const inputFailure = assertProfilingInput(input);
   if (inputFailure) return inputFailure;

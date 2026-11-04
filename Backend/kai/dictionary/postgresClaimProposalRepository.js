@@ -23,6 +23,11 @@ import {
   EVIDENCE_REVIEW_CONTINUATION_AUTHORITY_SOURCE,
 } from "../validators/kaiEvidenceReviewContinuationValidators.js";
 import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
+import {
+  DOCUMENT_EVIDENCE_TYPE,
+  composeDocumentClaimStatement,
+  validateDocumentClaimBasis,
+} from "../validators/kaiDocumentEvidenceValidators.js";
 import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
@@ -690,6 +695,15 @@ export function createPostgresClaimProposalRepository({
             if (!referenceAllowedUse.ok) return continuationFailure(referenceAllowedUse);
           }
           statement = composeDerivedClaimStatementFromRow(measurementRow);
+          const composable = validateComposedStatement(statement);
+          if (!composable.ok) return continuationFailure(composable);
+        } else if (evidenceItemRow.evidence_type === DOCUMENT_EVIDENCE_TYPE) {
+          // A document statement's claim restates the exact excerpt its
+          // locator's hash binds, explicitly as source-reported and not
+          // independently verified; never a column-presence statement.
+          const basis = validateDocumentClaimBasis({ evidenceItemRow, locatorRow });
+          if (!basis.ok) return continuationFailure(basis);
+          statement = composeDocumentClaimStatement({ excerpt: basis.excerpt, coordinates: basis.coordinates });
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return continuationFailure(composable);
         } else {

@@ -747,6 +747,130 @@ async function runPdfProfile() {
   }
 }
 
+// Bounds on the text a governed text read may return. A document
+// beyond them is refused rather than truncated, so no excerpt is read out of
+// a partial document.
+export const PDF_TEXT_MAXIMUM_PAGES = 200;
+export const PDF_TEXT_MAXIMUM_CHARACTERS = 1_000_000;
+
+class PdfTextLimitExceeded extends Error {}
+
+/**
+ * The text lines of each text block, page by page, numbered exactly as
+ * collectPdfProfile numbers its block shapes (image and vector blocks take a
+ * block index too), so a locator's page and block identify the profiled
+ * block. Only called after assessOpenedPdfDocument admitted the document.
+ */
+function collectPdfText(document, pageCount, trustedMetadata) {
+  assertUsablePageCount(pageCount);
+  assertTrustedProfileMetadata(trustedMetadata, workerData.bytes.byteLength);
+  if (pageCount > PDF_TEXT_MAXIMUM_PAGES) throw new PdfTextLimitExceeded();
+
+  let pdfDocument = null;
+  try {
+    pdfDocument = document.asPDF();
+    if (!pdfDocument || typeof pdfDocument.wasRepaired !== "function") throw dependencyFailure();
+    if (pdfDocument.wasRepaired()) throw dependencyFailure();
+  } catch {
+    throw dependencyFailure();
+  }
+
+  let characterCount = 0;
+  const pages = [];
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    let page = null;
+    let structuredText = null;
+    const blocks = [];
+    let blockIndex = 0;
+    let currentBlock = null;
+    let currentLine = null;
+    const closeLine = () => {
+      if (currentBlock && currentLine !== null) currentBlock.lines.push(currentLine);
+      currentLine = null;
+    };
+    try {
+      page = document.loadPage(pageIndex);
+      if (!page || typeof page.toStructuredText !== "function") throw dependencyFailure();
+      structuredText = page.toStructuredText();
+      if (!structuredText || typeof structuredText.walk !== "function") throw dependencyFailure();
+      structuredText.walk({
+        beginTextBlock() {
+          blockIndex += 1;
+          currentBlock = { block_index: blockIndex, lines: [] };
+        },
+        beginLine() {
+          closeLine();
+          currentLine = "";
+        },
+        onChar(character) {
+          if (typeof character !== "string") throw dependencyFailure();
+          characterCount += character.length;
+          if (characterCount > PDF_TEXT_MAXIMUM_CHARACTERS) throw new PdfTextLimitExceeded();
+          if (currentLine !== null) currentLine += character;
+        },
+        endTextBlock() {
+          closeLine();
+          if (currentBlock && currentBlock.lines.length > 0) blocks.push(Object.freeze({ block_index: currentBlock.block_index, lines: Object.freeze(currentBlock.lines) }));
+          currentBlock = null;
+        },
+        onImageBlock() {
+          blockIndex += 1;
+        },
+        onVector() {
+          blockIndex += 1;
+        },
+      });
+    } catch (error) {
+      if (error instanceof PdfTextLimitExceeded) throw error;
+      throw dependencyFailure();
+    } finally {
+      try {
+        destroyDependencyHandle(structuredText);
+      } finally {
+        destroyDependencyHandle(page);
+      }
+    }
+    pages.push(Object.freeze({ page_number: pageIndex + 1, blocks: Object.freeze(blocks) }));
+  }
+  return Object.freeze({ status: "extracted", format: "pdf", pages: Object.freeze(pages) });
+}
+
+async function runPdfText() {
+  globalThis.$libmupdf_log_error = () => {};
+  globalThis.$libmupdf_log_warning = () => {};
+  const mupdf = await import("mupdf");
+  mupdf.setLog(null);
+  let document = null;
+
+  try {
+    document = mupdf.Document.openDocument(workerData.bytes, "application/pdf");
+    const pageCount = document.countPages();
+    // The same security assessment as profiling: an encrypted, textless or
+    // active/embedded-content PDF is never read for its text.
+    const assessmentResult = assessOpenedPdfDocument(document, mupdf.Document, pageCount);
+    if (assessmentResult !== undefined) {
+      parentPort.postMessage({
+        type: "kai_pdf_text_worker_not_profilable",
+        result: profileNotProfilable(PDF_PROFILE_REASON_BY_BLOCK_CATEGORY[assessmentResult.category] ?? "pdf_no_extractable_text"),
+      });
+      return;
+    }
+    let text;
+    try {
+      text = collectPdfText(document, pageCount, workerData.trustedMetadata);
+    } catch (error) {
+      if (!(error instanceof PdfTextLimitExceeded)) throw error;
+      parentPort.postMessage({ type: "kai_pdf_text_worker_not_profilable", result: profileNotProfilable("pdf_text_limit_exceeded") });
+      return;
+    }
+    parentPort.postMessage({ type: "kai_pdf_text_worker_ok", text });
+  } finally {
+    if (document) {
+      document.destroy();
+    }
+  }
+}
+
 async function runPdfAssessment() {
   globalThis.$libmupdf_log_error = () => {};
   globalThis.$libmupdf_log_warning = () => {};
@@ -777,12 +901,14 @@ async function runPdfAssessment() {
 }
 
 if (!isMainThread && parentPort) {
-  const operation = workerData.operation === "profile" ? runPdfProfile : runPdfAssessment;
+  const operation = workerData.operation === "profile"
+    ? runPdfProfile
+    : workerData.operation === "text" ? runPdfText : runPdfAssessment;
   operation().catch(() => {
     parentPort.postMessage({
       type: workerData.operation === "profile"
         ? "kai_pdf_profile_worker_failed"
-        : "kai_pdf_worker_liveness_failed",
+        : workerData.operation === "text" ? "kai_pdf_text_worker_failed" : "kai_pdf_worker_liveness_failed",
     });
   });
 }
