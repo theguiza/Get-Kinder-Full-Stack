@@ -3955,6 +3955,7 @@ router.get(
 async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft
+    || intakeServiceOverride?.createFreeImpactAssessmentDraft
     || intakeServiceOverride?.createImpactNarrativeDraft
     || intakeServiceOverride?.createReadinessAssessmentDraft
     || intakeServiceOverride?.createCaseForSupportDraft
@@ -4108,6 +4109,45 @@ router.post(
         now,
       }, {
         draftGenerator: createProductionEvidenceSummaryDraftGenerator(),
+        claimGapFollowupMetadataOnlyAuditFactory: createProductionMetadataOnlyAuditForClaimGapFollowup,
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+/**
+ * Free Impact Assessment: the six-section internal assessment, persisted as
+ * an internal Evidence Summary draft (kaiFreeImpactAssessmentComposition.js).
+ * The request body is the internal Evidence Summary's (claim_ids,
+ * idempotency_key, engagement_id); the audience is fixed to "internal". The
+ * draft then follows the existing review, release and export path.
+ */
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/free-impact-assessment",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateEvidenceSummaryRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionFreeImpactAssessmentDraftGenerator } = await import("../services/kaiFreeImpactAssessmentDraftGenerator.js");
+      return service.createFreeImpactAssessmentDraft({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        requestedAudience: "internal",
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionFreeImpactAssessmentDraftGenerator(),
         claimGapFollowupMetadataOnlyAuditFactory: createProductionMetadataOnlyAuditForClaimGapFollowup,
         metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
           organizationId: parsed.organizationId,

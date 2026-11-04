@@ -93,9 +93,63 @@ async function runCedarBridgeAcceptance() {
   // A test may replace the repeated statement of a block (modelBlockText) to
   // prove a fabricated or unsupported output is refused.
   let modelBlockText = null;
+  // A Free Impact Assessment request (it carries an `assessment` context)
+  // gets the same kind of deterministic stub, by section: no language model
+  // and no intelligence. It restates each claim's human-stated label and its
+  // figures (internal field keys dropped), one block per group of claims
+  // with identical limitation codes, and quotes the document statements
+  // exactly. The server composes the gaps, improvements and next steps.
+  let assessmentStub = null;
+  // The clause of a claim statement that states its figures, with internal
+  // field and worksheet keys and register identifiers left out.
+  const KEY = /\b(?:field|sheet)_\d+\b/;
+  const stubFigure = (claim) => {
+    const statement = claim.claimStatement;
+    const open = statement.indexOf(" (");
+    const close = statement.indexOf("): ");
+    const label = open > 0 ? statement.slice(0, open) : statement.split(":")[0];
+    const segments = (close > 0 ? statement.slice(close + 3) : statement).split(/:\s/)
+      .map((segment) => segment.replace(/;?\s*linked to register [0-9a-f-]{36}\.?/g, "").trim())
+      .filter((segment) => /\d/.test(segment.replace(new RegExp(KEY.source, "g"), "")));
+    const clean = (segment) => segment
+      .replace(/\s+(?:served\s+)?in field_\d+\s*=\s*[A-Za-z0-9_]+/g, (match) => (match.includes("served") ? " served" : ""))
+      .replace(/\bmore than one field_\d+ value\b/g, "more than one group")
+      .replace(/\s*in selected worksheet sheet_\d+/g, "")
+      .replace(/\bfield_\d+\s*=\s*([A-Za-z0-9_]+)/g, (_, value) => value.replace(/_/g, " "))
+      .replace(/,?[^,;]*\bfield_\d+[^,;]*/g, "")
+      .replace(/\.\.$/, ".")
+      .trim();
+    const chosen = segments.find((segment) => !KEY.test(segment)) ?? segments[0] ?? "";
+    return `${label}: ${clean(chosen).replace(/\.$/, "")}`;
+  };
+  const firstNumber = (claim) => Number((stubFigure(claim).match(/\d[\d,]*/) || ["0"])[0].replace(/,/g, ""));
+  const stubAssessmentBlocks = (requestBody) => {
+    const isDocument = (claim) => /^Source-reported, not independently verified/.test(claim.claimStatement);
+    const cite = (claims) => claims.map((claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }));
+    const groups = new Map();
+    for (const claim of requestBody.claims.filter((c) => !isDocument(c))) {
+      const key = [...claim.limitationCodes].sort().join(",");
+      groups.set(key, [...(groups.get(key) || []), claim]);
+    }
+    const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
+    const documents = requestBody.claims.filter(isDocument);
+    const lead = ordered.slice(0, 2).map((group) => [...group].sort((a, b) => firstNumber(b) - firstNumber(a))[0]);
+    const blocks = [];
+    if (lead.length > 0) {
+      blocks.push({ section: "executive_snapshot", text: `For the reporting period, the cited evidence records: ${lead.map(stubFigure).join("; ")}. `
+        + "Alongside these figures, the organization's own documents describe how the programmes run and where their records are incomplete.", citations: cite(lead) });
+    }
+    for (const group of ordered) blocks.push({ section: "evidence_findings", text: `${group.map(stubFigure).join("; ")}.`, citations: cite(group) });
+    if (documents.length > 0) {
+      const quoted = documents.map((claim) => /\(([^)]*)\): ("[\s\S]*")$/.exec(claim.claimStatement)).map((match) => `${match[2]} (${match[1]})`);
+      blocks.push({ section: "impact_stories", text: `The organization's own documents describe the programme in these words, each source-reported: ${quoted.join(" ")}`, citations: cite(documents) });
+    }
+    return assessmentStub ? assessmentStub(blocks, requestBody) : blocks;
+  };
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
-    modelCalls.push({ claims: requestBody.claims, serialized: J(payload) });
+    modelCalls.push({ claims: requestBody.claims, assessment: requestBody.assessment ?? null, serialized: J(payload) });
+    if (requestBody.assessment) return { content: [{ type: "text", text: J({ blocks: stubAssessmentBlocks(requestBody) }) }] };
     return { content: [{ type: "text", text: J({ approved: true, draftStatus: "released",
       blocks: requestBody.claims.map((claim) => ({ text: modelBlockText ? modelBlockText(claim) : claim.claimStatement, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })) }) }] };
   };
@@ -2757,6 +2811,178 @@ async function runCedarBridgeAcceptance() {
         delivery: statuses, limitation_entries: entries, released_markdown_path: markdownPath, released_characters: released.length,
       };
       console.log(`Cedar Bridge assessment release: ${J(statuses)}; markdown ${markdownPath}`);
+    });
+
+    // -------------------------------------------------------------------------
+    // Stage F (2026-11-04): the six-section Free Impact Assessment from the
+    // persistent Impact Evidence Library. Every claim the library lists as
+    // currently eligible for internal use is composed; nothing is seeded and
+    // no Cedar Bridge figure is written by the test. The narrative sections
+    // come from the deterministic stub above (no language model); the gaps,
+    // three proposed improvements and next steps are composed by the server.
+    const ASSESSMENT_TITLES = ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Three Recommended Improvements", "Your Next Steps"];
+    const assessmentState = {};
+    await test("F1: a Free Impact Assessment is composed from every currently eligible library claim, saved, and retrievable", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      report.free_impact_assessment = assessmentState;
+      const { eligibleClaimsPath } = await import("../frontend/impactEvidenceLibraryLogic.js");
+      // The eligible-claims read is a Get Kinder role read (unchanged); the
+      // organization administrator then drafts, as for the Evidence Summary.
+      const listed = await gkApi("GET", eligibleClaimsPath(ORG, "internal"));
+      assert.equal(listed.status, 200, J(listed.body));
+      assert.equal(listed.body.data.truncated, false, "the whole eligible library fits one page");
+      const eligibleIds = [...new Set(listed.body.data.eligibleClaims.map((item) => item.claimId))].sort();
+      const library = await query(`SELECT c.claim_id::text, e.evidence_type, c.statement FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
+        WHERE c.claim_id = ANY($1::uuid[]) ORDER BY c.claim_id`, [eligibleIds]);
+      // The request takes at most 20 claims (the existing route limit). When the
+      // library holds more, the person composing leaves out the raw P2-01M
+      // record counts, whose rows the derived measurements already measure.
+      const claimIds = (eligibleIds.length > 20 ? library.filter((row) => row.evidence_type !== "source_record_count_measurement") : library).map((row) => row.claim_id).sort();
+      assessmentState.library = { eligible: library.map((row) => ({ claim_id: row.claim_id, evidence_type: row.evidence_type, selected: claimIds.includes(row.claim_id) })) };
+      for (const label of CLAIMED_ANCHORS) assert.ok(claimIds.includes(documentClaims[label]), `${label}: eligible in the library`);
+      for (const label of ["reach_encounters", "reach_people", "reach_DS_people", "reach_EN_people", "reach_both"]) assert.ok(claimIds.includes(correctedClaims[label]), label);
+      assert.ok(claimIds.length <= 20, `${claimIds.length} eligible claims`);
+      const callsBefore = modelCalls.length;
+      const created = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, { claim_ids: claimIds, idempotency_key: `cedar-free-assessment-${randomUUID()}`, engagement_id: PROJECT });
+      assessmentState.generation = { status: created.status, blockers: blockersOf(created), claim_ids: claimIds };
+      assert.equal(created.status, 201, J(created.body));
+      assert.equal(modelCalls.length, callsBefore + 1);
+      const call = modelCalls.at(-1);
+      assert.equal(call.assessment.composition, "free_impact_assessment");
+      assert.equal(call.assessment.participantStoryEvidence, "none_cited");
+      for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier reaches the model");
+      const draftId = created.body.data.generatedContentDraftId;
+      const blocks = await query(
+        `SELECT b.ordinal, b.text, array_agg(c.claim_id::text ORDER BY c.claim_id) AS claim_ids FROM kai.generated_content_blocks b
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid GROUP BY b.ordinal, b.text ORDER BY b.ordinal`, [draftId]);
+      const { parseFreeImpactAssessment } = await import("../Backend/kai/services/kaiFreeImpactAssessmentComposition.js");
+      const sections = parseFreeImpactAssessment(blocks.map((b) => ({ ordinal: b.ordinal, text: b.text, claimIds: b.claim_ids })));
+      assert.ok(sections, "the persisted draft is a six-section assessment");
+      assert.deepEqual(sections.map((section) => section.title), ASSESSMENT_TITLES);
+      for (const section of sections) assert.ok(section.blocks.map((b) => b.body).join(" ").length >= 200, `${section.title} is substantive`);
+      const prose = (section) => section.blocks.map((b) => b.body.split("Measurement disclosure for")[0]).join("\n");
+      for (const section of sections) assert.doesNotMatch(prose(section), /\bfield_\d+\b/, `${section.title}: no internal field key in the prose`);
+      // Figures: each cited measurement's persisted value is stated in a block
+      // citing it, and the reach figures equal the independent answer key.
+      const expected = Object.fromEntries(parseCsv(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "Expected_Metrics.csv"), "utf8")).map((row) => [row.metric_id, row]));
+      const keyed = { reach_people: "E_DISTINCT_SERVED_PEOPLE", reach_DS_people: "E_DISTINCT_DS_SERVED", reach_EN_people: "E_DISTINCT_EN_SERVED", reach_both: "E_DISTINCT_SERVED_BOTH", reach_encounters: "V2_ELIGIBLE_ENCOUNTERS" };
+      const figures = {};
+      for (const [label, metricId] of Object.entries(keyed)) {
+        const claimId = correctedClaims[label];
+        const [row] = await query(`SELECT m.measured_value FROM kai.claims c JOIN kai.evidence_derived_measurements edm ON edm.evidence_item_id = c.evidence_item_id
+          JOIN kai.source_derived_measurements m ON m.source_derived_measurement_id = edm.source_derived_measurement_id WHERE c.claim_id = $1::uuid`, [claimId]);
+        const citing = blocks.filter((b) => b.claim_ids.includes(claimId));
+        figures[label] = { metric_id: metricId, expected: Number(expected[metricId].expected_value), persisted: Number(row.measured_value), stated_in_citing_block: citing.some((b) => new RegExp(`(?<![\\d.])${row.measured_value}(?![\\d.])`).test(b.text)) };
+        assert.deepEqual([figures[label].persisted, figures[label].stated_in_citing_block], [figures[label].expected, true], `${label}: ${J(figures[label])}`);
+      }
+      // Every other answer-key metric matched earlier (test 31) whose claim the
+      // assessment cites is stated with the key's value in a citing block.
+      const numbersIn = (value) => [...String(value).matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+      const keyMatches = report.comparison_final.filter((row) => row.difference === "match" && row.claim_id && claimIds.includes(row.claim_id))
+        .map((row) => ({ metric_id: row.metric_id, expected: Number(row.expected), claim_id: row.claim_id,
+          stated: blocks.some((b) => b.claim_ids.includes(row.claim_id) && numbersIn(b.text.split("Measurement disclosure for")[0]).includes(Number(row.expected))) }));
+      for (const row of keyMatches) assert.ok(row.stated, J(row));
+      assert.ok(keyMatches.length >= 12, `${keyMatches.length} answer-key figures checked`);
+      figures.answer_key_rows = keyMatches;
+      // PDF/TXT evidence: every document claim is cited, and its quoted words appear verbatim.
+      for (const label of CLAIMED_ANCHORS) {
+        assert.ok(blocks.some((b) => b.claim_ids.includes(documentClaims[label]) && b.text.includes(DOCUMENT_ANCHORS[label].text)), `${label}: quoted with its citation`);
+      }
+      const stories = sections[2].blocks.map((b) => b.body).join("\n");
+      assert.match(stories, /Participant story evidence: none is available/);
+      assert.ok(sections[2].blocks.some((b) => b.claimIds.includes(documentClaims.no_participant_story)), "the missing-story statement cites the source that records it");
+      // Three proposed improvements, each grounded in a documented gap that its citations carry.
+      const recommendations = sections[4].blocks;
+      assert.equal(recommendations.length, 3);
+      for (const rec of recommendations) {
+        assert.match(rec.body, /^Proposed change: .+ Basis: .+ This is a proposal for the organization to consider; it is not a measured or confirmed result\.(?: Measurement disclosure for .+)?$/s);
+        assert.ok(rec.claimIds.length >= 1);
+      }
+      assert.match(recommendations[0].body, /duration/i);
+      assert.ok(recommendations[0].claimIds.includes(documentClaims.missing_duration), "duration: grounded in the operations note on missing durations");
+      assert.match(recommendations[1].body, /follow-up/i);
+      assert.ok(recommendations[1].claimIds.includes(documentClaims.convenience_sample) && recommendations[1].claimIds.includes(documentClaims.employment_not_verified), "follow-up: grounded in the convenience-sample and check-in statements");
+      assert.match(recommendations[2].body, /duplicate/i);
+      const [dupClaim] = recommendations[2].claimIds;
+      const [dupCodes] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [dupClaim]);
+      assert.ok(dupCodes, "duplicates: grounded in a measured claim");
+      // Saved and retrievable: the Library's drafts index and the review packet.
+      const index = await gkApi("GET", `${orgPath}/generated-content-drafts?limit=25`);
+      assert.equal(index.status, 200, J(index.body));
+      assert.ok(J(index.body).includes(draftId), "listed in the persistent drafts index");
+      const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${draftId}/review-packet`);
+      assert.equal(packet.status, 200, J(packet.body));
+      Object.assign(assessmentState, { draftId, figures, block_count: blocks.length, characters: blocks.reduce((n, b) => n + b.text.length, 0),
+        sections: sections.map((section) => ({ title: section.title, blocks: section.blocks.length, claim_ids: [...new Set(section.blocks.flatMap((b) => b.claimIds))] })),
+        recommendations: recommendations.map((rec) => ({ text: rec.body.split(" Measurement disclosure for")[0], claim_ids: rec.claimIds })) });
+    });
+
+    await test("F2: Get Kinder's existing review and release; the client receives the six-section assessment; the PDF is 4 to 6 pages", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      assert.ok(assessmentState.draftId, "F1 produced the draft");
+      const delivery = await releaseThroughGetKinder(assessmentState.draftId);
+      const { released, entries, ...statuses } = delivery;
+      assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
+        delivery.limitation_snapshot, delivery.export_candidate, delivery.final_release_authority, delivery.export_manifest, delivery.client_released_markdown],
+        [[200, 200], 201, 200, 200, 201, 201, 201, 201, 200], J(statuses));
+      assert.equal(typeof released, "string");
+      assert.match(released, /^# Free Impact Assessment\n/);
+      ASSESSMENT_TITLES.forEach((title, index) => assert.ok(released.includes(`## ${index + 1}. ${title}`), title));
+      assert.match(released, /\*\*Reporting period:\*\* 2025-04-01 to 2026-03-31/);
+      assert.match(released, /internal use only/);
+      assert.doesNotMatch(released, /\[\[assessment:/);
+      assert.doesNotMatch(released, /CB0\d\d|EV0\d\d|FU0\d\d/);
+      // Limitations stay visible: document claims carry source-reported and accepted coverage limitations.
+      for (const label of CLAIMED_ANCHORS) {
+        const entry = entries.find((candidate) => candidate.claim_id === documentClaims[label]);
+        assert.ok(entry.limitation_codes.includes("document.source_reported_not_verified"), `${label}: ${J(entry.limitation_codes)}`);
+        assert.ok(entry.limitation_codes.some((code) => code.endsWith(".accepted_internal_limitation")), `${label}: accepted coverage limitation carried`);
+      }
+      assert.match(released, /quoted verbatim from the organization's own document|what the source document states/i);
+      assert.match(released, /accepted as a limitation for internal use only/);
+      assert.match(released, /## Evidence and sources[\s\S]*Source-reported statement \((?:line|page)/);
+      assert.match(released, /## Evidence and sources[\s\S]*People served/);
+      // The existing PDF export of the same manifest.
+      const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      let pdf;
+      try {
+        const response = await fetch(`${baseUrl}${orgPath}/export-manifests/${delivery.export_manifest_id}/pdf`, { headers: { Accept: "application/pdf", Cookie: `kai_harness_user=${USERS.gkAdmin}` } });
+        assert.equal(response.status, 200, await response.clone().text());
+        pdf = Buffer.from(await response.arrayBuffer());
+      } finally {
+        if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
+      }
+      const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+      const markdownPath = REPORT_PATH ? REPORT_PATH.replace(/\.json$/, "") + ".free-impact-assessment.md" : null;
+      const pdfPath = REPORT_PATH ? REPORT_PATH.replace(/\.json$/, "") + ".free-impact-assessment.pdf" : null;
+      if (markdownPath) writeFileSync(markdownPath, released);
+      if (pdfPath) writeFileSync(pdfPath, pdf);
+      Object.assign(assessmentState, { delivery: statuses, limitation_entries: entries, released_markdown_path: markdownPath, pdf_path: pdfPath, pdf_pages: pages, released_characters: released.length });
+      assert.ok(pages >= 4 && pages <= 6, `${pages} PDF pages`);
+      console.log(`Cedar Bridge Free Impact Assessment: ${pages} PDF pages; ${J(statuses)}; ${markdownPath}`);
+    });
+
+    await test("F3: the existing correction controls refuse a fabricated figure and an invented quotation, and nothing is persisted", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      const claimIds = assessmentState.generation.claim_ids;
+      const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n;
+      const outcomes = {};
+      for (const [label, mutate] of [
+        ["fabricated_figure", (blocks) => blocks.map((block, index) => (index === 0 ? { ...block, text: `${block.text} Participation rose by 47 per cent.` } : block))],
+        ["invented_quotation", (blocks) => blocks.map((block) => (block.section === "impact_stories" ? { ...block, text: `${block.text} One participant said "this programme changed my life completely".` } : block))],
+      ]) {
+        assessmentStub = mutate;
+        try {
+          const refused = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, { claim_ids: claimIds, idempotency_key: `cedar-free-assessment-${label}-${randomUUID()}`, engagement_id: PROJECT });
+          outcomes[label] = { status: refused.status, blockers: blockersOf(refused) };
+          assert.equal(refused.status, 422, J(refused.body));
+        } finally {
+          assessmentStub = null;
+        }
+      }
+      assert.ok(J(outcomes.fabricated_figure.blockers).includes("unsupported_numeric_or_causal_assertion"), J(outcomes));
+      assert.ok(J(outcomes.invented_quotation.blockers).includes("assessment_quotation_not_in_cited_evidence"), J(outcomes));
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n, draftsBefore);
+      assessmentState.refusals = outcomes;
     });
   } finally {
     if (REPORT_PATH) writeFileSync(REPORT_PATH, `${J(report, null, 2)}\n`);

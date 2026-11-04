@@ -1,5 +1,6 @@
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
 import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
+import { composeFreeImpactAssessmentView, serializeFreeImpactAssessmentToMarkdown } from "./kaiFreeImpactAssessmentRenderer.js";
 
 const MARKDOWN_CONTRACT_VERSION = "kai-sprint2-export-manifest-markdown-v1";
 
@@ -45,6 +46,10 @@ export function serializeExportManifestRenderModelToMarkdown(renderModel) {
   if (!validateRenderModel(renderModel)) {
     throw new TypeError("A valid export manifest render-model DTO is required.");
   }
+  // A released Free Impact Assessment is laid out as its six sections; every
+  // other released draft keeps exactly the layout below.
+  const assessment = composeFreeImpactAssessmentView(renderModel);
+  if (assessment) return serializeFreeImpactAssessmentToMarkdown(assessment, { contractLine: `Markdown contract \`${MARKDOWN_CONTRACT_VERSION}\`` });
 
   const lines = [
     "# Export Manifest",

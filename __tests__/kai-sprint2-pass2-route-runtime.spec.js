@@ -404,6 +404,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // requested claim must be freshly funder-eligible (pre- and
     // post-generation) before generation may proceed.
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary/funder",
+    // The six-section Free Impact Assessment: an internal Evidence Summary
+    // composition on the same governed generation vertical (2026-11-04).
+    "/admin/organizations/:organizationId/generated-content-drafts/free-impact-assessment",
     "/admin/organizations/:organizationId/generated-content-drafts/funder-outcome-table",
     "/admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph",
     // KAI P13-01 internal impact-narrative generation surface, reusing the

@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
+import { composeFreeImpactAssessmentView, renderFreeImpactAssessmentPdf } from "./kaiFreeImpactAssessmentRenderer.js";
 
 const PDF_CONTRACT_VERSION = "kai-sprint2-export-manifest-pdf-v1";
 
@@ -89,6 +90,14 @@ export function serializeExportManifestRenderModelToPdf(renderModel) {
     doc.on("end", resolve);
     doc.on("error", reject);
   });
+
+  // A released Free Impact Assessment is laid out as its six sections.
+  const assessment = composeFreeImpactAssessmentView(renderModel);
+  if (assessment) {
+    renderFreeImpactAssessmentPdf(doc, assessment, { contractLine: `PDF contract ${PDF_CONTRACT_VERSION}` });
+    doc.end();
+    return finished.then(() => Buffer.concat(chunks));
+  }
 
   doc.fontSize(20).font("Helvetica-Bold").text("Export Manifest");
   doc.moveDown(0.5);

@@ -1,4 +1,5 @@
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
+import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
 import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
@@ -408,8 +409,16 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     narrativeIntroduction(model),
   ];
+  // A Free Impact Assessment's blocks carry their section marker; the section
+  // title is shown once, as a heading, instead of the marker.
+  let currentSection = null;
   for (const block of [...model.blocks].sort((a, b) => a.ordinal - b.ordinal)) {
-    lines.push("", `${text(block.text)} ${refs(block.citationRefs)}`);
+    const section = parseAssessmentBlockText(block.text);
+    if (section && section.sectionKey !== currentSection) {
+      currentSection = section.sectionKey;
+      lines.push("", `### ${ASSESSMENT_SECTIONS.find((entry) => entry.key === section.sectionKey).title}`);
+    }
+    lines.push("", `${text(section ? section.body : block.text)} ${refs(block.citationRefs)}`);
   }
   lines.push(
     "",

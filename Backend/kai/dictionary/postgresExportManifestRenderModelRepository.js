@@ -1,3 +1,5 @@
+import { isFreeImpactAssessmentBlocks } from "../services/kaiFreeImpactAssessmentComposition.js";
+import { DOCUMENT_EVIDENCE_LOCATOR_TYPE, DOCUMENT_EVIDENCE_TYPE, documentLocatorLabel } from "../validators/kaiDocumentEvidenceValidators.js";
 import { withTransaction } from "../db/kaiDb.js";
 import {
   evaluateExportCandidateCurrentnessInTransaction,
@@ -88,11 +90,63 @@ async function loadReportContextInTransaction(tx, { organizationId, generatedCon
   );
   const row = rows[0];
   if (!row) return null;
-  return {
+  const context = {
     organizationId,
     organizationName: row.organization_name ?? null,
     engagementId: row.engagement_id ?? null,
     engagementCode: row.engagement_code ?? null,
+  };
+  // Free Impact Assessment display context: the engagement's recorded
+  // reporting period and, per cited claim, the human-stated indicator label
+  // or the document locator, and the source's file kind. Display only.
+  const assessment = await loadAssessmentDisplayContext(tx, { organizationId, generatedContentDraftId, engagementId: row.engagement_id });
+  return assessment ? { ...context, ...assessment } : context;
+}
+
+async function loadAssessmentDisplayContext(tx, { organizationId, generatedContentDraftId, engagementId }) {
+  const { rows: blockRows } = await tx.query(
+    `SELECT text FROM kai.generated_content_blocks
+      WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid ORDER BY ordinal`,
+    [organizationId, generatedContentDraftId],
+  );
+  if (!isFreeImpactAssessmentBlocks(blockRows.map((block, index) => ({ ordinal: index + 1, text: block.text })))) return null;
+  const { rows: [period] } = await tx.query(
+    `SELECT e.project_metadata->'engagement_requirement_target'->>'reporting_period_start' AS period_start,
+            e.project_metadata->'engagement_requirement_target'->>'reporting_period_end' AS period_end,
+            e.project_metadata->'engagement_requirement_target'->>'report_identity' AS report_identity
+       FROM kai.engagements e WHERE e.organization_id = $1::uuid AND e.engagement_id = $2::uuid`,
+    [organizationId, engagementId],
+  );
+  const derivedPresent = (await tx.query("SELECT to_regclass('kai.evidence_derived_measurements') IS NOT NULL AS present")).rows[0]?.present === true;
+  const { rows } = await tx.query(
+    `SELECT DISTINCT c.claim_id::text AS claim_id, e.evidence_type, f.file_extension, l.locator_type, l.coordinates,
+            ${derivedPresent ? `(SELECT i.indicator_label FROM kai.evidence_derived_measurements edm
+                JOIN kai.source_derived_measurement_interpretations i ON i.organization_id = edm.organization_id AND i.interpretation_id = edm.interpretation_id
+               WHERE edm.organization_id = e.organization_id AND edm.evidence_item_id = e.evidence_item_id)` : "NULL::text"} AS indicator_label
+       FROM kai.generated_content_blocks b
+       JOIN kai.generated_content_citations gc ON gc.organization_id = b.organization_id AND gc.generated_content_block_id = b.generated_content_block_id
+       JOIN kai.claims c ON c.organization_id = gc.organization_id AND c.claim_id = gc.claim_id
+       JOIN kai.evidence_items e ON e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id
+       LEFT JOIN kai.source_locators l ON l.organization_id = e.organization_id AND l.source_locator_id = e.source_locator_id
+       JOIN kai.source_versions sv ON sv.organization_id = e.organization_id AND sv.source_version_id = e.source_version_id
+       JOIN kai.intake_source_candidates isc ON isc.organization_id = sv.organization_id AND isc.intake_source_candidate_id = sv.intake_source_candidate_id
+       JOIN kai.intake_files f ON f.organization_id = isc.organization_id AND f.intake_file_id = isc.intake_file_id
+      WHERE b.organization_id = $1::uuid AND b.generated_content_draft_id = $2::uuid`,
+    [organizationId, generatedContentDraftId],
+  );
+  const citationLabels = {};
+  for (const claim of rows) {
+    const kind = claim.evidence_type === DOCUMENT_EVIDENCE_TYPE ? "document_statement" : "measurement";
+    const label = kind === "document_statement"
+      ? `Source-reported statement (${claim.locator_type === DOCUMENT_EVIDENCE_LOCATOR_TYPE ? documentLocatorLabel(claim.coordinates) : "located excerpt"})`
+      : claim.indicator_label || "Recorded measurement";
+    citationLabels[claim.claim_id] = { kind, label, fileKind: String(claim.file_extension || "").replace(/^\./, "").toUpperCase() || null };
+  }
+  return {
+    reportingPeriodStart: period?.period_start ?? null,
+    reportingPeriodEnd: period?.period_end ?? null,
+    reportIdentity: period?.report_identity ?? null,
+    citationLabels,
   };
 }
 

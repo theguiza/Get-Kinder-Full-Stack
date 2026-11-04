@@ -333,6 +333,71 @@
     return { ok: true, data: result.data, error: null };
   }
 
+  /**
+   * Free Impact Assessment (owner prompt 2026-11-04): an internal Evidence
+   * Summary composed into six sections (kaiFreeImpactAssessmentComposition.js).
+   * Exactly the internal Evidence Summary's gates: the same operation and role
+   * set (organization administrators may draft internal content), the same
+   * engagement/tenant check and P2-04 reconciliation, and the same repository
+   * transaction, validators, review queue and audit. No new permission,
+   * approval or review stage.
+   */
+  export async function createFreeImpactAssessmentDraft(input, dependencies = {}) {
+    const env = dependencies.env || process.env;
+    if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+    if (!isKaiGenerationEnabled(env) || !areKaiSprint2GenerationFeaturesEnabled(env)) {
+      return buildKaiError("feature_disabled");
+    }
+    if (!isCreateEvidenceSummaryDraftInput(input) || input.requestedAudience !== "internal") {
+      return buildKaiError("validation_blocker");
+    }
+    if (!isMappedHumanActor(input.actorContext)) {
+      return buildKaiError("authorization_denied");
+    }
+
+    const auth = validateActorCanPerformOperation(
+      input.actorContext,
+      CREATE_EVIDENCE_SUMMARY_OPERATION,
+      input.organizationId,
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
+    );
+    if (!auth.ok) {
+      return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+    }
+
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+    });
+
+    const tenant = validateTenantBoundaryConsistency({
+      expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
+    });
+    if (tenant.severity === "blocker") {
+      return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+
+    const reconciliation = await reconcileInternalClaimGapsForGeneration(input, dependencies);
+    if (reconciliation) return reconciliation;
+
+    const repository =
+      dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+    const result = await repository.createFreeImpactAssessmentDraft(input, {
+      draftGenerator: dependencies.draftGenerator,
+      metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
+    return { ok: true, data: result.data, error: null };
+  }
+
   export async function createImpactNarrativeDraft(input, dependencies = {}) {
     const env = dependencies.env || process.env;
     if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");

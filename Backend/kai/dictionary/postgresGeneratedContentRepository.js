@@ -13,6 +13,11 @@ import {
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import {
+  FREE_IMPACT_ASSESSMENT_COMPOSITION,
+  buildAssessmentModelContext,
+  composeFreeImpactAssessmentBlocks,
+} from "../services/kaiFreeImpactAssessmentComposition.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
   DERIVED_MEASUREMENT_EVIDENCE_TYPE,
@@ -182,6 +187,9 @@ const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 const TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-TRACE-P0-001";
 const GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-RESULT-P0-001";
 const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
+// The Free Impact Assessment's structure (six sections, three grounded
+// recommendations, quotations only from cited evidence).
+const FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY = "VAL-GEN-ASSESSMENT-001";
 // Phase-13 governance repair: the earliest shared generated-content
 // admission boundary at which every current content type's claims are
 // already freshly traceability-revalidated (see traceabilityResults in
@@ -410,6 +418,13 @@ export function fingerprintEvidenceSummaryRequest({ requestedAudience, claimIds,
   return fingerprintGeneratedContentRequest(CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
+// The Free Impact Assessment is an internal Evidence Summary composition; its
+// requests are fingerprinted apart from a plain Evidence Summary's, so one
+// idempotency key never stands for both.
+export function fingerprintFreeImpactAssessmentRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(`${CONTENT_TYPE}:${FREE_IMPACT_ASSESSMENT_COMPOSITION}`, { requestedAudience, claimIds, engagementId });
+}
+
 export function fingerprintImpactNarrativeRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(IMPACT_NARRATIVE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
@@ -529,6 +544,9 @@ function validateGeneratorInput(input) {
     allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "readiness"]);
   } else if (input?.contentType === DATA_GAP_MEMO_CONTENT_TYPE) {
     allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "gaps"]);
+  } else if (input?.contentType === CONTENT_TYPE && input?.assessment !== undefined) {
+    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "assessment"]);
+    if (input.requestedAudience !== "internal" || input.assessment?.composition !== FREE_IMPACT_ASSESSMENT_COMPOSITION) return false;
   }
   if (!hasExactKeys(input, allowedInputKeys)) return false;
   if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
@@ -1270,7 +1288,7 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
   }));
 }
 
-function toGeneratorInput({ requestedAudience, projections, contentType, authoritativeReadiness }) {
+function toGeneratorInput({ requestedAudience, projections, contentType, authoritativeReadiness, assessment = false }) {
   const input = {
     contentType,
     requestedAudience,
@@ -1290,6 +1308,7 @@ function toGeneratorInput({ requestedAudience, projections, contentType, authori
   if (contentType === DATA_GAP_MEMO_CONTENT_TYPE) {
     input.gaps = authoritativeReadiness;
   }
+  if (assessment) input.assessment = buildAssessmentModelContext(projections);
   if (!validateGeneratorInput(input)) throw new Error("invalid_generator_input_contract");
   return input;
 }
@@ -1428,6 +1447,11 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
   ) return failure("validation_blocker");
   if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
   if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+  // The Free Impact Assessment composition: an internal Evidence Summary only.
+  const assessment = dependencies.composition === FREE_IMPACT_ASSESSMENT_COMPOSITION;
+  if (dependencies.composition !== undefined && (!assessment || contentType !== CONTENT_TYPE || input.requestedAudience !== "internal")) {
+    return failure("validation_blocker");
+  }
   const requestFingerprint = fingerprintRequest(input);
 
   try {
@@ -1570,7 +1594,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           // the model is told and VAL-GEN-010 bounds the generated text.
           const ordinaryAuthority = ordinaryInternalAuthorityOf(traceability);
           const countOnly = ordinaryAuthority?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
-          if (countOnly && ordinaryAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
+          if (countOnly && ordinaryAuthority.reliedOn && (contentType !== COUNT_ONLY_CONTENT_TYPE || assessment)) {
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
@@ -1634,9 +1658,26 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
               ? dependencies.authoritativeDataGaps
               : dependencies.authoritativeReadiness,
+            assessment,
           })
         : null;
       let generatorResult = generatorInput ? await dependencies.draftGenerator(generatorInput) : null;
+      // Free Impact Assessment: the model's section blocks pass the result
+      // contract, then the server adds the composed sections (story
+      // evidence, documented gaps, three proposed improvements, next steps)
+      // from the same projections. Disclosures, the combined result contract
+      // and every validator below then run on the whole assessment.
+      if (assessment) {
+        const modelClassification = classifyGeneratorResult(generatorResult);
+        if (!modelClassification.ok) {
+          rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+        }
+        const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
+        if (!composedAssessment.ok) {
+          rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
+        }
+        generatorResult = { blocks: composedAssessment.blocks };
+      }
       // An Evidence Summary block citing an ordinary measured claim carries
       // that claim's server-composed disclosure after the model's own text
       // (composeEvidenceSummaryMeasurementDisclosures). The model result
@@ -3088,6 +3129,15 @@ export function createPostgresGeneratedContentRepository({
         fingerprintEvidenceSummaryRequest,
         input,
         dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
+    async createFreeImpactAssessmentDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        CONTENT_TYPE,
+        fingerprintFreeImpactAssessmentRequest,
+        input,
+        { ...dependencies, composition: FREE_IMPACT_ASSESSMENT_COMPOSITION },
         { runInTransaction, evaluator, afterPersist },
       );
     },
