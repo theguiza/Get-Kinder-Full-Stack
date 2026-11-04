@@ -1,3 +1,4 @@
+import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
@@ -212,7 +213,7 @@ export default function ClientInternalDrafts({
           <InternalReport draft={draft} canRead={canReadInternalReports} report={report} structuralOnly={structuralOnly}
             onOpen={() => openMarkdown(draft.generatedContentDraftId, clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId))}
             downloadPath={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} />
-          {!draft.internalReport.available && draft.release && !ORGANIZATION_RELEASE_STEPS.has(draft.release.state) ? (
+          {draft.release && (!draft.internalReport.available || draft.release.state === "released_for_internal_use") && !ORGANIZATION_RELEASE_STEPS.has(draft.release.state) ? (
             <div className="small mb-2" data-client-internal-draft-release-state={draft.release.state}>
               <span className="badge text-bg-light me-2">{INTERNAL_DRAFT_RELEASE_STATE_LABELS[draft.release.state]}</span>
               {draft.organizationRelease.releasedBy ? (
@@ -249,7 +250,7 @@ export default function ClientInternalDrafts({
           </ul>
           {draft.blocks.map((block) => (
             <div key={block.ordinal} className="mb-2" data-client-internal-draft-block={block.ordinal}>
-              <p className="mb-1" style={{ whiteSpace: "pre-wrap" }}>{block.text}</p>
+              <p className="mb-1" style={{ whiteSpace: "pre-wrap" }}>{assessmentBlockDisplay(block.text)}</p>
               <div className="small text-muted">
                 Cites:
                 <ul className="mb-0">

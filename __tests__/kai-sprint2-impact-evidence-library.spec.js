@@ -1605,10 +1605,10 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
 
 test("Impact Evidence Library generation buttons: disabled whenever no explicit engagement is selected", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
-  // Evidence Summary, Impact Narrative, and Readiness Assessment are all
+  // Free Impact Assessment, Evidence Summary, Impact Narrative, and Readiness Assessment are all
   // claim-driven generators and keep the shared claim-selection prerequisite.
-  const claimDrivenDisabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
-  assert.equal(claimDrivenDisabledMatches.length, 3);
+  const claimDrivenDisabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| selectedGenerationClaimIds\.length > 20 \|\| !engagementId\}/g) || [];
+  assert.equal(claimDrivenDisabledMatches.length, 4);
   // Data Gap Memo has no real claim-selection prerequisite (its route
   // deliberately accepts no claim_ids - membership is server-derived), so its
   // button must not depend on selectedGenerationClaimIds.

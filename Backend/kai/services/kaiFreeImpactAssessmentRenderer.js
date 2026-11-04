@@ -103,7 +103,7 @@ export function serializeFreeImpactAssessmentToMarkdown(view, { contractLine }) 
   for (const section of view.sections) {
     lines.push("", `## ${section.number}. ${section.title}`);
     section.blocks.forEach((block, index) => {
-      const lead = section.key === "recommended_improvements" ? `**Improvement ${index + 1}.** ` : "";
+      const lead = section.key === "recommended_improvements" && block.prose.startsWith("Proposed change:") ? `**Improvement ${index + 1}.** ` : "";
       lines.push("", `${lead}${text(block.prose)}${refsText(block.citationRefs)}`);
       if (block.disclosure) lines.push("", `> _Limitations of the cited figures:_ ${text(block.disclosure)}`);
     });
@@ -135,7 +135,7 @@ export function renderFreeImpactAssessmentPdf(doc, view, { contractLine }) {
     doc.fontSize(14).font("Helvetica-Bold").text(`${section.number}. ${section.title}`);
     section.blocks.forEach((block, index) => {
       doc.moveDown(0.4);
-      if (section.key === "recommended_improvements") doc.fontSize(11).font("Helvetica-Bold").text(`Improvement ${index + 1}`);
+      if (section.key === "recommended_improvements" && block.prose.startsWith("Proposed change:")) doc.fontSize(11).font("Helvetica-Bold").text(`Improvement ${index + 1}`);
       doc.fontSize(11).font("Helvetica").text(`${text(block.prose)}${refsText(block.citationRefs)}`);
       if (block.disclosure) {
         doc.moveDown(0.2);

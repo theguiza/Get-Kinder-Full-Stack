@@ -7,6 +7,7 @@ import {
   claimTraceabilityPath,
   clientImpactFactsPath,
   createEvidenceSummaryPath,
+  createFreeImpactAssessmentPath,
   createImpactNarrativePath,
   errorText,
   canOfferEvidenceExtraction,
@@ -76,6 +77,7 @@ import ClientMeasuredClaimReviewPanel from "./ClientMeasuredClaimReviewPanel.jsx
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
+  free_impact_assessment: "Free Impact Assessment",
   impact_narrative: "Internal impact narrative",
 });
 
@@ -837,6 +839,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       {access.generateDrafts ? (
         <div className="admin-card mb-3">
           <h5 className="mb-2">Internal drafts</h5>
+          <div className="small mb-2">{selectedClaimIds.length}/20 claims selected. Choose the measurements and document statements needed for this assessment; unselected claims are not included. You can deselect claims to change the set. Include evidence of limitations as well as findings.</div>
           {!readiness.ready ? <div className="small mb-2" data-client-draft-readiness={readiness.reason}>{INTERNAL_DRAFT_READINESS_MESSAGES[readiness.reason]}</div> : null}
           {readiness.ready && !selectionUse.immediatelyUsable ? (
             <div className="small mb-2" data-client-draft-selection-usability={selectionUse.notUsable.length > 0 ? "not_usable" : "unknown"}>
@@ -844,6 +847,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             </div>
           ) : null}
           <div className="d-flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm btn-primary" disabled={!readiness.ready || Boolean(pending)}
+              onClick={() => generate("free_impact_assessment", createFreeImpactAssessmentPath)}>
+              {pending === "generate:free_impact_assessment" ? "Generating..." : "Generate Free Impact Assessment"}
+            </button>
             <button type="button" className="btn btn-sm btn-primary" disabled={!readiness.ready || Boolean(pending)}
               onClick={() => generate("evidence_summary", createEvidenceSummaryPath)}>
               {pending === "generate:evidence_summary" ? "Generating..." : "Generate internal evidence summary"}

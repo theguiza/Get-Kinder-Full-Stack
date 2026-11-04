@@ -32,6 +32,8 @@ import {
   coverageInternalAcceptancePath,
   coverageFunderAcceptancePath,
   createEvidenceSummaryPath,
+  createFreeImpactAssessmentPath,
+  assessmentBlockDisplay,
   createDataGapMemoPath,
   createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
@@ -2315,7 +2317,7 @@ export default function ImpactEvidenceLibrary({
     // unrelated claim checkboxes.
     const isClaimDrivenGeneration = !requestBodyBuilder;
     if (audience !== "internal" || !engagementId) return;
-    if (isClaimDrivenGeneration && selectedGenerationClaimIds.length === 0) return;
+    if (isClaimDrivenGeneration && (selectedGenerationClaimIds.length === 0 || selectedGenerationClaimIds.length > 20)) return;
     const requestOrganizationId = organizationId;
     const requestEngagementId = engagementId;
     setGeneratingDraft(true);
@@ -2368,6 +2370,11 @@ export default function ImpactEvidenceLibrary({
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
   }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts, workflowOperations]);
+
+  const generateFreeImpactAssessment = useCallback(
+    () => generateDraft(createFreeImpactAssessmentPath, "free-impact-assessment"),
+    [generateDraft],
+  );
 
   const generateEvidenceSummary = useCallback(
     () => generateDraft(createEvidenceSummaryPath, "evidence-summary"),
@@ -3672,11 +3679,21 @@ export default function ImpactEvidenceLibrary({
               ))}
             </div>
             {workflowOperations.generateDrafts && audience === "internal" ? (
+              <div className="small mt-2">{selectedGenerationClaimIds.length}/20 claims selected. Choose relevant measurements and document statements, including limitations. Unselected claims are not included; deselect claims to change the set.</div>
+            ) : null}
+            {workflowOperations.generateDrafts && audience === "internal" ? (
+              <button type="button" className="btn btn-sm btn-primary mt-2 w-100"
+                onClick={generateFreeImpactAssessment}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || selectedGenerationClaimIds.length > 20 || !engagementId}>
+                {generatingDraft ? "Generating..." : "Generate Free Impact Assessment"}
+              </button>
+            ) : null}
+            {workflowOperations.generateDrafts && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-primary mt-3 w-100"
                 onClick={generateEvidenceSummary}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || selectedGenerationClaimIds.length > 20 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate evidence summary"}
               </button>
@@ -3686,7 +3703,7 @@ export default function ImpactEvidenceLibrary({
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
                 onClick={generateImpactNarrative}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || selectedGenerationClaimIds.length > 20 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>
@@ -3696,7 +3713,7 @@ export default function ImpactEvidenceLibrary({
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
                 onClick={generateReadinessAssessment}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || selectedGenerationClaimIds.length > 20 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Readiness Assessment"}
               </button>
@@ -4280,7 +4297,7 @@ export default function ImpactEvidenceLibrary({
                             {draft.blocks.map((block) => (
                               <div key={block.ordinal} className="border rounded p-2 mb-2">
                                 <div className="small fw-semibold">Block {block.ordinal}</div>
-                                <p className="small mb-2">{block.text}</p>
+                                <p className="small mb-2">{assessmentBlockDisplay(block.text)}</p>
                                 <div className="small fw-semibold">Why can KAI say this?</div>
                                 {block.citations.map((citation, index) => (
                                   <div
@@ -5169,7 +5186,7 @@ export default function ImpactEvidenceLibrary({
               {generatedDraftPacket.blocks.map((block) => (
                 <div key={block.ordinal} className="border rounded p-2 mb-2">
                   <div className="small fw-semibold">Block {block.ordinal}</div>
-                  <p className="small mb-2">{block.text}</p>
+                  <p className="small mb-2">{assessmentBlockDisplay(block.text)}</p>
                   {block.citations.map((citation, index) => (
                     <div key={`${citation.claimId}-${citation.evidenceItemId}-${index}`} className="border-top pt-2 mt-2">
                       <ValueRow label="Citation" value={`${citation.claimId} / ${citation.evidenceItemId}`} />

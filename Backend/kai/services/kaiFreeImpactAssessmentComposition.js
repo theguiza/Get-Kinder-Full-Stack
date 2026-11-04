@@ -16,7 +16,7 @@ import { DOCUMENT_EVIDENCE_TYPE } from "../validators/kaiDocumentEvidenceValidat
  * narrative). The server composes, from the cited claims only:
  * - the missing participant-story statement, when no story evidence is cited;
  * - the documented gaps, each grounded in the claims that carry it;
- * - exactly three recommendations, each a proposed change (never an outcome)
+ * - up to three recommendations, each a proposed change (never an outcome)
  *   tied to one documented gap and citing the claims that ground it;
  * - the next steps, from the draft's governance state (internal only).
  *
@@ -69,7 +69,7 @@ export function parseAssessmentBlockText(text) {
 /**
  * The six sections of a persisted or released assessment, or null when the
  * blocks are not one: every block marked, sections in order, all six present,
- * exactly three recommendations.
+ * up to three recommendations.
  */
 export function parseFreeImpactAssessment(blocks) {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
@@ -85,7 +85,11 @@ export function parseFreeImpactAssessment(blocks) {
     sections[index].blocks.push({ ...block, body: parsed.body });
   }
   if (sections.some((section) => section.blocks.length === 0)) return null;
-  if (sections[SECTION_INDEX.get("recommended_improvements")].blocks.length !== RECOMMENDATION_COUNT) return null;
+  if (sections[SECTION_INDEX.get("recommended_improvements")].blocks.length > RECOMMENDATION_COUNT) return null;
+  const improvements = sections[SECTION_INDEX.get("recommended_improvements")];
+  if (improvements.blocks.filter((block) => block.body.startsWith("Proposed change:")).length < RECOMMENDATION_COUNT) {
+    improvements.title = "Recommended Improvements";
+  }
   return sections;
 }
 
@@ -322,7 +326,19 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   }
 
   const chosen = gaps.filter((gap) => !gap.entry.story || gap.documentGrounding.length > 0).slice(0, RECOMMENDATION_COUNT);
-  if (chosen.length !== RECOMMENDATION_COUNT) return { ok: false, reason: "assessment_recommendations_not_grounded" };
+  const fallbackCitations = modelBlocks[0].citations.map((citation) => ({ ...citation }));
+  if (documented.length === 0) {
+    bySection.get("gaps_opportunities").push({
+      text: withAssessmentSection("gaps_opportunities", "No specific improvement gap is established by the cited evidence. This does not establish that no gaps exist; the assessment is limited to the selected evidence."),
+      citations: fallbackCitations,
+    });
+  }
+  if (chosen.length === 0) {
+    bySection.get("recommended_improvements").push({
+      text: withAssessmentSection("recommended_improvements", "The cited evidence does not support a specific improvement proposal. No recommendations have been invented to fill this section. Review the evidence gaps with Get Kinder before proposing changes."),
+      citations: fallbackCitations,
+    });
+  }
   for (const gap of chosen) {
     bySection.get("recommended_improvements").push({
       text: withAssessmentSection("recommended_improvements",
@@ -331,9 +347,16 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
     });
   }
 
+  if (chosen.length > 0 && chosen.length < RECOMMENDATION_COUNT) {
+    const first = bySection.get("recommended_improvements")[0];
+    first.text += " The cited evidence supports fewer than three specific proposals; no further recommendations have been invented.";
+  }
+
   const nextSteps = [
     "Read this internal draft with Get Kinder. It is approved for internal use only; none of its findings is cleared for funder or public use.",
-    `Decide which proposed change to try first, then ${chosen.map((gap) => gap.entry.nextStep).join("; ")}.`,
+    chosen.length > 0
+      ? `Decide which proposed change to try first, then ${chosen.map((gap) => gap.entry.nextStep).join("; ")}.`
+      : "Review the limited evidence with Get Kinder and identify what further evidence would be needed before proposing changes.",
     "Keep the limitations named in this assessment with any figure you reuse, and work through them with Get Kinder before external use.",
     ...(storyEvidenceCited(claims) ? [] : ["If a future assessment should include a participant story, collect it with the participant's recorded permission first."]),
   ];
@@ -345,7 +368,7 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
     nextSeen.add(key);
     nextCitations.push(citation);
   }
-  bySection.get("next_steps").push({ text: withAssessmentSection("next_steps", sentenceList(nextSteps)), citations: nextCitations });
+  bySection.get("next_steps").push({ text: withAssessmentSection("next_steps", sentenceList(nextSteps)), citations: nextCitations.length > 0 ? nextCitations : fallbackCitations });
 
   const blocks = SECTION_KEYS.flatMap((key) => bySection.get(key))
     .map((block, index) => ({ ordinal: index + 1, text: block.text, citations: block.citations.map((citation) => ({ claimId: citation.claimId, evidenceItemId: citation.evidenceItemId })) }));

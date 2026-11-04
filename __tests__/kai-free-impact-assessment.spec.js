@@ -1,4 +1,8 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { __generatedContentRepositoryTestables } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
+import { assessmentBlockDisplay, createFreeImpactAssessmentPath, errorText } from "../frontend/impactEvidenceLibraryLogic.js";
+import { internalDraftReadiness, internalDraftRequestBody } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 import assert from "node:assert/strict";
 
 import {
@@ -102,10 +106,6 @@ test("a model block that invents a quotation, omits a required section or is unm
   assert.deepEqual(composeFreeImpactAssessmentBlocks({ modelBlocks: unmarked, claims: CLAIMS }), { ok: false, reason: "assessment_model_section_invalid" });
   const recommends = [...MODEL_BLOCKS, { ...MODEL_BLOCKS[0], text: withAssessmentSection("recommended_improvements", "Do this.") }];
   assert.deepEqual(composeFreeImpactAssessmentBlocks({ modelBlocks: recommends, claims: CLAIMS }), { ok: false, reason: "assessment_model_section_invalid" });
-  // Too few documented gaps to ground three proposals: refused, never padded.
-  const thin = [CLAIMS[2]];
-  assert.deepEqual(composeFreeImpactAssessmentBlocks({ modelBlocks: [MODEL_BLOCKS[0], MODEL_BLOCKS[1], { ...MODEL_BLOCKS[1], text: withAssessmentSection("impact_stories", "x") }].map((b) => ({ ...b, citations: cite(CLAIMS[2]) })), claims: thin }),
-    { ok: false, reason: "assessment_recommendations_not_grounded" });
 });
 
 test("the model adapter writes each block's section marker and refuses a request without the assessment context", async () => {
@@ -190,4 +190,74 @@ test("a released assessment renders as six numbered sections with labelled refer
   const pdf = await serializeExportManifestRenderModelToPdf(model);
   assert.ok((pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) || []).length >= 1);
   assert.equal(serializeFreeImpactAssessmentToMarkdown(composeFreeImpactAssessmentView(model), { contractLine: "x" }).startsWith("# Free Impact Assessment"), true);
+});
+
+
+test("zero, one or two grounded improvements retain six sections without padding, and pass validation", () => {
+  for (const codes of [[], ["derived.matched_subset_only"], ["derived.matched_subset_only", "derived.duplicate_event_copies_counted_once"]]) {
+    const basis = claim(70, DERIVED, "Recorded observation: 25 observations.", ["derived.meaning_human_stated", ...codes]);
+    const modelBlocks = ["executive_snapshot", "evidence_findings", "impact_stories"].map((key, index) => ({
+      ordinal: index + 1, text: withAssessmentSection(key, "The cited evidence records observations."), citations: cite(basis),
+    }));
+    const composed = composeFreeImpactAssessmentBlocks({ modelBlocks, claims: [basis] });
+    assert.equal(composed.ok, true, composed.reason);
+    const sections = parseFreeImpactAssessment(composed.blocks);
+    assert.equal(sections.length, 6);
+    assert.equal(sections[4].title, "Recommended Improvements");
+    assert.equal(sections[4].blocks.filter((block) => block.body.startsWith("Proposed change:")).length, codes.length);
+    assert.match(sections[4].blocks.map((b) => b.body).join(" "), /[Nn]o (?:further )?recommendations have been invented/);
+    assert.ok(composed.blocks.every((block) => block.citations.length > 0));
+    const markdown = serializeFreeImpactAssessmentToMarkdown({ title: "Free Impact Assessment", references: [], limitations: [],
+      sections: sections.map((section, index) => ({ ...section, number: index + 1, blocks: section.blocks.map((block) => ({ prose: block.body, citationRefs: [] })) })),
+    }, { contractLine: "test" });
+    assert.equal((markdown.match(/\*\*Improvement /g) || []).length, codes.length, "evidence-gap prose is not labelled as a proposal");
+    const disclosed = composeEvidenceSummaryMeasurementDisclosures({ blocks: composed.blocks, claims: [basis], measuredValueByClaimId: new Map([[basis.claimId, 25]]) });
+    assert.equal(disclosed.ok, true);
+    const validation = validateGeneratedContentDraft({ requestedAudience: "internal", contentType: "evidence_summary",
+      generationClaims: [{ ...basis, requestedAudience: "internal", revalidatedForGeneration: true, audienceAuthority: { internal: true } }], blocks: disclosed.blocks });
+    assert.deepEqual(validation.blockers, []);
+  }
+});
+
+
+test("the size contract refuses oversized output without modifying text or citations, with actionable UI feedback", () => {
+  const { classifyGeneratorResult } = __generatedContentRepositoryTestables;
+  const result = { blocks: Array.from({ length: 6 }, (_, index) => ({ ordinal: index + 1, text: "x".repeat(3400), citations: cite(CLAIMS[0]) })) };
+  const before = structuredClone(result);
+  assert.deepEqual(classifyGeneratorResult(result), { ok: false, reason: "generator_result_text_total_too_long" });
+  assert.deepEqual(result, before);
+  result.blocks[5].text = "x".repeat(3000);
+  assert.equal(classifyGeneratorResult(result).ok, true, "exactly 20,000 characters fits");
+  const composed = composeFreeImpactAssessmentBlocks({ modelBlocks: MODEL_BLOCKS, claims: CLAIMS });
+  const padded = composed.blocks.map((block) => ({ ...block, text: block.text + " ".repeat(2700 - block.text.length) }));
+  const disclosed = composeEvidenceSummaryMeasurementDisclosures({ blocks: padded, claims: CLAIMS, measuredValueByClaimId: new Map([[id(1), 223], [id(2), 16815], [id(3), 25]]) });
+  assert.equal(disclosed.ok, true);
+  assert.equal(classifyGeneratorResult({ blocks: disclosed.blocks }).ok, false, "server disclosures also pass through the final size gate");
+  assert.match(errorText({ body: { blockers: [{ blocking_reason: "generator_result_text_total_too_long" }] } }), /Nothing was saved or shortened/);
+});
+
+test("the existing claim selection preserves twenty explicit claims, refuses twenty-one and allows changing the set", () => {
+  const selected = Array.from({ length: 21 }, (_, i) => id(500 + i));
+  const ready = (ids) => internalDraftReadiness({ canGenerate: true, engagementId: id(900), selectedClaimIds: ids });
+  assert.deepEqual(ready(selected), { ready: false, reason: "too_many_claims" });
+  assert.equal(ready(selected.slice(1)).ready, true);
+  assert.deepEqual(internalDraftRequestBody({ claimIds: selected.slice(1), engagementId: id(900), idempotencyKey: "assessment-ui-selection" }).claim_ids, selected.slice(1));
+});
+
+test("existing client and GK controls connect to the assessment route, and review display preserves the cited text", () => {
+  assert.equal(createFreeImpactAssessmentPath(id(1)), `/api/kai/sprint2/intake/admin/organizations/${id(1)}/generated-content-drafts/free-impact-assessment`);
+  for (const file of ["frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", "frontend/ImpactEvidenceLibrary.jsx"]) {
+    const source = readFileSync(file, "utf8");
+    assert.match(source, /createFreeImpactAssessmentPath/);
+    assert.match(source, /Generate Free Impact Assessment/);
+    assert.match(source, /20 claims selected/);
+  }
+  for (const file of ["frontend/ImpactEvidenceLibrary.jsx", "frontend/gkExportReviewDetail.jsx", "frontend/knowledgeStudio/ClientInternalDrafts.jsx", "frontend/knowledgeStudio/ClientGeneratedDrafts.jsx"]) {
+    assert.match(readFileSync(file, "utf8"), /assessmentBlockDisplay\(block.text\)/);
+  }
+  assert.equal(assessmentBlockDisplay("[[assessment:evidence_findings]]\n223 encounters. [CIT-001]"), "What Your Evidence Tells Us\n223 encounters. [CIT-001]");
+  assert.equal(assessmentBlockDisplay("Plain block."), "Plain block.");
+  const client = readFileSync("frontend/knowledgeStudio/ClientInternalDrafts.jsx", "utf8");
+  assert.doesNotMatch(client, /!draft.internalReport.available && draft.release/);
+  assert.match(client, /canReadReleasedReports && draft.release.state === "released_for_internal_use"/);
 });

@@ -15,7 +15,7 @@ import {
  * (kaiFreeImpactAssessmentComposition.js). It is the same provider call,
  * bounded JSON output and result-reason tagging as the Evidence Summary
  * adapter; each returned block names its section, and the adapter writes the
- * section marker. The server composes the gaps list, the three proposed
+ * section marker. The server composes the gaps list, up to three proposed
  * improvements and the next steps, and every block then passes the same
  * contract and VAL-GEN validators as any internal Evidence Summary.
  */
@@ -61,7 +61,7 @@ const SYSTEM_PROMPT = [
   "Return blocks for these sections, in this order: executive_snapshot (one short block naming the main things the evidence shows),",
   "evidence_findings (one block per related group of findings, grouping claims that carry the same limitationCodes),",
   "impact_stories (a source-backed account of the programme drawn from the cited document statements),",
-  "and optionally gaps_opportunities (what the evidence does not yet show). The server adds the documented gaps, three proposed improvements and next steps; do not write recommendations.",
+  "and optionally gaps_opportunities (what the evidence does not yet show). The server adds the documented gaps, up to three proposed improvements and next steps; do not write recommendations.",
   "Every block must cite at least one supplied claim/evidence pair, and only the claims it relies on.",
   "Name indicators by the human-stated label at the start of a claim statement; never write internal field keys such as field_1.",
   "Do not add numbers, percentages or counts unless they appear verbatim in a cited claim statement, and keep each number's unit, period and population as the claim states it.",

@@ -1,3 +1,4 @@
+import { assessmentBlockDisplay } from "./impactEvidenceLibraryLogic.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -102,7 +103,7 @@ function BlockDetail({ block }) {
   return (
     <section className="gk-export-review-block">
       <FieldRow label="Ordinal" value={block.ordinal} />
-      <p className="gk-export-review-block-text">{block.text}</p>
+      <p className="gk-export-review-block-text">{assessmentBlockDisplay(block.text)}</p>
       <h4>Why can KAI say this?</h4>
       <ul>
         {block.citations.map((citation, index) => (

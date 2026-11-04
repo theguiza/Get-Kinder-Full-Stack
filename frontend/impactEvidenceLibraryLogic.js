@@ -617,6 +617,26 @@ export function claimTraceabilityPath(organizationId, claimId, audience) {
     + `/claims/${encodeURIComponent(claimId)}/traceability?${params.toString()}`;
 }
 
+export function createFreeImpactAssessmentPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/free-impact-assessment`;
+}
+
+// Display only: persisted text and review decisions retain their original form.
+export function assessmentBlockDisplay(text) {
+  const titles = {
+    executive_snapshot: "Executive Impact Snapshot",
+    evidence_findings: "What Your Evidence Tells Us",
+    impact_stories: "Impact Stories",
+    gaps_opportunities: "Gaps and Opportunities",
+    recommended_improvements: "Recommended Improvements",
+    next_steps: "Your Next Steps",
+  };
+  const match = /^\[\[assessment:([a-z_]+)\]\]\n/.exec(String(text ?? ""));
+  return match && titles[match[1]]
+    ? `${titles[match[1]]}\n${text.slice(match[0].length)}`
+    : text;
+}
+
 export function createEvidenceSummaryPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/evidence-summary`;
 }
@@ -2578,6 +2598,9 @@ export function reviewTransitionBody(expectedUpdatedAt) {
 }
 
 export function errorText(result) {
+  if (result?.body?.blockers?.some((blocker) => ["generator_result_text_total_too_long", "generator_result_block_text_too_long"].includes(blocker.blocking_reason))) {
+    return "The generated assessment or draft exceeded the report size limit. Nothing was saved or shortened; evidence, citations and limitations were not removed. Retry generation, or choose a more focused set of claims that still includes the necessary findings and limitations.";
+  }
   return result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
 }
 

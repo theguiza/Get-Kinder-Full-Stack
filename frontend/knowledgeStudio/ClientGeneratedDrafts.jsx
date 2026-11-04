@@ -1,3 +1,4 @@
+import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -65,7 +66,7 @@ function DraftBody({ draft, factsById }) {
     <div>
       {draft.blocks.map((block) => (
         <div key={block.ordinal} className="mb-3">
-          <p className="small mb-1" style={{ whiteSpace: "pre-wrap" }}>{block.text}</p>
+          <p className="small mb-1" style={{ whiteSpace: "pre-wrap" }}>{assessmentBlockDisplay(block.text)}</p>
           <div className="small text-muted">What supports this:</div>
           <ul className="small mb-0">
             {block.supportingClaimIds.map((claimId) => {
