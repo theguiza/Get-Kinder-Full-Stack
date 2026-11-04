@@ -180,7 +180,7 @@ test("listOrganizationSources: groups each source with only its own governed sou
   assert.deepEqual(result.data.sources[1].source_versions.map((v) => v.source_version_id), [sourceVersionIdB1]);
   for (const version of result.data.sources[0].source_versions) {
     assert.deepEqual(Object.keys(version).sort(), [
-      "created_at", "engagement_id", "has_xlsx_record_count_basis", "is_current",
+      "created_at", "engagement_id", "evidence_extraction_capability", "has_xlsx_record_count_basis", "is_current",
       "profile_format", "safe_filename", "source_id", "source_version_id",
     ].sort());
   }
@@ -188,6 +188,8 @@ test("listOrganizationSources: groups each source with only its own governed sou
     source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false, created_at: createdAt,
     engagement_id: "00000000-0000-4000-8000-000000000601",
     safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+    // No field count in this repository row: the capability is not inferred.
+    evidence_extraction_capability: "unknown",
   });
 });
 
@@ -356,12 +358,12 @@ test("projectOrganizationSources projects the safe DTO into camelCase without in
       {
         sourceVersionId: sourceVersionIdA1, sourceId: sourceIdA, isCurrent: false, createdAt,
         engagementId: "00000000-0000-4000-8000-000000000601",
-        safeFilename: "legacy.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: false,
+        safeFilename: "legacy.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: false, evidenceExtractionCapability: "unknown",
       },
       {
         sourceVersionId: sourceVersionIdA2, sourceId: sourceIdA, isCurrent: true, createdAt,
         engagementId: "00000000-0000-4000-8000-000000000601",
-        safeFilename: "current.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: true,
+        safeFilename: "current.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: true, evidenceExtractionCapability: "unknown",
       },
     ],
   }]);

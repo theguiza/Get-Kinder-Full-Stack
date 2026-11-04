@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL } from "../validators/kaiDocumentEvidenceValidators.js";
 
 /**
  * Read-only, organization + engagement scoped lineage counts for the client
@@ -129,6 +130,12 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             -- The committed data-dictionary fields P2-01 composes evidence
             -- from (its candidate's dictionary); NULL with no current version.
             dfc.current_dictionary_field_count,
+            -- The current version's profiled format, and whether the
+            -- installed schema admits document-statement evidence, so a
+            -- PDF or plain-text source is offered extraction exactly when
+            -- the document-statement path can write it.
+            dfc.current_profile_format,
+            ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
             COALESCE(e.evidence_count, 0)::int AS evidence_item_count,
             COALESCE(e.evidence_needs_review_count, 0)::int AS evidence_needs_review_count,
             COALESCE(e.evidence_reviewed_count, 0)::int AS evidence_reviewed_count,
@@ -230,11 +237,15 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
        ) sv ON true
        LEFT JOIN LATERAL (
-         SELECT count(df.data_dictionary_field_id)::int AS current_dictionary_field_count
+         SELECT count(df.data_dictionary_field_id)::int AS current_dictionary_field_count,
+                min(fp.profile->>'format') AS current_profile_format
            FROM kai.source_versions v
            JOIN kai.intake_source_candidates ic
              ON ic.organization_id = v.organization_id
             AND ic.intake_source_candidate_id = v.intake_source_candidate_id
+           LEFT JOIN kai.intake_file_profiles fp
+             ON fp.organization_id = ic.organization_id
+            AND fp.file_profile_id = ic.file_profile_id
            LEFT JOIN kai.data_dictionary_fields df
              ON df.organization_id = ic.organization_id
             AND df.data_dictionary_id = ic.data_dictionary_id

@@ -15,6 +15,7 @@ import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js
 import { authorizeSourceCandidateContinuation } from "./kaiSourceCandidateService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
+import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceValidators.js";
 
 /**
  * Client-safe evidence pipeline for one organization + engagement/project:
@@ -151,6 +152,7 @@ const PIPELINE_REASONS = Object.freeze([
   "evidence_extraction_ready",
   "evidence_extraction_pending",
   "no_extractable_evidence",
+  "document_evidence_not_enabled",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -391,16 +393,24 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   const evidence = count(row.evidence_item_count);
+  const extractionCapability = evidenceExtractionCapability({
+    profileFormat: row.current_profile_format,
+    dictionaryFieldCount: row.current_dictionary_field_count,
+    documentEvidenceSupported: row.document_evidence_supported,
+  });
   if (evidence > 0) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
   } else if (allowedUseClosed) {
     // A source promoted before its allowed use became not_allowed: P2-01 refuses it.
     stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "allowed_use_not_allowed" }));
-  } else if (row.current_dictionary_field_count === 0) {
-    // P2-01 composes one evidence item per committed data-dictionary field of
-    // this source version; with none (a PDF or plain-text document is
-    // profiled for structure only) it can never create evidence, so
-    // extraction is not offered as a step that is waiting on anyone.
+  } else if (extractionCapability === "document_statements_not_enabled") {
+    // A PDF or plain-text document is read for its statements; until the
+    // document-evidence schema change is installed that extraction cannot
+    // write, so it is not offered as a step waiting on anyone.
+    stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "document_evidence_not_enabled" }));
+  } else if (extractionCapability === "none") {
+    // Not a document, and no committed data-dictionary field: P2-01 composes
+    // one evidence item per field, so extraction could never write anything.
     stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "no_extractable_evidence" }));
   } else if (clientAuthority.extractEvidence) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "evidence_extraction_ready" }));

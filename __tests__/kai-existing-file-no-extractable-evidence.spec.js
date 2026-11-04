@@ -12,6 +12,7 @@ import {
   stageStatusLabel,
 } from "../frontend/knowledgeStudio/clientEvidencePipelineLogic.js";
 import {
+  NO_EVIDENCE_FROM_PROMOTION_MESSAGE,
   NO_EXTRACTABLE_EVIDENCE_MESSAGE,
   USE_FOR_IMPACT_MAX_STEPS,
   extractionResultMessage,
@@ -124,8 +125,11 @@ function runUseForImpact(startFile, reread) {
   return { outcome: "interrupted", extractions };
 }
 
+// 2026-11-04: a PDF or plain-text document is no longer "no extractable
+// evidence" (see kai-document-statement-evidence.spec.js); this state now
+// belongs to a promoted non-document source with no dictionary field.
 test("a promoted source with no dictionary fields is not offered extraction: truthful terminal state, no Use for impact loop", async () => {
-  const pdf = row(1, { ...promoted, safe_filename: "cedar_bridge_survey_results_verified.pdf", current_dictionary_field_count: 0 });
+  const pdf = row(1, { ...promoted, safe_filename: "empty_export.csv", current_profile_format: "csv", current_dictionary_field_count: 0 });
   const tabular = row(2, { ...promoted, current_dictionary_field_count: 10 });
   const data = await readPipeline([pdf, tabular]);
 
@@ -136,8 +140,8 @@ test("a promoted source with no dictionary fields is not offered extraction: tru
   );
   const stage = pdfFile.stages.find((entry) => entry.key === "evidence_extraction");
   assert.equal(stageStatusLabel(stage), "Not available for this file");
-  assert.match(nextActionText(pdfFile), /^No action required from you\. This file's source is promoted, but KAI cannot create evidence from its content/);
-  assert.match(pipelineReasonMessage("no_extractable_evidence", 1), /has been promoted, but KAI cannot create evidence from its content/);
+  assert.match(nextActionText(pdfFile), /^No action required from you\. This file's source is promoted, but KAI cannot create evidence from it: it is not a PDF or plain-text document and it has no data fields/);
+  assert.match(pipelineReasonMessage("no_extractable_evidence", 1), /has been promoted, but KAI cannot create evidence from it: it is not a PDF or plain-text document/);
   assert.ok(PIPELINE_REASONS.includes("no_extractable_evidence"));
   assert.deepEqual(data.reasons.find((r) => r.reason === "no_extractable_evidence")?.fileCount, 1);
 
@@ -147,7 +151,7 @@ test("a promoted source with no dictionary fields is not offered extraction: tru
   const flow = runUseForImpact(pdfFile, (file) => file);
   assert.equal(flow.outcome, "blocked");
   assert.equal(flow.extractions, 0);
-  assert.match(flow.text, /KAI cannot create evidence from its content/);
+  assert.match(flow.text, /KAI cannot create evidence from it/);
 
   // A source with fields keeps the administrator's extraction step unchanged.
   const tabularFile = fileOf(data, 2);
@@ -179,19 +183,27 @@ test("the reported five-file summary (1 failed, 3 extraction-ready, 1 complete) 
   // PDF and the operations-notes TXT profile with 0 dictionary fields; the
   // workbook carries a reviewed Impact Fact. Which production file holds which
   // state is NOT established here.
-  const states = (withCount) => [
-    row(1, { ...promoted, ...(withCount ? { current_dictionary_field_count: 0 } : {}) }),
+  // 2026-11-04: the three zero-field documents carry their profiled format;
+  // their state now follows the document-statement capability.
+  const document = (withCount, format, supported) => (withCount
+    ? { current_dictionary_field_count: 0, current_profile_format: format, document_evidence_supported: supported }
+    : {});
+  const states = (withCount, supported = false) => [
+    row(1, { ...promoted, ...document(withCount, "pdf", supported) }),
     row(2, { file_policy_status: "blocked" }),
-    row(3, { ...promoted, evidence_item_count: 11, evidence_reviewed_count: 11, claim_count: 11, claim_ids: [claimId(3)], ...(withCount ? { current_dictionary_field_count: 10 } : {}) }),
-    row(4, { ...promoted, ...(withCount ? { current_dictionary_field_count: 0 } : {}) }),
-    row(5, { ...promoted, ...(withCount ? { current_dictionary_field_count: 0 } : {}) }),
+    row(3, { ...promoted, evidence_item_count: 11, evidence_reviewed_count: 11, claim_count: 11, claim_ids: [claimId(3)], ...(withCount ? { current_dictionary_field_count: 10, current_profile_format: "xlsx", document_evidence_supported: supported } : {}) }),
+    row(4, { ...promoted, ...document(withCount, "pdf", supported) }),
+    row(5, { ...promoted, ...document(withCount, "txt", supported) }),
   ];
   const facts = [{ claimId: claimId(3), statement: "Reviewed fact", claimType: "outcome", limitationDimensionKeys: ["small_cell_risk"] }];
   const summary = (data) => Object.fromEntries(data.reasons.map((r) => [r.reason, r.fileCount]));
 
   assert.deepEqual(summary(await readPipeline(states(false), facts)), { failed: 1, evidence_extraction_ready: 3, complete: 1 });
   const repaired = await readPipeline(states(true), facts);
-  assert.deepEqual(summary(repaired), { failed: 1, no_extractable_evidence: 3, complete: 1 });
+  assert.deepEqual(summary(repaired), { failed: 1, document_evidence_not_enabled: 3, complete: 1 });
+  // With the document-evidence schema installed the same documents are the
+  // administrator's extraction step again, now one that can write.
+  assert.deepEqual(summary(await readPipeline(states(true, true), facts)), { failed: 1, evidence_extraction_ready: 3, complete: 1 });
   const blocked = fileOf(repaired, 2);
   assert.deepEqual([blocked.currentStage, blocked.failureCategory, blocked.nextAction], ["security_check", "file_blocked_by_policy", "upload_new_file"]);
 });
@@ -272,7 +284,8 @@ test("promotion handoff with zero evidence items no longer says evidence is awai
       evidence_extraction_handoff: { status, evidence_item_count: 0 },
       replayed: false,
     });
-    assert.equal(text, `Source promoted. ${NO_EXTRACTABLE_EVIDENCE_MESSAGE}`, status);
+    assert.equal(text, `Source promoted. ${NO_EVIDENCE_FROM_PROMOTION_MESSAGE}`, status);
+    assert.doesNotMatch(text, /awaiting Get Kinder evidence review|already/);
   }
   assert.match(sourcePromotionResultMessage({
     promotion_decision: { decision_status: "promoted" },

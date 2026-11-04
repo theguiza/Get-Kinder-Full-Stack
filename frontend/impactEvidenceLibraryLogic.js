@@ -657,6 +657,49 @@ export function evidenceExtractionPath(organizationId, sourceVersionId) {
     + `/source-versions/${encodeURIComponent(sourceVersionId)}/evidence-extraction`;
 }
 
+// What the one evidence-extraction action can do for a source version
+// (server rule: evidenceExtractionCapability). Every entry point offers the
+// action only where it can write, and reports a result the same way.
+export const EVIDENCE_EXTRACTION_CAPABILITIES = new Set([
+  "field_presence", "document_statements", "document_statements_not_enabled", "none", "unknown",
+]);
+
+export function canOfferEvidenceExtraction(version) {
+  return version?.isCurrent === true
+    && ["field_presence", "document_statements", "unknown"].includes(version.evidenceExtractionCapability ?? "unknown");
+}
+
+export const EXTRACTION_UNAVAILABLE_MESSAGES = Object.freeze({
+  document_statements_not_enabled: "Evidence from document text is not yet available in this KAI installation.",
+  none: "No evidence can be extracted: this file is not a PDF or plain-text document and has no data fields.",
+});
+
+export const NO_EXTRACTABLE_EVIDENCE_MESSAGE = "KAI cannot create evidence from this source: it is not a PDF or plain-text document "
+  + "and it has no data fields. Nothing was written, and extracting again would not change this.";
+export const DOCUMENT_EVIDENCE_NOT_ENABLED_MESSAGE = "Evidence from document text is not yet available in this KAI installation, "
+  + "so nothing was read or written. Extracting again will not change this until it is enabled.";
+export const NO_SUPPORTABLE_STATEMENTS_MESSAGE = "KAI read this document's text but found no complete statement it could cite as evidence "
+  + "(headings, labels, table cells and instruction-like text are not used). Nothing was written, and extracting again would not change this.";
+
+// The response of the evidence-extraction action, as one line. A call that
+// wrote nothing is never reported as earlier extraction unless evidence
+// for the version was actually found.
+export function evidenceExtractionResultMessage(data) {
+  const count = Array.isArray(data?.evidenceItems) ? data.evidenceItems.length : 0;
+  const outcome = data?.documentEvidence?.outcome;
+  if (outcome === "document_evidence_not_enabled") return DOCUMENT_EVIDENCE_NOT_ENABLED_MESSAGE;
+  if (outcome === "no_supportable_statements") return NO_SUPPORTABLE_STATEMENTS_MESSAGE;
+  if (count === 0) return NO_EXTRACTABLE_EVIDENCE_MESSAGE;
+  if (outcome === "statements_extracted") {
+    return data?.replayed === true
+      ? `These document statements were already extracted (${count} evidence item(s)). Nothing new was written.`
+      : `Evidence extracted from the document's text: ${count} statement(s), each quoted with its page or line location and awaiting Get Kinder evidence review. Each is what the document states, not a verified fact.`;
+  }
+  return data?.replayed === true
+    ? `Evidence was already extracted from this source version (${count} evidence item(s)). Nothing new was written.`
+    : `Evidence extracted: ${count} evidence item(s) created, awaiting Get Kinder evidence review.`;
+}
+
 export function evidenceCoverageAssessmentPath(organizationId, sourceVersionId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/source-versions/${encodeURIComponent(sourceVersionId)}/evidence-coverage-assessment`;
@@ -1563,6 +1606,9 @@ export function projectOrganizationSources(dto) {
       safeFilename: version.safe_filename,
       profileFormat: version.profile_format,
       hasXlsxRecordCountBasis: version.has_xlsx_record_count_basis === true,
+      evidenceExtractionCapability: EVIDENCE_EXTRACTION_CAPABILITIES.has(version.evidence_extraction_capability)
+        ? version.evidence_extraction_capability
+        : "unknown",
     })),
   }));
 }

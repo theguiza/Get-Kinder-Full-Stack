@@ -414,6 +414,7 @@ test("read safety: Sources returns ids, code, reviewed type, currentness, and ti
         source_version_id: SOURCE_VERSION, source_id: SOURCE, is_current: true, created_at: NOW,
         engagement_id: ENGAGEMENT_X,
         safe_filename: "harbourline-households.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+        evidence_extraction_capability: "unknown",
       }],
     }],
   });

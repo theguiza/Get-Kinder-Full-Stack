@@ -1,4 +1,5 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
+import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceValidators.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
@@ -57,6 +58,12 @@ function toSafeSourceVersion(row) {
     safe_filename: row.safe_filename,
     profile_format: row.profile_format,
     has_xlsx_record_count_basis: row.profile_format === "xlsx" && row.has_xlsx_record_count_basis === true,
+    // What "Extract evidence" can do for this version (the pipeline's rule).
+    evidence_extraction_capability: evidenceExtractionCapability({
+      profileFormat: row.profile_format,
+      dictionaryFieldCount: row.dictionary_field_count,
+      documentEvidenceSupported: row.document_evidence_supported,
+    }),
   };
 }
 

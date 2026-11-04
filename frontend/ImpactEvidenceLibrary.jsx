@@ -42,6 +42,7 @@ import {
   errorText,
   evidenceCoverageAssessmentPath,
   evidenceExtractionPath,
+  evidenceExtractionResultMessage,
   evidenceReviewCompletePath,
   evidenceReviewDecisionBody,
   evidenceReviewDecisionValidationError,
@@ -2515,7 +2516,7 @@ export default function ImpactEvidenceLibrary({
     const result = await postJson(evidenceExtractionPath(organizationId, sourceVersionId), {});
     setWorkflowPending(false);
     setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
-      ? `Evidence extracted: ${(result.body?.data?.evidenceItems || []).length} evidence item(s).`
+      ? evidenceExtractionResultMessage(result.body?.data)
       : errorText(result));
   }, [organizationId, sourceVersionId, workflowPending, workflowOperations]);
 

@@ -9,6 +9,8 @@ import {
   createEvidenceSummaryPath,
   createImpactNarrativePath,
   errorText,
+  canOfferEvidenceExtraction,
+  EXTRACTION_UNAVAILABLE_MESSAGES,
   evidenceExtractionPath,
   evidenceLibraryCandidatesPath,
   getJson,
@@ -427,7 +429,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     const version = detail.statusCode === 200 && detail.body?.ok ? detail.body.data?.source_version : null;
     if (!version || version.is_current !== true || !isRouteUuid(version.source_version_id)) return { ok: false, text: errorText(detail) };
     const extracted = await postJson(evidenceExtractionPath(organizationId, version.source_version_id), {});
-    return extracted.statusCode === 200 && extracted.body?.ok ? { ok: true } : { ok: false, text: errorText(extracted) };
+    if (!(extracted.statusCode === 200 && extracted.body?.ok)) return { ok: false, text: errorText(extracted) };
+    // An extraction that returns no evidence ends the flow with its reason:
+    // running it again would write nothing either.
+    const data = extracted.body.data;
+    return Array.isArray(data?.evidenceItems) && data.evidenceItems.length > 0
+      ? { ok: true }
+      : { ok: true, terminal: true, text: extractionResultMessage(data) };
   };
   const continueForFile = async (intakeFileId) => {
     const continued = await postJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId), {});
@@ -461,6 +469,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         if (!outcome.ok) {
           setImpactFlow(null);
           setNotice({ kind: "warning", text: `${outcome.text} ${USE_FOR_IMPACT_MESSAGES.interrupted}` });
+          return;
+        }
+        if (outcome.terminal) {
+          setImpactFlow(null);
+          setNotice({ kind: "warning", text: outcome.text });
           return;
         }
         const reread = await rereadPipelineFile(file.intakeFileId);
@@ -665,11 +678,17 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                         Prepare workbook for counting
                       </button>
                     ) : null}
-                    {access.extractEvidence && isRouteUuid(version.sourceVersionId) ? (
+                    {access.extractEvidence && isRouteUuid(version.sourceVersionId) && canOfferEvidenceExtraction(version) ? (
                       <button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending)}
+                        data-client-extract-evidence={version.sourceVersionId}
                         onClick={() => extract(version.sourceVersionId)}>
                         {pending === `extract:${version.sourceVersionId}` ? "Extracting..." : "Extract evidence"}
                       </button>
+                    ) : null}
+                    {access.extractEvidence && version.isCurrent && EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability] ? (
+                      <span className="text-muted" data-client-extraction-unavailable={version.evidenceExtractionCapability}>
+                        {EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability]}
+                      </span>
                     ) : null}
                     {access.recordSourceMeasurement && version.isCurrent && isRouteUuid(version.sourceVersionId) ? (
                       <button type="button" className="btn btn-sm btn-outline-secondary" data-client-open-source-measurement={version.sourceVersionId}

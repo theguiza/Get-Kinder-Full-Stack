@@ -1,4 +1,4 @@
-import { errorText, isRouteUuid } from "../impactEvidenceLibraryLogic.js";
+import { errorText, evidenceExtractionResultMessage, isRouteUuid, NO_EXTRACTABLE_EVIDENCE_MESSAGE } from "../impactEvidenceLibraryLogic.js";
 import { nextActionText } from "./clientEvidencePipelineLogic.js";
 
 /**
@@ -309,20 +309,14 @@ export function internalDraftRequestBody({ claimIds, idempotencyKey, engagementI
   return { claim_ids: [...claimIds].sort(), idempotency_key: idempotencyKey, engagement_id: engagementId };
 }
 
-// P2-01 returns one evidence item for every committed data-dictionary field
-// of the source version, whether created now or already present, so an empty
-// list means the version has no fields to extract from, not that evidence
-// already exists (its `replayed` then only means that nothing was written).
-export const NO_EXTRACTABLE_EVIDENCE_MESSAGE = "KAI cannot create evidence from this source's content: it has no data fields "
-  + "(a PDF or plain-text document is profiled for its structure only). Nothing was written, and extracting again would not change this.";
+// The extraction result line is shared with the Impact Evidence Library
+// (impactEvidenceLibraryLogic.js): an empty list is never earlier evidence.
+export { NO_EXTRACTABLE_EVIDENCE_MESSAGE };
+export const extractionResultMessage = evidenceExtractionResultMessage;
 
-export function extractionResultMessage(data) {
-  const created = Array.isArray(data?.evidenceItems) ? data.evidenceItems.length : 0;
-  if (created === 0) return NO_EXTRACTABLE_EVIDENCE_MESSAGE;
-  return data?.replayed === true
-    ? `Evidence was already extracted from this source version (${created} evidence item(s)). Nothing new was written.`
-    : `Evidence extracted: ${created} evidence item(s) created, awaiting Get Kinder evidence review.`;
-}
+// A promotion's server-side extraction handoff carries counts only.
+export const NO_EVIDENCE_FROM_PROMOTION_MESSAGE = "No evidence was created from this source's content, and nothing was written. "
+  + "The file's status explains why (for a document, evidence from its text may not be available yet or it may have no complete statement to cite).";
 
 export function claimProposalResultMessage(data) {
   return data?.replayed === true
@@ -508,7 +502,7 @@ export function sourcePromotionResultMessage(data) {
   }
   if (status === "promoted") {
     if ((handoff?.status === "created" || handoff?.status === "replayed") && handoff.evidence_item_count === 0) {
-      return `Source promoted${replayed}. ${NO_EXTRACTABLE_EVIDENCE_MESSAGE}`;
+      return `Source promoted${replayed}. ${NO_EVIDENCE_FROM_PROMOTION_MESSAGE}`;
     }
     if (handoff?.status === "created" || handoff?.status === "replayed") {
       return `Source promoted${replayed}. Evidence extraction ${handoff.status === "created" ? "created" : "already had"} ${handoff.evidence_item_count ?? 0} evidence item(s), awaiting Get Kinder evidence review.`;
