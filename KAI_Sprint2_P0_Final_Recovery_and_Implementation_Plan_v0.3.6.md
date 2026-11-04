@@ -46372,3 +46372,63 @@ During the session the owner separately approved (USER_CONFIRMED) one disposable
 - Narrative statements reach internal use only through Get Kinder's evidence, claim and coverage review. No conflict-candidate route was added.
 
 **Status:** DOCUMENT_STATEMENT_EVIDENCE_IMPLEMENTED_AND_VERIFIED_ON_DISPOSABLE_POSTGRESQL; MIGRATION_NOT_APPLIED_OUTSIDE_DISPOSABLE_CLUSTERS; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### Connected Cedar Bridge MVP acceptance: documents to a released report; reload and P2-04 replay repairs; pgAdmin packet (2026-11-04)
+
+**Authorization (USER_CONFIRMED):** owner prompt "KAI — Complete the Existing MVP and Run One Connected Local Acceptance Test". It authorizes:
+- running the existing product on the safe synthetic Cedar Bridge files, with disposable loopback PostgreSQL and the document-statement migration applied there;
+- fixing only demonstrated MVP blockers, including the zero-statement reload defect;
+- reconciling the seven P2-01M failures;
+- preparing the pgAdmin packet;
+- local commits.
+
+Excluded: production SQL, push, deploy, flags, credentials, roles/permissions/review-queue or governance changes, and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `8b95cd69`, clean. Every Node/npm command used the non-listening loopback sentinel `DATABASE_URL`. Every PostgreSQL cluster was runner-owned, on 127.0.0.1, and destroyed afterwards.
+
+**Repair 1: zero-statement document offered extraction again after a reload (TOOL_VERIFIED; `2a4971f7`).**
+- **Defect:** a PDF/TXT read with no complete statement wrote nothing, not even its audit (`writes > 0` only). Both read models therefore recomputed `document_statements` after a reload.
+- **Correction:** that completed read now writes one required, metadata-only audit per version and extractor method: action `extract_document_statement_evidence`, reason `document_statements_none_found:kai_document_statement_excerpt_v1`, object `source_version`. The pipeline lateral and the Data Sources SQL read it (`documentStatementsNoneFoundSql`). The pipeline closes the stage with reason `no_supportable_statements` (next action none). Data Sources reports `document_statements_none_found` and the button is not offered.
+- **Proof:** unit tests 18/18 (two mutations each fail a test). Integration B3b on real PostgreSQL: a synthetic headings-only TXT through the real intake and promotion handoff gives exactly one audit. After a reload the pipeline is closed with `no_supportable_statements` and Data Sources reads `document_statements_none_found`, not offered. A repeated POST writes nothing. A later extractor method would be offered again.
+
+**Repair 2: completed client follow-ups made a claim ungenerable (TOOL_VERIFIED; `3aca2de9`, pre-existing).**
+- **First failure:** the connected journey's internal Evidence Summary over document claims returned 409 `conflict_current_state_changed`. Each document claim alone failed; measured claims alone returned 201.
+- **Exact operation:** `reconcileInternalClaimGapsForGeneration` replays P2-04 for every cited claim. P2-04's `queueRowsMatchExpectation` admits the P2-11 `resolved/resolved` follow-up pair, but `validateExistingRoutingRows` re-ran the routing validator, which requires `waiting_on_client/proposed`. A claim with completed follow-ups therefore always replayed as a conflict. Measured claims route no follow-ups, so earlier journeys never reached this.
+- **Correction:** a resolved follow-up's routing is checked against the pair P2-04 wrote. Every other column and status still fails closed.
+- **Proof:** a regression test fails before the fix and passes after it; four altered statuses or columns still conflict.
+
+**Connected journey (TOOL_VERIFIED; `a6d412ab`).** `scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js` ran with the package plus `KAI_CEDAR_BRIDGE_SURVEY_PDF`/`KAI_CEDAR_BRIDGE_ORIGINAL_PDF`: **41/41**. The existing tests 0–31 are unchanged and pass; the final answer-key tally is 41 match, 32 unavailable. The new Stage E tests D1–D4:
+- **D1:** the original FY2025-26 PDF is `blocked` (no profile, no sensitivity item; pipeline `failed`/`upload_new_file`). The verified survey PDF passes the security check, P1 profiles 4 pages with no text stored, and the real decision and promotion handoff creates 13 statements.
+- **D2:** the Operations Notes TXT (29) and Programme Review PDF (29) are the versions promoted in test 3; nothing was re-uploaded and both have 0 dictionary fields. Six anchors were located independently in the raw bytes (TXT lines 10, 14, 26 and 38; PDF page 3, and page 2 for EB13), and each persisted locator matches. EB13 keeps "Preliminary reach estimate requiring reconciliation". Replaying all three writes nothing (71 evidence, 71 locators, 3 audits). After a reload the documents read `evidence_awaiting_review` and the pipeline does not offer extraction. The real Impact Evidence Library lists all 71.
+- **D3:** five statements go through the existing GK evidence review, explicit P2-04 (9 gaps and 4 client follow-ups per claim) and P2-11 completion by a synthetic `client_reviewer`. They then go through GK claim review (internal) and 9 internal coverage acceptances per claim. All five are internally eligible, with funder and public false. EB13 deliberately gets no claim.
+- **D4:** one internal Evidence Summary cites the 5 document claims and 5 current corrected-version measured claims. The model is a deterministic stub that repeats each claim statement. The document excerpts are verbatim with line/page locators. The existing GK content review, export review, limitation snapshot, export candidate, final release authority and manifest all succeed, and the client released-report route returns 200. The CSV appendix cites each document claim's source version. No `CB/EV/FU` identifier reaches the model or the document.
+
+**Six-section Free Impact Assessment (TOOL_VERIFIED as not available; first exact boundary).**
+- **Boundary:** generation admits only the content types in `ALLOWED_GENERATED_CONTENT_TYPES` (`kaiGeneratedContentService.js`), mirrored by the `generated_content_drafts`/`export_candidates` `content_type` CHECKs. Every generator emits an untyped `blocks[]` list, and the release renders "Export Manifest / Block N".
+- **Missing:** no existing type, generator or serializer composes the six sections, and no existing capability generates recommendations or next steps. Adding one needs a content-type migration and a product decision on generating recommendations.
+- **Result:** not built, by instruction.
+- **Evidence insufficiency (source-stated):** Impact Stories. Operations Notes line 38: no participant story was provided and story/quote permission was not obtained.
+
+**Released report (independent check).**
+- 223 eligible encounters (V2), 80 register participants, DS 51 and EN 39 people, 10 in both: these match the answer key. The DS/EN encounter split (118/105) has no per-programme V2 key value.
+- No unique-person total is inferred, and no outcome or cause is stated.
+- **Quality gaps:** fields read `field_1`/`field_3`; there is no section structure; and document claims show "limitation codes: none" although nine coverage limitations were accepted. Only measured claims carry accepted coverage limitations into generation. The source-reported qualifier is in each document claim statement.
+
+**Regressions (TOOL_VERIFIED).**
+- `npm test`: 6,051 tests, 5,926 pass, 0 fail, 125 skipped.
+- API contract 71/71. `npm run build` passed (bundle updated). `git diff --check` clean.
+- Document-statement runner 12/12 plus packet checks. Plan A normal chain: 86 migrations, 2/2, 40/43 (3 skipped), 4/4, proof passed.
+- P2-01M runner: verifiers PASS; main spec 77 tests, 60 pass, 7 fail, 10 skipped. The 7 failures (67, 70, 71, 73, 75, 76, 77) have **identical failure signatures** at `8b95cd69` in a clean worktree, so none is attributable.
+
+**Packet (TOOL_VERIFIED locally; `2ac67636`).** `KAI_PGADMIN_DOCUMENT_STATEMENT_EVIDENCE_PACKET/` contains the verbatim migration and rollback, a read-only preflight, a read-only verify-after (01V), a rollback precheck (RP01), `RUN_IN_PGADMIN.md` and `SOURCE_MANIFEST.md`.
+- The preflight checks prerequisites P01–P03 and the PRE/POST md5 of the five CHECKs, as pinned on PostgreSQL 16.
+- The document runner executes the packet's own files: REQUIRED → migration → ALREADY_APPLIED, 01V PASS, RP01 SAFE_TO_ROLL_BACK → rollback → REQUIRED. A missing prerequisite gives STOP_INCOMPATIBLE. With 71 statements present: 01V PASS, RP01 UNSAFE_ROLLBACK_REFUSES.
+- **Order:** the three Measurement MVP migrations (derived → cross-source reach → reconciliation jobs), then this migration with 01V PASS, then push/deploy.
+
+**Limitations (NOT_RUN / NOT_CONFIRMED):**
+- The real model provider was not called (no credential authorized). Browser rendering was not run.
+- Production's state of the three prerequisite migrations is unknown.
+- The Data Sources button still offers a replay for document versions that already have evidence. It answers "already extracted … nothing new written", the same as for CSV.
+- Five document claims needed 20 client follow-up completions and 45 coverage acceptances. That is existing P2-04 behaviour for non-measured claims and was not changed (governance excluded).
+
+**Status:** CONNECTED_DOCUMENT_TO_RELEASED_REPORT_VERIFIED_ON_DISPOSABLE_POSTGRESQL; SIX_SECTION_ASSESSMENT_NOT_AVAILABLE_BOUNDARY_IDENTIFIED; MIGRATION_PACKET_READY_NOT_APPLIED; PRODUCTION_NOT_VERIFIED. Stop at the production authorization boundary.
