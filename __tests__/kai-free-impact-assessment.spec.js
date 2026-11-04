@@ -2,7 +2,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { __generatedContentRepositoryTestables } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 import { assessmentBlockDisplay, createFreeImpactAssessmentPath, errorText } from "../frontend/impactEvidenceLibraryLogic.js";
-import { internalDraftReadiness, internalDraftRequestBody } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
+import { internalDraftFailureMessage, internalDraftReadiness, internalDraftRequestBody } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 import assert from "node:assert/strict";
 
 import {
@@ -17,7 +17,7 @@ import { createProductionFreeImpactAssessmentDraftGenerator } from "../Backend/k
 import { composeFreeImpactAssessmentView, serializeFreeImpactAssessmentToMarkdown } from "../Backend/kai/services/kaiFreeImpactAssessmentRenderer.js";
 import { serializeExportManifestRenderModelToMarkdown } from "../Backend/kai/services/kaiExportManifestMarkdownSerializer.js";
 import { serializeExportManifestRenderModelToPdf } from "../Backend/kai/services/kaiExportManifestPdfSerializer.js";
-import { composeEvidenceSummaryMeasurementDisclosures, validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
+import { composeCountOnlyAssessmentText, composeCountOnlyFindingText, countOnlyBlockMatchesMeasurement, countOnlyBlockViolations, ASSESSMENT_SELECTION_NOTE, composeEvidenceSummaryMeasurementDisclosures, validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
 import {
   applyDocumentStatementCoverageDimensions,
   documentStatementLimitationCodes,
@@ -260,4 +260,32 @@ test("existing client and GK controls connect to the assessment route, and revie
   const client = readFileSync("frontend/knowledgeStudio/ClientInternalDrafts.jsx", "utf8");
   assert.doesNotMatch(client, /!draft.internalReport.available && draft.release/);
   assert.match(client, /canReadReleasedReports && draft.release.state === "released_for_internal_use"/);
+});
+
+
+test("assessment count-only sections are closed server projections and cannot carry free text or altered assertions", () => {
+  const measurement = { evidence_item_id: id(102), measured_value: 2, blank_record_count: 0, duplicate_record_count: 1,
+    calculation_method: "p1_csv_profile_data_records_excluding_blank_v1", period_start: "2026-09-01", period_end: "2026-09-30",
+    definition_text: "STORY-SENTINEL", unit_label: "STORY-LABEL-SENTINEL" };
+  const citations = [{ claimId: id(101), evidenceItemId: id(102) }];
+  const finding = composeCountOnlyFindingText(measurement);
+  for (const section of ASSESSMENT_SECTIONS) {
+    const text = composeCountOnlyAssessmentText(measurement, section.key);
+    assert.ok(text.includes(finding));
+    assert.doesNotMatch(text, /STORY-SENTINEL|STORY-LABEL-SENTINEL/);
+    assert.deepEqual(countOnlyBlockViolations(text, [finding]), []);
+    assert.equal(countOnlyBlockMatchesMeasurement({ text, citations }, measurement), true);
+    for (const changed of [text + " It changed lives.", text.replace("2 nonblank", "200 nonblank"), text.replace("row count", "participant count")]) {
+      assert.equal(countOnlyBlockMatchesMeasurement({ text: changed, citations }, measurement), false);
+    }
+  }
+  const note = composeCountOnlyAssessmentText(measurement, "gaps_opportunities") + " " + ASSESSMENT_SELECTION_NOTE;
+  assert.equal(countOnlyBlockMatchesMeasurement({ text: note, citations }, measurement), true);
+  assert.deepEqual(countOnlyBlockViolations(note, [finding]), []);
+  assert.equal(composeCountOnlyAssessmentText(measurement, "ordinary_narrative"), null);
+});
+
+
+test("an assessment without an eligible finding explains its refusal", () => {
+  assert.match(internalDraftFailureMessage({ body: { blockers: [{ blocking_reason: "assessment_no_eligible_evidence" }] } }), /None of the selected claims is currently eligible.*No assessment was created/);
 });

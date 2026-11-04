@@ -1334,12 +1334,14 @@ async function runSuite() {
     assert.equal(proposal.data.claim.statement,
       `The promoted source contains the committed data-dictionary field "field_1" identified by locator ${locatorRow.locator_fingerprint}.`);
     // A field-presence claim keeps today's lifecycle: no gap state at
-    // proposal, P2-06 still needs the explicit P2-04 step, and that step still
-    // routes its unresolved client-answerable dimensions as follow-ups.
+    // proposal, P2-06 accurately reports evaluation required, and the existing
+    // P2-04 command routes unresolved client-answerable dimensions.
     assert.equal(proposal.data.claim_gap_state, undefined);
     assert.equal(proposal.data.measurementClaim, undefined);
     const untraced = await trace(proposal.data.claim.claim_id);
-    assert.equal(untraced.data?.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+    assert.equal(untraced.ok, true);
+    assert.equal(untraced.data.eligible, false);
+    assert.ok(untraced.data.blockerCodes.includes("p204_evaluation_required"));
     const legacyGaps = await generateClaimGapFollowups(
       { organizationId: ORG, claimId: proposal.data.claim.claim_id, actorContext: ADMIN, now: NOW },
       { env: ENV, claimGapFollowupRepository: gapRepository, metadataOnlyAudit: noAudit() },

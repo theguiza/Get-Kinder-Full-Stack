@@ -121,6 +121,23 @@ export function composeCountOnlyFindingText(measurementRow) {
     + `${period} Any coverage limitations recorded for the claim apply and are listed with the report's limitations.`;
 }
 
+// Closed server projections for the assessment. No free-text definition,
+// source content or model prose enters a count-only block.
+export const ASSESSMENT_SELECTION_NOTE = "Selection note: selected evidence with unresolved limitations was excluded from assertions. Its current-use explanation is shown in Knowledge Studio.";
+const COUNT_ONLY_ASSESSMENT_PREFIXES = Object.freeze({
+  executive_snapshot: "This assessment is limited to the cited row count. ",
+  evidence_findings: "",
+  impact_stories: "No personal account is included; only the row count is available. ",
+  gaps_opportunities: "The row count does not establish record meaning or external-use alignment. ",
+  recommended_improvements: "No specific improvement proposal is established by the row count. ",
+  next_steps: "Keep the definition, cited source and limitations with the row count before reusing it. ",
+});
+
+export function composeCountOnlyAssessmentText(measurementRow, sectionKey) {
+  if (!Object.hasOwn(COUNT_ONLY_ASSESSMENT_PREFIXES, sectionKey)) return null;
+  return `[[assessment:${sectionKey}]]\n${COUNT_ONLY_ASSESSMENT_PREFIXES[sectionKey]}${composeCountOnlyFindingText(measurementRow)}`;
+}
+
 // A persisted block citing a count-only claim is accepted only when it cites
 // exactly that claim's evidence item and is exactly the composed finding of
 // the measurement now recorded for it.
@@ -129,7 +146,11 @@ export function countOnlyBlockMatchesMeasurement(block, measurementRow) {
     && Array.isArray(block?.citations)
     && block.citations.length === 1
     && block.citations[0].evidenceItemId === measurementRow.evidence_item_id
-    && block.text === composeCountOnlyFindingText(measurementRow);
+    && (block.text === composeCountOnlyFindingText(measurementRow)
+      || Object.keys(COUNT_ONLY_ASSESSMENT_PREFIXES).some((key) => {
+        const exact = composeCountOnlyAssessmentText(measurementRow, key);
+        return block.text === exact || (key === "gaps_opportunities" && block.text === `${exact} ${ASSESSMENT_SELECTION_NOTE}`);
+      }));
 }
 
 /**

@@ -310,6 +310,9 @@ try {
   if (EXPORT_PATH_SPECS.has(acceptanceSpec)) {
     for (const migration of EXPORT_PATH_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
   }
+  if (acceptanceSpec === "__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js") {
+    psqlFile("migrations/kai_sprint2_document_statement_evidence.sql");
+  }
   if (MEASUREMENT_SCHEMA_SPECS.has(acceptanceSpec)) {
     for (const migration of MEASUREMENT_SCHEMA_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
   }

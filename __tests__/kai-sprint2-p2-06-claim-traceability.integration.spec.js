@@ -262,7 +262,7 @@ async function runP206IntegrationSuite() {
     assert.equal(result.data.evidence.sensitivity_level, "unknown");
   });
 
-  test("P2-06 rejects absent P2-04 rows instead of inferring clear coverage", async () => {
+  test("P2-06 reports absent P2-04 evaluation without inferring eligibility", async () => {
     const [claimId] = await prepareTwoClaims();
     const savedGaps = await query(`SELECT * FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
     const savedFollowups = await query(`SELECT * FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
@@ -284,8 +284,9 @@ async function runP206IntegrationSuite() {
     await pool.query(`DELETE FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
     await pool.query(`DELETE FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
     const result = await trace(claimId);
-    assert.equal(result.ok, false);
-    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(result.ok, true);
+    assert.equal(result.data.eligible, false);
+    assert.ok(result.data.blockerCodes.includes("p204_evaluation_required"));
     for (const row of savedGaps) {
       await pool.query(
         `INSERT INTO kai.gap_log_items (
@@ -1204,9 +1205,9 @@ async function runP206IntegrationSuite() {
     assert.deepEqual(beforeRows[0], { gaps: 0, followups: 0 });
 
     const beforeTrace = await trace(legacy.claimId, "internal");
-    assert.equal(beforeTrace.ok, false);
-    assert.equal(beforeTrace.error.code, "conflict_current_state_changed");
-    assert.equal(beforeTrace.data.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+    assert.equal(beforeTrace.ok, true);
+    assert.equal(beforeTrace.data.eligible, false);
+    assert.ok(beforeTrace.data.blockerCodes.includes("p204_evaluation_required"));
 
     await pool.query(
       `INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
@@ -1233,7 +1234,7 @@ async function runP206IntegrationSuite() {
     assert.deepEqual(preflight.blockers, [{
       validator_key: "VAL-GEN-TRACE-P0-001",
       severity: "blocker",
-      blocking_reason: "traceability_result_contract_invalid",
+      blocking_reason: "p204_evaluation_required",
     }]);
     assert.equal(preflightProviderCalls, 0);
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -410,7 +411,7 @@ async function runBrowserAcceptance() {
   await query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS logo_url text");
   // The skinny browser fixture predates assessment source labels. Mirror the
   // existing intake column (kaiIntakeQueries); no application migration.
-  await query("ALTER TABLE kai.intake_files ADD COLUMN IF NOT EXISTS file_extension text");
+  await query("ALTER TABLE kai.intake_files ADD COLUMN IF NOT EXISTS file_extension text, ADD COLUMN IF NOT EXISTS storage_provider text, ADD COLUMN IF NOT EXISTS storage_object_key text");
   for (const [organizationId, name, code] of [[ORG_X, "Harbourline Session Society", "harbourline-sessions"], [ORG_Y, "Larchmont Other Society", "larchmont-other-sessions"]]) {
     await query("INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ($1::uuid, $2, $3)", [organizationId, name, code]);
   }
@@ -449,18 +450,18 @@ async function runBrowserAcceptance() {
   };
 
   /** P1-03..P1-05 rows of the file from the real profiler's output on the CSV bytes (the P1 worker's persistence - simulated). */
-  async function seedProfiledFile({ fileId = FILE_X, csv = CSV, filename = "sessions.csv", checksumChar = "c" } = {}) {
+  async function seedProfiledFile({ fileId = FILE_X, csv = CSV, filename = "sessions.csv", checksumChar = "c", extension = ".csv" } = {}) {
     const bytes = new TextEncoder().encode(csv);
-    const profile = await profileLocalTrustedFile({ extension: ".csv", declaredMime: "text/csv", byteSize: bytes.byteLength, bytes });
+    const profile = await profileLocalTrustedFile({ extension, declaredMime: extension === ".txt" ? "text/plain" : "text/csv", byteSize: bytes.byteLength, bytes });
     assert.equal(profile.status, "profiled");
-    const checksum = checksumChar.repeat(64);
+    const checksum = extension === ".txt" ? createHash("sha256").update(bytes).digest("hex") : checksumChar.repeat(64);
     await query(
       `INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
          checksum, hash_algorithm, upload_state, object_version_id, verified_checksum, verified_size_bytes, verified_at,
          mime_type, file_extension, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $7, $7, $5, 'sha256', 'confirmed', 'synthetic-v1', $5, $6, now(),
-         'text/csv', '.csv', $6, 'clean', 'not_reviewed', 'passed', now())`,
-      [fileId, BATCH_X, ORG_X, PROJECT_X, checksum, bytes.byteLength, filename],
+         $8, $9, $6, 'clean', 'not_reviewed', 'passed', now())`,
+      [fileId, BATCH_X, ORG_X, PROJECT_X, checksum, bytes.byteLength, filename, extension === ".txt" ? "text/plain" : "text/csv", extension],
     );
     const [run] = await query(
       `INSERT INTO kai.intake_parser_runs (organization_id, intake_file_id, parser_name, parser_version, checksum, parser_status, started_at)
@@ -733,6 +734,26 @@ async function runBrowserAcceptance() {
       assert.match(ids.historicalState.text, /field_2/);
       assert.equal(modelCalls.length, 1);
       results.history = { structuralClaims: claims.length, historicalDraft: ids.historicalState.review_status };
+    });
+
+    await test("P2-04 boundary: an ordinary current P2-03 claim is read before any reconciliation", async () => {
+      const [fresh] = await query(`SELECT c.claim_id::text FROM kai.claims c JOIN kai.evidence_items e USING (evidence_item_id)
+        WHERE c.organization_id = $1::uuid AND e.source_version_id = $2::uuid
+        ORDER BY c.claim_id LIMIT 1`, [ORG_X, ids.wideSourceVersionId]);
+      const snapshot = () => query(`SELECT
+        (SELECT count(*)::int FROM kai.gap_log_items WHERE claim_id = $1::uuid) AS gaps,
+        (SELECT count(*)::int FROM kai.client_followup_items WHERE claim_id = $1::uuid) AS followups,
+        (SELECT count(*)::int FROM kai.review_queue_items WHERE queue_type = 'client_followup') AS queues,
+        (SELECT count(*)::int FROM kai.audit_events) AS audits`, [fresh.claim_id]);
+      const before = await snapshot();
+      assert.deepEqual([before[0].gaps, before[0].followups], [0, 0]);
+      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, fresh.claim_id, "internal"));
+      console.log(`[p204-unreconciled-api] ${JSON.stringify(traced)}`);
+      assert.deepEqual(await snapshot(), before, "traceability GET writes nothing");
+      assert.equal(traced.status, 200, "missing evaluation is reported without a stale-state conflict");
+      assert.equal(traced.body.data.eligible, false);
+      assert.ok(traced.body.data.blockerCodes.includes("p204_evaluation_required"));
+      assert.equal(traced.body.data.dimensions.denominator_clarity.assessment_status, "unresolved");
     });
 
     await test("missing measurement: with only structural claims the customer is told to count records first; structural claims are labelled and not offered as an impact finding; the historical draft is shown as metadata-only", async () => {
@@ -1324,17 +1345,77 @@ async function runBrowserAcceptance() {
       const proofDir = "/tmp/kai-knowledge-studio-assessment-proof";
       mkdirSync(proofDir, { recursive: true });
       const orgPath = `${BASE_PATH}/admin/organizations/${ORG_X}`;
-      for (const [kind, target, build] of [
-        ["evidence_review", ids.evidenceItemId, (queue) => [evidenceReviewCompletePath(ORG_X, ids.evidenceItemId, queue.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(queue.updated_at).toISOString(), decision: "supported" })]],
-        ["claim_review", ids.claimId, (queue) => [claimReviewCompletePath(ORG_X, ids.claimId, queue.review_queue_item_id), claimReviewDecisionBody({ expectedUpdatedAt: new Date(queue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })]],
-      ]) {
-        const [path, decision] = build(await queueOf(kind, target));
-        created(await gkReviewerPage.api("POST", path, decision), kind);
+      // A normal document claim: real profile, source authorization, text
+      // extraction and proposal. No review, P2-04 call or prepared eligibility.
+      const documentText = "Follow-up information remains incomplete for the programme in this reporting period.";
+      const fileId = "21000000-0000-4000-8000-0000000000e4";
+      const doc = await seedProfiledFile({ fileId, csv: documentText, filename: "limitations.txt", extension: ".txt" });
+      await query("UPDATE kai.intake_files SET storage_provider = 'local', storage_object_key = 'synthetic-document' WHERE intake_file_id = $1::uuid", [fileId]);
+      const docCandidate = await reachReviewableSourceCandidate(doc.sensitivityProfileId);
+      assert.equal((await gkReviewerPage.api("POST", decisionPath(docCandidate), { outcome: "promoted", reviewed_source_type: "organization_primary_record" })).status, 200);
+      const [version] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [docCandidate]);
+      const { createPostgresDocumentEvidenceRepository } = await import("../Backend/kai/dictionary/postgresDocumentEvidenceRepository.js");
+      const { createDocumentContentReader } = await import("../Backend/kai/parsing/documentContentReader.js");
+      const { extractEvidenceFromSourceVersion } = await import("../Backend/kai/services/kaiEvidenceLineageService.js");
+      const bytes = new TextEncoder().encode(documentText);
+      const documentRepository = createPostgresDocumentEvidenceRepository({
+        runInTransaction: async (callback) => {
+          const client = await seedPool.connect();
+          try { await client.query("BEGIN"); const result = await callback(client); await client.query("COMMIT"); return result; }
+          catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+        },
+        documentContentReader: createDocumentContentReader({ storageAdapter: {
+          async readObjectVersion() { return { ok: true, data: { bytes }, error: null }; },
+        } }),
+      });
+      const extracted = await extractEvidenceFromSourceVersion({ organizationId: ORG_X, sourceVersionId: version.source_version_id,
+        actorContext: gkReviewerService, now: new Date().toISOString() }, { env: ENV, documentEvidenceRepository: documentRepository });
+      assert.equal(extracted.ok, true, JSON.stringify(extracted));
+      const docEvidenceId = extracted.data.evidenceItems[0].evidence_item_id;
+      const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, docEvidenceId), {});
+      created(proposed, "unprepared document claim");
+      const docClaimId = proposed.body.data.claim.claim_id;
+      const docState = () => query(`SELECT
+        (SELECT count(*)::int FROM kai.gap_log_items WHERE claim_id = $1::uuid) AS gaps,
+        (SELECT count(*)::int FROM kai.client_followup_items WHERE claim_id = $1::uuid) AS followups,
+        (SELECT count(*)::int FROM kai.audit_events) AS audits`, [docClaimId]);
+      const before = await docState();
+      assert.deepEqual([before[0].gaps, before[0].followups], [0, 0]);
+      const approvalsBefore = await approvalCounts();
+      let beforeDimensions;
+      for (let read = 0; read < 2; read++) {
+        const trace = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"));
+        assert.equal(trace.status, 200, JSON.stringify(trace));
+        assert.equal(trace.body.data.eligible, false);
+        assert.ok(trace.body.data.blockerCodes.includes("p204_evaluation_required"));
+        beforeDimensions = trace.body.data.dimensions;
       }
-      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
-      for (const [key, dimension] of Object.entries(traced.body.data.dimensions || {})) {
-        if (dimension.assessment_status === "unresolved") created(await gkReviewerPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, key), {}), key);
-      }
+      assert.deepEqual(await docState(), before, "repeated GETs do not prepare state");
+      // A qualifying story-present source. Its text and definition sentinel
+      // must never reach model input or a factual assertion.
+      const countFileId = "21000000-0000-4000-8000-0000000000e5";
+      const count = await seedProfiledFile({ fileId: countFileId, csv: 'note\nSTORY-SENTINEL\nSTORY-SENTINEL\n', filename: "stories.csv", checksumChar: "f" });
+      const countCandidate = await reachReviewableSourceCandidate(count.sensitivityProfileId, { reviewed_story_testimonial_status: "present" });
+      assert.equal((await gkReviewerPage.api("POST", decisionPath(countCandidate), { outcome: "promoted", reviewed_source_type: "organization_primary_record" })).status, 200);
+      const [countVersion] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [countCandidate]);
+      const counted = await adminPage.api("POST", sourceRecordCountMeasurementPath(ORG_X, countVersion.source_version_id), measurementDefinitionBody({
+        countedUnit: "record", unitLabel: "records", definitionText: "STORY-DEFINITION-SENTINEL each row is a record.",
+        inclusionRule: "Every nonblank data row.", exclusionRule: "The header and empty rows.",
+        periodStart: "2026-09-01", periodEnd: "2026-09-30",
+      }));
+      created(counted, "count-only measurement");
+      const [countMeasurement] = await query("SELECT evidence_item_id::text FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [countVersion.source_version_id]);
+      const countProposed = await adminPage.api("POST", claimProposalPath(ORG_X, countMeasurement.evidence_item_id), {});
+      created(countProposed, "count-only claim");
+      const countClaimId = countProposed.body.data.claim.claim_id;
+      // Establish the actual internal authority, rather than infer it from a
+      // story flag or from the content type alone.
+      const { evaluateClaimTraceabilityInTransaction } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
+      const { ordinaryInternalAuthorityOf } = await import("../Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js");
+      const authority = await evaluateClaimTraceabilityInTransaction(seedPool, { organizationId: ORG_X, claimId: countClaimId, requestedAudience: "internal" });
+      assert.deepEqual(ordinaryInternalAuthorityOf(authority.data), { basis: "count_only_story_testimonial_present", reliedOn: true });
+      assert.equal(authority.data.eligible, true);
+      const selected = [ids.claimId, docClaimId, countClaimId].sort();
       await openDataSources(PROJECT_X2);
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.claimId}"] input[type=checkbox]'))`), "the existing claim selection");
       const group = await adminPage.evaluate(`(() => {
@@ -1345,7 +1426,9 @@ async function runBrowserAcceptance() {
       })()`);
       assert.deepEqual(group, { count: 1, labels: ["Generate Free Impact Assessment", "Generate internal evidence summary", "Generate internal impact narrative"], disabled: true });
       await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Select the measured claim for the assessment");
-      await adminPage.waitForText("1/20 claims selected");
+      await adminPage.clickIn(`[data-client-claim="${docClaimId}"] input[type=checkbox]`, "Select the unreconciled limitation claim");
+      await adminPage.clickIn(`[data-client-claim="${countClaimId}"] input[type=checkbox]`, "Select the count-only claim");
+      await adminPage.waitForText("3/20 claims selected");
       await adminPage.evaluate(`[...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Generate Free Impact Assessment").scrollIntoView({ block: "center" })`);
       await adminPage.screenshot(join(proofDir, "01-action-group.png"));
       const mark = adminPage.mark();
@@ -1358,7 +1441,7 @@ async function runBrowserAcceptance() {
       assert.equal(sent[0].status, 201);
       const body = JSON.parse(sent[0].postData);
       assert.deepEqual(Object.keys(body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
-      assert.deepEqual(body.claim_ids, [ids.claimId]);
+      assert.deepEqual(body.claim_ids, selected);
       assert.equal(body.engagement_id, PROJECT_X2);
       assert.match(body.idempotency_key, /^client-free_impact_assessment-/);
       assert.equal(modelCalls.length, callsBefore + 1);
@@ -1368,7 +1451,22 @@ async function runBrowserAcceptance() {
       const [run] = await query("SELECT r.engagement_id::text FROM kai.generation_runs r JOIN kai.generated_content_drafts d ON d.generation_run_id = r.generation_run_id WHERE d.generated_content_draft_id = $1::uuid", [draftId]);
       assert.equal(run.engagement_id, PROJECT_X2);
       assert.equal(saved.content_type, "evidence_summary");
-      assert.deepEqual([...new Set(saved.cited_claim_ids)], [ids.claimId]);
+      assert.deepEqual([...new Set(saved.cited_claim_ids)].sort(), [ids.claimId, countClaimId].sort());
+      assert.match(saved.text, /2 nonblank data rows/);
+      assert.match(saved.text, /Selection note: selected evidence with unresolved limitations was excluded from assertions/);
+      assert.doesNotMatch(saved.text, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
+      assert.doesNotMatch(JSON.stringify(modelCalls.slice(callsBefore)), /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
+      assert.match(await textOf(adminPage, "[data-client-workflow-notice]"), /was not used as an assertion/);
+      const after = await docState();
+      assert.ok(after[0].gaps > 0, "generation reconciled the fresh document claim");
+      const docAfter = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"));
+      assert.equal(docAfter.status, 200);
+      assert.equal(docAfter.body.data.eligible, false);
+      assert.ok(!docAfter.body.data.blockerCodes.includes("p204_evaluation_required"));
+      assert.deepEqual(await approvalCounts(), approvalsBefore, "reconciliation approved nothing");
+      const readState = await docState();
+      for (let read = 0; read < 2; read++) assert.equal((await adminPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"))).status, 200);
+      assert.deepEqual(await docState(), readState);
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${draftId}"]`)), "the saved assessment opens by its own id");
       const shown = await textOf(adminPage, `[data-client-internal-draft-detail="${draftId}"]`);
       for (const heading of ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"]) assert.ok(shown.includes(heading), heading);
@@ -1380,6 +1478,44 @@ async function runBrowserAcceptance() {
       assert.doesNotMatch(report, /\[\[assessment:/);
       await adminPage.evaluate(`document.querySelector('[data-client-internal-draft-detail="${draftId}"]').scrollIntoView({ block: "start" })`);
       await adminPage.screenshot(join(proofDir, "02-saved-assessment.png"));
+      const [p204Lifecycle] = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit
+        WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated' AND metadata->>'claim_id' = $2`, [ORG_X, docClaimId]);
+      assert.equal(p204Lifecycle.count, 1, "one actual P2-04 transaction committed for the document claim");
+      const p204Audits = await query(`SELECT actor_user_id::text, actor_type, metadata FROM kai.audit_events
+        WHERE organization_id = $1::uuid AND metadata->>'object_id' = $2 AND action = 'claim_gap_and_followup_generated'`, [ORG_X, docClaimId]);
+      assert.equal(p204Audits.length, 1);
+      assert.equal(p204Audits[0].actor_user_id, adminUser.user_id);
+      assert.equal(p204Audits[0].actor_type, "human");
+      assert.equal(p204Audits[0].metadata.metadata_only, true);
+      const [outcome] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      const excluded = outcome.validator_results.find((result) => result.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.excluded_claims;
+      assert.deepEqual(excluded, [{ claimId: docClaimId, blockerCodes: docAfter.body.data.blockerCodes }]);
+      const beforeReplay = await docState();
+      const replay = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, body);
+      created(replay, "assessment retry");
+      assert.equal(replay.body.data.generatedContentDraftId, draftId);
+      assert.equal(replay.body.data.replayed, true);
+      assert.deepEqual(replay.body.data.excludedClaims, excluded);
+      assert.deepEqual(await docState(), beforeReplay, "retry creates no new P2-04 rows or audits");
+      const callsAfterMixed = modelCalls.length;
+      const countOnlyAssessment = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "count-only-six-section-assessment",
+      });
+      created(countOnlyAssessment, "count-only assessment");
+      assert.equal(modelCalls.length, callsAfterMixed, "no model call for a count-only selection");
+      const { parseFreeImpactAssessment } = await import("../Backend/kai/services/kaiFreeImpactAssessmentComposition.js");
+      assert.equal(parseFreeImpactAssessment(countOnlyAssessment.body.data.blocks).length, 6);
+      const refusedNarrative = await adminPage.api("POST", createImpactNarrativePath(ORG_X), {
+        claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "count-only-narrative-still-refused",
+      });
+      assert.equal(refusedNarrative.status, 422);
+      assert.equal(refusedNarrative.body.blockers[0].blocking_reason, "story_testimonial_count_only_operation_not_permitted");
+      const nonqualifying = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: [ids.riskClaimId], engagement_id: PROJECT_X2, idempotency_key: "nonqualifying-assessment-still-refused",
+      });
+      assert.equal(nonqualifying.status, 422);
+      assert.equal(nonqualifying.body.blockers[0].blocking_reason, "assessment_no_eligible_evidence");
+      assert.equal(modelCalls.length, callsAfterMixed);
       // Existing GK review/release actions, through the real authenticated routes.
       // This is API-boundary release proof, not a claim that the GK buttons were clicked.
       const draftPath = `${orgPath}/generated-content-drafts/${draftId}`;
@@ -1389,6 +1525,10 @@ async function runBrowserAcceptance() {
         const queue = await queueOf("generated_content_review", draftId);
         const result = await gkReviewerPage.api("POST", `${draftPath}/generated-content-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
         assert.equal(result.status, 200, JSON.stringify(result.body));
+        if (step === "start") {
+          const stale = await gkReviewerPage.api("POST", `${draftPath}/generated-content-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
+          assert.equal(stale.status, 409, "a genuinely stale review mutation still conflicts");
+        }
       }
       created(await gkAdminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" }), "export review request");
       for (const step of ["start", "complete"]) {
@@ -1403,7 +1543,11 @@ async function runBrowserAcceptance() {
       const exportQueue = await queueOf("export_review", draftId);
       created(await gkAdminPage.api("POST", `${orgPath}/export-candidates/${candidate.id}/export-manifests`, { export_review_queue_item_id: exportQueue.review_queue_item_id }), "manifest");
       const [manifest] = await query("SELECT export_manifest_id::text AS id FROM kai.export_manifests WHERE export_candidate_id = $1::uuid", [candidate.id]);
-      // Reload the same existing client draft: both internal and released receipts must remain available.
+      // Reload the actual client page; repeat traceability and saved-report reads.
+      const beforeReload = await docState();
+      await openDataSources(PROJECT_X2);
+      assert.equal((await adminPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"))).status, 200);
+      assert.deepEqual(await docState(), beforeReload, "reload and reads create no state or audit loop");
       await adminPage.clickIn(`[data-client-internal-draft="${draftId}"] button`, "Read the released assessment");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-released-report="${manifest.id}"]`)), "the existing released-report control");
       const download = await attr(adminPage, `[data-client-download-released-report="${manifest.id}"]`, "href");
@@ -1411,19 +1555,24 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => (await textOf(adminPage, "[data-client-released-report-markdown]"))?.startsWith("# Free Impact Assessment"), "the released assessment");
       const released = await textOf(adminPage, "[data-client-released-report-markdown]");
       assert.equal((await fetchText(adminPage, download)).body, released);
+      assert.doesNotMatch(released, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
+      assert.match(released, /2 nonblank data rows/);
+      assert.match(released, /selected evidence with unresolved limitations was excluded from assertions/);
       await adminPage.evaluate(`document.querySelector("[data-client-released-report-markdown]").scrollIntoView({ block: "start" })`);
       await adminPage.screenshot(join(proofDir, "03-released-assessment.png"));
       const pdf = await gkAdminPage.evaluate(`(async () => {
         const response = await fetch("${orgPath}/export-manifests/${manifest.id}/pdf");
         const bytes = new Uint8Array(await response.arrayBuffer());
-        return { status: response.status, type: response.headers.get("content-type"), header: String.fromCharCode(...bytes.slice(0, 5)), bytes: bytes.length };
+        return { status: response.status, type: response.headers.get("content-type"), header: String.fromCharCode(...bytes.slice(0, 5)), bytes: bytes.length, base64: btoa(String.fromCharCode(...bytes)) };
       })()`);
       assert.equal(pdf.status, 200);
       assert.equal(pdf.type, "application/pdf");
       assert.equal(pdf.header, "%PDF-");
       assert.ok(pdf.bytes > 1000);
+      writeFileSync(join(proofDir, "released-assessment.pdf"), Buffer.from(pdf.base64, "base64"));
+      delete pdf.base64;
       assert.deepEqual(adminPage.exceptions, []);
-      const proof = { browser: "Chrome", fixture: "synthetic Harbourline (not Cedar)", provider: "deterministic stub", group, request: body, draftId, manifestId: manifest.id, pdf,
+      const proof = { browser: "Chrome", fixture: "synthetic Harbourline (not Cedar)", provider: "deterministic stub", group, request: body, unreconciled: { docClaimId, before, beforeDimensions, after, p204Lifecycle, p204Audits, blockers: docAfter.body.data.blockerCodes }, countOnly: { contentType: "evidence_summary", assessment: true, countOnly: true, ...ordinaryInternalAuthorityOf(authority.data) }, draftId, manifestId: manifest.id, pdf,
         acceptance: "Knowledge Studio generation/save/read and client released receipt PASS; GK review/release exercised at API boundary", screenshots: ["01-action-group.png", "02-saved-assessment.png", "03-released-assessment.png"] };
       writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2));
       console.log(`[knowledge-studio-assessment] ${JSON.stringify(proof)}`);

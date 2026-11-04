@@ -87,6 +87,7 @@ const BLOCKER_ORDER = Object.freeze([
   "potential_conflict_review_unresolved",
   "requirement_authority_absent",
   "traceability_incomplete",
+  "p204_evaluation_required",
 ]);
 
 const {
@@ -202,6 +203,11 @@ function computeDimensions(rows) {
     requirement_alignment: assessRequirementAlignment(),
     coverage_gaps: assessCoverageGaps(rows.dictionaryFieldRows, rows.evidenceFieldKeys),
   };
+}
+
+function missingP204Evaluation(dimensions, { gapRows, followupRows, followupQueueRows }) {
+  return gapRows.length === 0 && followupRows.length === 0 && followupQueueRows.length === 0
+    && DIMENSION_KEYS.some((key) => dimensionResultRequiresGap(dimensions[key]));
 }
 
 async function readGapRows(tx, { organizationId, claimId }) {
@@ -634,12 +640,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   });
 
   const noPersistedP204 = gapRows.length === 0 && followupRows.length === 0 && followupQueueRows.length === 0;
-  if (noPersistedP204) {
-    const allClear = DIMENSION_KEYS.every((dimensionKey) => !dimensionResultRequiresGap(dimensions[dimensionKey]));
-    if (!allClear) {
-      return failureWithReason("gap_dimension_requires_missing_p204_state");
-    }
-  } else {
+  // An unprepared claim is a normal P2-03 lifecycle state. Read its actual
+  // dimensions and blockers without inventing persisted gaps or eligibility.
+  // Generation reconciles through the authorized P2-04 command before use.
+  const p204EvaluationRequired = missingP204Evaluation(dimensions, { gapRows, followupRows, followupQueueRows });
+  if (!noPersistedP204) {
     const gapsMatch = gapRowsMatchExpectation(gapRows, expectedGapPlans, {
       evidenceItemId: evidenceItemRow.evidence_item_id,
       sourceVersionId: evidenceItemRow.source_version_id,
@@ -783,6 +788,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const claimReviewHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
 
   const blockers = new Set();
+  if (p204EvaluationRequired) addOrderedBlocker(blockers, "p204_evaluation_required");
   const affectedDimensionKeys = new Set();
   const affectedObjectIds = new Set();
   const graphRelationships = composeClaimTraceabilityGraphRelationships({
@@ -1052,6 +1058,7 @@ export const AUDIENCE_AUTHORITY_BLOCKER_CODES = Object.freeze([
 ]);
 
 export const __claimTraceabilityRepositoryContract = Object.freeze({
+  missingP204Evaluation,
   BLOCKER_ORDER,
   DIMENSION_KEYS,
   REVIEW_QUEUE_CLAIM_LIMIT,

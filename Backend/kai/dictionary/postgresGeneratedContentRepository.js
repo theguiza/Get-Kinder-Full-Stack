@@ -9,6 +9,8 @@ import {
 } from "./postgresClaimTraceabilityRepository.js";
 import {
   composeCountOnlyFindingText,
+  composeCountOnlyAssessmentText,
+  ASSESSMENT_SELECTION_NOTE,
   composeEvidenceSummaryMeasurementDisclosures,
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
@@ -733,7 +735,7 @@ async function readExistingState(tx, { organizationId, idempotencyKey }) {
   const draftRows = await tx.query(
     `SELECT generated_content_draft_id::text AS generated_content_draft_id,
             generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
-            content_type, requested_audience, draft_status, review_status, created_by_type, created_at
+            content_type, requested_audience, draft_status, review_status, validator_results, created_by_type, created_at
        FROM kai.generated_content_drafts
       WHERE organization_id = $1::uuid AND generation_run_id = $2::uuid`,
     [organizationId, run.generation_run_id],
@@ -1417,6 +1419,9 @@ function toResult(state, replayed = false) {
   }
   return {
     generationRunId: state.run.generation_run_id,
+    ...((draft.validator_results || []).some((result) => result.validator_key === FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY)
+      ? { excludedClaims: draft.validator_results.find((result) => result.validator_key === FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY).evidence.excluded_claims }
+      : {}),
     generatedContentDraftId: draft.generated_content_draft_id,
     requestedAudience: draft.requested_audience,
     draftStatus: draft.draft_status,
@@ -1505,6 +1510,9 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "traceability_result_contract_invalid"),
           );
         }
+        if (result.data.blockerCodes?.includes("p204_evaluation_required")) {
+          rollbackFailure("validation_blocker", stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "p204_evaluation_required"));
+        }
         traceabilityResults.push(result.data);
       }
 
@@ -1555,8 +1563,17 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         rollbackFailure("funder_use_not_currently_eligible");
       }
 
-      const projections = await loadGenerationProjection(tx, input, funderAuthorityByClaimId);
+      let projections = await loadGenerationProjection(tx, input, funderAuthorityByClaimId);
       if (!projections) rollbackFailure("conflict_current_state_changed");
+      // An assessment states eligible findings only. Keep an explicit selection
+      // note in the saved content; excluded claim text never enters the model
+      // or acquires a release citation. Other generators retain their contract.
+      const excludedClaims = assessment ? traceabilityResults.filter((item) => item.eligible !== true) : [];
+      if (assessment) {
+        const excludedIds = new Set(excludedClaims.map((item) => item.claim.claim_id));
+        projections = projections.filter((item) => !excludedIds.has(item.claimId));
+        if (projections.length === 0) rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, "assessment_no_eligible_evidence"));
+      }
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
       const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
       // The exact cited measurement of each claim used under the count-only
@@ -1565,6 +1582,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       const countOnlyMeasurementByClaimId = new Map();
       const measuredValueByClaimId = new Map();
       for (const traceability of traceabilityResults) {
+        if (assessment && traceability.eligible !== true) continue;
         const projection = projectionByClaim.get(traceability.claim.claim_id);
         if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
           rollbackFailure("conflict_current_state_changed");
@@ -1590,11 +1608,11 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           // A story-present source's count is usable under the count-only
           // basis for an internal Evidence Summary only: where eligibility
           // rests on that basis, every other content type is refused before
-          // the model. Under it the claim carries the count-only code, so
-          // the model is told and VAL-GEN-010 bounds the generated text.
+          // the model. Under it the claim carries the count-only code and
+          // only the closed server projection can cite it in an assessment.
           const ordinaryAuthority = ordinaryInternalAuthorityOf(traceability);
           const countOnly = ordinaryAuthority?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
-          if (countOnly && ordinaryAuthority.reliedOn && (contentType !== COUNT_ONLY_CONTENT_TYPE || assessment)) {
+          if (countOnly && ordinaryAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
@@ -1667,7 +1685,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // evidence, documented gaps, three proposed improvements, next steps)
       // from the same projections. Disclosures, the combined result contract
       // and every validator below then run on the whole assessment.
-      if (assessment) {
+      if (assessment && modelProjections.length > 0) {
         const modelClassification = classifyGeneratorResult(generatorResult);
         if (!modelClassification.ok) {
           rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
@@ -1711,9 +1729,31 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             text: composeCountOnlyFindingText(countOnlyMeasurementByClaimId.get(projection.claimId)),
             citations: [{ claimId: projection.claimId, evidenceItemId: projection.evidenceItemId }],
           }));
-        generatorResult = {
-          blocks: [...countOnlyBlocks, ...modelBlocks].map((block, index) => ({ ordinal: index + 1, text: block.text, citations: block.citations })),
-        };
+        if (assessment) {
+          const findings = countOnlyBlocks.map((block) => ({ ...block,
+            text: composeCountOnlyAssessmentText(countOnlyMeasurementByClaimId.get(block.citations[0].claimId), "evidence_findings"),
+          }));
+          if (modelBlocks.length > 0) {
+            const nextSection = modelBlocks.findIndex((block) => !/^\[\[assessment:(?:executive_snapshot|evidence_findings)\]\]/.test(block.text));
+            modelBlocks.splice(nextSection, 0, ...findings);
+          } else {
+            const anchor = countOnlyBlocks[0];
+            modelBlocks = ["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]
+              .flatMap((key) => key === "evidence_findings" ? findings : [{
+                citations: anchor.citations,
+                text: composeCountOnlyAssessmentText(countOnlyMeasurementByClaimId.get(anchor.citations[0].claimId), key),
+              }]);
+          }
+          generatorResult = { blocks: modelBlocks.map((block, index) => ({ ...block, ordinal: index + 1 })) };
+        } else {
+          generatorResult = {
+            blocks: [...countOnlyBlocks, ...modelBlocks].map((block, index) => ({ ordinal: index + 1, text: block.text, citations: block.citations })),
+          };
+        }
+      }
+      if (assessment && excludedClaims.length > 0) {
+        const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
+        gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
       }
       const generatorResultClassification = classifyGeneratorResult(generatorResult);
       if (!generatorResultClassification.ok) {
@@ -1723,7 +1763,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         );
       }
 
-      const validation = validateGeneratedContentDraft({
+      let validation = validateGeneratedContentDraft({
         requestedAudience: input.requestedAudience,
         generationClaims: projections.map((projection) => ({
           ...projection,
@@ -1738,6 +1778,16 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           : dependencies.authoritativeReadiness,
       });
       if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
+      if (assessment) {
+        // Keep the exact selection outcome on the saved draft and its
+        // idempotent response, without creating a citation or review authority
+        // for evidence that was not used. IDs and codes only; no source text.
+        validation = { ...validation, results: [...validation.results, {
+          validator_key: FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, severity: "pass", evidence: {
+            excluded_claims: excludedClaims.map((item) => ({ claimId: item.claim.claim_id, blockerCodes: item.blockerCodes })),
+          },
+        }] };
+      }
 
       // Post-generation revalidation remains a current-state/lineage
       // integrity check only: it must still fail closed if traceability
@@ -1760,10 +1810,13 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // P14-09: for FUNDER only, this same post-generation revalidation
         // pass must also fail closed (rolling back everything generated
         // above, before any persistence) if current funder eligibility was
-        // lost between the pre-generation check and now. INTERNAL semantics
-        // above remain untouched - eligible is not read for internal.
+        // lost between the pre-generation check and now. Assessments also
+        // require their asserted findings to remain eligible.
         if (input.requestedAudience === "funder" && result.data?.eligible !== true) {
           rollbackFailure("funder_use_not_currently_eligible");
+        }
+        if (assessment && result.data?.eligible !== true) {
+          rollbackFailure("conflict_current_state_changed");
         }
       }
 

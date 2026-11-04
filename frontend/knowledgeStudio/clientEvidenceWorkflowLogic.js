@@ -101,7 +101,8 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
 // not determinate: generation records it itself before evaluating.
 export function claimDraftAdmitted(claim, diagnosis) {
   if (claimKind(claim) !== "measurement" || diagnosis?.status !== "not_usable") return true;
-  return diagnosis.blockerCodes.length === 0 && diagnosis.conflictReason === "gap_dimension_requires_missing_p204_state";
+  return diagnosis.blockerCodes.includes("p204_evaluation_required")
+    || (diagnosis.blockerCodes.length === 0 && diagnosis.conflictReason === "gap_dimension_requires_missing_p204_state");
 }
 
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
@@ -186,6 +187,7 @@ export function claimsToDiagnose({ claims, impactFacts, diagnostics, selectedCla
 
 // What a P2-06 blocker means to the organization administrator.
 export const CLAIM_USE_BLOCKER_MESSAGES = Object.freeze({
+  p204_evaluation_required: "its gap evaluation has not been recorded yet; generation evaluates it automatically before checking whether it can be used",
   claim_not_approved_for_requested_audience: "it is not approved for internal use",
   audience_gate_closed: "its evidence is not cleared for internal use",
   claim_review_unresolved: "the ordinary record-count rule does not cover it and its claim has no completed review",
@@ -422,6 +424,9 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
   if (result?.body?.blockers?.[0]?.blocking_reason === "story_testimonial_count_only_operation_not_permitted") {
     return "A selected measured finding comes from a source recorded as containing stories or testimonials. It is usable as a record "
       + "count in an internal Evidence Summary only; other draft types need Get Kinder's review. Nothing was created.";
+  }
+  if (result?.body?.blockers?.[0]?.blocking_reason === "assessment_no_eligible_evidence") {
+    return "None of the selected claims is currently eligible for an assessment assertion. Their current conditions are shown under Claims for internal drafts. No assessment was created.";
   }
   if (result?.body?.blockers?.[0]?.blocking_reason === "measured_claim_not_currently_eligible") {
     return "A selected measured finding is not usable in internal reports now, so no draft was created. Its current condition is shown "

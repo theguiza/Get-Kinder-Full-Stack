@@ -325,6 +325,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     canGenerate: access.generateDrafts, engagementId, selectedClaimIds,
     claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unadmittedClaimIds,
   });
+  const assessmentReadiness = internalDraftReadiness({
+    canGenerate: access.generateDrafts, engagementId, selectedClaimIds,
+    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete,
+  });
   const kindOfClaim = (claimId) => claimKind(claims.items.find((claim) => claim.claimId === claimId));
   const selectionUse = selectionReportUsability(selectedClaimIds, useOfClaim, kindOfClaim);
   const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
@@ -347,7 +351,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     });
   };
   const generate = (contentType, pathBuilder) => {
-    if (!readiness.ready) return;
+    if (!(contentType === "free_impact_assessment" ? assessmentReadiness : readiness).ready) return;
     // One idempotency key per request: a retry after a failed or interrupted
     // request replays it, and the key is retired once a draft is returned, so
     // the next click is an intentionally new draft.
@@ -361,6 +365,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           return rest;
         });
         setLastDraft(internalDraftResultSummary(data, contentType));
+        if (contentType === "free_impact_assessment" && data.excludedClaims?.length > 0) {
+          setNotice({ kind: "warning", text: data.excludedClaims.map((excluded) => {
+            const claim = claims.items.find((item) => item.claimId === excluded.claimId);
+            return `Selected claim ${claim?.claimStatement || excluded.claimId} was not used as an assertion. ${claimNotUsableMessage({ blockerCodes: excluded.blockerCodes })}`;
+          }).join(" ") });
+        }
         // The persisted draft is read back and opened below, never shown from this response.
         setDraftsRefreshToken((value) => value + 1);
       },
@@ -840,6 +850,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3">
           <h5 className="mb-2">Internal drafts</h5>
           <div className="small mb-2">{selectedClaimIds.length}/20 claims selected. Choose the measurements and document statements needed for this assessment; unselected claims are not included. You can deselect claims to change the set. Include evidence of limitations as well as findings.</div>
+          {assessmentReadiness.ready ? <div className="small mb-2">The assessment checks each selected claim after evaluating its gaps. Claims with unresolved conditions are explained and excluded from assertions.</div> : null}
           {!readiness.ready ? <div className="small mb-2" data-client-draft-readiness={readiness.reason}>{INTERNAL_DRAFT_READINESS_MESSAGES[readiness.reason]}</div> : null}
           {readiness.ready && !selectionUse.immediatelyUsable ? (
             <div className="small mb-2" data-client-draft-selection-usability={selectionUse.notUsable.length > 0 ? "not_usable" : "unknown"}>
@@ -847,7 +858,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             </div>
           ) : null}
           <div className="d-flex flex-wrap gap-2">
-            <button type="button" className="btn btn-sm btn-primary" disabled={!readiness.ready || Boolean(pending)}
+            <button type="button" className="btn btn-sm btn-primary" disabled={!assessmentReadiness.ready || Boolean(pending)}
               onClick={() => generate("free_impact_assessment", createFreeImpactAssessmentPath)}>
               {pending === "generate:free_impact_assessment" ? "Generating..." : "Generate Free Impact Assessment"}
             </button>

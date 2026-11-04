@@ -135,6 +135,7 @@ test("P2-06 repository contract fixes blocker ordering and exposes potential gro
     "potential_conflict_review_unresolved",
     "requirement_authority_absent",
     "traceability_incomplete",
+    "p204_evaluation_required",
   ]);
   const source = readFileSync(new URL("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js", import.meta.url), "utf8");
   assert.match(source, /potential_conflict_groups/);
@@ -224,4 +225,15 @@ test("P2-06 repository wires graph relationship endpoint and completeness valida
   assert.match(source, /graph_relationships:\s*graphRelationships/);
   assert.match(source, /graph_trace_completeness:\s*graphTraceCompleteness/);
   assert.match(source, /if \(!graphTraceCompleteness\.complete\) addOrderedBlocker\(blockers, "traceability_incomplete"\)/);
+});
+
+
+test("absent P2-04 rows require evaluation only when a dimension actually requires a gap", () => {
+  const { DIMENSION_KEYS, missingP204Evaluation } = __claimTraceabilityRepositoryContract;
+  const dimensions = Object.fromEntries(DIMENSION_KEYS.map((key) => [key, { evidence: { assessment_status: "resolved_clear" } }]));
+  const absent = { gapRows: [], followupRows: [], followupQueueRows: [] };
+  assert.equal(missingP204Evaluation(dimensions, absent), false, "no-gap-required read needs no persisted rows");
+  dimensions.denominator_clarity.evidence.assessment_status = "unresolved";
+  assert.equal(missingP204Evaluation(dimensions, absent), true);
+  assert.equal(missingP204Evaluation(dimensions, { ...absent, gapRows: [{}] }), false, "partial persisted state must take existing currentness validation");
 });
