@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
 
 /**
  * KAI document-statement evidence (pure; no SQL, no I/O).
@@ -492,6 +493,65 @@ export function validateDocumentClaimBasis({ evidenceItemRow, locatorRow }) {
   if (excerpt === null || documentExcerptSha256(excerpt) !== coordinates.excerpt_sha256) return blocked("document_statement_excerpt_mismatch");
   if (composeDocumentEvidenceStatement({ excerpt, coordinates }) !== evidenceItemRow.statement) return blocked("document_statement_excerpt_mismatch");
   return { ok: true, excerpt, coordinates };
+}
+
+// ---------------------------------------------------------------------------
+// Coverage dimensions of a document statement (owner prompt "KAI — Finish the
+// six-section Free Impact Assessment", 2026-11-04).
+//
+// The P2-02 field-level dimensions read a source's data-dictionary fields and
+// quality findings. A document statement has neither: its evidence is one
+// located excerpt quoted verbatim, so those dimensions came out "unresolved"
+// for every statement, and P2-04 asked the organization four questions about
+// "the unresolved field or measure" (meaning, denominator, period, entity
+// level) of a field that does not exist; their completion records no answer.
+// The statement's own form answers them, in the manner of a measurement's
+// method: nothing is counted (missing values, duplicates and field coverage
+// are clear), and what the words mean, what they count, their denominator and
+// their period are the source's own, recorded as known limitations (not as
+// resolved facts) and carried into every use. The source-level dimensions
+// (small-cell risk, conflicting sources, requirement alignment) are kept
+// exactly as assessed, so their review is unchanged.
+const { dimensionResult } = __evidenceCoverageAssessmentValidatorsTestables;
+
+export const DOCUMENT_ANSWERED_DIMENSION_KEYS = Object.freeze([
+  "definition_clarity",
+  "denominator_clarity",
+  "time_period_clarity",
+  "entity_level_clarity",
+]);
+
+// The release limitations of a document statement: its existing statement
+// codes (documentLimitationCodes: source-reported, and any interpretation,
+// uncertainty or self-report wording in the quoted words), plus every
+// coverage dimension that is not clear (accepted or not), exactly as a
+// measured claim's coverage codes are composed.
+export function documentStatementLimitationCodes({ statement, dimensions }) {
+  const text = String(statement ?? "");
+  const first = text.indexOf("\"");
+  const last = text.lastIndexOf("\"");
+  const codes = [...documentLimitationCodes(first >= 0 && last > first ? text.slice(first + 1, last) : text)];
+  for (const [dimensionKey, dimension] of Object.entries(dimensions && typeof dimensions === "object" ? dimensions : {})) {
+    const status = dimension?.assessment_status;
+    if (typeof status !== "string" || status === "resolved_clear") continue;
+    codes.push(dimension.internal_limitation_accepted === true
+      ? `coverage.${dimensionKey}.accepted_internal_limitation`
+      : `coverage.${dimensionKey}.${status}`);
+  }
+  return [...new Set(codes)].sort();
+}
+
+export function applyDocumentStatementCoverageDimensions(dimensions) {
+  return {
+    ...dimensions,
+    missingness: dimensionResult("missingness", "resolved_clear", "The claim quotes one located excerpt; it counts no record values, so none is missing from it."),
+    duplicates: dimensionResult("duplicates", "resolved_clear", "The claim quotes one located excerpt; it counts no records."),
+    coverage_gaps: dimensionResult("coverage_gaps", "resolved_clear", "The claim relies on no data field; it quotes one located excerpt."),
+    definition_clarity: dimensionResult("definition_clarity", "resolved_risk_flagged", "The claim restates the source's own words verbatim; what they mean is the source's statement and was not independently verified."),
+    denominator_clarity: dimensionResult("denominator_clarity", "resolved_risk_flagged", "Any quantity in the quoted words is the source's own; no denominator was established for it."),
+    time_period_clarity: dimensionResult("time_period_clarity", "resolved_risk_flagged", "The quoted words are not tied to a checked reporting period; any period they mention is the source's own."),
+    entity_level_clarity: dimensionResult("entity_level_clarity", "resolved_risk_flagged", "The quoted words name their own subject; what they describe was not established beyond them."),
+  };
 }
 
 export const __documentEvidenceTestables = Object.freeze({

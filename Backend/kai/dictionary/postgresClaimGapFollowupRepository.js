@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  DOCUMENT_ANSWERED_DIMENSION_KEYS,
+  DOCUMENT_EVIDENCE_TYPE,
+  applyDocumentStatementCoverageDimensions,
+} from "../validators/kaiDocumentEvidenceValidators.js";
+import {
   getScopedClaimById,
   getScopedClaimEvidenceLinkByClaimId,
   getScopedEvidenceItemById,
@@ -254,6 +259,11 @@ async function claimCoverageDimensions(tx, { organizationId, evidenceItemRow, ba
       tx,
     );
     return derivedMeasurementCoverageDimensions(baseDimensions, derivedRow);
+  }
+  // A document statement's own form answers the field-level dimensions
+  // (applyDocumentStatementCoverageDimensions); source-level ones stay.
+  if (evidenceItemRow?.evidence_type === DOCUMENT_EVIDENCE_TYPE) {
+    return { dimensions: applyDocumentStatementCoverageDimensions(baseDimensions), answeredDimensionKeys: [...DOCUMENT_ANSWERED_DIMENSION_KEYS] };
   }
   if (evidenceItemRow?.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
     return { dimensions: baseDimensions, answeredDimensionKeys: [] };

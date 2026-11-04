@@ -1,3 +1,4 @@
+import { describeDocumentLimitationCode } from "./kaiDocumentEvidenceValidators.js";
 import { createHash } from "node:crypto";
 import { CROSS_SOURCE_REACH_BASIS_VERSION, CROSS_SOURCE_REACH_METHOD } from "../parsing/crossSourceReachReconciliation.js";
 import { PAIRED_OUTCOME_CALCULATION_METHOD } from "../profiling/pairedOutcomeBasis.js";
@@ -1385,6 +1386,8 @@ const DERIVED_DISCLOSURES = Object.freeze({
 
 export function describeDerivedLimitationCode(code) {
   if (DERIVED_DISCLOSURES[code]) return DERIVED_DISCLOSURES[code];
+  const documentDescription = describeDocumentLimitationCode(code);
+  if (documentDescription) return documentDescription;
   return describeMeasurementLimitationCode(code);
 }
 

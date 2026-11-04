@@ -2686,8 +2686,14 @@ async function runCedarBridgeAcceptance() {
           assert.ok([200, 201].includes(completed.status), `${label} ${followup.dimension_key}: ${J(completed.body)}`);
           completedFollowups.push(followup.dimension_key);
         }
+        // A document statement's own form answers the field-level dimensions
+        // (2026-11-04): no client question is routed about a field it does not
+        // have, and only the source-level dimensions need Get Kinder's
+        // internal acceptance, as for a derived measurement.
+        assert.deepEqual(followups, [], `${label}: no client follow-up`);
         const accepted = [];
         for (const dimensionKey of (await traceOf(claimId)).unresolved) accepted.push([dimensionKey, (await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, dimensionKey), {})).status]);
+        assert.deepEqual(accepted, [["conflicting_source_indicators", 201], ["requirement_alignment", 201]], `${label}: ${J(accepted)}`);
         const traced = await traceOf(claimId);
         if (!traced.eligible) assert.fail(`${label}: ${J((await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"))).body?.data?.blockerCodes)}`);
         const [row] = await query("SELECT statement, internal_only, public_use_allowed, funder_use_allowed FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);

@@ -1,3 +1,4 @@
+import { DOCUMENT_EVIDENCE_TYPE, documentStatementLimitationCodes } from "../validators/kaiDocumentEvidenceValidators.js";
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
@@ -174,7 +175,7 @@ async function loadCitedPairLimitationCodes(tx, { organizationId, requestedAudie
   const measured = new Map();
   // One read per measurement evidence type: the record count's, then the
   // source-derived measurement's (Measurement MVP).
-  for (const evidenceType of [MEASUREMENT_EVIDENCE_TYPE, DERIVED_MEASUREMENT_EVIDENCE_TYPE]) {
+  for (const evidenceType of [MEASUREMENT_EVIDENCE_TYPE, DERIVED_MEASUREMENT_EVIDENCE_TYPE, DOCUMENT_EVIDENCE_TYPE]) {
     const { rows } = await tx.query(
       `SELECT evidence_item_id::text AS evidence_item_id
          FROM kai.evidence_items
@@ -187,6 +188,14 @@ async function loadCitedPairLimitationCodes(tx, { organizationId, requestedAudie
   for (const pair of citedPairs) {
     if (!measured.has(pair.evidence_item_id)) continue;
     const traceability = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId: pair.claim_id, requestedAudience });
+    // A document statement's limitations (source-reported, and every
+    // coverage dimension that is not clear) are carried like a measured
+    // claim's, so a release never shows "none" for them.
+    if (measured.get(pair.evidence_item_id) === DOCUMENT_EVIDENCE_TYPE) {
+      if (!traceability.ok || traceability.data?.evidence?.evidence_item_id !== pair.evidence_item_id) return null;
+      codesByPair.set(pairKey(pair.claim_id, pair.evidence_item_id), documentStatementLimitationCodes({ statement: traceability.data.evidence?.statement, dimensions: traceability.data.dimensions }));
+      continue;
+    }
     if (measured.get(pair.evidence_item_id) === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
       const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: pair.evidence_item_id }, tx);
       if (!traceability.ok || traceability.data?.evidence?.evidence_item_id !== pair.evidence_item_id || !derivedRow) return null;
