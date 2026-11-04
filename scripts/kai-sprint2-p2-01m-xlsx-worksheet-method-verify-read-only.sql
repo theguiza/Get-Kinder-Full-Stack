@@ -15,9 +15,17 @@
 -- pairing admitted, and every other value and pairing still refused. Its new
 -- constraints are verified separately by
 -- scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql.
+-- Also version-aware for migrations/kai_sprint2_document_statement_evidence.sql,
+-- which widens the data-class CHECK and the other three by one value each:
+-- before it the data-class CHECK must match its pinned text; after it all four
+-- are verified by behaviour (the document-statement value, class, pairing and
+-- locator admitted; mismatched pairings and unknown values still refused).
 WITH
 schema_state AS (
-  SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_present
+  SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_present,
+         EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conrelid = to_regclass('kai.evidence_items') AND conname = 'evidence_items_p2_01_evidence_type_check'
+                    AND pg_get_constraintdef(oid) LIKE '%source_document_statement%') AS document_present
 ),
 live AS (
   SELECT con.conname::text AS name,
@@ -56,12 +64,32 @@ locator_results AS (
            substr(l.def, 7), v.locator_type, v.coordinates), false, true, '')))[1]::text = 'true' AS observed
     FROM locator_vectors v JOIN live l ON l.name = 'source_locators_p2_01_coordinates_check'
 ),
-unchanged(name, md5, widened_by_derived) AS (
+unchanged(name, md5, widened_by_derived, widened_by_document) AS (
   VALUES
-    ('evidence_items_p2_01_evidence_type_check', 'fb69f3652c5cb0d132b363e954b37214', true),
-    ('evidence_items_p2_01_data_class_check', '6995d02dd3cc654b66ea26d754ad7e08', false),
-    ('evidence_items_p2_01m_type_class_pairing_check', '27be1934508bbb0b85750bd963402ba8', true),
-    ('source_locators_p2_01_locator_type_check', '605d49b80446568e147b817150e6e2c5', true)
+    ('evidence_items_p2_01_evidence_type_check', 'fb69f3652c5cb0d132b363e954b37214', true, true),
+    ('evidence_items_p2_01_data_class_check', '6995d02dd3cc654b66ea26d754ad7e08', false, true),
+    ('evidence_items_p2_01m_type_class_pairing_check', '27be1934508bbb0b85750bd963402ba8', true, true),
+    ('source_locators_p2_01_locator_type_check', '605d49b80446568e147b817150e6e2c5', true, true)
+),
+-- Literal vectors for the four CHECKs the document-statement migration
+-- widens: expected without it and with it.
+document_vectors(name, vector, evidence_type, data_class, locator_type, expected_without, expected_with) AS (
+  VALUES
+    ('evidence_items_p2_01_evidence_type_check', 'document statement', 'source_document_statement', 'source_document_excerpt', 'column', false, true),
+    ('evidence_items_p2_01_data_class_check', 'metadata class', 'dictionary_field_presence_fact', 'organization_committed_metadata', 'column', true, true),
+    ('evidence_items_p2_01_data_class_check', 'aggregate class', 'source_record_count_measurement', 'source_derived_aggregate', 'column', true, true),
+    ('evidence_items_p2_01_data_class_check', 'excerpt class', 'source_document_statement', 'source_document_excerpt', 'column', false, true),
+    ('evidence_items_p2_01_data_class_check', 'unknown class', 'source_document_statement', 'raw_document_text', 'column', false, false),
+    ('evidence_items_p2_01m_type_class_pairing_check', 'document as excerpt', 'source_document_statement', 'source_document_excerpt', 'column', false, true),
+    ('evidence_items_p2_01m_type_class_pairing_check', 'document as metadata', 'source_document_statement', 'organization_committed_metadata', 'column', false, false),
+    ('evidence_items_p2_01m_type_class_pairing_check', 'fact as excerpt', 'dictionary_field_presence_fact', 'source_document_excerpt', 'column', false, false),
+    ('source_locators_p2_01_locator_type_check', 'document span locator', 'dictionary_field_presence_fact', 'organization_committed_metadata', 'document_text_span', false, true)
+),
+document_results AS (
+  SELECT v.name, v.vector, CASE WHEN s.document_present THEN v.expected_with ELSE v.expected_without END AS expected,
+         (xpath('/row/ok/text()', query_to_xml(format('SELECT coalesce(%s, true) AS ok FROM (VALUES (%L::text, %L::text, %L::text)) AS t(evidence_type, data_class, locator_type)',
+           substr(l.def, 7), v.evidence_type, v.data_class, v.locator_type), false, true, '')))[1]::text = 'true' AS observed
+    FROM document_vectors v CROSS JOIN schema_state s JOIN live l ON l.name = v.name
 ),
 -- Literal vectors for the three CHECKs the derived-measurement migration
 -- widens: expected before it (pre) and after it (post).
@@ -91,7 +119,8 @@ vocabulary_results AS (
 ),
 checks(seq, check_id, status, expected, observed, detail) AS (
   SELECT 5, 'X0.schema_state', 'PASS', 'informational',
-         CASE WHEN (SELECT derived_present FROM schema_state) THEN 'after the derived-measurement migration' ELSE 'before the derived-measurement migration' END,
+         CASE WHEN (SELECT derived_present FROM schema_state) THEN 'after the derived-measurement migration' ELSE 'before the derived-measurement migration' END
+           || CASE WHEN (SELECT document_present FROM schema_state) THEN '; after the document-statement migration' ELSE '' END,
          'selects the pinned-text or behavioural verification of the three CHECKs that migration widens'
   UNION ALL
   SELECT 10, 'X1.method_vectors',
@@ -112,15 +141,21 @@ checks(seq, check_id, status, expected, observed, detail) AS (
            -- Every vocabulary vector of this CHECK must hold in the current schema state.
            WHEN u.widened_by_derived AND NOT coalesce((SELECT count(*) = count(*) FILTER (WHERE r.observed IS NOT DISTINCT FROM r.expected) AND count(*) > 0
                                                    FROM vocabulary_results r WHERE r.name = u.name), false) THEN 'FAIL'
-           -- Pinned text: always for the data-class CHECK; before the derived migration for all four.
-           WHEN (NOT u.widened_by_derived OR NOT s.derived_present) AND md5(l.def) <> u.md5 THEN 'FAIL'
+           -- Every document vector of this CHECK must hold in the current schema state.
+           WHEN u.widened_by_document AND NOT coalesce((SELECT count(*) = count(*) FILTER (WHERE r.observed IS NOT DISTINCT FROM r.expected) AND count(*) > 0
+                                                   FROM document_results r WHERE r.name = u.name), false) THEN 'FAIL'
+           -- Pinned text until a migration that widens the CHECK is present.
+           WHEN NOT ((u.widened_by_derived AND s.derived_present) OR (u.widened_by_document AND s.document_present)) AND md5(l.def) <> u.md5 THEN 'FAIL'
            ELSE 'PASS'
          END,
-         CASE WHEN u.widened_by_derived AND s.derived_present THEN 'record-count and derived values admitted; every other value refused' ELSE u.md5 END,
-         CASE WHEN u.widened_by_derived AND s.derived_present
-              THEN coalesce((SELECT string_agg(r.vector || '=' || coalesce(r.observed::text, 'absent'), '; ' ORDER BY r.vector) FROM vocabulary_results r WHERE r.name = u.name), '(constraint absent)')
+         CASE WHEN (u.widened_by_derived AND s.derived_present) OR (u.widened_by_document AND s.document_present)
+              THEN 'record-count, derived and (when installed) document values admitted; every other value refused' ELSE u.md5 END,
+         CASE WHEN (u.widened_by_derived AND s.derived_present) OR (u.widened_by_document AND s.document_present)
+              THEN coalesce((SELECT string_agg(r.vector || '=' || coalesce(r.observed::text, 'absent'), '; ' ORDER BY r.vector)
+                               FROM (SELECT vector, observed, name FROM vocabulary_results UNION ALL SELECT vector, observed, name FROM document_results) r WHERE r.name = u.name), '(constraint absent)')
               ELSE coalesce(md5(l.def), '(absent)') END,
-         CASE WHEN u.widened_by_derived AND s.derived_present THEN 'widened by the derived-measurement migration; verified by behaviour'
+         CASE WHEN u.widened_by_document AND s.document_present THEN 'widened by the document-statement migration; verified by behaviour'
+              WHEN u.widened_by_derived AND s.derived_present THEN 'widened by the derived-measurement migration; verified by behaviour'
               ELSE 'unchanged since the P2-01M migration' END
     FROM unchanged u CROSS JOIN schema_state s LEFT JOIN live l ON l.name = u.name
   UNION ALL

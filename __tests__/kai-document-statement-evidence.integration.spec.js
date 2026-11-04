@@ -233,8 +233,11 @@ async function runDocumentEvidenceAcceptance() {
         await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: source.bytes });
         const confirmed = await adminApi("POST", confirmUploadPath(ORG, state[source.key].intakeFileId), { organization_id: ORG });
         assert.equal(confirmed.status, 200, `${source.name}: ${J(confirmed.body)}`);
+        // One file at a time: the PDF worker admits one PDF operation at once,
+        // and a PDF confirmed while another is being profiled is left pending
+        // with a "retry security check" action (existing behaviour).
+        await dispatcher.whenIdle();
       }
-      await dispatcher.whenIdle();
       for (const source of SOURCES) {
         const [file] = await query("SELECT file_policy_status FROM kai.intake_files WHERE intake_file_id = $1::uuid", [state[source.key].intakeFileId]);
         const [profile] = await query("SELECT profile FROM kai.intake_file_profiles WHERE intake_file_id = $1::uuid", [state[source.key].intakeFileId]);

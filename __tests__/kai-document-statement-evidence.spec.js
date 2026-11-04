@@ -140,6 +140,7 @@ function createStore({ format, bytes, isCurrent = true, schemaReady = true, allo
     if (text.includes("FROM kai.source_locators")) return { rows: state.locators.filter((row) => row.locator_fingerprint === params[2]) };
     if (text.includes("FROM kai.evidence_items")) return { rows: state.evidence.filter((row) => row.statement_fingerprint === params[2]) };
     if (text.includes("FROM kai.review_queue_items")) return { rows: state.queue.filter((row) => row.target_object_id === params[1]) };
+    if (text.includes("AS format")) return { rows: [{ format }] };
     if (text.includes("FROM kai.intake_file_profiles")) return { rows: [profileRow] };
     if (text.includes("FROM kai.source_versions")) {
       return { rows: [{ source_version_id: SOURCE_VERSION, organization_id: ORG, source_id: SOURCE, intake_source_candidate_id: CANDIDATE, intake_sensitivity_profile_id: SENSITIVITY, profile_canonical_sha256: PROFILE_SHA, is_current: isCurrent, created_at: NOW }] };
@@ -558,4 +559,15 @@ test("verbless table cells and running headers are not cut out as statements; a 
     "The Followups sheet describes selected participants contacted during February–March 2026, and every self-reported outcome stayed unverified.",
   ]);
   assert.deepEqual([candidates[0].coordinates.block_start, candidates[0].coordinates.block_end], [20, 21]);
+});
+
+test("a non-document version goes to the unchanged field-presence extraction before any governed read or byte read", async () => {
+  const bytes = new TextEncoder().encode("participant_id,status\nCB001,active\n");
+  const { state, repository } = createStore({ format: "csv", bytes, isCurrent: false });
+  const result = await extract(repository);
+  assert.deepEqual(result, { ok: true, data: { applicable: false }, error: null });
+  // Only the format read ran: no loader, schema probe, byte read or write.
+  assert.equal(state.statements.length, 1);
+  assert.match(state.statements[0], /AS format/);
+  assert.equal(state.byteReads, 0);
 });

@@ -205,6 +205,23 @@ export function createPostgresDocumentEvidenceRepository({
     async extractDocumentEvidence({ organizationId, sourceVersionId, actorUserId, now }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       return run(async (tx) => {
+        // Only a document version is this path's: any other version (or one
+        // this read cannot find) goes to the unchanged field-presence
+        // extraction, refusals included, before the stricter shared loader.
+        const formatRows = (await tx.query(
+          `SELECT p.profile->>'format' AS format
+             FROM kai.source_versions v
+             JOIN kai.intake_source_candidates c
+               ON c.organization_id = v.organization_id
+              AND c.intake_source_candidate_id = v.intake_source_candidate_id
+             JOIN kai.intake_file_profiles p
+               ON p.organization_id = c.organization_id
+              AND p.file_profile_id = c.file_profile_id
+            WHERE v.organization_id = $1::uuid
+              AND v.source_version_id = $2::uuid`,
+          [organizationId, sourceVersionId],
+        )).rows;
+        if (formatRows.length !== 1 || !DOCUMENT_EVIDENCE_FORMATS.includes(formatRows[0].format)) return success({ applicable: false });
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, operation: DOCUMENT_EVIDENCE_OPERATION });
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;

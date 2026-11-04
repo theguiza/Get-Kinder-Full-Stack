@@ -160,6 +160,12 @@ try {
   // The reconciliation job table builds on the cross-source migration: it rolls back first and re-applies last.
   const jobsMigration = "kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs";
   if (!MIGRATION_CHAIN.includes(jobsMigration)) throw new Error(`${jobsMigration} is not in the migration chain`);
+  // The document-statement migration widens CHECKs the derived rollback
+  // restores, so it rolls back first and re-applies last.
+  const documentMigration = "kai_sprint2_document_statement_evidence";
+  if (MIGRATION_CHAIN.at(-1) !== documentMigration) throw new Error(`${documentMigration} is not the last migration in the chain`);
+  const afterDocument = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${documentMigration}.rollback.sql`);
   const afterJobs = (await catalog(schemaFingerprintSql))[0].fingerprint;
   psqlFile(`migrations/${jobsMigration}.rollback.sql`);
   const afterCross = (await catalog(schemaFingerprintSql))[0].fingerprint;
@@ -173,7 +179,9 @@ try {
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterCross) throw new Error(`${crossMigration} re-apply changed the schema`);
   psqlFile(`migrations/${jobsMigration}.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterJobs) throw new Error(`${jobsMigration} re-apply changed the schema`);
-  console.log(`Cedar Bridge acceptance: ${jobsMigration}, ${crossMigration} and ${derivedMigration} rolled back to the prior schema fingerprints and re-applied identically.`);
+  psqlFile(`migrations/${documentMigration}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDocument) throw new Error(`${documentMigration} re-apply changed the schema`);
+  console.log(`Cedar Bridge acceptance: ${documentMigration}, ${jobsMigration}, ${crossMigration} and ${derivedMigration} rolled back to the prior schema fingerprints and re-applied identically.`);
   for (const verifier of ["scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql", "scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql"]) {
     const rows = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", verifier], { capture: true }).stdout.trim().split("\n");
     if (rows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2] !== "PASS") throw new Error(`${verifier} failed:\n${rows.join("\n")}`);
