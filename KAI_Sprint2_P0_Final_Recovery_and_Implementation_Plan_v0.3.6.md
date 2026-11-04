@@ -46432,3 +46432,71 @@ Excluded: production SQL, push, deploy, flags, credentials, roles/permissions/re
 - Five document claims needed 20 client follow-up completions and 45 coverage acceptances. That is existing P2-04 behaviour for non-measured claims and was not changed (governance excluded).
 
 **Status:** CONNECTED_DOCUMENT_TO_RELEASED_REPORT_VERIFIED_ON_DISPOSABLE_POSTGRESQL; SIX_SECTION_ASSESSMENT_NOT_AVAILABLE_BOUNDARY_IDENTIFIED; MIGRATION_PACKET_READY_NOT_APPLIED; PRODUCTION_NOT_VERIFIED. Stop at the production authorization boundary.
+
+### Six-section Free Impact Assessment: composition, document-statement review correction, connected local acceptance (2026-11-04)
+
+**Authorization (USER_CONFIRMED):** owner prompt "KAI — Finish the six-section Free Impact Assessment". It authorizes:
+- the smallest coherent six-section composition on existing infrastructure;
+- recommendations as proposed improvements grounded in findings or documented gaps (agreed MVP behaviour; no new decision or approval workflow);
+- a fix for any demonstrated incorrect application of review requirements to internal drafting;
+- one connected local acceptance on the synthetic Cedar Bridge files;
+- local commits.
+
+Excluded: new permissions or approval stages, unrelated migrations, PDF redevelopment, real client data, production mutation, push, deploy, and `00_KAI_CURRENT_STATE.md`. The owner reports 25/25 production database checks passing, including the document-statement constraints (USER_CONFIRMED; not re-checked here).
+
+**Start (TOOL_VERIFIED):** `main` at `197689a7`, clean. Every Node/npm command used the non-listening loopback sentinel `DATABASE_URL`. Every PostgreSQL cluster was runner-owned, on 127.0.0.1, and destroyed afterwards. Baseline Cedar runner: 41/41.
+
+**Representation (no schema change needed; TOOL_VERIFIED).**
+- The assessment is an internal `evidence_summary` draft. Each block's first line is a section marker (`[[assessment:<key>]]`).
+- The existing limits fit: `generated_content_blocks` ordinal 1–20 and text 1–4000 characters; the result contract allows 20 blocks and 20,000 characters.
+- Persistence, the VAL-GEN validators, server measurement disclosures, GK content review, export review, limitation snapshot, candidate, release authority, manifest and client route are all reused unchanged. No content type, CHECK, table or migration was added.
+
+**Implementation (`291e9cc9`).**
+- **Route.** `POST .../generated-content-drafts/free-impact-assessment` takes the internal Evidence Summary body and gates: the same operation and role set, engagement/tenant check, P2-04 reconciliation, P2-06 revalidation and audit. Its fingerprint is distinct from a plain Evidence Summary's.
+- **Model sections.** `kaiFreeImpactAssessmentDraftGenerator.js` uses the same provider call and result tagging as the Evidence Summary, with per-block `section`. The model writes the snapshot, findings and programme narrative, plus an optional gaps narrative. Any quotation must appear in a cited claim (`VAL-GEN-ASSESSMENT-001`).
+- **Server sections.** `kaiFreeImpactAssessmentComposition.js` composes the following from structural signals only (limitation codes, document-statement evidence type, and the words those statements quote):
+  - the missing participant-story statement (no KAI evidence type holds a consented story);
+  - the documented gaps;
+  - exactly three proposed improvements, each citing the claims that ground it;
+  - next steps.
+
+  It names nothing organization-specific. A library without three grounded gaps is refused, never padded. Count-only claims are refused for the assessment.
+- **Rendering.** `kaiFreeImpactAssessmentRenderer.js` handles the released Markdown and the existing PDF export. Each shows the six numbered sections, reporting period, internal-only status, labelled references (human-stated indicator labels, document line/page locators, file kind) and each limitation described once with its references. Every other release keeps its layout byte for byte. The client internal report shows section titles instead of markers. The release context (display only, not fingerprinted) adds the engagement's reporting period and the per-citation labels.
+
+**Review friction (TOOL_VERIFIED; `3dfb960b`).**
+- **Demonstrated defect:** a document statement has no dictionary fields, so six P2-02 field-level dimensions were always unresolved. P2-04 routed four client questions about "the unresolved field or measure" of a field that does not exist, and their completion route records no answer.
+- **Correction:** the statement's form answers the field-level dimensions, as a measurement's method does:
+  - missing values, duplicates and field coverage are `resolved_clear`;
+  - definition, denominator, period and entity level are `resolved_risk_flagged` and treated as answered (no client question).
+
+  Small-cell risk, conflicting sources and requirement alignment are unchanged, so Get Kinder's internal acceptance of them still applies, as for derived claims.
+- **Unchanged:** GK evidence review, GK claim review and audience approval are untouched. Nothing is auto-approved or auto-accepted.
+- **Result:** five document claims need 0 client follow-ups (was 20) and 10 acceptances (was 45).
+- **Release limitations:** a released document claim now carries its existing document codes (`document.source_reported_not_verified`, plus uncertainty, interpretation or self-report where its words carry them) and every coverage dimension that is not clear. It no longer reads "limitation codes: none".
+
+**Connected acceptance (TOOL_VERIFIED).** `scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js`, run with the package and both PDFs: **44/44**. Tests 0–31 and D1–D4 pass unchanged, and D3 now asserts 0 follow-ups and exactly the two acceptances. The final answer-key tally is unchanged: 41 match, 32 unavailable.
+- **F1:**
+  - The Impact Evidence Library (eligible-claims read, as GK) lists 21 internally eligible claims. Over the existing 20-claim request limit, the three raw P2-01M record counts are left out, giving 18 claims: 10 cross-source and activity, 2 paired outcome, 1 rate, 1 count and 5 documents.
+  - The organization administrator generates the assessment: 201 and one model call (deterministic stub). It produces 14 blocks and about 19,100 characters.
+  - All six sections are present and substantive, with no `field_N` in the prose.
+  - The five reach figures equal the answer key (80, 51, 39, 10, V2 223). Every other matched answer-key metric whose claim is cited is stated with the key value in its block: 13 rows, including 25/38 (65.79%), 23/40 (57.50%), 29/38 (76.32%) and 9.
+  - All five document statements are quoted verbatim with citations. The missing-story statement cites the line 38 statement.
+  - The three proposals are: duration as a required entry (cites the line 10 statement); a fixed follow-up point (cites the convenience-sample and check-in statements); and a duplicate check (cites a measured claim carrying the duplicate code).
+  - The draft is listed in the persistent drafts index, and its review packet returns 200.
+- **F2:** the existing GK content review, export review, limitation snapshot, candidate, release authority and manifest succeed with unchanged statuses, and the client released route returns 200 with the six-section layout. Document claims carry source-reported and accepted coverage limitations. The existing PDF export renders **5 pages**.
+- **F3:** a fabricated figure (VAL-GEN-004) and an invented quotation (`assessment_quotation_not_in_cited_evidence`) each return 422, with no draft persisted.
+
+**Regressions (TOOL_VERIFIED).**
+- `npm test`: 6,057 tests, 5,932 pass, 0 fail, 125 skipped. New `kai-free-impact-assessment.spec.js` 6/6. The route-surface registry includes the new route.
+- API contract 71/71. Document-statement runner 12/12 (packet checks pass). Plan A normal chain: 2/2, 40/43 (3 skipped), 4/4.
+- `npm run build` passed with the tracked bundle unchanged. `git diff --check` is clean.
+
+**Limitations (NOT_CONFIRMED / NOT_RUN):**
+- The narrative sections in the local run come from a deterministic test stub, not a language model. No credential was authorized, so real-model prose and its fit within the 20,000-character result limit (a refusal, never truncation) are NOT_CONFIRMED.
+- The server-composed gaps, proposals and next steps are real product output.
+- Browser rendering and the GK review UI were not run. The GK review packet shows the raw section markers in block text.
+- Per-programme encounter and minutes figures after the correction have no V2 answer-key row.
+
+**Release delta:** application code only (`3dfb960b`, `291e9cc9`, this record). No new migration. It relies on the document-statement migration and its three Measurement MVP prerequisites being present in production, which the owner reports verified (USER_CONFIRMED). Next: push and deploy under separate authorization.
+
+**Status:** FREE_IMPACT_ASSESSMENT_COMPOSED_REVIEWED_RELEASED_ON_DISPOSABLE_POSTGRESQL; DOCUMENT_STATEMENT_REVIEW_FRICTION_CORRECTED; PRODUCTION_NOT_VERIFIED. Stop at the production authorization boundary.
