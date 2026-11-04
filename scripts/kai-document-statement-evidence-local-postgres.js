@@ -99,6 +99,31 @@ const schemaFingerprintSql = `SELECT md5(string_agg(x, '|' ORDER BY x)) AS finge
      WHERE connamespace IN (SELECT oid FROM pg_namespace WHERE nspname LIKE 'kai%')
   ) t`;
 
+
+// The production pgAdmin packet's read-only files, run exactly as written
+// (psql, unaligned): each returns check rows ending in OVERALL / R01.
+const PACKET = "KAI_PGADMIN_DOCUMENT_STATEMENT_EVIDENCE_PACKET";
+function packetRows(file) {
+  const out = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", `${PACKET}/${file}`], { capture: true }).stdout.trim();
+  return out.split("\n").map((line) => { const [checkId, description, status, observed] = line.split("|"); return { checkId, description, status, observed }; });
+}
+function packetStatus(file, checkId) {
+  const rows = packetRows(file);
+  const row = rows.find((candidate) => candidate.checkId === checkId);
+  if (!row) throw new Error(`${file}: no ${checkId} row:\n${JSON.stringify(rows, null, 2)}`);
+  return { status: row.status, rows };
+}
+function expectPacket(file, checkId, expected, label) {
+  const { status, rows } = packetStatus(file, checkId);
+  if (status !== expected) throw new Error(`${label}: ${file} ${checkId} = ${status}, expected ${expected}:\n${rows.map((r) => [r.checkId, r.status, r.observed].join(" | ")).join("\n")}`);
+  return rows;
+}
+const packetConstraintMd5Sql = `SELECT conname, md5(pg_get_constraintdef(oid)) AS def_md5 FROM pg_constraint
+  WHERE conrelid IN ('kai.evidence_items'::regclass, 'kai.source_locators'::regclass)
+    AND conname IN ('evidence_items_p2_01_evidence_type_check', 'evidence_items_p2_01_data_class_check',
+      'evidence_items_p2_01m_type_class_pairing_check', 'source_locators_p2_01_locator_type_check', 'source_locators_p2_01_coordinates_check')
+  ORDER BY conname`;
+
 if (!cedarPackage || !existsSync(join(cedarPackage, "01_UPLOAD_TO_KAI")) || !surveyPdf || !existsSync(surveyPdf) || !originalPdf || !existsSync(originalPdf)) {
   throw new Error("document evidence runner requires KAI_CEDAR_BRIDGE_PACKAGE, KAI_CEDAR_BRIDGE_SURVEY_PDF and KAI_CEDAR_BRIDGE_ORIGINAL_PDF");
 }
@@ -166,6 +191,7 @@ try {
   }
   console.log("Document evidence: XLSX method and derived-measurement verifiers OVERALL PASS with the document-statement migration applied.");
   const afterDocument = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  console.log(`Document evidence chain POST constraint md5: ${JSON.stringify(await catalog(packetConstraintMd5Sql))}`);
   if (afterDocument === beforeDocument) throw new Error(`${documentMigration} changed nothing`);
   psqlFile(`migrations/${documentMigration}.rollback.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDocument) throw new Error(`${documentMigration} rollback did not restore the prior schema`);
@@ -174,6 +200,31 @@ try {
   psqlFile(`migrations/${documentMigration}.rollback.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDocument) throw new Error(`${documentMigration} second rollback did not restore the prior schema`);
   console.log(`Document evidence: ${documentMigration} rollback restored ${beforeDocument}, re-apply reproduced ${afterDocument}; left rolled back for phase A.`);
+
+  // The production pgAdmin packet, in the rolled-back (production-before)
+  // state, after its verbatim migration file, and after its verbatim
+  // rollback file: preflight, verify-after and rollback precheck.
+  console.log(`Document evidence packet: PRE ${JSON.stringify(await catalog(packetConstraintMd5Sql))}`);
+  expectPacket("00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql", "OVERALL", "REQUIRED", "before the migration");
+  expectPacket("RP01_ROLLBACK_PRECHECK_READ_ONLY.sql", "R01", "NOT_APPLIED", "before the migration");
+  if (expectPacket("01V_VERIFY_AFTER_document_statement_evidence_READ_ONLY.sql", "OVERALL", "FAIL", "before the migration").length !== 9) throw new Error("01V row count");
+  psqlFile(`${PACKET}/01_MIGRATION_kai_sprint2_document_statement_evidence.sql`);
+  console.log(`Document evidence packet: POST ${JSON.stringify(await catalog(packetConstraintMd5Sql))}`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDocument) throw new Error("the packet's migration file is not the repository migration");
+  const preflightAfter = expectPacket("00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql", "OVERALL", "ALREADY_APPLIED", "after the migration");
+  if (preflightAfter.length !== 12) throw new Error(`preflight row count ${preflightAfter.length}`);
+  expectPacket("01V_VERIFY_AFTER_document_statement_evidence_READ_ONLY.sql", "OVERALL", "PASS", "after the migration");
+  expectPacket("RP01_ROLLBACK_PRECHECK_READ_ONLY.sql", "R01", "SAFE_TO_ROLL_BACK", "after the migration, no evidence");
+  psqlFile(`${PACKET}/rollback/R01_ROLLBACK_kai_sprint2_document_statement_evidence.rollback.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDocument) throw new Error("the packet's rollback file did not restore the prior schema");
+  expectPacket("00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql", "OVERALL", "REQUIRED", "after the packet rollback");
+  // A missing prerequisite stops the preflight (reversible, inside one transaction).
+  const prerequisite = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-c",
+    "BEGIN; ALTER TABLE kai.cross_source_reconciliation_jobs RENAME TO cross_source_reconciliation_jobs_hidden;",
+    "-f", `${PACKET}/00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql`, "-c", "ROLLBACK;"], { capture: true }).stdout;
+  if (!/^P03\|[^|]*\|FAIL\|/m.test(prerequisite) || !/^OVERALL\|[^|]*\|STOP_INCOMPATIBLE\|/m.test(prerequisite)) throw new Error(`missing prerequisite not stopped:\n${prerequisite}`);
+  expectPacket("00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql", "OVERALL", "REQUIRED", "after the prerequisite negative");
+  console.log("Document evidence packet: preflight REQUIRED -> migration -> ALREADY_APPLIED, 01V PASS, RP01 SAFE_TO_ROLL_BACK -> rollback -> REQUIRED; missing prerequisite -> STOP_INCOMPATIBLE.");
 
   const testResult = spawnSync("node", ["--test", "--test-concurrency=1", "--test-timeout=600000", spec], {
     cwd: repoRoot,
@@ -207,6 +258,11 @@ try {
   });
   if (testResult.status !== 0) throw new Error(`document evidence acceptance failed: ${spec}`);
   console.log(`Document evidence acceptance passed: ${spec}`);
+  // With real document evidence persisted by the spec (migration applied in B1).
+  expectPacket("01V_VERIFY_AFTER_document_statement_evidence_READ_ONLY.sql", "OVERALL", "PASS", "with document evidence");
+  expectPacket("00_DOCUMENT_EVIDENCE_PREFLIGHT_READ_ONLY.sql", "OVERALL", "ALREADY_APPLIED", "with document evidence");
+  const unsafe = expectPacket("RP01_ROLLBACK_PRECHECK_READ_ONLY.sql", "R01", "UNSAFE_ROLLBACK_REFUSES", "with document evidence");
+  console.log(`Document evidence packet with evidence: 01V PASS, preflight ALREADY_APPLIED, RP01 ${unsafe[0].observed}.`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });
