@@ -296,7 +296,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   }, []);
 
   const extract = (sourceVersionId) => runWrite(`extract:${sourceVersionId}`, evidenceExtractionPath(organizationId, sourceVersionId), {},
-    (data) => setNotice({ kind: "success", text: extractionResultMessage(data) }));
+    (data) => setNotice({
+      kind: Array.isArray(data?.evidenceItems) && data.evidenceItems.length > 0 ? "success" : "warning",
+      text: extractionResultMessage(data),
+    }));
   const propose = (evidenceItemId) => runWrite(`propose:${evidenceItemId}`, claimProposalPath(organizationId, evidenceItemId), {},
     (data) => setNotice({ kind: "success", text: claimProposalResultMessage(data) }));
   // P2-04 is idempotent per claim: a repeat request replays the same rows.

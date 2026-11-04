@@ -126,6 +126,9 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             COALESCE(c.rejected_count, 0)::int AS source_candidate_rejected_count,
             COALESCE(c.actionable_count, 0)::int AS source_candidate_actionable_count,
             COALESCE(sv.source_version_count, 0)::int AS source_version_count,
+            -- The committed data-dictionary fields P2-01 composes evidence
+            -- from (its candidate's dictionary); NULL with no current version.
+            dfc.current_dictionary_field_count,
             COALESCE(e.evidence_count, 0)::int AS evidence_item_count,
             COALESCE(e.evidence_needs_review_count, 0)::int AS evidence_needs_review_count,
             COALESCE(e.evidence_reviewed_count, 0)::int AS evidence_reviewed_count,
@@ -226,6 +229,21 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND ic.intake_file_id = files.intake_file_id
             AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
        ) sv ON true
+       LEFT JOIN LATERAL (
+         SELECT count(df.data_dictionary_field_id)::int AS current_dictionary_field_count
+           FROM kai.source_versions v
+           JOIN kai.intake_source_candidates ic
+             ON ic.organization_id = v.organization_id
+            AND ic.intake_source_candidate_id = v.intake_source_candidate_id
+           LEFT JOIN kai.data_dictionary_fields df
+             ON df.organization_id = ic.organization_id
+            AND df.data_dictionary_id = ic.data_dictionary_id
+          WHERE v.organization_id = s.organization_id
+            AND v.is_current = true
+            AND ic.intake_file_id = files.intake_file_id
+            AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
+         HAVING count(v.source_version_id) > 0
+       ) dfc ON true
        LEFT JOIN LATERAL (
          SELECT count(*) AS evidence_count,
                 count(*) FILTER (WHERE ei.evidence_review_status = 'needs_gk_review') AS evidence_needs_review_count,

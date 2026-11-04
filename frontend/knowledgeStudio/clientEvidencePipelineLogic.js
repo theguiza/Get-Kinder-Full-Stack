@@ -75,6 +75,7 @@ export const PIPELINE_REASONS = Object.freeze([
   "source_promotion_blocked",
   "evidence_extraction_ready",
   "evidence_extraction_pending",
+  "no_extractable_evidence",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -203,7 +204,8 @@ export function stageStatusLabel(stage) {
     case "failed":
       return "Failed";
     case "closed":
-      return "Not promoted";
+      // A closed evidence-extraction stage follows a promoted source.
+      return stage.key === "evidence_extraction" ? "Not available for this file" : "Not promoted";
     case "not_currently_eligible":
       return "Not currently usable";
     default:
@@ -279,6 +281,10 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "ask_organization_administrator":
       return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Data Sources.`;
     default:
+      if (file.reason === "no_extractable_evidence") {
+        return "No action required from you. This file's source is promoted, but KAI cannot create evidence from its content: "
+          + "it has no data fields (a PDF or plain-text document is profiled for its structure only). Extracting evidence again would not change this.";
+      }
       if (file.reason === "allowed_use_not_allowed") {
         return "This file's recorded allowed use is not_allowed, so it is not used as a source or for evidence, claims, or drafts. Only a new sensitivity & allowed-use review can change this.";
       }
@@ -302,6 +308,7 @@ const REASON_MESSAGES = Object.freeze({
   source_promotion_blocked: (n) => `${pluralFiles(n)} ${n === 1 ? "has a source candidate that" : "have source candidates that"} cannot be promoted in ${n === 1 ? "its" : "their"} current state. Contact Get Kinder.`,
   evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Data Sources.`,
   evidence_extraction_pending: (n) => `The source from ${pluralFiles(n)} has been promoted. Get Kinder has not yet created evidence from it.`,
+  no_extractable_evidence: (n) => `The source from ${pluralFiles(n)} has been promoted, but KAI cannot create evidence from ${n === 1 ? "its" : "their"} content: ${n === 1 ? "it has" : "they have"} no data fields (a PDF or plain-text document is profiled for its structure only).`,
   evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
   impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
   not_currently_eligible: (n) => `Evidence from ${pluralFiles(n)} was reviewed but is not currently usable as an Impact Fact. Contact Get Kinder for details.`,

@@ -150,6 +150,7 @@ const PIPELINE_REASONS = Object.freeze([
   "source_promotion_blocked",
   "evidence_extraction_ready",
   "evidence_extraction_pending",
+  "no_extractable_evidence",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -395,6 +396,12 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   } else if (allowedUseClosed) {
     // A source promoted before its allowed use became not_allowed: P2-01 refuses it.
     stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "allowed_use_not_allowed" }));
+  } else if (row.current_dictionary_field_count === 0) {
+    // P2-01 composes one evidence item per committed data-dictionary field of
+    // this source version; with none (a PDF or plain-text document is
+    // profiled for structure only) it can never create evidence, so
+    // extraction is not offered as a step that is waiting on anyone.
+    stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "no_extractable_evidence" }));
   } else if (clientAuthority.extractEvidence) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "evidence_extraction_ready" }));
   } else {
