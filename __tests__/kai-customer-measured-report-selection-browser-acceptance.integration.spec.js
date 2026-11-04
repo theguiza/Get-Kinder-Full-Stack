@@ -130,7 +130,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     if (message.sessionId !== sessionId) return;
     const { method, params } = message;
     if (method === "Network.requestWillBeSent" && params.type !== "Document" && params.request.url.includes("/api/")) {
-      const entry = { url: params.request.url, method: params.request.method, status: null, done: false };
+      const entry = { url: params.request.url, method: params.request.method, postData: params.request.postData, status: null, done: false };
       requests.push(entry);
       byId.set(params.requestId, entry);
     } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
@@ -271,6 +271,10 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
       await idle();
     },
+    async screenshot(path) {
+      const shot = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
+      writeFileSync(path, Buffer.from(shot.data, "base64"));
+    },
     async close() {
       browser.listeners.delete(listener);
       await browser.send("Target.closeTarget", { targetId });
@@ -295,10 +299,18 @@ async function runBrowserAcceptance() {
     + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
-    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment are unresolved and carried with the count for internal use only.";
+    + "Internal limitations: conflicting source indicators and requirement alignment are unresolved and carried with the count for internal use only.";
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
-    modelCalls.push({ system: payload.system, claims: requestBody.claims });
+    modelCalls.push({ system: payload.system, claims: requestBody.claims, assessment: requestBody.assessment });
+    if (requestBody.assessment?.composition === "free_impact_assessment") {
+      return { content: [{ type: "text", text: JSON.stringify({ blocks:
+        ["executive_snapshot", "evidence_findings", "impact_stories"].map((section) => ({
+          section, text: COMPLIANT_TEXT,
+          citations: requestBody.claims.map((claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId })),
+        })),
+      }) }] };
+    }
     return {
       content: [{
         type: "text",
@@ -387,7 +399,6 @@ async function runBrowserAcceptance() {
     "coverage.duplicates.resolved_risk_flagged",
     "coverage.missingness.resolved_risk_flagged",
     "coverage.requirement_alignment.unresolved",
-    "coverage.small_cell_risk.unresolved",
     "coverage.time_period_clarity.resolved_risk_flagged",
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
@@ -397,6 +408,9 @@ async function runBrowserAcceptance() {
 
   // --- organizations, projects, GK binding, users ---------------------------
   await query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS logo_url text");
+  // The skinny browser fixture predates assessment source labels. Mirror the
+  // existing intake column (kaiIntakeQueries); no application migration.
+  await query("ALTER TABLE kai.intake_files ADD COLUMN IF NOT EXISTS file_extension text");
   for (const [organizationId, name, code] of [[ORG_X, "Harbourline Session Society", "harbourline-sessions"], [ORG_Y, "Larchmont Other Society", "larchmont-other-sessions"]]) {
     await query("INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ($1::uuid, $2, $3)", [organizationId, name, code]);
   }
@@ -443,9 +457,9 @@ async function runBrowserAcceptance() {
     await query(
       `INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
          checksum, hash_algorithm, upload_state, object_version_id, verified_checksum, verified_size_bytes, verified_at,
-         mime_type, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
+         mime_type, file_extension, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $7, $7, $5, 'sha256', 'confirmed', 'synthetic-v1', $5, $6, now(),
-         'text/csv', $6, 'clean', 'not_reviewed', 'passed', now())`,
+         'text/csv', '.csv', $6, 'clean', 'not_reviewed', 'passed', now())`,
       [fileId, BATCH_X, ORG_X, PROJECT_X, checksum, bytes.byteLength, filename],
     );
     const [run] = await query(
@@ -1305,6 +1319,114 @@ async function runBrowserAcceptance() {
       };
       for (const page of [gkReviewerPage, gkAdminPage, adminPage, contributorPage, reviewerPage, inactiveAdminPage]) assert.deepEqual(page.exceptions, []);
       console.log(`[customer-measured-report-selection] ${JSON.stringify(results)}`);
+    });
+    await test("Assessment: the existing Knowledge Studio action group submits the explicit selection, opens the saved six-section draft and retains released-report/PDF delivery", async () => {
+      const proofDir = "/tmp/kai-knowledge-studio-assessment-proof";
+      mkdirSync(proofDir, { recursive: true });
+      const orgPath = `${BASE_PATH}/admin/organizations/${ORG_X}`;
+      for (const [kind, target, build] of [
+        ["evidence_review", ids.evidenceItemId, (queue) => [evidenceReviewCompletePath(ORG_X, ids.evidenceItemId, queue.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(queue.updated_at).toISOString(), decision: "supported" })]],
+        ["claim_review", ids.claimId, (queue) => [claimReviewCompletePath(ORG_X, ids.claimId, queue.review_queue_item_id), claimReviewDecisionBody({ expectedUpdatedAt: new Date(queue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })]],
+      ]) {
+        const [path, decision] = build(await queueOf(kind, target));
+        created(await gkReviewerPage.api("POST", path, decision), kind);
+      }
+      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
+      for (const [key, dimension] of Object.entries(traced.body.data.dimensions || {})) {
+        if (dimension.assessment_status === "unresolved") created(await gkReviewerPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, key), {}), key);
+      }
+      await openDataSources(PROJECT_X2);
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.claimId}"] input[type=checkbox]'))`), "the existing claim selection");
+      const group = await adminPage.evaluate(`(() => {
+        const buttons = [...document.querySelectorAll("button")];
+        const assessment = buttons.find((button) => button.textContent.trim() === "Generate Free Impact Assessment");
+        return { count: buttons.filter((button) => button.textContent.trim() === "Generate Free Impact Assessment").length,
+          labels: [...assessment.parentElement.querySelectorAll("button")].map((button) => button.textContent.trim()), disabled: assessment.disabled };
+      })()`);
+      assert.deepEqual(group, { count: 1, labels: ["Generate Free Impact Assessment", "Generate internal evidence summary", "Generate internal impact narrative"], disabled: true });
+      await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Select the measured claim for the assessment");
+      await adminPage.waitForText("1/20 claims selected");
+      await adminPage.evaluate(`[...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Generate Free Impact Assessment").scrollIntoView({ block: "center" })`);
+      await adminPage.screenshot(join(proofDir, "01-action-group.png"));
+      const mark = adminPage.mark();
+      const callsBefore = modelCalls.length;
+      const [draftId, ...extra] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created");
+      assert.ok(draftId);
+      assert.deepEqual(extra, []);
+      const sent = adminPage.requestsSince(mark).filter((request) => request.method === "POST" && request.url.endsWith("/generated-content-drafts/free-impact-assessment"));
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].status, 201);
+      const body = JSON.parse(sent[0].postData);
+      assert.deepEqual(Object.keys(body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+      assert.deepEqual(body.claim_ids, [ids.claimId]);
+      assert.equal(body.engagement_id, PROJECT_X2);
+      assert.match(body.idempotency_key, /^client-free_impact_assessment-/);
+      assert.equal(modelCalls.length, callsBefore + 1);
+      assert.equal(modelCalls.at(-1).assessment.composition, "free_impact_assessment");
+      assert.deepEqual(modelCalls.at(-1).claims.map((claim) => claim.claimId), [ids.claimId]);
+      const saved = await draftState(draftId);
+      const [run] = await query("SELECT r.engagement_id::text FROM kai.generation_runs r JOIN kai.generated_content_drafts d ON d.generation_run_id = r.generation_run_id WHERE d.generated_content_draft_id = $1::uuid", [draftId]);
+      assert.equal(run.engagement_id, PROJECT_X2);
+      assert.equal(saved.content_type, "evidence_summary");
+      assert.deepEqual([...new Set(saved.cited_claim_ids)], [ids.claimId]);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${draftId}"]`)), "the saved assessment opens by its own id");
+      const shown = await textOf(adminPage, `[data-client-internal-draft-detail="${draftId}"]`);
+      for (const heading of ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"]) assert.ok(shown.includes(heading), heading);
+      assert.doesNotMatch(shown, /\[\[assessment:/);
+      const report = await openOpenReport(draftId, "the assessment", PROJECT_X2);
+      // The pre-release internal receipt keeps its established report wrapper;
+      // its generated narrative must contain the six assessment sections.
+      for (const heading of ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"]) assert.ok(report.includes(heading), heading);
+      assert.doesNotMatch(report, /\[\[assessment:/);
+      await adminPage.evaluate(`document.querySelector('[data-client-internal-draft-detail="${draftId}"]').scrollIntoView({ block: "start" })`);
+      await adminPage.screenshot(join(proofDir, "02-saved-assessment.png"));
+      // Existing GK review/release actions, through the real authenticated routes.
+      // This is API-boundary release proof, not a claim that the GK buttons were clicked.
+      const draftPath = `${orgPath}/generated-content-drafts/${draftId}`;
+      const gkPacket = await gkReviewerPage.api("GET", generatedDraftReviewPacketPath(ORG_X, draftId));
+      assert.equal(gkPacket.status, 200);
+      for (const step of ["start", "complete"]) {
+        const queue = await queueOf("generated_content_review", draftId);
+        const result = await gkReviewerPage.api("POST", `${draftPath}/generated-content-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+      }
+      created(await gkAdminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" }), "export review request");
+      for (const step of ["start", "complete"]) {
+        const queue = await queueOf("export_review", draftId);
+        const result = await gkAdminPage.api("POST", `${draftPath}/export-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+      }
+      created(await gkReviewerPage.api("POST", `${draftPath}/limitation-snapshot`, {}), "snapshot");
+      created(await gkAdminPage.api("POST", `${draftPath}/export-candidates`, {}), "candidate");
+      const [candidate] = await query("SELECT export_candidate_id::text AS id FROM kai.export_candidates WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      created(await gkAdminPage.api("POST", `${orgPath}/export-candidates/${candidate.id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" }), "authority");
+      const exportQueue = await queueOf("export_review", draftId);
+      created(await gkAdminPage.api("POST", `${orgPath}/export-candidates/${candidate.id}/export-manifests`, { export_review_queue_item_id: exportQueue.review_queue_item_id }), "manifest");
+      const [manifest] = await query("SELECT export_manifest_id::text AS id FROM kai.export_manifests WHERE export_candidate_id = $1::uuid", [candidate.id]);
+      // Reload the same existing client draft: both internal and released receipts must remain available.
+      await adminPage.clickIn(`[data-client-internal-draft="${draftId}"] button`, "Read the released assessment");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-released-report="${manifest.id}"]`)), "the existing released-report control");
+      const download = await attr(adminPage, `[data-client-download-released-report="${manifest.id}"]`, "href");
+      await adminPage.clickIn(`[data-client-open-released-report="${manifest.id}"]`, "Open released report");
+      await adminPage.waitFor(async () => (await textOf(adminPage, "[data-client-released-report-markdown]"))?.startsWith("# Free Impact Assessment"), "the released assessment");
+      const released = await textOf(adminPage, "[data-client-released-report-markdown]");
+      assert.equal((await fetchText(adminPage, download)).body, released);
+      await adminPage.evaluate(`document.querySelector("[data-client-released-report-markdown]").scrollIntoView({ block: "start" })`);
+      await adminPage.screenshot(join(proofDir, "03-released-assessment.png"));
+      const pdf = await gkAdminPage.evaluate(`(async () => {
+        const response = await fetch("${orgPath}/export-manifests/${manifest.id}/pdf");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return { status: response.status, type: response.headers.get("content-type"), header: String.fromCharCode(...bytes.slice(0, 5)), bytes: bytes.length };
+      })()`);
+      assert.equal(pdf.status, 200);
+      assert.equal(pdf.type, "application/pdf");
+      assert.equal(pdf.header, "%PDF-");
+      assert.ok(pdf.bytes > 1000);
+      assert.deepEqual(adminPage.exceptions, []);
+      const proof = { browser: "Chrome", fixture: "synthetic Harbourline (not Cedar)", provider: "deterministic stub", group, request: body, draftId, manifestId: manifest.id, pdf,
+        acceptance: "Knowledge Studio generation/save/read and client released receipt PASS; GK review/release exercised at API boundary", screenshots: ["01-action-group.png", "02-saved-assessment.png", "03-released-assessment.png"] };
+      writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2));
+      console.log(`[knowledge-studio-assessment] ${JSON.stringify(proof)}`);
     });
   } finally {
     await browser.close();
