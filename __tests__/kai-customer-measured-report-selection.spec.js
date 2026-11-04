@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import * as workflowLogic from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 
 import { listClaimLibraryCandidates } from "../Backend/kai/services/kaiClaimLibraryService.js";
 import {
@@ -58,6 +59,27 @@ const claim = (n, evidenceType, extra = {}) => ({
 const MEASURED = claim(1, "source_record_count_measurement");
 const FIELD_2 = claim(2, "dictionary_field_presence_fact");
 const UNKNOWN = claim(3, null);
+
+test("a historical record count opens only the same logical source's single current version, without transferring claim authority", () => {
+  const { currentRecordCountRecoveryVersion } = workflowLogic;
+  assert.equal(typeof currentRecordCountRecoveryVersion, "function", "historical counts need a route to their current source's counting workflow");
+  const historical = { ...MEASURED, evidenceSourceId: id(700), evidenceSourceVersionId: id(701), evidenceSourceVersionIsCurrent: false };
+  const current = { sourceVersionId: id(702), sourceId: id(700), isCurrent: true };
+  const sources = [{ sourceId: id(700), sourceVersions: [{ sourceVersionId: id(701), isCurrent: false }, current] },
+    { sourceId: id(800), sourceVersions: [{ sourceVersionId: id(801), isCurrent: true }] }];
+  assert.deepEqual(currentRecordCountRecoveryVersion(historical, sources), current);
+  assert.equal(claimInternalDraftSelectability(historical).selectable, false);
+  assert.equal(currentRecordCountRecoveryVersion({ ...historical, evidenceSourceVersionIsCurrent: true }, sources), null);
+  assert.deepEqual(currentRecordCountRecoveryVersion({ ...historical, evidenceSourceVersionIsCurrent: true }, sources,
+    { conflictReason: "source_version_not_current" }), current, "a fresh diagnostic can establish the historical state");
+  for (const candidate of [{ ...historical, evidenceSourceId: null }, { ...historical, evidenceType: "source_derived_measurement" }, FIELD_2]) {
+    assert.equal(currentRecordCountRecoveryVersion(candidate, sources), null, "record counting cannot replace another kind of finding");
+  }
+  assert.equal(currentRecordCountRecoveryVersion(historical, [sources[1]]), null, "an independent source is never a replacement");
+  assert.equal(currentRecordCountRecoveryVersion(historical, [{ ...sources[0], sourceVersions: [current, { ...current, sourceVersionId: id(703) }] }]), null,
+    "ambiguous currentness offers no inferred target");
+  assert.equal(currentRecordCountRecoveryVersion(historical, [{ ...sources[0], sourceVersions: [{ ...current, sourceVersionId: id(701) }] }]), null);
+});
 
 test("the Claim Library candidate read projects each claim's evidence type; an absent type stays null", async () => {
   const actorContext = {

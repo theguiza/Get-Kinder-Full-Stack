@@ -41,6 +41,7 @@ import {
   claimProposalResultMessage,
   claimSelectabilityMessage,
   claimSourceVersionUnavailable,
+  currentRecordCountRecoveryVersion,
   extractionResultMessage,
   gapFollowupFailureMessage,
   gapFollowupResultMessage,
@@ -388,6 +389,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [measuring, setMeasuring] = useState(null);
   useEffect(() => { setMeasuring(null); }, [organizationId, engagementId]);
   const openMeasurement = measuring && measuring.contextKey === contextKey ? measuring.sourceVersionId : null;
+  const measurementPanelRef = useRef(null);
+  useEffect(() => {
+    if (openMeasurement) measurementPanelRef.current?.scrollIntoView({ block: "center" });
+  }, [openMeasurement]);
   // Every governed version by id (display facts only), and the current CSV
   // versions a service-event version may be linked to or a successor may replace.
   const allVersions = sources.items.flatMap((source) => source.sourceVersions.map((version) => ({ ...version, reviewedSourceType: source.reviewedSourceType })));
@@ -713,7 +718,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       </button>
                     ) : null}
                     {openMeasurement === version.sourceVersionId ? (
-                      <div className="w-100">
+                      <div className="w-100" ref={measurementPanelRef}>
                         <ClientSourceMeasurementPanel key={`${contextKey}:${version.sourceVersionId}`} organizationId={organizationId}
                           sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
                           initialWorksheetKey={measuring.worksheetKey || ""}
@@ -790,6 +795,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               const use = useOfClaim(claim.claimId);
               const diagnosis = claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))
                 ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
+              const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
               return (
                 <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}
                   data-client-claim-kind={kind} data-client-claim-internal-use={use}>
@@ -838,6 +844,19 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                     </button>
                   ) : null}
                   {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
+                  {access.recordSourceMeasurement && recoveryVersion ? (
+                    <div className="mt-1">
+                      <button type="button" className="btn btn-sm btn-outline-primary"
+                        data-client-recover-current-count={claim.claimId}
+                        onClick={() => {
+                          setMeasuring({ contextKey, sourceVersionId: recoveryVersion.sourceVersionId });
+                          if (openMeasurement === recoveryVersion.sourceVersionId) measurementPanelRef.current?.scrollIntoView({ block: "center" });
+                        }}>
+                        Count records on current version
+                      </button>
+                      <div className="text-muted">Choose the worksheet in Count records. Use its existing measurement if one is recorded, or define the count there, then propose its claim. Earlier reviews stay with the earlier finding.</div>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}

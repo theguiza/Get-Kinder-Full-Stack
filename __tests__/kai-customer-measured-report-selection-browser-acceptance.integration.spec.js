@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { programmeSessionRows, syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 /**
  * Customer source-to-report correction (owner prompt 2026-10-26): the
@@ -449,19 +450,20 @@ async function runBrowserAcceptance() {
     organizationMemberships: [ORG_X, ORG_Y].map((organization_id) => ({ organization_id, membership_status: "active", role_name: "gk_reviewer" })),
   };
 
-  /** P1-03..P1-05 rows of the file from the real profiler's output on the CSV bytes (the P1 worker's persistence - simulated). */
-  async function seedProfiledFile({ fileId = FILE_X, csv = CSV, filename = "sessions.csv", checksumChar = "c", extension = ".csv" } = {}) {
-    const bytes = new TextEncoder().encode(csv);
-    const profile = await profileLocalTrustedFile({ extension, declaredMime: extension === ".txt" ? "text/plain" : "text/csv", byteSize: bytes.byteLength, bytes });
+  /** P1-03..P1-05 persistence is simulated; CSV, TXT and XLSX profiles come from their real synthetic bytes. */
+  async function seedProfiledFile({ fileId = FILE_X, csv = CSV, filename = "sessions.csv", checksumChar = "c", extension = ".csv", workbookBytes = null, objectVersionId = "synthetic-v1", forceNewVersion = false } = {}) {
+    const bytes = workbookBytes || new TextEncoder().encode(csv);
+    const mime = extension === ".xlsx" ? SYNTHETIC_XLSX_MIME : extension === ".txt" ? "text/plain" : "text/csv";
+    const profile = await profileLocalTrustedFile({ extension, declaredMime: mime, byteSize: bytes.byteLength, bytes });
     assert.equal(profile.status, "profiled");
-    const checksum = extension === ".txt" ? createHash("sha256").update(bytes).digest("hex") : checksumChar.repeat(64);
+    const checksum = workbookBytes || extension === ".txt" ? createHash("sha256").update(bytes).digest("hex") : checksumChar.repeat(64);
     await query(
       `INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
          checksum, hash_algorithm, upload_state, object_version_id, verified_checksum, verified_size_bytes, verified_at,
-         mime_type, file_extension, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $7, $7, $5, 'sha256', 'confirmed', 'synthetic-v1', $5, $6, now(),
-         $8, $9, $6, 'clean', 'not_reviewed', 'passed', now())`,
-      [fileId, BATCH_X, ORG_X, PROJECT_X, checksum, bytes.byteLength, filename, extension === ".txt" ? "text/plain" : "text/csv", extension],
+         mime_type, file_extension, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at, force_new_version)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $7, $7, $5, 'sha256', 'confirmed', $10, $5, $6, now(),
+         $8, $9, $6, 'clean', 'not_reviewed', 'passed', now(), $11)`,
+      [fileId, BATCH_X, ORG_X, PROJECT_X, checksum, bytes.byteLength, filename, mime, extension, objectVersionId, forceNewVersion],
     );
     const [run] = await query(
       `INSERT INTO kai.intake_parser_runs (organization_id, intake_file_id, parser_name, parser_version, checksum, parser_status, started_at)
@@ -475,7 +477,7 @@ async function runBrowserAcceptance() {
     const [dictionary] = await query(
       `INSERT INTO kai.data_dictionaries (organization_id, intake_file_id, file_profile_id, profile_canonical_sha256)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4) RETURNING data_dictionary_id::text`, [ORG_X, fileId, fileProfile.file_profile_id, fileProfile.profile_canonical_sha256]);
-    for (const field of profile.fields) {
+    for (const field of profile.fields || []) {
       await query(
         `INSERT INTO kai.data_dictionary_fields (data_dictionary_id, organization_id, file_profile_id, profile_field_key, field_label_safe, data_type)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $4, 'string')`, [dictionary.data_dictionary_id, ORG_X, fileProfile.file_profile_id, field.field_key]);
@@ -1659,6 +1661,194 @@ async function runBrowserAcceptance() {
       assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [separateVersion.source_version_id]))[0].is_current, true);
       assert.deepEqual(adminPage.exceptions, []);
       console.log(`[source-currentness-proof] ${JSON.stringify({ retainedUpload: old, originalVersion: ids.sourceVersionId, independentVersion: separateVersion.source_version_id, successor, staleStatus: stale.status, supersessionAudits: audit.count, currentClaimId, draftId, reloadsWithoutDiagnostic409: 2 })}`);
+    });
+    await test("Current workbook recovery: the historical reviewed sheet_1 count opens its identical successor's measurement workflow, reuses a recorded count and releases an assessment without asserting unreviewed derived findings", async () => {
+      const workbookBytes = syntheticXlsxWorkbook({ sheets: [
+        { name: "Assessments", rows: programmeSessionRows({ tag: "recovery" }) },
+        { name: "Followups", rows: [["followup_id", "status"], ["F1", "completed"], ["F2", "pending"]] },
+        { name: "Engagements", rows: [["engagement_id", "status"], ["E1", "active"], ["E2", "active"], ["E3", "closed"]] },
+      ] });
+      const fileIds = ["21000000-0000-4000-8000-0000000000e8", "21000000-0000-4000-8000-0000000000e9"];
+      const promoteWorkbook = async (index, predecessor = null) => {
+        const file = await seedProfiledFile({ fileId: fileIds[index], filename: "04_assessments_and_followups.xlsx", extension: ".xlsx", workbookBytes,
+          objectVersionId: `synthetic-workbook-version-${index + 1}`, forceNewVersion: Boolean(predecessor) });
+        // P1 upload persistence is simulated as in the existing fixture. The
+        // actual sensitivity decision and explicit source replacement are real.
+        const candidate = await reachReviewableSourceCandidate(file.sensitivityProfileId, { reviewed_story_testimonial_status: "present" });
+        const body = { outcome: "promoted", reviewed_source_type: "organization_primary_record", ...(predecessor ? { supersedes_source_version_id: predecessor } : {}) };
+        const promoted = await gkReviewerPage.api("POST", decisionPath(candidate), body);
+        created(promoted, "workbook promotion");
+        const [version] = await query("SELECT source_version_id::text, source_id::text FROM kai.source_versions WHERE intake_source_candidate_id = $1::uuid", [candidate]);
+        return { ...version, candidate, body };
+      };
+      const definition = measurementDefinitionBody({ countedUnit: "programme session", unitLabel: "programme sessions",
+        definitionText: "Each row of the session log records one delivered programme session.",
+        inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
+        periodStart: "2026-09-01", periodEnd: "2026-09-30" });
+      const historical = await promoteWorkbook(0);
+      const historicalMeasurement = await adminPage.api("POST", sourceRecordCountMeasurementPath(ORG_X, historical.source_version_id, "sheet_1"), definition);
+      created(historicalMeasurement, "historical count");
+      const historicalEvidenceId = historicalMeasurement.body.data.evidenceItem.evidence_item_id;
+      const historicalProposal = await adminPage.api("POST", claimProposalPath(ORG_X, historicalEvidenceId), {});
+      created(historicalProposal, "historical claim");
+      const historicalClaimId = historicalProposal.body.data.claim.claim_id;
+      const evidenceQueue = await queueOf("evidence_review", historicalEvidenceId);
+      created(await gkReviewerPage.api("POST", evidenceReviewCompletePath(ORG_X, historicalEvidenceId, evidenceQueue.review_queue_item_id),
+        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" })), "historical evidence review");
+      const claimQueue = await queueOf("claim_review", historicalClaimId);
+      created(await gkReviewerPage.api("POST", claimReviewCompletePath(ORG_X, historicalClaimId, claimQueue.review_queue_item_id),
+        claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })), "historical claim review");
+      const history = async () => (await query(`SELECT c.claim_id::text, c.claim_review_status, c.claim_strength, c.evidence_item_id::text,
+        e.source_version_id::text, e.evidence_review_status, e.support_strength, l.coordinates
+        FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id AND e.organization_id = c.organization_id
+        JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id AND l.organization_id = e.organization_id
+        WHERE c.organization_id = $1::uuid AND c.claim_id = $2::uuid`, [ORG_X, historicalClaimId]))[0];
+      const historicalState = await history();
+      assert.deepEqual([historicalState.claim_review_status, historicalState.claim_strength, historicalState.coordinates.sheet_key], ["reviewed", "reviewed_supported", "sheet_1"]);
+      const current = await promoteWorkbook(1, historical.source_version_id);
+      assert.equal(current.source_id, historical.source_id);
+      const historicalTrace = await adminPage.api("GET", claimTraceabilityPath(ORG_X, historicalClaimId, "internal"));
+      assert.deepEqual([historicalTrace.status, historicalTrace.body.data.traceability_conflict_reason], [409, "source_version_not_current"]);
+      const files = await query("SELECT verified_checksum, verified_size_bytes, object_version_id FROM kai.intake_files WHERE intake_file_id = ANY($1::uuid[]) ORDER BY intake_file_id", [fileIds]);
+      assert.equal(files[0].verified_checksum, createHash("sha256").update(workbookBytes).digest("hex"));
+      assert.equal(files[0].verified_checksum, files[1].verified_checksum);
+      assert.equal(files[0].verified_size_bytes, files[1].verified_size_bytes);
+      assert.notEqual(files[0].object_version_id, files[1].object_version_id);
+      const { tabularMeasurementPath } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
+      const derivedClaimIds = [];
+      for (const sheet of ["sheet_2", "sheet_3"]) {
+        const measurement = await adminPage.api("POST", tabularMeasurementPath(ORG_X, current.source_version_id, sheet), {
+          definition: { operation: "count", unit: { kind: "records" }, conditions: [] },
+        });
+        created(measurement, `current ${sheet} derived measurement`);
+        const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, measurement.body.data.evidenceItem.evidence_item_id), {});
+        created(proposed, `current ${sheet} claim`);
+        derivedClaimIds.push(proposed.body.data.claim.claim_id);
+        assert.deepEqual([proposed.body.data.claim.claim_review_status, proposed.body.data.claim.claim_strength], ["needs_gk_review", "unassessed"]);
+      }
+      const measurementPath = sourceRecordCountMeasurementPath(ORG_X, current.source_version_id, "sheet_1");
+      const before = await adminPage.api("GET", measurementPath);
+      assert.equal(before.status, 200);
+      assert.equal(before.body.data.recorded, null, "a new version has no copied human definition, measurement or claim");
+      const oldRow = `[data-client-claim="${historicalClaimId}"]`;
+      const openRecovery = async () => {
+        await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-recover-current-count="${historicalClaimId}"]`)) !== null, "the historical finding's current-version recovery control");
+        await adminPage.clickIn(`[data-client-recover-current-count="${historicalClaimId}"]`, "Count records on current version");
+        const panel = `[data-client-source-measurement="${current.source_version_id}"]`;
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-worksheet-select]`)) !== null, "the current workbook worksheet selector");
+        await adminPage.evaluate(`(() => { const el = document.querySelector('${panel} [data-client-source-measurement-worksheet-select]'); el.value = "sheet_1"; el.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+        await adminPage.waitFor(async () => /Counted records = data records minus blank records = 5/.test(await textOf(adminPage, panel) || ""), "the authoritative current sheet_1 count");
+        return panel;
+      };
+      const readMark = adminPage.mark();
+      await openDataSources(PROJECT_X2);
+      const panel = await openRecovery();
+      assert.equal(await textOf(adminPage, `${oldRow} input[type=checkbox]`), null);
+      for (const [field, value] of Object.entries({ countedUnit: "programme session", unitLabel: "programme sessions",
+        definitionText: "Each row of the session log records one delivered programme session.",
+        inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
+        periodStart: "2026-09-01", periodEnd: "2026-09-30" })) assert.ok(await setInput(adminPage, `${panel} [data-client-source-measurement-field="${field}"]`, value));
+      await adminPage.clickIn(`${panel} [data-client-source-measurement-field="periodAttested"]`, "attest current definition period");
+      await adminPage.clickIn(`${panel} [data-client-source-measurement-submit]`, "Record definition and count");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-value]`)) !== null, "the recorded current measurement");
+      await adminPage.idle();
+      const recorded = await adminPage.api("GET", measurementPath);
+      assert.equal(recorded.body.data.recorded.claim, null);
+      const currentEvidenceId = recorded.body.data.recorded.measurement.evidence_item_id;
+      assert.equal(Number(recorded.body.data.recorded.measurement.measured_value), 5);
+      const measurements = async () => query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND worksheet_key = 'sheet_1'", [ORG_X, current.source_version_id]);
+      const recordedRows = await measurements();
+      assert.equal(recordedRows.length, 1);
+      // Cover the production possibility that measurement already exists but
+      // proposal was not done: close/reload and reuse that exact evidence.
+      await openDataSources(PROJECT_X2);
+      await openRecovery();
+      assert.equal(await textOf(adminPage, `${panel} [data-client-source-measurement-submit]`), null);
+      await adminPage.clickIn(`${panel} [data-client-source-measurement-propose-claim="${currentEvidenceId}"]`, "Propose a claim from this measurement");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-claim]`)) !== null, "the proposed current sheet_1 claim");
+      const after = await adminPage.api("GET", measurementPath);
+      const currentClaimId = after.body.data.recorded.claim.claim_id;
+      assert.notEqual(currentClaimId, historicalClaimId);
+      assert.deepEqual(await measurements(), recordedRows, "proposal reused the existing measurement without duplicate rows");
+      assert.deepEqual(await history(), historicalState, "lineage and historical decisions are preserved exactly");
+      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, currentClaimId, "internal"));
+      assert.deepEqual([traced.status, traced.body.data.eligible, traced.body.data.claim.claim_review_status], [200, true, "needs_gk_review"], "the existing count-only internal authority requires no new GK factual approval");
+      const decisions = await query(`SELECT decision_id FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG_X, currentClaimId]);
+      assert.equal(decisions.length, 0, "historical review is never copied");
+      await openDataSources(PROJECT_X2);
+      for (const id of [currentClaimId, ...derivedClaimIds]) {
+        await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${id}"] input[type=checkbox]`)) !== null, "the explicit current selection");
+        await adminPage.clickIn(`[data-client-claim="${id}"] input[type=checkbox]`, "Select current finding for assessment");
+      }
+      const callsBefore = modelCalls.length;
+      const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created");
+      const state = await draftState(draftId);
+      assert.equal(modelCalls.length, callsBefore, "count-only assertions never reach the model");
+      assert.deepEqual([...new Set(state.cited_claim_ids)], [currentClaimId]);
+      for (const section of ["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]) assert.ok(state.text.includes(`[[assessment:${section}]]`), section);
+      assert.match(state.text, /5 nonblank data rows/);
+      assert.match(state.text, /selected evidence with unresolved limitations was excluded from assertions/);
+      const [validation] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      const excluded = validation.validator_results.find((result) => result.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.excluded_claims;
+      assert.deepEqual(excluded.map((entry) => entry.claimId).sort(), [...derivedClaimIds].sort());
+      const derivedStates = await query("SELECT statement, claim_review_status, claim_strength FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = ANY($2::uuid[])", [ORG_X, derivedClaimIds]);
+      for (const row of derivedStates) {
+        assert.deepEqual([row.claim_review_status, row.claim_strength], ["needs_gk_review", "unassessed"]);
+        assert.equal(state.text.includes(row.statement), false, "excluded derived findings are not assessment assertions");
+      }
+      const path = `${orgPath()}/generated-content-drafts/${draftId}`;
+      for (const step of ["start", "complete"]) {
+        const queue = await queueOf("generated_content_review", draftId);
+        created(await gkReviewerPage.api("POST", `${path}/generated-content-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() }), `draft review ${step}`);
+      }
+      created(await gkAdminPage.api("POST", `${path}/export-review-request`, { requested_export_audience: "internal" }), "export review request");
+      for (const step of ["start", "complete"]) {
+        const queue = await queueOf("export_review", draftId);
+        created(await gkAdminPage.api("POST", `${path}/export-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() }), `export review ${step}`);
+      }
+      created(await gkReviewerPage.api("POST", `${path}/limitation-snapshot`, {}), "snapshot");
+      created(await gkAdminPage.api("POST", `${path}/export-candidates`, {}), "candidate");
+      const [candidate] = await query("SELECT export_candidate_id::text AS id FROM kai.export_candidates WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      created(await gkAdminPage.api("POST", `${orgPath()}/export-candidates/${candidate.id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" }), "authority");
+      const exportQueue = await queueOf("export_review", draftId);
+      created(await gkAdminPage.api("POST", `${orgPath()}/export-candidates/${candidate.id}/export-manifests`, { export_review_queue_item_id: exportQueue.review_queue_item_id }), "manifest");
+      const [manifest] = await query("SELECT export_manifest_id::text AS id FROM kai.export_manifests WHERE export_candidate_id = $1::uuid", [candidate.id]);
+      await openDataSources(PROJECT_X2);
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft="${draftId}"]`)) !== null, "the saved recovered assessment");
+      await adminPage.clickIn(`[data-client-internal-draft="${draftId}"] button`, "Open recovered assessment");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-open-released-report="${manifest.id}"]`)) !== null, "the released report control");
+      await adminPage.clickIn(`[data-client-open-released-report="${manifest.id}"]`, "Open released report");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-released-report-markdown]")), "released recovered assessment");
+      const released = await textOf(adminPage, "[data-client-released-report-markdown]");
+      for (const title of ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"]) assert.match(released, new RegExp(title, "i"));
+      assert.match(released, /5 nonblank data rows/);
+      assert.match(released, /1 blank rows excluded and 2 exact-duplicate rows included/);
+      assert.match(released, /reporting period 2026-09-01 to 2026-09-30 is attested.*not verified against dates/);
+      assert.match(released, /what one record represents is human-defined.*not verified by KAI/);
+      assert.ok(released.includes(currentClaimId) && released.includes(current.source_version_id.slice(0, 8)), "the released citation names the current finding and source version");
+      assert.doesNotMatch(released, new RegExp([historicalClaimId, ...derivedClaimIds].join("|")));
+      const pdf = await gkAdminPage.evaluate(`(async () => { const response = await fetch('${orgPath()}/export-manifests/${manifest.id}/pdf'); const bytes = new Uint8Array(await response.arrayBuffer()); return { status: response.status, type: response.headers.get('content-type'), bytes: bytes.length, base64: btoa(String.fromCharCode(...bytes)) }; })()`);
+      assert.equal(pdf.status, 200);
+      assert.equal(pdf.type, "application/pdf");
+      assert.ok(pdf.bytes > 1000);
+      const proofDir = "/tmp/kai-current-sheet1-recovery-proof";
+      mkdirSync(proofDir, { recursive: true });
+      writeFileSync(join(proofDir, "released-assessment.pdf"), Buffer.from(pdf.base64, "base64"));
+      writeFileSync(join(proofDir, "released-assessment.md"), released);
+      delete pdf.base64;
+      assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [historical.source_version_id]))[0].is_current, false);
+      assert.deepEqual(await history(), historicalState);
+      assert.equal(adminPage.requestsSince(readMark).filter((request) => request.url.includes(`/claims/${historicalClaimId}/traceability?`)).length, 0, "the full recovery has no historical traceability 409 loop");
+      const auditCount = (await query("SELECT count(*)::int AS count FROM kai.audit_events WHERE organization_id = $1::uuid AND reason_code = 'source_version_superseded' AND metadata->>'superseded_source_version_id' = $2", [ORG_X, historical.source_version_id]))[0].count;
+      assert.equal(auditCount, 1);
+      created(await gkReviewerPage.api("POST", decisionPath(current.candidate), current.body), "replacement replay");
+      assert.equal((await query("SELECT count(*)::int AS count FROM kai.audit_events WHERE organization_id = $1::uuid AND reason_code = 'source_version_superseded' AND metadata->>'superseded_source_version_id' = $2", [ORG_X, historical.source_version_id]))[0].count, 1);
+      const proof = { fixture: "synthetic identical-content three-worksheet workbook", historical, historicalClaimId, current, derivedClaimIds, currentEvidenceId, currentClaimId,
+        count: 5, draftId, manifestId: manifest.id, pdf, historicalReadRequests: 0, modelCalls: 0,
+        review: "historical supported decisions retained; current count internal authority requires no additional factual approval; GK draft/export review and release use real authenticated APIs" };
+      writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2));
+      assert.deepEqual(adminPage.exceptions, []);
+      console.log(`[current-sheet1-recovery-proof] ${JSON.stringify(proof)}`);
     });
   } finally {
     await browser.close();

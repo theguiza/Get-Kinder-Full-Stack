@@ -69,6 +69,18 @@ export function claimSourceVersionUnavailable(claim, diagnosis) {
   return claim?.evidenceSourceVersionIsCurrent === false || diagnosis?.conflictReason === "source_version_not_current";
 }
 
+// Open the existing measurement workflow, never move a historical finding or
+// infer that the current version already has the same definition or claim.
+export function currentRecordCountRecoveryVersion(claim, sources, diagnosis) {
+  if (claimKind(claim) !== "measurement" || !claimSourceVersionUnavailable(claim, diagnosis)
+    || !isRouteUuid(claim.evidenceSourceId)) return null;
+  const versions = (Array.isArray(sources) ? sources : [])
+    .filter((source) => source.sourceId === claim.evidenceSourceId)
+    .flatMap((source) => Array.isArray(source.sourceVersions) ? source.sourceVersions : [])
+    .filter((version) => version.isCurrent === true && isRouteUuid(version.sourceVersionId));
+  return versions.length === 1 && versions[0].sourceVersionId !== claim.evidenceSourceVersionId ? versions[0] : null;
+}
+
 export function claimInternalDraftSelectability(claim, diagnosis) {
   if (!isRouteUuid(claim?.claimId) || !isRouteUuid(claim?.evidenceItemId)) {
     return { selectable: false, reason: "invalid_claim" };
