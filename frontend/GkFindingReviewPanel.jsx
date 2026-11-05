@@ -7,6 +7,7 @@ import {
   eligibilityBlockerText,
   measurementWorksheetText,
   COUNT_ONLY_RULE_TEXT,
+  NUMERICAL_ONLY_RULE_TEXT,
   ordinaryRuleConditions,
   organizationFactualReviewPath,
   projectOrganizationFactualReview,
@@ -112,7 +113,9 @@ export default function GkFindingReviewPanel({ organizationId, claimId, reloadKe
           <div className="mt-1" data-gk-finding-ordinary-rule={review.ordinaryRule.applies ? "applies" : "does_not_apply"}>
             <span className="fw-semibold">Ordinary internal rule:</span>{" "}
             {review.ordinaryRule.applies
-              ? (review.ordinaryRule.countOnly ? COUNT_ONLY_RULE_TEXT : "applies; no Get Kinder decision is needed for internal use.")
+              ? (review.ordinaryRule.countOnly ? COUNT_ONLY_RULE_TEXT
+                : review.ordinaryRule.numericalOnly ? NUMERICAL_ONLY_RULE_TEXT
+                  : "applies; no Get Kinder decision is needed for internal use.")
               : "does not apply, because of what is recorded for the source:"}
             {!review.ordinaryRule.applies ? (
               <ul className="mb-0" data-gk-finding-ordinary-conditions="">

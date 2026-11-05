@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { getClaimTraceabilitySummary } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
-import { evaluateClaimTraceabilityInTransaction } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
+import { evaluateClaimTraceabilityInTransaction, __claimTraceabilityRepositoryTestables } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
+import { __claimGapFollowupRepositoryTestables } from "../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js";
 import { listOrganizationEvidenceGapsForImpactLibrary } from "../Backend/kai/services/kaiOrganizationEvidenceGapReadService.js";
 import { computeCoverageReviewDecisionFingerprint } from "../Backend/kai/validators/kaiCoverageReviewDecisionValidators.js";
 import { createPostgresCoverageReviewDecisionRepository } from "../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js";
@@ -10,6 +11,8 @@ import { classifySourceDecision, recordedSourcePermissions } from "../Backend/ka
 import { composeMeasurementDisclosure, measurementLimitationCodes } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
 import { projectOrganizationGapsAndRisks, projectReviewQueue } from "../frontend/impactEvidenceLibraryLogic.js";
 import { ordinaryRuleConditions } from "../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js";
+import * as Derived from "../Backend/kai/validators/kaiDerivedMeasurementValidators.js";
+import { ordinaryInternalAuthorityOf } from "../Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js";
 
 /**
  * KAI Package 4 semantic-parity regression.
@@ -160,7 +163,7 @@ function persistedFollowupQueueRows() {
  * authoritative input that differs between the matching and mismatched cases
  * below.
  */
-function buildFakeTx({ qualityFindingRows, smallCellState = null }) {
+function buildFakeTx({ qualityFindingRows, smallCellState = null, derived = null }) {
   const claimRow = {
     claim_id: CLAIM_ID,
     organization_id: ORG,
@@ -298,6 +301,35 @@ function buildFakeTx({ qualityFindingRows, smallCellState = null }) {
     safe_summary: "Claim gap requires review for dimension: small_cell_risk." });
   const followupRows = persistedFollowupRows();
   const followupQueueRows = persistedFollowupQueueRows();
+  if (derived) {
+    // A paired-outcome measurement claim with no review decision recorded:
+    // the shape of the reported production claims.
+    Object.assign(evidenceItemRow, {
+      evidence_type: Derived.DERIVED_MEASUREMENT_EVIDENCE_TYPE, data_class: Derived.DERIVED_MEASUREMENT_DATA_CLASS,
+      statement: Derived.composeDerivedMeasurementEvidenceStatement({ measurementRow: derived.row, interpretation: null }),
+    });
+    Object.assign(locatorRow, {
+      locator_type: Derived.DERIVED_MEASUREMENT_LOCATOR_TYPE,
+      coordinates: Derived.derivedMeasurementLocatorCoordinates({ sheetKey: derived.row.worksheet_key, fieldKeys: derived.row.field_keys }),
+    });
+    Object.assign(claimRow, { claim_type: "finding", statement: Derived.composeDerivedClaimStatementFromRow(derived.row), claim_strength: "unassessed" });
+    evidenceItemRow.support_strength = "unassessed";
+    for (const row of [evidenceReviewQueueItemRow, claimReviewQueueItemRow]) Object.assign(row, { queue_status: "open", review_status: "needs_gk_review" });
+    // The claim's P2-04 preparation, persisted from the same pure helpers P2-04 uses.
+    const { buildExpectedGapPlans, buildExpectedFollowupDimensionKeys } = __claimGapFollowupRepositoryTestables;
+    const base = __claimTraceabilityRepositoryTestables.computeDimensions({
+      dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys: evidenceFieldKeyRows.map((row) => row.profile_field_key),
+    });
+    const plans = buildExpectedGapPlans(Derived.applyDerivedMeasurementCoverageDimensions(base, derived.row));
+    assert.deepEqual(buildExpectedFollowupDimensionKeys(plans, Derived.DERIVED_ANSWERED_DIMENSION_KEYS), [], "no client follow-up for a derived measurement here");
+    gapRows.length = 0;
+    plans.forEach((plan, index) => gapRows.push({
+      gap_log_item_id: `00000000-0000-4000-8000-0000000030${String(index).padStart(2, "0")}`, organization_id: ORG, claim_id: CLAIM_ID,
+      evidence_item_id: EVIDENCE_ITEM_ID, source_version_id: SOURCE_VERSION_ID, ...plan, created_by_type: "system", created_at: new Date("2026-11-02T00:00:00.000Z"),
+    }));
+    followupRows.length = 0;
+    followupQueueRows.length = 0;
+  }
 
   const calls = [];
   return {
@@ -307,6 +339,8 @@ function buildFakeTx({ qualityFindingRows, smallCellState = null }) {
       calls.push(sql);
 
       if (sql.startsWith("SET TRANSACTION ISOLATION LEVEL")) return { rows: [] };
+      if (derived && sql.includes("FROM kai.evidence_derived_measurements")) return { rows: [derived.row] };
+      if (derived && sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: derived.head ? [derived.head] : [] };
       if (sql.includes("FROM kai.gap_log_items")) return { rows: gapRows };
       if (sql.includes("FROM kai.client_followup_items")) return { rows: followupRows };
       if (sql.includes("kai.review_queue_items") && sql.includes("queue_type = 'client_followup'")) {
@@ -338,6 +372,8 @@ function buildFakeTx({ qualityFindingRows, smallCellState = null }) {
       if (sql.includes("FROM kai.source_versions")) return { rows: [sourceVersionRow] };
       if (sql.includes("FROM kai.sources")) return { rows: [sourceRow] };
       if (sql.includes("FROM kai.claims")) return { rows: [claimRow] };
+      if (derived && sql.includes("FROM kai.evidence_review_decisions")) return { rows: derived.evidenceHead ? [derived.evidenceHead] : [] };
+      if (derived && sql.includes("FROM kai.claim_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.evidence_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "supported", decided_by_role: "gk_reviewer" }] : [] };
       if (sql.includes("FROM kai.claim_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "approved", approved_audiences: ["internal"], decided_by_role: "gk_reviewer" }] : [] };
 
@@ -640,4 +676,70 @@ test("Case B (persisted-but-mismatched, REPAIRED): a new open kai.data_quality_f
       `REPAIRED: no gap for claim ${CLAIM_ID} is exposed as current while the claim itself fails the current-state gate (dimension ${dimensionKey})`,
     );
   }
+});
+
+// Owner prompt 2026-11-05: the connected P2-06 result for the reported production
+// case - a current paired-outcome claim (25 of 38) from a source recorded as
+// containing stories/testimonials, every other category absent, no review
+// decision recorded. The real traceability evaluation is run before and after
+// the numerical basis applies, through the same fake transaction.
+test("connected: a story-present source's paired claim becomes internally eligible through P2-06; carried limitations, other audiences and recorded decisions are unchanged", async () => {
+  const row = {
+    organization_id: ORG, evidence_item_id: EVIDENCE_ITEM_ID, source_version_id: SOURCE_VERSION_ID, measurement_source_version_id: SOURCE_VERSION_ID,
+    source_derived_measurement_id: "00000000-0000-4000-8000-000000002001", measurement_family: Derived.DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME,
+    calculation_method: Derived.DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME, worksheet_key: "sheet_1",
+    definition: { outcome_field_key: "field_6", outcome_column: "F", participant_field_key: "field_2", stage_field_key: "field_4", instrument_version_field_key: "field_5" },
+    field_keys: ["field_2", "field_4", "field_5", "field_6"], measured_value: 25, numerator: 25, denominator: 38, percentage: "65.79",
+    component_counts: { participant_count: 62, comparable_pair_count: 38, increased_count: 25, unchanged_count: 10, decreased_count: 3, excluded_participant_count: 24 },
+    exclusions: { participants: [{ reason: "no_baseline_observation", participant_count: 24 }], rows: [] },
+    profile_canonical_sha256: SHA, interpretation_id: null, current_interpretation_id: null, contributing_sources: [],
+  };
+  const storyPresent = {
+    organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_id: "00000000-0000-4000-8000-000000002101",
+    decision_outcome: "reviewed", decided_by_role: "gk_reviewer", created_by_type: "human",
+    reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent", reviewed_health_housing_justice_immigration_status: "absent",
+    reviewed_indigenous_governance_status: "absent", reviewed_story_testimonial_status: "present", reviewed_small_cell_risk_status: "absent",
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true,
+  };
+  const trace = async (head, evidenceHead = null, requestedAudience = "internal") => {
+    const result = await evaluateClaimTraceabilityInTransaction(buildFakeTx({ qualityFindingRows: [], derived: { row, head, evidenceHead } }),
+      { organizationId: ORG, claimId: CLAIM_ID, requestedAudience });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.data;
+  };
+
+  // Before (story recorded 'unknown', where the refusal still applies): exactly the four
+  // internal blockers the production browser reported for both claims.
+  const unknown = await trace({ ...storyPresent, reviewed_story_testimonial_status: "unknown" });
+  assert.deepEqual(unknown.blockerCodes, ["claim_review_unresolved", "evidence_review_unresolved", "support_strength_unassessed", "coverage_dimension_unresolved"]);
+  assert.equal(unknown.eligible, false);
+  assert.equal(ordinaryInternalAuthorityOf(unknown).basis, null);
+  const blocking = Object.entries(unknown.dimensions).filter(([, d]) => d.blocks_requested_audience).map(([k]) => k).sort();
+  assert.deepEqual(blocking, ["conflicting_source_indicators", "requirement_alignment"], "the coverage blocker is the two source-level dimensions only");
+
+  // After (story recorded 'present'): the ordinary rule answers all four; nothing is accepted or approved.
+  const present = await trace(storyPresent);
+  assert.deepEqual([present.eligible, present.blockerCodes], [true, []]);
+  assert.deepEqual({ ...ordinaryInternalAuthorityOf(present) }, { basis: "numerical_measurement_story_testimonial_present", reliedOn: true });
+  for (const key of ["conflicting_source_indicators", "requirement_alignment"]) {
+    assert.deepEqual([present.dimensions[key].assessment_status, present.dimensions[key].blocks_requested_audience, present.dimensions[key].internal_limitation_accepted],
+      ["unresolved", false, false], `${key} is carried as an internal limitation, not accepted`);
+  }
+  assert.equal(present.claim.claim_review_status, "unassessed");
+  assert.equal(present.evidence_review_decision ?? null, null);
+  assert.equal(present.claim_review_decision ?? null, null);
+
+  // Funder use is untouched: the ordinary rule is internal only.
+  const funder = await trace(storyPresent, null, "funder");
+  assert.equal(funder.eligible, false);
+  assert.equal(ordinaryInternalAuthorityOf(funder), null);
+  for (const code of ["claim_review_unresolved", "evidence_review_unresolved", "support_strength_unassessed", "coverage_dimension_unresolved"]) {
+    assert.ok(funder.blockerCodes.includes(code), code);
+  }
+
+  // A recorded negative evidence decision still governs its own lineage.
+  const negative = await trace(storyPresent, { decision_outcome: "not_supported", decided_by_role: "gk_reviewer" });
+  assert.equal(negative.eligible, false);
+  assert.equal(ordinaryInternalAuthorityOf(negative).basis, null);
+  assert.ok(negative.blockerCodes.includes("support_strength_unassessed"));
 });

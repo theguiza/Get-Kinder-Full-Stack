@@ -344,8 +344,10 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
         is_current: data.source_version.is_current === true,
       },
       ...measurements.data,
-      // basis: all_sensitive_categories_absent, or count_only_story_testimonial_present
-      // (usable as a count in an internal Evidence Summary only); null when it does not apply.
+      // basis: all_sensitive_categories_absent, count_only_story_testimonial_present
+      // (usable as a count in an internal Evidence Summary only), or
+      // numerical_measurement_story_testimonial_present (a derived measurement's
+      // numbers, internal Evidence Summary only); null when it does not apply.
       ordinary_internal_rule: { applies: ordinaryRule.ordinary, reasons: ordinaryRule.reasons, basis: ordinaryRule.basis },
       source_permissions: {
         is_current: ordinaryRule.sourcePermissions?.is_current === true,

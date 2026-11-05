@@ -83,6 +83,20 @@ export const ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS = Object.freeze([
 export const ORDINARY_AUTHORITY_BASIS = Object.freeze({
   ALL_CATEGORIES_ABSENT: "all_sensitive_categories_absent",
   COUNT_ONLY_STORY_TESTIMONIAL_PRESENT: "count_only_story_testimonial_present",
+  // Owner prompt 2026-11-05 ("Fix the false story/testimonial blocker"),
+  // Operating Model v0.2 sections 7 and 11: a source-derived measurement
+  // (paired outcome, tabular count or rate) whose claim restates exactly its
+  // deterministic arithmetic uses no story or testimonial content, so a
+  // source recorded as also containing such content is no reason to refuse
+  // its ordinary internal drafting. The same source conditions as the
+  // count-only basis apply (story 'present', never 'unknown'; every other
+  // category 'absent'; use allowed; AI processing permitted; current), per
+  // contributing source, and no current evidence or claim decision on the
+  // lineage may be negative. Like the count-only basis it admits only the
+  // internal Evidence Summary (and so the Free Impact Assessment); the
+  // recorded category is unchanged, and the internal report and release
+  // checks of the drafted text keep their own story/testimonial review.
+  NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT: "numerical_measurement_story_testimonial_present",
 });
 export const COUNT_ONLY_CONTENT_TYPE = "evidence_summary";
 // Carried in the governed generator input beside the measurement codes
@@ -194,6 +208,22 @@ function orderedReasons(reasons) {
   return ORDINARY_AUTHORITY_REASONS.filter((reason) => present.has(reason));
 }
 
+// A source that is ordinary on its own (no reason at all) or whose only
+// reason is its recorded 'present' story/testimonial category. Pure.
+function isOrdinaryOrStoryOnlySource(source) {
+  return (source?.getKinderReviewReasons?.length === 0 && source.blockedReasons?.length === 0)
+    || isCountOnlyStoryTestimonialSource(source);
+}
+
+// No current evidence or claim decision on this claim's lineage is negative
+// (absent decisions are answered by the ordinary authority itself).
+async function lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId, claimId }) {
+  const evidenceHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId });
+  const claimHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
+  return (!evidenceHead || POSITIVE_EVIDENCE_OUTCOMES.has(evidenceHead.decision_outcome))
+    && (!claimHead || POSITIVE_CLAIM_OUTCOMES.has(claimHead.decision_outcome));
+}
+
 /**
  * Whether this measured claim is ordinary internal factual information now.
  * claimRow is optional: without it only the evidence is classified (the
@@ -209,8 +239,9 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     // Measurement MVP: a source-derived measurement is ordinary on the same
     // terms - its arithmetic still matches its basis under its current
-    // interpretation, and the claim restates exactly that measurement. It
-    // never uses the record-count-only story basis.
+    // interpretation, and the claim restates exactly that measurement. A
+    // story-present source is answered by the numerical-measurement basis
+    // below, never by the record-count-only basis.
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
     if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
       reasons.push("measurement_definition_not_confirmed");
@@ -225,15 +256,32 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
     // A cross-source measurement is ordinary only when every version it
     // combines is: the reference version's recorded categories count too.
+    const combined = [source];
     for (const linked of (derivedRow?.contributing_sources || []).filter((entry) => entry.source_role === "reference")) {
       const reference = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: linked.source_version_id });
       reasons.push(...reference.getKinderReviewReasons, ...reference.blockedReasons);
+      combined.push(reference);
     }
-    const ordered = orderedReasons(reasons);
+    let ordered = orderedReasons(reasons);
+    let basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
+    // The only remaining reason is a recorded 'present' story/testimonial
+    // category, the claim (checked above) restates exactly the numerical
+    // measurement, every combined source is otherwise ordinary, and no
+    // recorded decision on the lineage is negative: the measurement uses no
+    // story content, so it is ordinary internal information as a number.
+    if (claimRow
+      && ordered.length === 1
+      && ordered[0] === HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status
+      && combined.every(isOrdinaryOrStoryOnlySource)
+      && combined.some(isCountOnlyStoryTestimonialSource)
+      && await lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id, claimId: claimRow.claim_id })) {
+      ordered = [];
+      basis = ORDINARY_AUTHORITY_BASIS.NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT;
+    }
     return {
       ordinary: ordered.length === 0,
       reasons: ordered,
-      basis: ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null,
+      basis,
       measurementRow: null,
       sourcePermissions: { is_current: source.isCurrent, recorded: source.recorded },
     };
@@ -265,10 +313,7 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   // count-only use, and only while no recorded decision on its lineage is
   // negative.
   if (claimRow && ordered.length === 1 && isCountOnlyStoryTestimonialSource(source)) {
-    const evidenceHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id });
-    const claimHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId: claimRow.claim_id });
-    if ((!evidenceHead || POSITIVE_EVIDENCE_OUTCOMES.has(evidenceHead.decision_outcome))
-      && (!claimHead || POSITIVE_CLAIM_OUTCOMES.has(claimHead.decision_outcome))) {
+    if (await lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id, claimId: claimRow.claim_id })) {
       ordered = [];
       basis = ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
     }

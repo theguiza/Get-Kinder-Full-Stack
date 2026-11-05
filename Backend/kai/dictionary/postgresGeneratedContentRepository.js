@@ -1643,6 +1643,17 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
             );
           }
+          // A story-present source's numerical measurement is usable under
+          // its basis for an internal Evidence Summary (and so the Free
+          // Impact Assessment) only, exactly as the count-only basis.
+          const derivedAuthority = ordinaryInternalAuthorityOf(traceability);
+          if (derivedAuthority?.basis === ORDINARY_AUTHORITY_BASIS.NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT
+            && derivedAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
+            rollbackFailure(
+              "validation_blocker",
+              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
+            );
+          }
           const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
             { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
             tx,

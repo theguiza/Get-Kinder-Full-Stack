@@ -12,6 +12,7 @@ import {
   measuredClaimReviewStepLabel,
   measurementWorksheetText,
   COUNT_ONLY_RULE_TEXT,
+  NUMERICAL_ONLY_RULE_TEXT,
   ordinaryRuleConditions,
   organizationFactualReviewPath,
   projectOrganizationFactualReview,
@@ -156,6 +157,9 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
               organization&apos;s recorded definition, and its limitations are carried into every report.
               {review.ordinaryRule.countOnly ? (
                 <span data-client-measured-claim-count-only=""> The ordinary internal record-count rule {COUNT_ONLY_RULE_TEXT}</span>
+              ) : null}
+              {review.ordinaryRule.numericalOnly ? (
+                <span data-client-measured-claim-numerical-only=""> The ordinary internal rule {NUMERICAL_ONLY_RULE_TEXT}</span>
               ) : null}
             </div>
           ) : null}

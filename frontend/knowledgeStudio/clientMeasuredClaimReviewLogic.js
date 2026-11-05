@@ -92,6 +92,7 @@ export function projectOrganizationFactualReview(dto) {
       applies: dto?.ordinary_internal_rule?.applies === true,
       reasons: asArray(dto?.ordinary_internal_rule?.reasons),
       countOnly: dto?.ordinary_internal_rule?.basis === COUNT_ONLY_STORY_TESTIMONIAL_BASIS,
+      numericalOnly: dto?.ordinary_internal_rule?.basis === NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_BASIS,
     },
     sourcePermissions: {
       isCurrent: dto?.source_permissions?.is_current === true,
@@ -115,6 +116,12 @@ export function projectOrganizationFactualReview(dto) {
 export const COUNT_ONLY_STORY_TESTIMONIAL_BASIS = "count_only_story_testimonial_present";
 export const COUNT_ONLY_RULE_TEXT = "applies as a count only: the source is recorded as containing stories or testimonials, so this finding "
   + "is usable in an internal Evidence Summary as a record count, with no story or testimonial content. Any other use still needs Get Kinder's review.";
+// The numerical-measurement basis: the source is also recorded as containing
+// stories or testimonials, which this measurement does not use.
+export const NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_BASIS = "numerical_measurement_story_testimonial_present";
+export const NUMERICAL_ONLY_RULE_TEXT = "applies to the measurement's numbers only: the source is also recorded as containing stories or testimonials, "
+  + "which this measurement does not use. It is usable in an internal Evidence Summary or Free Impact Assessment; any story or testimonial content, "
+  + "and any other use, still needs Get Kinder's review.";
 
 // The counted worksheet as the organization knows it: its safe name and
 // stable key, or null for a CSV or single-worksheet count without one.
