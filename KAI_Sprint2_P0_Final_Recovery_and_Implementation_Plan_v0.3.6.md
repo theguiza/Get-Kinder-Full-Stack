@@ -46871,3 +46871,46 @@ Operating Model §7 permits authorized normal processing/drafts without per-step
 **Next action:** separately authorized push/deployment of this commit, then the read-only owner-browser verification of the two existing claim IDs. After confirmed eligibility, a Free Impact Assessment (internal `evidence_summary`) may be generated from them under separate owner authorization; its internal report/release keeps Get Kinder review because the source records story/testimonial content.
 
 **Status:** STORY_TESTIMONIAL_SOURCE_FLAG_NO_LONGER_REFUSES_NUMERICAL_DERIVED_DRAFTING_LOCALLY; RELEASE_REVIEW_UNCHANGED; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED.
+
+### Evidence with no claim: honest pipeline next step and "Use for impact" bulk claim proposal (2026-11-05)
+
+**Authorization (USER_CONFIRMED):** owner prompt "lets fix this properly and not limited to this file", then the owner's choice "Honest status + bulk propose" over "Honest status" alone and "Keep GK gate, bulk review". Code, tests, this record and a local commit only. No push, deployment, database access, production request, review decision, coverage acceptance, claim proposal or Current State update was authorized or performed.
+
+**Production evidence relied on (USER_CONFIRMED, owner-supplied live read):** Project `83da8938-2cf5-4d67-9317-57224552252a`, organization `2b4cf90f-9360-4c88-aade-a41695cb299f`. `06_programme_review.pdf` (`500f4f2f-cdcd-4e22-a4a5-9c1a70c155ec`) had every stage through `evidence_extraction` complete (29 items), then `evidence_review` `waiting_for_get_kinder` / `none_waiting_for_get_kinder`. Summary: 3 files `evidence_awaiting_review`, 3 `complete`. The sensitivity panel's all-`unknown` JSON is the intake-time detected profile, not the decision.
+
+**Root cause (TOOL_VERIFIED repository):**
+- `deriveFileStages()` held any file with unreviewed evidence and no governed-eligible claim at a Get Kinder evidence-review wait.
+- P2-03 proposes a claim from unreviewed evidence: `validateLoadBearingEvidence` only warns on `needs_gk_review`/`unassessed`. Get Kinder then reviews each claim with its evidence (P2-06 blockers `evidence_review_unresolved`/`claim_review_unresolved`).
+- For a document file with no claim, the real next step was therefore the administrator's proposal, while the client was told "No action required". An open client follow-up on a proposed claim was also hidden behind that wait.
+
+**Correction (TOOL_VERIFIED):**
+- **Read model.** `evidence_unclaimed_proposable_count` counts current evidence that has no `kai.claims` row, excluding `dictionary_field_presence_fact` (structural column facts are never Impact Facts). It is never returned to the client.
+- **Pipeline.** Unreviewed evidence with no usable fact now resolves as follows:
+  - unclaimed claimable evidence and P2-03 client authority (`proposeClaims`: P2-03 client roles, not a Get Kinder membership) → `evidence_review` `waiting_for_client`, next action `propose_claims`, reason `claim_proposal_ready`, count = unclaimed;
+  - unclaimed and no claim, for another viewer → the existing administrator / Get Kinder rule;
+  - an open client follow-up → `answer_client_followups`;
+  - otherwise → the unchanged Get Kinder wait.
+  - The rule from owner prompt 2026-10-26 (a usable fact releases the file) is unchanged.
+- **Frontend.** The new next action and reason, with their text. Reviews-tab source work. The file is listed under Source preparation. `useForImpactStep` → `propose`. Max steps raised to 5.
+- **Use for impact.** It resolves the file's current source version (same path as extraction) and reads the whole Evidence Library; it refuses a partial read. It then proposes each claimable item of that version that the Claim Library does not already show a claim for, one at a time, through the existing P2-03 route. After each proposal it runs the existing P2-04 route, unless a measured proposal already reported `generated`/`replayed` or the actor lacks `generateClaimGapFollowups`. It stops at the first refusal without retrying, and reports counts. No review decision, acceptance or approval.
+
+**Validation (TOOL_VERIFIED local; every Node/npm command used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+- New `kai-client-claim-proposal-next-step.spec.js` passes 10/10:
+  - the reported PDF state;
+  - each viewer (client_admin, reviewer or contributor with or without an administrator, Get Kinder);
+  - proposed claims, open follow-ups, an interrupted proposal, structural-only evidence, and a usable fact;
+  - authority;
+  - the read-model SQL shape;
+  - frontend projection, targets, P2-04 need and run message;
+  - a component boundary check.
+- Five existing fixtures gained the new row field. The focused pipeline/workflow set passes 182/182.
+- Full `npm test`: 6093 tests, 5968 pass, 0 fail, 125 skipped (database-runner suites). `npm run build` succeeded. `git diff --check` is clean, and the complete diff was inspected.
+- The real-PostgreSQL lineage SQL was not executed (no database authorized): **NOT_CONFIRMED** until a disposable-database runner or deployment.
+
+**Projected production result (NOT_CONFIRMED until deployed and read):**
+- For a `client_admin`, `06_programme_review.pdf` and the TXT/MD files (if their evidence has no claim) read `propose_claims`. Use for impact proposes their statement claims and prepares gaps.
+- The files then wait on Get Kinder claim/evidence review (or on client follow-ups, if any).
+
+**Next action:** separately authorized push/deployment. Then the owner runs Use for impact on one document file and returns the counts and the re-read pipeline row.
+
+**Status:** EVIDENCE_WITHOUT_CLAIM_IS_CLIENT_PROPOSAL_STEP_LOCALLY; BULK_PROPOSAL_VIA_EXISTING_ROUTES; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED.

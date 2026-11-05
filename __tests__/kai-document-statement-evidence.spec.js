@@ -487,7 +487,7 @@ function pipelineRow(n, overrides) {
     intake_file_id: fileId(n), safe_filename: `file-${n}`, upload_state: "confirmed", file_policy_status: "passed", created_at: new Date(NOW),
     parser_status: "completed", parser_error_code: null, file_profile_complete: true, data_dictionary_complete: true, sensitivity_profile_complete: true,
     sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 0, source_candidate_promoted_count: 1,
-    source_candidate_rejected_count: 0, source_version_count: 1, evidence_item_count: 0, evidence_needs_review_count: 0, evidence_reviewed_count: 0,
+    source_candidate_rejected_count: 0, source_version_count: 1, evidence_item_count: 0, evidence_needs_review_count: 0, evidence_reviewed_count: 0, evidence_unclaimed_proposable_count: 0,
     claim_count: 0, claim_needs_review_count: 0, claim_ids: [], open_client_followup_count: 0, sensitivity_permission_predicate: true, source_candidate_actionable_count: 0,
     ...overrides,
   };

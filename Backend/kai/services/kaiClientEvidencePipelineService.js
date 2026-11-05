@@ -14,6 +14,7 @@ import { listClientImpactFacts } from "./kaiClientImpactFactsService.js";
 import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { authorizeSourceCandidateContinuation } from "./kaiSourceCandidateService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
+import { __claimProposalServiceContract } from "./kaiClaimProposalService.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceValidators.js";
 
@@ -115,6 +116,7 @@ const NEXT_ACTION = Object.freeze({
   reviewSensitivity: "review_sensitivity",
   askOrganizationAdministrator: "ask_organization_administrator",
   retrySecurityCheck: "retry_security_check",
+  proposeClaims: "propose_claims",
 });
 
 // Non-policy security assessment outcomes (boundedFileSecurityAssessor.js,
@@ -154,6 +156,7 @@ const PIPELINE_REASONS = Object.freeze([
   "no_extractable_evidence",
   "document_evidence_not_enabled",
   "no_supportable_statements",
+  "claim_proposal_ready",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -169,12 +172,16 @@ const NO_CLIENT_AUTHORITY = Object.freeze({
   extractEvidence: false,
   continueSourcePreparation: false,
   reviewSensitivity: false,
+  proposeClaims: false,
   getKinderViewer: false,
 });
 const GK_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const EXTRACTION_ROLES = [...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES];
 const CLIENT_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => role.startsWith("client_")));
 const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.startsWith("client_")));
+const PROPOSAL_ROLES = [...__claimProposalServiceContract.CLAIM_PROPOSAL_ALLOWED_ROLES];
+const CLIENT_PROPOSAL_ROLES = new Set(PROPOSAL_ROLES.filter((role) => role.startsWith("client_")));
+const GK_PROPOSAL_ROLES = new Set(PROPOSAL_ROLES.filter((role) => !role.startsWith("client_")));
 
 /**
  * The organization-scoped client authority the requesting actor holds for a
@@ -195,9 +202,13 @@ function resolveClientAuthority(actorContext, organizationId) {
   const passesExtraction = (allowedRoles) => allowedRoles.size > 0 && validateActorCanPerformOperation(
     actorContext, __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION, organizationId, { allowedRoles },
   ).ok === true;
+  const passesProposal = (allowedRoles) => allowedRoles.size > 0 && validateActorCanPerformOperation(
+    actorContext, __claimProposalServiceContract.CLAIM_PROPOSAL_OPERATION, organizationId, { allowedRoles },
+  ).ok === true;
   return {
     promoteSource: promotion.ok === true && promotion.organizationAdminAuthorized === true,
     extractEvidence: passesExtraction(CLIENT_EXTRACTION_ROLES) && !passesExtraction(GK_EXTRACTION_ROLES),
+    proposeClaims: passesProposal(CLIENT_PROPOSAL_ROLES) && !passesProposal(GK_PROPOSAL_ROLES),
     continueSourcePreparation: authorizeSourceCandidateContinuation(actorContext, organizationId).ok === true,
     reviewSensitivity: validateActorCanPerformSensitivityReview(
       actorContext, "record_sensitivity_allowed_use_decision", organizationId, GK_ROLES, { globalRolesOnly: true },
@@ -427,17 +438,36 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   const evidenceNeedsReview = count(row.evidence_needs_review_count);
+  const unclaimedProposable = count(row.evidence_unclaimed_proposable_count);
+  const openFollowups = count(row.open_client_followup_count);
+  const claims = count(row.claim_count);
   // Owner prompt 2026-10-26: once a claim from this file is currently
   // governed-eligible (for example an ordinary measured fact, which needs no
   // evidence review), the file's other unreviewed evidence (such as its
   // structural column facts) no longer holds it at Get Kinder's evidence review.
-  stages.push(evidenceNeedsReview > 0 && reviewedImpactFactCount === 0
-    ? stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })
-    : stage("evidence_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: count(row.evidence_reviewed_count) }));
-  if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
+  if (evidenceNeedsReview > 0 && reviewedImpactFactCount === 0) {
+    // Owner decision 2026-11-05: P2-03 proposes a claim from unreviewed
+    // evidence (VAL-KAI-P2-03-001 only warns), and Get Kinder's evidence and
+    // claim reviews then run together on each claim. So evidence that has no
+    // claim yet is the organization administrator's step (propose_claims),
+    // not a Get Kinder wait, and an open client follow-up on a proposed claim
+    // is client work. Structural column facts are not counted: a claim
+    // restating which columns a source has is never an Impact Fact.
+    if (unclaimedProposable > 0 && clientAuthority.proposeClaims === true) {
+      stages.push(stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client,
+        { count: unclaimedProposable, detail: "claim_proposal_ready" }));
+    } else if (unclaimedProposable > 0 && claims === 0) {
+      stages.push(waitingOnAdministratorOr(row, clientAuthority, "evidence_review",
+        stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })));
+    } else if (openFollowups > 0) {
+      stages.push(stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
+    } else {
+      stages.push(stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview }));
+    }
+    return stages;
+  }
+  stages.push(stage("evidence_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: count(row.evidence_reviewed_count) }));
 
-  const openFollowups = count(row.open_client_followup_count);
-  const claims = count(row.claim_count);
   // An open client follow-up is client work still to do, even when another
   // claim from the same file is already usable.
   if (openFollowups > 0) {
@@ -483,6 +513,7 @@ function nextActionFor(current) {
       if (current.detail === "sensitivity_review_ready") return NEXT_ACTION.reviewSensitivity;
       if (current.detail === "organization_administrator_action_ready") return NEXT_ACTION.askOrganizationAdministrator;
       if (current.detail === "security_check_retry_ready") return NEXT_ACTION.retrySecurityCheck;
+      if (current.detail === "claim_proposal_ready") return NEXT_ACTION.proposeClaims;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;

@@ -38,7 +38,10 @@ import {
   claimNotUsableMessage,
   claimUseDiagnosis,
   claimsToDiagnose,
+  claimNeedsGapPreparation,
   claimProposalResultMessage,
+  claimProposalRunMessage,
+  claimProposalTargets,
   claimSelectabilityMessage,
   claimSourceVersionUnavailable,
   currentRecordCountRecoveryVersion,
@@ -91,6 +94,9 @@ const DRAFT_LABELS = Object.freeze({
 const LIBRARY_PAGES_PER_LOAD = 40;
 const CLAIM_CURSOR = "nextAfterClaimId";
 const EVIDENCE_CURSOR = "nextAfterEvidenceItemId";
+// "Use for impact" claim proposal reads the whole Evidence Library (25 per
+// page) before proposing; beyond this it stops and says so.
+const CLAIM_PROPOSAL_EVIDENCE_PAGES = 200;
 // Per-claim P2-06 diagnostics read automatically per refresh; any further
 // claim offers its own "Check internal use".
 const CLAIM_DIAGNOSES_PER_REFRESH = 25;
@@ -199,7 +205,11 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
  * existing panel; once the person records it, the flow resumes from the
  * re-read state. Every step is the existing route, which re-authorizes and
  * replays idempotently, so a repeat or an interrupted flow continues from
- * whatever is persisted.
+ * whatever is persisted. Owner decision 2026-11-05: a file whose evidence has
+ * no claim yet (propose_claims) is taken one step further - P2-03 for each
+ * claimable evidence item of the file's current source version (structural
+ * column facts skipped), each followed by its P2-04 gap preparation - and the
+ * flow ends with counts; no evidence or claim review is recorded.
  *
  * "Processing permissions" (reviewSensitivity; exception recovery): every file
  * of the Project whose sensitivity review is complete, at whatever later
@@ -442,14 +452,19 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   };
   // P2-01 for the file's own current source version, resolved through the
   // file -> candidate -> detail reads (never a browser guess).
-  const extractForFile = async (intakeFileId) => {
+  const currentVersionForFile = async (intakeFileId) => {
     const lookup = await getJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId));
     const candidateId = lookup.statusCode === 200 && lookup.body?.ok ? lookup.body.data?.intake_source_candidate_id : null;
     if (!isRouteUuid(candidateId)) return { ok: false, text: errorText(lookup) };
     const detail = await getJson(sourceCandidateDetailPath(organizationId, candidateId));
     const version = detail.statusCode === 200 && detail.body?.ok ? detail.body.data?.source_version : null;
     if (!version || version.is_current !== true || !isRouteUuid(version.source_version_id)) return { ok: false, text: errorText(detail) };
-    const extracted = await postJson(evidenceExtractionPath(organizationId, version.source_version_id), {});
+    return { ok: true, sourceVersionId: version.source_version_id };
+  };
+  const extractForFile = async (intakeFileId) => {
+    const version = await currentVersionForFile(intakeFileId);
+    if (!version.ok) return version;
+    const extracted = await postJson(evidenceExtractionPath(organizationId, version.sourceVersionId), {});
     if (!(extracted.statusCode === 200 && extracted.body?.ok)) return { ok: false, text: errorText(extracted) };
     // An extraction that returns no evidence ends the flow with its reason:
     // running it again would write nothing either.
@@ -457,6 +472,56 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     return Array.isArray(data?.evidenceItems) && data.evidenceItems.length > 0
       ? { ok: true }
       : { ok: true, terminal: true, text: extractionResultMessage(data) };
+  };
+  // Owner decision 2026-11-05: P2-03 for each claimable evidence item of the
+  // file's own current source version (the complete Evidence Library read,
+  // never a partial one), one at a time, each followed by its P2-04 gap
+  // preparation when that is still needed and the actor may run it. Stops at
+  // the first refusal without retrying: every request replays idempotently,
+  // so using the action again continues from what is persisted.
+  const proposeClaimsForFile = async (intakeFileId, isCurrent) => {
+    const version = await currentVersionForFile(intakeFileId);
+    if (!version.ok) return version;
+    const read = await readLibraryPages({
+      fetchPage: (after) => getJson(evidenceLibraryCandidatesPath(organizationId, after)),
+      project: projectEvidenceLibraryItems,
+      cursorKey: EVIDENCE_CURSOR,
+      maxPages: CLAIM_PROPOSAL_EVIDENCE_PAGES,
+      isCurrent,
+    });
+    if (read.status === "superseded") return { ok: true, terminal: true, text: "" };
+    if (read.status === "error") return { ok: false, text: errorText(read.result) };
+    if (!read.complete) {
+      return { ok: false, text: "This organization has more evidence than one Use for impact run reads, so claims were not proposed automatically. Propose them from the evidence list below." };
+    }
+    const targets = claimProposalTargets(read.items, version.sourceVersionId, claimIdsByEvidenceItem(claims.items));
+    const run = { targetCount: targets.length, proposed: 0, replayed: 0, prepared: 0, followups: 0, failureText: "" };
+    for (const item of targets) {
+      const proposal = await postJson(claimProposalPath(organizationId, item.evidenceItemId), {});
+      if (!isCurrent()) return { ok: true, terminal: true, text: "" };
+      if (!((proposal.statusCode === 200 || proposal.statusCode === 201) && proposal.body?.ok)) {
+        run.failureText = errorText(proposal);
+        break;
+      }
+      const data = proposal.body.data;
+      if (data?.replayed === true) run.replayed += 1; else run.proposed += 1;
+      const claimId = data?.claim?.claim_id;
+      if (!claimNeedsGapPreparation(data)) {
+        run.prepared += 1;
+        run.followups += data.claim_gap_state.client_followup_item_count || 0;
+        continue;
+      }
+      if (!access.generateClaimGapFollowups || !isRouteUuid(claimId)) continue;
+      const gaps = await postJson(claimGapFollowupsPath(organizationId, claimId), {});
+      if (!isCurrent()) return { ok: true, terminal: true, text: "" };
+      if (!(gaps.statusCode === 200 && gaps.body?.ok)) {
+        run.failureText = gapFollowupFailureMessage(gaps);
+        break;
+      }
+      run.prepared += 1;
+      run.followups += Array.isArray(gaps.body.data?.clientFollowupItems) ? gaps.body.data.clientFollowupItems.length : 0;
+    }
+    return { ok: true, terminal: true, kind: run.failureText ? "warning" : "success", text: claimProposalRunMessage(run) };
   };
   const continueForFile = async (intakeFileId) => {
     const continued = await postJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId), {});
@@ -484,7 +549,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           refresh();
           return;
         }
-        const outcome = next.kind === "continue" ? await continueForFile(file.intakeFileId) : await extractForFile(file.intakeFileId);
+        const outcome = next.kind === "continue" ? await continueForFile(file.intakeFileId)
+          : next.kind === "propose" ? await proposeClaimsForFile(file.intakeFileId, () => contextRef.current === requestContext)
+            : await extractForFile(file.intakeFileId);
         if (contextRef.current !== requestContext) return;
         refresh();
         if (!outcome.ok) {
@@ -494,7 +561,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         }
         if (outcome.terminal) {
           setImpactFlow(null);
-          setNotice({ kind: "warning", text: outcome.text });
+          onPipelineRefresh?.();
+          if (outcome.text) setNotice({ kind: outcome.kind || "warning", text: outcome.text });
           return;
         }
         const reread = await rereadPipelineFile(file.intakeFileId);

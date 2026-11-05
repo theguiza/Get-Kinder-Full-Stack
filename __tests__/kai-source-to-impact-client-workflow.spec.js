@@ -269,7 +269,7 @@ function row(overrides = {}) {
     sensitivity_permission_predicate: true, sensitivity_decision_outcome: "reviewed", source_candidate_continuation_ready: false,
     effective_allowed_use_not_allowed: false, organization_administrator_available: true,
     source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_promoted_count: 0, source_candidate_rejected_count: 0,
-    source_candidate_actionable_count: 1, source_version_count: 0, evidence_item_count: 0, evidence_needs_review_count: 0, evidence_reviewed_count: 0,
+    source_candidate_actionable_count: 1, source_version_count: 0, evidence_item_count: 0, evidence_needs_review_count: 0, evidence_reviewed_count: 0, evidence_unclaimed_proposable_count: 0,
     claim_count: 0, claim_needs_review_count: 0, open_client_followup_count: 0, claim_ids: [], ...overrides,
   };
 }

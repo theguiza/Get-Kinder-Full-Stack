@@ -500,6 +500,7 @@ export function sourcePreparationFiles(pipelineData, access) {
     (file.currentStage === "sensitivity_review" && access?.reviewSensitivity === true && file.currentStatus !== "failed")
     || file.currentStage === "source_review"
     || (file.currentStage === "evidence_extraction" && file.nextAction === "extract_evidence")
+    || file.nextAction === "propose_claims"
   ));
 }
 
@@ -631,7 +632,7 @@ export function sourcePreparationGuidance(file, access) {
 // the source authorization) is opened for the person, never made for them.
 // ---------------------------------------------------------------------------
 
-export const USE_FOR_IMPACT_MAX_STEPS = 4;
+export const USE_FOR_IMPACT_MAX_STEPS = 5;
 
 export function useForImpactStep(file, access) {
   if (!file || typeof file !== "object") return { kind: "blocked", text: "This file's status is not available." };
@@ -643,6 +644,9 @@ export function useForImpactStep(file, access) {
   if (action === "continue_source_preparation" && access?.promoteSource === true) return { kind: "continue" };
   if (action === "promote_source" && access?.promoteSource === true) return { kind: "confirm_promotion" };
   if (action === "extract_evidence" && access?.extractEvidence === true) return { kind: "extract" };
+  // Owner decision 2026-11-05: evidence with no claim yet is proposed by the
+  // organization administrator; Get Kinder then reviews each claim with its evidence.
+  if (action === "propose_claims" && access?.proposeClaim === true) return { kind: "propose" };
   if (file.currentStatus === "complete" || ["evidence_review", "impact_fact_review"].includes(file.currentStage)) {
     return { kind: "done" };
   }
@@ -651,7 +655,7 @@ export function useForImpactStep(file, access) {
 
 // Offered on a file when its next governed step is one this actor may take.
 export function isUseForImpactCandidate(file, access) {
-  return ["review_sensitivity", "continue", "confirm_promotion", "extract"].includes(useForImpactStep(file, access).kind);
+  return ["review_sensitivity", "continue", "confirm_promotion", "extract", "propose"].includes(useForImpactStep(file, access).kind);
 }
 
 export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
@@ -660,6 +664,43 @@ export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
   done: "Use for impact: this file's evidence exists. Propose claims from it below, generate their gap follow-ups, then internal drafts.",
   interrupted: "Use for impact stopped. Every completed step is kept; use the action again to continue from the current state.",
 });
+
+// "Use for impact" claim proposal (owner decision 2026-11-05): the evidence
+// of the file's own current source version that a claim is proposed from -
+// every evidence type except structural column facts (a claim restating which
+// columns a source has is never an Impact Fact), skipping evidence the Claim
+// Library already shows a claim for. P2-03 replays an existing claim anyway.
+export function claimProposalTargets(evidenceItems, sourceVersionId, proposedByEvidence = new Map()) {
+  if (!isRouteUuid(sourceVersionId)) return [];
+  return (Array.isArray(evidenceItems) ? evidenceItems : []).filter((item) => item?.sourceVersionId === sourceVersionId
+    && isRouteUuid(item.evidenceItemId)
+    && item.evidenceType !== STRUCTURAL_EVIDENCE_TYPE
+    && !((proposedByEvidence.get(item.evidenceItemId) || []).length > 0));
+}
+
+// Whether a just-proposed claim still needs its explicit P2-04 gap
+// preparation: a measured claim's proposal already prepared it, unless that
+// post-commit step reported it was not generated.
+export function claimNeedsGapPreparation(proposalData) {
+  if (proposalData?.measurementClaim !== true) return true;
+  return proposalData?.claim_gap_state?.status !== "generated" && proposalData?.claim_gap_state?.status !== "replayed";
+}
+
+// The bulk proposal's outcome, as one line. Counts only.
+export function claimProposalRunMessage({ targetCount, proposed = 0, replayed = 0, prepared = 0, followups = 0, failureText = "" }) {
+  if (targetCount === 0) {
+    return "Use for impact: every claimable item of evidence from this file already has a claim (structural column facts are not proposed). "
+      + "Get Kinder reviews each claim with its evidence.";
+  }
+  const done = `${proposed} claim(s) proposed and ${replayed} already proposed, of ${targetCount}; gap follow-ups prepared for ${prepared}`
+    + ` (${followups} client follow-up question(s)).`;
+  if (failureText) {
+    return `Use for impact proposed claims until a request was refused: ${done} ${failureText} `
+      + "Nothing is retried automatically; use the action again to continue from the current state.";
+  }
+  return `Use for impact: ${done} Every claim is internal-only and waits for Get Kinder to review it with its evidence`
+    + `${followups > 0 ? ", and for your organization's answers to the follow-up questions" : ""}. Nothing was approved.`;
+}
 
 // The restrictions a promotion keeps, from the file's current sensitivity
 // decision (the existing review read). Lines only; nothing is inferred.

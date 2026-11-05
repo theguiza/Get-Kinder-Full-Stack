@@ -406,6 +406,7 @@ function pipelineRow(overrides = {}) {
     evidence_item_count: 0,
     evidence_needs_review_count: 0,
     evidence_reviewed_count: 0,
+    evidence_unclaimed_proposable_count: 0,
     claim_count: 0,
     claim_needs_review_count: 0,
     open_client_followup_count: 0,

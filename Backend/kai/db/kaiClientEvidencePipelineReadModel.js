@@ -142,6 +142,10 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             COALESCE(e.evidence_count, 0)::int AS evidence_item_count,
             COALESCE(e.evidence_needs_review_count, 0)::int AS evidence_needs_review_count,
             COALESCE(e.evidence_reviewed_count, 0)::int AS evidence_reviewed_count,
+            -- Current evidence a P2-03 claim can still be proposed from: not a
+            -- structural column fact, and no claim yet (owner decision
+            -- 2026-11-05: proposing claims is the client's next step).
+            COALESCE(e.evidence_unclaimed_proposable_count, 0)::int AS evidence_unclaimed_proposable_count,
             COALESCE(cl.claim_count, 0)::int AS claim_count,
             COALESCE(cl.claim_needs_review_count, 0)::int AS claim_needs_review_count,
             COALESCE(cl.claim_ids, ARRAY[]::uuid[]) AS claim_ids,
@@ -262,7 +266,16 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
        LEFT JOIN LATERAL (
          SELECT count(*) AS evidence_count,
                 count(*) FILTER (WHERE ei.evidence_review_status = 'needs_gk_review') AS evidence_needs_review_count,
-                count(*) FILTER (WHERE ei.evidence_review_status = 'reviewed') AS evidence_reviewed_count
+                count(*) FILTER (WHERE ei.evidence_review_status = 'reviewed') AS evidence_reviewed_count,
+                count(*) FILTER (
+                  WHERE ei.evidence_type <> 'dictionary_field_presence_fact'
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM kai.claims pc
+                       WHERE pc.organization_id = ei.organization_id
+                         AND pc.evidence_item_id = ei.evidence_item_id
+                    )
+                ) AS evidence_unclaimed_proposable_count
            FROM kai.evidence_items ei
            JOIN kai.source_versions v
              ON v.organization_id = ei.organization_id
