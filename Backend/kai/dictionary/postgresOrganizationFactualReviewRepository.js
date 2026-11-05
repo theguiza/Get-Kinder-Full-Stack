@@ -3,6 +3,7 @@ import {
   getScopedClaimById,
   getScopedEvidenceItemById,
   getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedDerivedMeasurementByEvidenceItemId,
   getScopedSourceLocatorById,
   getScopedSourceVersionById,
 } from "../db/kaiIntakeQueries.js";
@@ -20,6 +21,14 @@ import {
   describeMeasurementLimitationCode,
   measurementLimitationCodes,
 } from "../validators/kaiSourceMeasurementValidators.js";
+import {
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  DERIVED_MEASUREMENT_FAMILIES,
+  describeDerivedLimitationCode,
+  derivedMeasurementLimitationCodes,
+  interpretationOf,
+  validateDerivedMeasurementClaimBasis,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 
 export { isConfirmedMeasurement };
 
@@ -188,6 +197,79 @@ function decisionState(head, queue, evaluation) {
   };
 }
 
+/** Read projection only. Keep the established record-count DTO separate from paired outcomes. */
+export async function readFactualReviewMeasurementsInTransaction(tx, {
+  organizationId, evidenceItemRow, locatorRow, sourceVersionRow, dimensions,
+}) {
+  const evidenceItemId = evidenceItemRow.evidence_item_id;
+  const row = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
+  const definition = row
+    ? await readMeasurementDefinition(tx, { organizationId, sourceMeasurementDefinitionId: row.source_measurement_definition_id })
+    : null;
+  const measurement = row ? {
+    calculation_method: row.calculation_method,
+    worksheet_key: row.worksheet_key || null,
+    worksheet_name: row.worksheet_name || null,
+    measured_value: row.measured_value,
+    unit_label: row.unit_label,
+    counted_unit: row.counted_unit,
+    total_record_count: row.total_record_count,
+    blank_record_count: row.blank_record_count,
+    duplicate_record_count: row.duplicate_record_count,
+    period_start: row.period_start,
+    period_end: row.period_end,
+    definition_text: definition?.definition_text ?? null,
+    inclusion_rule: definition?.inclusion_rule ?? null,
+    exclusion_rule: definition?.exclusion_rule ?? null,
+  } : null;
+  const data = {
+    measurement,
+    derived_measurement: null,
+    limitations: row ? measurementLimitationCodes({ measurementRow: row, dimensions })
+      .map((code) => ({ code, description: describeMeasurementLimitationCode(code) })) : [],
+  };
+  if (evidenceItemRow.evidence_type !== DERIVED_MEASUREMENT_EVIDENCE_TYPE) return { ok: true, data };
+  const derived = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
+  // Other derived families retain their existing projection; this repair is paired-outcome scoped.
+  if (derived && derived.measurement_family !== DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) return { ok: true, data };
+  if (evidenceItemRow.organization_id !== organizationId || sourceVersionRow?.organization_id !== organizationId
+    || sourceVersionRow?.is_current !== true
+    || !validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derived }).ok) {
+    return { ok: false, error: { code: "conflict_current_state_changed", status: 409 } };
+  }
+  const interpretation = interpretationOf(derived);
+  const counts = derived.component_counts;
+  data.derived_measurement = {
+    measurement_type: derived.measurement_family,
+    source_derived_measurement_id: derived.source_derived_measurement_id,
+    evidence_item_id: evidenceItemId,
+    source_version_id: derived.source_version_id,
+    is_current: true,
+    worksheet_key: derived.worksheet_key,
+    outcome_field_key: derived.definition.outcome_field_key,
+    calculation_method: derived.calculation_method,
+    numerator: derived.numerator,
+    denominator: derived.denominator,
+    percentage: derived.percentage,
+    increased_count: counts.increased_count,
+    unchanged_count: counts.unchanged_count,
+    decreased_count: counts.decreased_count,
+    participant_count: counts.participant_count,
+    comparable_pair_count: counts.comparable_pair_count,
+    excluded_participant_count: counts.excluded_participant_count,
+    exclusions: {
+      participants: derived.exclusions.participants.map(({ reason, participant_count }) => ({ reason, participant_count })),
+      rows: derived.exclusions.rows.map(({ reason, row_count }) => ({ reason, row_count })),
+    },
+    interpretation: interpretation ? { interpretation_id: derived.interpretation_id, ...interpretation } : null,
+    score_direction: interpretation?.score_direction ?? "not_established",
+    reporting_period: null,
+  };
+  data.limitations = derivedMeasurementLimitationCodes({ measurementRow: derived, dimensions })
+    .map((code) => ({ code, description: describeDerivedLimitationCode(code) }));
+  return { ok: true, data };
+}
+
 /**
  * The organization administrator's factual-review view of one claim: what is
  * measured and from which source, the current decisions and who made them
@@ -206,10 +288,14 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
   const evidenceEvaluation = await evaluateOrganizationFactualReviewInTransaction(tx, { organizationId, evidenceItemId, currentHead: evidenceHead });
   const claimEvaluation = await evaluateOrganizationFactualReviewInTransaction(tx, { organizationId, evidenceItemId, currentHead: claimHead });
 
-  const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
-  const definitionRow = measurementRow
-    ? await readMeasurementDefinition(tx, { organizationId, sourceMeasurementDefinitionId: measurementRow.source_measurement_definition_id })
-    : null;
+  const claimRow = await getScopedClaimById({ organizationId, claimId }, tx);
+  const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+  const locatorRow = await getScopedSourceLocatorById({ organizationId, sourceLocatorId: data.locator.source_locator_id }, tx);
+  const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId: data.source_version.source_version_id }, tx);
+  const measurements = await readFactualReviewMeasurementsInTransaction(tx, {
+    organizationId, evidenceItemRow, locatorRow, sourceVersionRow, dimensions: data.dimensions,
+  });
+  if (!measurements.ok) return measurements;
 
   const coverageLimitations = [];
   for (const [dimensionKey, dimension] of Object.entries(data.dimensions)) {
@@ -234,16 +320,13 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
     });
   }
 
-  const limitationCodes = measurementRow ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }) : [];
   // The ordinary internal rule exactly as P2-06 applies it, with its reasons
   // and the recorded source values it read (never re-derived here).
-  const claimRow = await getScopedClaimById({ organizationId, claimId }, tx);
-  const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
   const ordinaryRule = await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     organizationId,
     evidenceItemRow,
-    locatorRow: await getScopedSourceLocatorById({ organizationId, sourceLocatorId: data.locator.source_locator_id }, tx),
-    sourceVersionRow: await getScopedSourceVersionById({ organizationId, sourceVersionId: data.source_version.source_version_id }, tx),
+    locatorRow,
+    sourceVersionRow,
     claimRow,
   });
   const outstanding = [...new Set(data.blockerCodes.map((code) => OUTSTANDING_REVIEW_STEP[code]).filter(Boolean))];
@@ -260,25 +343,7 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
         source_version_id: data.source_version.source_version_id,
         is_current: data.source_version.is_current === true,
       },
-      measurement: measurementRow
-        ? {
-          calculation_method: measurementRow.calculation_method,
-          worksheet_key: measurementRow.worksheet_key || null,
-          worksheet_name: measurementRow.worksheet_name || null,
-          measured_value: measurementRow.measured_value,
-          unit_label: measurementRow.unit_label,
-          counted_unit: measurementRow.counted_unit,
-          total_record_count: measurementRow.total_record_count,
-          blank_record_count: measurementRow.blank_record_count,
-          duplicate_record_count: measurementRow.duplicate_record_count,
-          period_start: measurementRow.period_start,
-          period_end: measurementRow.period_end,
-          definition_text: definitionRow?.definition_text ?? null,
-          inclusion_rule: definitionRow?.inclusion_rule ?? null,
-          exclusion_rule: definitionRow?.exclusion_rule ?? null,
-        }
-        : null,
-      limitations: limitationCodes.map((code) => ({ code, description: describeMeasurementLimitationCode(code) })),
+      ...measurements.data,
       // basis: all_sensitive_categories_absent, or count_only_story_testimonial_present
       // (usable as a count in an internal Evidence Summary only); null when it does not apply.
       ordinary_internal_rule: { applies: ordinaryRule.ordinary, reasons: ordinaryRule.reasons, basis: ordinaryRule.basis },
