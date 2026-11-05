@@ -867,6 +867,115 @@ async function runCedarBridgeAcceptance() {
       const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG, sourceVersionId, "sheet_1"), {});
       assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
       assert.deepEqual(await writeCounts(), afterWrite, "a repeated record writes nothing and audits nothing");
+    });
+
+    await test("11a: unresolved meaning stays descriptive through proposal, actual eligibility gates and a saved six-section readiness assessment", async () => {
+      const scenario = { surface: "disposable PostgreSQL / real HTTP services", provider: "deterministic stub", project_id: PROJECT, claims: [] };
+      report.unresolved_outcome_assessment = scenario;
+      const trace = async (claimId) => {
+        const result = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+        assert.equal(result.status, 200, J(result.body));
+        return result.body.data;
+      };
+      for (const field of ["field_6", "field_7"]) {
+        const evidenceItemId = derived[`paired_${field}`].proposedEvidenceItemId;
+        const proposed = await adminApi("POST", claimProposalPath(ORG, evidenceItemId), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        const claimId = proposed.body.data.claim.claim_id;
+        const [claim] = await query("SELECT statement, claim_review_status, claim_strength FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
+        assert.match(claim.statement, /whether higher is better is not established/);
+        assert.doesNotMatch(claim.statement, /improv|caus|unique participants/i);
+        const initial = await trace(claimId);
+        assert.equal(initial.eligible, false, "this source records personal information; meaning is not inferred as the reason");
+        assert.ok(initial.blockerCodes.includes("evidence_review_unresolved") && initial.blockerCodes.includes("claim_review_unresolved"), J(initial));
+        scenario.claims.push({ field, claim_id: claimId, evidence_item_id: evidenceItemId, statement: claim.statement, initial });
+      }
+      const claimIds = scenario.claims.map((entry) => entry.claim_id);
+      const draftCount = async () => (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n;
+      const draftsBefore = await draftCount();
+      const callsBefore = modelCalls.length;
+      const refused = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: claimIds, engagement_id: PROJECT, idempotency_key: `unresolved-blocked-${randomUUID()}`,
+      });
+      scenario.before_review = { status: refused.status, body: refused.body };
+      assert.equal(refused.status, 422, J(refused.body));
+      assert.equal(modelCalls.length, callsBefore, "blocked claims never reach the provider");
+      assert.equal(await draftCount(), draftsBefore, "refusal persists no draft");
+
+      // These are new, attributed synthetic decisions on descriptive findings,
+      // through the existing GK operations; no eligibility or approval is seeded.
+      const queueOf = async (queueType, targetId) => (await query(
+        "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
+        [ORG, queueType, targetId]))[0];
+      for (const entry of scenario.claims) {
+        const evidenceQueue = await queueOf("evidence_review", entry.evidence_item_id);
+        const evidence = await gkApi("POST", evidenceReviewCompletePath(ORG, entry.evidence_item_id, evidenceQueue.review_queue_item_id),
+          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+        const claimQueue = await queueOf("claim_review", entry.claim_id);
+        const claim = await gkApi("POST", claimReviewCompletePath(ORG, entry.claim_id, claimQueue.review_queue_item_id),
+          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        assert.deepEqual([evidence.status, claim.status], [200, 200], J([evidence.body, claim.body]));
+        entry.coverage_acceptances = [];
+        for (const [key, dimension] of Object.entries((await trace(entry.claim_id)).dimensions)) {
+          if (dimension.assessment_status !== "unresolved") continue;
+          const accepted = await gkApi("POST", coverageInternalAcceptancePath(ORG, entry.claim_id, key), {});
+          assert.equal(accepted.status, 201, J(accepted.body));
+          entry.coverage_acceptances.push(key);
+        }
+        entry.after_review = await trace(entry.claim_id);
+        assert.equal(entry.after_review.eligible, true, J(entry.after_review));
+      }
+      assessmentStub = (_blocks, request) => {
+        const citations = request.claims.map((claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }));
+        return [
+          { section: "executive_snapshot", text: "The selected evidence describes baseline and follow-up comparisons for comparable pairs. Organizational meaning and favorable direction have not been established.", citations },
+          ...request.claims.map((claim) => ({ section: "evidence_findings", text: claim.claimStatement, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })),
+          { section: "impact_stories", text: "The selected evidence consists of measured comparisons. No consented participant story is supplied with these findings.", citations },
+        ];
+      };
+      let created;
+      try {
+        created = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
+          claim_ids: claimIds, engagement_id: PROJECT, idempotency_key: `unresolved-descriptive-${randomUUID()}`,
+        });
+      } finally { assessmentStub = null; }
+      scenario.generation = { status: created.status, body: created.body };
+      assert.equal(created.status, 201, J(created.body));
+      scenario.draft_id = created.body.data.generatedContentDraftId;
+      const blocks = await query("SELECT ordinal, text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal", [scenario.draft_id]);
+      const { parseFreeImpactAssessment } = await import("../Backend/kai/services/kaiFreeImpactAssessmentComposition.js");
+      const sections = parseFreeImpactAssessment(blocks);
+      assert.equal(sections?.length, 6);
+      const text = blocks.map((block) => block.text).join("\n");
+      assert.match(text, /25 of 38 comparable participant pairs \(65\.79%\)/);
+      assert.match(text, /23 of 40 comparable participant pairs \(57\.50%\)/);
+      assert.match(text, /whether higher is better is not established/);
+      assert.match(text, /not every participant/);
+      assert.doesNotMatch(text, /participants? improved|programme (?:caused|improves)|unique participants|2025-04-01/);
+      scenario.sections = sections.map((section) => section.title);
+      const [draftState] = await query("SELECT draft_status, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [scenario.draft_id]);
+      scenario.approval_representation = { ...draftState, next_steps: sections[5].blocks.map((block) => block.body).join("\n") };
+      assert.equal(draftState.draft_status, "draft");
+      assert.equal(draftState.review_status, "needs_gk_review");
+      assert.doesNotMatch(scenario.approval_representation.next_steps, /(?:is|been) approved for internal use/i, "an unreviewed saved draft cannot describe itself as approved");
+      const saved = await gkApi("GET", `${orgPath}/generated-content-drafts/${scenario.draft_id}/review-packet`);
+      assert.equal(saved.status, 200, J(saved.body));
+      assert.ok(J(saved.body).includes("65.79"), "a fresh application read retrieves the persisted outcome content");
+      // A model cannot turn the same undefined comparison into an improvement.
+      modelBlockText = (claim) => `${claim.claimStatement} The programme caused participants to improve.`;
+      try {
+        const unsupported = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, {
+          claim_ids: claimIds, engagement_id: PROJECT, idempotency_key: `unresolved-overclaim-${randomUUID()}`,
+        });
+        assert.equal(unsupported.status, 422, J(unsupported.body));
+        assert.ok(J(unsupported.body).includes("unsupported_numeric_or_causal_assertion"));
+        scenario.unsupported_output = { status: unsupported.status, blockers: blockersOf(unsupported) };
+      } finally { modelBlockText = null; }
+      assert.equal(await draftCount(), draftsBefore + 1, "only the descriptive assessment is saved");
+    });
+
+    await test("11b: an authorized person records synthetic meaning and units; arithmetic is unchanged and approvals are not copied", async () => {
+      const sourceVersionId = state.workbook.sourceVersionId;
 
       // A person states the meanings. Field 7 is first stated without a direction, then corrected.
       const interpret = (key, body) => adminApi("POST", derivedMeasurementInterpretationPath(ORG, derived[key].measurementId), body);
@@ -900,6 +1009,11 @@ async function runCedarBridgeAcceptance() {
       derived.paired_field_6.evidenceItemId = first6.body.data.evidenceItem.evidence_item_id;
       derived.paired_field_7.evidenceItemId = corrected7.body.data.evidenceItem.evidence_item_id;
       derived.paired_field_7.supersededClaimId = firstClaim7.body.data.claim.claim_id;
+      for (const entry of report.unresolved_outcome_assessment.claims) {
+        const stale = await gkApi("GET", claimTraceabilityPath(ORG, entry.claim_id, "internal"));
+        assert.equal(stale.status, 409, J(stale.body));
+        assert.ok(J(stale.body).includes("derived_measurement_interpretation_superseded"));
+      }
       // Proposed and superseded evidence are no longer current: no claim can be proposed from them.
       const staleProposed = await adminApi("POST", claimProposalPath(ORG, derived.paired_field_6.proposedEvidenceItemId), {});
       assert.deepEqual([staleProposed.status, blockersOf(staleProposed)], [422, ["derived_measurement_claim_basis_invalid"]]);
@@ -2953,11 +3067,33 @@ async function runCedarBridgeAcceptance() {
         if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
       }
       const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+      // Inspect the actual PDF, not only its header/page objects. Every reviewed
+      // block's prose must survive the PDF serializer; disclosures and citation
+      // identities are checked separately because the renderer groups them.
+      const { default: mupdf } = await import("mupdf");
+      const pdfDocument = mupdf.Document.openDocument(pdf, "application/pdf");
+      assert.equal(pdfDocument.countPages(), pages);
+      const pdfPages = Array.from({ length: pages }, (_, index) => pdfDocument.loadPage(index).toStructuredText().asText());
+      const normalizeText = (text) => text.normalize("NFKC").replace(/(\p{L})-\s*\n\s*(?=\p{L})/gu, "$1-").replace(/\s+/g, " ").trim();
+      const pdfText = normalizeText(pdfPages.join("\n"));
+      const savedBlocks = await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal", [assessmentState.draftId]);
+      for (const block of savedBlocks) {
+        const prose = block.text.replace(/^\[\[assessment:[a-z_]+\]\]\n/, "").split(/\s*Measurement disclosure for /)[0];
+        assert.ok(pdfText.includes(normalizeText(prose)), `reviewed prose missing from PDF: ${prose.slice(0, 100)}`);
+      }
+      for (const title of ASSESSMENT_TITLES) assert.ok(pdfText.includes(title), title);
+      for (const figure of ["25 of 38 comparable participant pairs (65.79%)", "23 of 40 comparable participant pairs (57.50%)"]) assert.ok(pdfText.includes(figure), figure);
+      assert.ok(pdfText.includes("not every participant") && pdfText.includes("not independently verified"), "population and evidence limitations survive PDF rendering");
+      assert.doesNotMatch(pdfText, /CB0\d\d|EV0\d\d|FU0\d\d|\[\[assessment:/);
+      const again = await readReleased(delivery.export_manifest_id);
+      assert.deepEqual([again.status, again.body], [200, released], "a new application request retrieves the same released report");
       const markdownPath = REPORT_PATH ? REPORT_PATH.replace(/\.json$/, "") + ".free-impact-assessment.md" : null;
       const pdfPath = REPORT_PATH ? REPORT_PATH.replace(/\.json$/, "") + ".free-impact-assessment.pdf" : null;
       if (markdownPath) writeFileSync(markdownPath, released);
       if (pdfPath) writeFileSync(pdfPath, pdf);
-      Object.assign(assessmentState, { delivery: statuses, limitation_entries: entries, released_markdown_path: markdownPath, pdf_path: pdfPath, pdf_pages: pages, released_characters: released.length });
+      if (pdfPath) writeFileSync(`${pdfPath}.txt`, pdfPages.join("\n"));
+      Object.assign(assessmentState, { delivery: statuses, limitation_entries: entries, released_markdown_path: markdownPath, pdf_path: pdfPath, pdf_pages: pages,
+        pdf_reviewed_prose_verified: savedBlocks.length, released_reload_verified: true, released_characters: released.length });
       assert.ok(pages >= 4 && pages <= 6, `${pages} PDF pages`);
       console.log(`Cedar Bridge Free Impact Assessment: ${pages} PDF pages; ${J(statuses)}; ${markdownPath}`);
     });

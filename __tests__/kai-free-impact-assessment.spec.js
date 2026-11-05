@@ -89,6 +89,8 @@ test("the composed assessment has six ordered sections and three grounded propos
   for (const rec of recommendations) assert.match(rec.body, /This is a proposal for the organization to consider; it is not a measured or confirmed result\.$/);
   assert.match(sections[2].blocks.at(-1).body, /^Participant story evidence: none is available\./);
   assert.deepEqual(sections[2].blocks.at(-1).citations, cite(CLAIMS[5]));
+  assert.doesNotMatch(sections[5].blocks.map((block) => block.body).join("\n"), /(?:is|been) approved for internal use/i,
+    "eligibility of cited claims does not approve the generated assessment");
   // The same disclosure composition and validators as any internal Evidence Summary.
   const measuredValueByClaimId = new Map([[id(1), 223], [id(2), 16815], [id(3), 25]]);
   const disclosed = composeEvidenceSummaryMeasurementDisclosures({ blocks: composed.blocks, claims: CLAIMS, measuredValueByClaimId });

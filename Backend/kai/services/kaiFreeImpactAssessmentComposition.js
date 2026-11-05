@@ -353,7 +353,7 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   }
 
   const nextSteps = [
-    "Read this internal draft with Get Kinder. It is approved for internal use only; none of its findings is cleared for funder or public use.",
+    "Read this internal draft with Get Kinder. Complete the applicable review and release before final use; none of its findings is cleared for funder or public use.",
     chosen.length > 0
       ? `Decide which proposed change to try first, then ${chosen.map((gap) => gap.entry.nextStep).join("; ")}.`
       : "Review the limited evidence with Get Kinder and identify what further evidence would be needed before proposing changes.",
