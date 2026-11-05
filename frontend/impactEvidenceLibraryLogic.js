@@ -2601,6 +2601,14 @@ export function errorText(result) {
   if (result?.body?.blockers?.some((blocker) => ["generator_result_text_total_too_long", "generator_result_block_text_too_long"].includes(blocker.blocking_reason))) {
     return "The generated assessment or draft exceeded the report size limit. Nothing was saved or shortened; evidence, citations and limitations were not removed. Retry generation, or choose a more focused set of claims that still includes the necessary findings and limitations.";
   }
+  const assertion = result?.body?.blockers?.find((blocker) => blocker?.blocking_reason === "unsupported_numeric_or_causal_assertion");
+  if (assertion) {
+    const evidence = assertion.evidence || {};
+    const kinds = (evidence.assertion_classes || []).map((kind) => (kind === "numeric_literal" ? "a number not stated in its cited evidence" : "cause-and-effect wording its cited evidence does not support"));
+    const attempts = evidence.generation_attempts === 2 ? " after one automatic correction" : "";
+    return `The generated draft${attempts} contained ${kinds.length > 0 ? kinds.join(" and ") : "an unsupported number or cause-and-effect wording"}, so nothing was saved. Retry generation; if it repeats, choose a more focused set of claims.`
+      + (evidence.origin === "composed_draft" ? " This came from Get Kinder's own assembled text; report it to Get Kinder." : "");
+  }
   return result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
 }
 

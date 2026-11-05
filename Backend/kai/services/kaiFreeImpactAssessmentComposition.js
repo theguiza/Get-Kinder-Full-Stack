@@ -39,6 +39,18 @@ export const ASSESSMENT_SECTIONS = Object.freeze([
   Object.freeze({ key: "next_steps", title: "Your Next Steps" }),
 ]);
 
+// The titles the model is given for the sections it writes. The customer
+// titles above name the report ("Executive Impact Snapshot", "Impact
+// Stories"); handing those to the model while forbidding causal "impact"
+// language invited exactly the wording VAL-GEN-004 refuses. Renderers keep
+// the customer titles; only the model's context uses these.
+const MODEL_SECTION_TITLES = Object.freeze({
+  executive_snapshot: "Executive Snapshot",
+  evidence_findings: "What the Evidence Records",
+  impact_stories: "Programme Account from Cited Statements",
+  gaps_opportunities: "What the Evidence Does Not Yet Show",
+});
+
 const SECTION_KEYS = ASSESSMENT_SECTIONS.map((section) => section.key);
 const SECTION_INDEX = new Map(SECTION_KEYS.map((key, index) => [key, index]));
 
@@ -243,7 +255,7 @@ function storyEvidenceCited(claims) {
 export function buildAssessmentModelContext(claims) {
   return {
     composition: FREE_IMPACT_ASSESSMENT_COMPOSITION,
-    modelSections: MODEL_SECTION_KEYS.map((key) => ({ key, title: ASSESSMENT_SECTIONS[SECTION_INDEX.get(key)].title, required: REQUIRED_MODEL_SECTION_KEYS.includes(key) })),
+    modelSections: MODEL_SECTION_KEYS.map((key) => ({ key, title: MODEL_SECTION_TITLES[key], required: REQUIRED_MODEL_SECTION_KEYS.includes(key) })),
     participantStoryEvidence: storyEvidenceCited(claims) ? "cited" : "none_cited",
     documentedGaps: detectAssessmentGaps(claims).map((gap) => ({
       key: gap.key,
@@ -377,4 +389,4 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   return { ok: true, blocks };
 }
 
-export const __freeImpactAssessmentCompositionTestables = Object.freeze({ GAP_CATALOGUE, STORY_PATTERN });
+export const __freeImpactAssessmentCompositionTestables = Object.freeze({ GAP_CATALOGUE, STORY_PATTERN, MODEL_SECTION_TITLES });

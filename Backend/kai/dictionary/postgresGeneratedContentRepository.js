@@ -12,11 +12,15 @@ import {
   composeCountOnlyAssessmentText,
   ASSESSMENT_SELECTION_NOTE,
   composeEvidenceSummaryMeasurementDisclosures,
+  unsupportedAssertionEvidence,
+  unsupportedAssertionViolations,
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import {
   FREE_IMPACT_ASSESSMENT_COMPOSITION,
+  MAX_MODEL_ASSESSMENT_BLOCKS,
+  MODEL_SECTION_KEYS,
   buildAssessmentModelContext,
   composeFreeImpactAssessmentBlocks,
 } from "../services/kaiFreeImpactAssessmentComposition.js";
@@ -540,6 +544,80 @@ function validateCompleteReviewInput(input) {
     && !Array.isArray(input.actorContext);
 }
 
+// Free Impact Assessment corrective regeneration (owner prompt 2026-11-05):
+// the one permitted correction names each refused model block by position
+// and section, the VAL-GEN-004 classes, and the model's own unsupported terms
+// (bounded). It carries no claim, source or participant data beyond what the
+// same model call already receives, and it is never returned by the API.
+const ASSESSMENT_MODEL_ATTEMPTS = 2;
+const CORRECTION_MAX_TERMS = 10;
+const CORRECTION_TERM_MAX_LENGTH = 40;
+const ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language"]);
+
+function isAssessmentCorrection(correction) {
+  return Boolean(correction) && typeof correction === "object" && !Array.isArray(correction)
+    && hasExactKeys(correction, new Set(["reason", "blocks"]))
+    && correction.reason === "unsupported_numeric_or_causal_assertion"
+    && Array.isArray(correction.blocks) && correction.blocks.length > 0 && correction.blocks.length <= MAX_MODEL_ASSESSMENT_BLOCKS
+    && correction.blocks.every((block) => hasExactKeys(block, new Set(["block", "section", "assertionClasses", "unsupportedTerms"]))
+      && Number.isInteger(block.block) && block.block >= 1 && block.block <= MAX_MODEL_ASSESSMENT_BLOCKS
+      && MODEL_SECTION_KEYS.includes(block.section)
+      && Array.isArray(block.assertionClasses) && block.assertionClasses.length > 0 && block.assertionClasses.every((value) => ASSERTION_CLASSES.has(value))
+      && Array.isArray(block.unsupportedTerms) && block.unsupportedTerms.length <= CORRECTION_MAX_TERMS
+      && block.unsupportedTerms.every((term) => typeof term === "string" && term.length > 0 && term.length <= CORRECTION_TERM_MAX_LENGTH));
+}
+
+function assessmentCorrection(violations, modelBlocks) {
+  const byOrdinal = new Map();
+  for (const violation of violations) {
+    const entry = byOrdinal.get(violation.block_ordinal) || { block: violation.block_ordinal, section: violation.section, assertionClasses: new Set(), unsupportedTerms: new Set() };
+    entry.assertionClasses.add(violation.type);
+    if (entry.unsupportedTerms.size < CORRECTION_MAX_TERMS) entry.unsupportedTerms.add(String(violation.literal).slice(0, CORRECTION_TERM_MAX_LENGTH));
+    byOrdinal.set(violation.block_ordinal, entry);
+  }
+  const blocks = [...byOrdinal.values()]
+    .filter((entry) => Number.isInteger(entry.block) && modelBlocks.some((block) => block.ordinal === entry.block))
+    .sort((a, b) => a.block - b.block)
+    .map((entry) => ({ block: entry.block, section: entry.section, assertionClasses: [...entry.assertionClasses].sort(), unsupportedTerms: [...entry.unsupportedTerms] }));
+  return { reason: "unsupported_numeric_or_causal_assertion", blocks };
+}
+
+function assessmentAssertionBlocker(violations, extraEvidence) {
+  return [{
+    validator_key: "VAL-GEN-004",
+    severity: "blocker",
+    object_type: "generated_content_draft",
+    object_code: "request",
+    object_id: null,
+    message: "Request failed KAI validation.",
+    blocking_reason: "unsupported_numeric_or_causal_assertion",
+    required_fix: "Correct the request and retry.",
+    evidence: { ...unsupportedAssertionEvidence(violations), ...extraEvidence },
+  }];
+}
+
+// VAL-GEN-004 on the model-authored assessment text alone, before any server
+// text or disclosure is added, so a refusal is attributed to the text that
+// caused it. Returns the one permitted correction input, or null when the
+// model text passes (the whole assembled draft is still validated later).
+// A second refusal, or a correction that does not fit the input contract,
+// rolls back with safe block-level diagnostics. Nothing is removed or
+// rewritten by the server.
+function assessmentCorrectionInput(previousInput, generatorResult, modelProjections, attempts) {
+  const modelClassification = classifyGeneratorResult(generatorResult);
+  if (!modelClassification.ok) {
+    rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+  }
+  const violations = unsupportedAssertionViolations({ blocks: generatorResult.blocks, generationClaims: modelProjections });
+  if (violations.length === 0) return null;
+  const refusal = assessmentAssertionBlocker(violations, { origin: "model_authored", generation_attempts: attempts });
+  if (attempts >= ASSESSMENT_MODEL_ATTEMPTS) rollbackFailure("validation_blocker", refusal);
+  const { correction: _previous, ...governed } = previousInput;
+  const corrected = { ...governed, correction: assessmentCorrection(violations, generatorResult.blocks) };
+  if (!validateGeneratorInput(corrected)) rollbackFailure("validation_blocker", refusal);
+  return corrected;
+}
+
 function validateGeneratorInput(input) {
   let allowedInputKeys = new Set(["contentType", "requestedAudience", "claims"]);
   if (input?.contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
@@ -547,8 +625,9 @@ function validateGeneratorInput(input) {
   } else if (input?.contentType === DATA_GAP_MEMO_CONTENT_TYPE) {
     allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "gaps"]);
   } else if (input?.contentType === CONTENT_TYPE && input?.assessment !== undefined) {
-    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "assessment"]);
+    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "assessment", ...(input.correction !== undefined ? ["correction"] : [])]);
     if (input.requestedAudience !== "internal" || input.assessment?.composition !== FREE_IMPACT_ASSESSMENT_COMPOSITION) return false;
+    if (input.correction !== undefined && !isAssessmentCorrection(input.correction)) return false;
   }
   if (!hasExactKeys(input, allowedInputKeys)) return false;
   if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
@@ -1679,7 +1758,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // The combined result then passes the same contract, validators,
       // persistence and audit as any generated draft.
       const modelProjections = projections.filter((projection) => !countOnlyMeasurementByClaimId.has(projection.claimId));
-      const generatorInput = modelProjections.length > 0
+      let generatorInput = modelProjections.length > 0
         ? toGeneratorInput({
             requestedAudience: input.requestedAudience,
             projections: modelProjections,
@@ -1690,17 +1769,23 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             assessment,
           })
         : null;
-      let generatorResult = generatorInput ? await dependencies.draftGenerator(generatorInput) : null;
+      // The one model boundary for every content type. Only a Free Impact
+      // Assessment may pass through it a second time, and only as the single
+      // bounded correction below: the same governed claims (already checked
+      // for AI-processing permission above) plus block-level diagnostics.
+      let generatorResult = null;
+      let assessmentModelAttempts = 0;
+      while (generatorInput) {
+        generatorResult = await dependencies.draftGenerator(generatorInput);
+        assessmentModelAttempts += 1;
+        generatorInput = assessment ? assessmentCorrectionInput(generatorInput, generatorResult, modelProjections, assessmentModelAttempts) : null;
+      }
       // Free Impact Assessment: the model's section blocks pass the result
       // contract, then the server adds the composed sections (story
       // evidence, documented gaps, three proposed improvements, next steps)
       // from the same projections. Disclosures, the combined result contract
       // and every validator below then run on the whole assessment.
       if (assessment && modelProjections.length > 0) {
-        const modelClassification = classifyGeneratorResult(generatorResult);
-        if (!modelClassification.ok) {
-          rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
-        }
         const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
         if (!composedAssessment.ok) {
           rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
@@ -1788,7 +1873,16 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           ? dependencies.authoritativeDataGaps
           : dependencies.authoritativeReadiness,
       });
-      if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
+      if (!validation.ok) {
+        // The model text already passed VAL-GEN-004 on its own, so a
+        // VAL-GEN-004 refusal of the assembled assessment is in
+        // server-composed text: a deterministic defect, never retried.
+        rollbackFailure("validation_blocker", assessment
+          ? validation.blockers.map((item) => (item.validator_key === "VAL-GEN-004"
+            ? { ...item, evidence: { ...item.evidence, origin: "composed_draft", generation_attempts: assessmentModelAttempts } }
+            : item))
+          : validation.blockers);
+      }
       if (assessment) {
         // Keep the exact selection outcome on the saved draft and its
         // idempotent response, without creating a citation or review authority
@@ -1796,6 +1890,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         validation = { ...validation, results: [...validation.results, {
           validator_key: FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, severity: "pass", evidence: {
             excluded_claims: excludedClaims.map((item) => ({ claimId: item.claim.claim_id, blockerCodes: item.blockerCodes })),
+            model_generation_attempts: assessmentModelAttempts,
           },
         }] };
       }

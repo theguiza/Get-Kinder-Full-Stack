@@ -298,6 +298,62 @@ function requestedCitationSet(generationClaims) {
   return new Set(generationClaims.map((claim) => `${claim.claimId}:${claim.evidenceItemId}`));
 }
 
+// VAL-GEN-004 (one implementation, also used to check model-authored text on
+// its own before the server composes a Free Impact Assessment). A block may
+// state a number only when a claim the block itself cites states the same
+// value with the same unit form: grouping commas and trailing decimal zeros
+// are presentation ("1,200" = "1200", "57.50%" = "57.5%"), while rounding,
+// a dropped or added percent sign, or a changed sign is a different number.
+// A causal term is allowed only when the cited text contains it. In a block
+// marked as a Free Impact Assessment section, the report's own section and
+// product names ("Impact Stories", "Impact Assessment", ...) are labels, not
+// a claim of effect; every other use of "impact" is still causal language.
+const ASSESSMENT_BLOCK_MARKER = /^\[\[assessment:([a-z_]+)\]\]\n/;
+const ASSESSMENT_REPORT_TERMINOLOGY = /\b(?:free\s+)?impact\s+(?:assessments?|stor(?:y|ies)|snapshots?|evidence(?:\s+library)?)\b/gi;
+
+function canonicalNumericLiteral(literal) {
+  const percent = literal.endsWith("%");
+  const value = Number(literal.replace(/[,%]/g, ""));
+  return Number.isFinite(value) ? `${value}${percent ? "%" : ""}` : literal;
+}
+
+export function unsupportedAssertionViolations({ blocks, generationClaims } = {}) {
+  const claimById = generationClaimsById(generationClaims || []);
+  const violations = [];
+  for (const block of blocks || []) {
+    const citedStatements = (block.citations || [])
+      .map((citation) => claimById.get(citation.claimId)?.claimStatement || "")
+      .filter(Boolean);
+    const citedText = citedStatements.join("\n");
+    const text = String(block.text ?? "");
+    const marker = ASSESSMENT_BLOCK_MARKER.exec(text);
+    const section = marker ? marker[1] : null;
+    const allowedNumbers = new Set(citedStatements.flatMap((statement) => literals(statement, NUMERIC_LITERAL_PATTERN)).map(canonicalNumericLiteral));
+    for (const numericLiteral of unique(literals(text, NUMERIC_LITERAL_PATTERN))) {
+      if (!allowedNumbers.has(canonicalNumericLiteral(numericLiteral))) {
+        violations.push({ type: "numeric_literal", block_ordinal: block.ordinal, section, literal: numericLiteral });
+      }
+    }
+    const causalText = marker ? text.replace(ASSESSMENT_REPORT_TERMINOLOGY, " ") : text;
+    for (const causalLiteral of unique(literals(causalText, CAUSAL_PATTERN))) {
+      if (!citedText.includes(causalLiteral)) violations.push({ type: "causal_language", block_ordinal: block.ordinal, section, literal: causalLiteral });
+    }
+  }
+  return violations;
+}
+
+// The VAL-GEN-004 blocker evidence: classes, ordinals and section keys only,
+// never the generated wording.
+export function unsupportedAssertionEvidence(violations) {
+  const sections = unique(violations.map((violation) => violation.section).filter(Boolean)).sort();
+  return {
+    violation_count: violations.length,
+    assertion_classes: unique(violations.map((violation) => violation.type)).sort(),
+    block_ordinals: unique(violations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
+    ...(sections.length > 0 ? { block_sections: sections } : {}),
+  };
+}
+
 // Package 14-05: `generationClaims` is the set of governed claims freshly
 // traceability-revalidated for THIS generation transaction. It is not, and
 // must not be treated as, "every claim eligible for the requested audience" —
@@ -358,28 +414,11 @@ export function validateGeneratedContentDraft({
       : blocker("VAL-GEN-003", "unauthorized_claim_reference", { unauthorized_count: unauthorized.length }),
   );
 
-  const assertionViolations = [];
-  for (const block of blocks || []) {
-    const citedStatements = (block.citations || [])
-      .map((citation) => claimById.get(citation.claimId)?.claimStatement || "")
-      .filter(Boolean);
-    const citedText = citedStatements.join("\n");
-    const allowedNumbers = new Set(unique(citedStatements.flatMap((statement) => literals(statement, NUMERIC_LITERAL_PATTERN))));
-    for (const numericLiteral of unique(literals(block.text, NUMERIC_LITERAL_PATTERN))) {
-      if (!allowedNumbers.has(numericLiteral)) assertionViolations.push({ type: "numeric_literal", block_ordinal: block.ordinal });
-    }
-    for (const causalLiteral of unique(literals(block.text, CAUSAL_PATTERN))) {
-      if (!citedText.includes(causalLiteral)) assertionViolations.push({ type: "causal_language", block_ordinal: block.ordinal });
-    }
-  }
+  const assertionViolations = unsupportedAssertionViolations({ blocks, generationClaims });
   results.push(
     assertionViolations.length === 0
       ? pass("VAL-GEN-004")
-      : blocker("VAL-GEN-004", "unsupported_numeric_or_causal_assertion", {
-          violation_count: assertionViolations.length,
-          assertion_classes: unique(assertionViolations.map((violation) => violation.type)).sort(),
-          block_ordinals: unique(assertionViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
-        }),
+      : blocker("VAL-GEN-004", "unsupported_numeric_or_causal_assertion", unsupportedAssertionEvidence(assertionViolations)),
   );
 
   // VAL-GEN-008 (Plan A Prompt 6): a block citing a measured claim must

@@ -233,6 +233,33 @@ function sanitizeExportEligibilityDiagnosticEvidence(evidence) {
   };
 }
 
+// VAL-GEN-004 diagnostics (owner prompt 2026-11-05): which assertion class
+// failed, in which block positions and assessment sections, whether the
+// model's own text or the assembled draft failed, and how many model
+// attempts ran. Closed values and bounded integers only; generated wording,
+// unsupported terms, claim text and prompts are never returned.
+const UNSUPPORTED_ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language"]);
+const ASSESSMENT_SECTION_KEYS = new Set(["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]);
+const UNSUPPORTED_ASSERTION_ORIGINS = new Set(["model_authored", "composed_draft"]);
+
+function sanitizeUnsupportedAssertionEvidence(blocker) {
+  if (blocker?.validator_key !== "VAL-GEN-004" || blocker?.blocking_reason !== "unsupported_numeric_or_causal_assertion") return {};
+  const evidence = blocker.evidence && typeof blocker.evidence === "object" && !Array.isArray(blocker.evidence) ? blocker.evidence : {};
+  const boundedInts = (values, max) => (Array.isArray(values) ? [...new Set(values.filter((value) => Number.isInteger(value) && value >= 1 && value <= max))].sort((a, b) => a - b).slice(0, 20) : []);
+  const closed = (values, allowed) => (Array.isArray(values) ? [...new Set(values.filter((value) => allowed.has(value)))].sort() : []);
+  const classes = closed(evidence.assertion_classes, UNSUPPORTED_ASSERTION_CLASSES);
+  const ordinals = boundedInts(evidence.block_ordinals, 20);
+  const sections = closed(evidence.block_sections, ASSESSMENT_SECTION_KEYS);
+  return {
+    ...(Number.isInteger(evidence.violation_count) && evidence.violation_count >= 0 && evidence.violation_count <= 10000 ? { violation_count: evidence.violation_count } : {}),
+    ...(classes.length > 0 ? { assertion_classes: classes } : {}),
+    ...(ordinals.length > 0 ? { block_ordinals: ordinals } : {}),
+    ...(sections.length > 0 ? { block_sections: sections } : {}),
+    ...(UNSUPPORTED_ASSERTION_ORIGINS.has(evidence.origin) ? { origin: evidence.origin } : {}),
+    ...(evidence.generation_attempts === 1 || evidence.generation_attempts === 2 ? { generation_attempts: evidence.generation_attempts } : {}),
+  };
+}
+
 function sanitizeServiceBlockers(blockers) {
   if (!Array.isArray(blockers)) return [];
   return blockers.flatMap((blocker) => {
@@ -253,6 +280,7 @@ function sanitizeServiceBlockers(blockers) {
         ...(failedGates.length > 0 ? { failed_gates: failedGates } : {}),
         ...(authorityEffectivenessReason ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
         ...exportEligibilityDiagnostic,
+        ...sanitizeUnsupportedAssertionEvidence(blocker),
       },
     }];
   });

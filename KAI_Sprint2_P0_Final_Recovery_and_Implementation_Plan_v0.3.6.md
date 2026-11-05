@@ -46914,3 +46914,56 @@ Operating Model §7 permits authorized normal processing/drafts without per-step
 **Next action:** separately authorized push/deployment. Then the owner runs Use for impact on one document file and returns the counts and the re-read pipeline row.
 
 **Status:** EVIDENCE_WITHOUT_CLAIM_IS_CLIENT_PROPOSAL_STEP_LOCALLY; BULK_PROPOSAL_VIA_EXISTING_ROUTES; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED.
+
+## Free Impact Assessment VAL-GEN-004 Reliability Repair (2026-11-05)
+
+**Owner authorization:** owner prompt 2026-11-05: "Proceed with Option A, modified". Implement, test and commit locally. No push, deployment or production generation.
+
+**Live observation (USER_CONFIRMED):** `POST …/organizations/2b4cf90f-…/generated-content-drafts/free-impact-assessment` returned HTTP 422 after about 10 s with `VAL-GEN-004` / `unsupported_numeric_or_causal_assertion` and `evidence: {}`.
+
+**Demonstrated root cause (TOOL_VERIFIED locally; the production model text was not preserved, so the exact failing prose is NOT_CONFIRMED):**
+- **Server text is clean.** The real claim statements for field_6 (25 of 38, 65.79%) and field_7 (23 of 40, 57.50%) were composed by `composeDerivedClaimStatementFromRow`. Every server-composed block and every appended disclosure passes VAL-GEN-004 with those claims. Every fixed server sentence contains no digit and no causal term: gap catalogue, recommendations, next steps, selection note, count-only prefixes, and every derived, document and coverage disclosure.
+- **Model text was set up to fail.**
+  - The model received the customer titles "Executive Impact Snapshot" and "Impact Stories" while being told not to write "impact".
+  - The prompt forbade field keys but gave no naming rule for paired claims, which have no human label ("Numeric outcome field_6 …"), so the model had to invent one; an invented "Outcome 6" is an unsupported number.
+  - The per-block number rule was not stated: a snapshot citing one claim cannot repeat another claim's figures.
+  - A single slip failed the request; there was no correction path.
+- **Diagnostics were stripped.** The validator already built `assertion_classes`, `block_ordinals` and `violation_count`. `sprint2IntakeApi.js` `sanitizeServiceBlockers` allow-lists evidence fields and dropped them, so the response showed `evidence: {}`.
+
+**Changes:**
+- **Validator.** VAL-GEN-004 now has one exported implementation (`unsupportedAssertionViolations`), not weakened:
+  - Numbers must still appear in a claim that the same block cites. Only presentation differences are equal: grouping commas, and trailing decimal zeros with the same percent form. Rounding, a dropped or added percent sign, and a changed sign are still refused.
+  - Inside marked assessment blocks only, the report's own labels (Impact Assessment, Impact Stories, Impact Snapshot, Impact Evidence) are not causal; any other "impact" is still refused.
+  - Evidence now adds closed `block_sections`.
+- **Composition.** The model receives neutral section titles. Customer titles and the six sections are unchanged.
+- **Prompt.** States the per-block number rule and the naming-by-column rule for unlabelled claims, lists the banned terms explicitly, and defines the correction input.
+- **Repository.**
+  - The model's text is checked on its own before composition. One bounded correction (`correction`: block position, section, classes, and up to 10 of the model's own unsupported terms) is allowed through the same single model boundary, after the existing AI-processing check.
+  - The whole assembled draft is still validated.
+  - A second failure rolls back with `origin: model_authored, generation_attempts: 2`. A failure in the assembled draft after the model text passed is marked `composed_draft` and never retried.
+  - Persisted validator evidence records `model_generation_attempts`.
+- **Route.** Passes only closed or bounded VAL-GEN-004 fields: count, classes, ordinals, sections, origin, attempts. Never prose or terms.
+- **Frontend.** Plain-language message for this refusal.
+
+**Validation (`DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel`):**
+- New `kai-free-impact-assessment-generation-reliability.spec.js` passes 10/10. It drives the real repository and production adapter (provider call stubbed) with an in-memory transaction, reading back through the existing reread. It covers:
+  - root cause and attribution;
+  - server-text cleanliness;
+  - titles;
+  - benign terminology;
+  - number formatting and block attribution;
+  - first-try persistence;
+  - retry success, with exactly the diagnostics sent;
+  - retry exhausted: nothing persisted, no third call;
+  - API sanitization;
+  - the correction contract.
+- Against the original code the workflow, title and API cases fail: one slip gives an immediate 422 after one model call, and evidence is stripped.
+- Existing assessment, paired, VAL-GEN-008 and AI-enforcement specs pass 47/47.
+- Full `npm test`: 6103 tests, 5978 pass, 0 fail, 125 skipped. A Chrome DevTools harness case failed once in an earlier full run; it passes in isolation and in the final run (environment flake).
+- `git diff --check` is clean.
+
+**Controls preserved:** tenant scoping, P2-06 revalidation, AI-processing refusal before the model, the count-only boundary, VAL-GEN-001…010, the result contract, review queue, release and export are unchanged. No migration.
+
+**Next action:** a separately authorized push/deployment. Then the owner runs one Free Impact Assessment with the same two claims and returns either the 201 draft or the 422 blocker, whose `evidence` will now name the class, sections, origin and attempts.
+
+**Status:** FREE_IMPACT_ASSESSMENT_VAL_GEN_004_RELIABILITY_REPAIRED_LOCALLY; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED.

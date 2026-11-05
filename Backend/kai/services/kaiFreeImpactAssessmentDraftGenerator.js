@@ -56,20 +56,21 @@ const FREE_IMPACT_ASSESSMENT_OUTPUT_SCHEMA = Object.freeze({
 });
 
 const SYSTEM_PROMPT = [
-  "You write the first sections of an internal Free Impact Assessment for Get Kinder, for the organization's own planning.",
+  "You write the first sections of an internal evidence assessment for Get Kinder, for the organization's own planning.",
   "Use only the supplied governed claim projection and assessment context; never use outside knowledge.",
-  "Return blocks for these sections, in this order: executive_snapshot (one short block naming the main things the evidence shows),",
+  "Return blocks for these sections, in this order, using the section keys exactly: executive_snapshot (one short block naming the main things the evidence records),",
   "evidence_findings (one block per related group of findings, grouping claims that carry the same limitationCodes),",
-  "impact_stories (a source-backed account of the programme drawn from the cited document statements),",
+  "impact_stories (a source-backed account of the programme drawn from the cited document statements; the key is an identifier, not a description),",
   "and optionally gaps_opportunities (what the evidence does not yet show). The server adds the documented gaps, up to three proposed improvements and next steps; do not write recommendations.",
   "Every block must cite at least one supplied claim/evidence pair, and only the claims it relies on.",
-  "Name indicators by the human-stated label at the start of a claim statement; never write internal field keys such as field_1.",
-  "Do not add numbers, percentages or counts unless they appear verbatim in a cited claim statement, and keep each number's unit, period and population as the claim states it.",
-  "Never state or imply causation or effect, and avoid words such as impact, improve, increase, reduce, because, due to, leads to or results in.",
+  "Name an indicator by the human-stated label at the start of its claim statement. When the statement has no human label and begins with an internal field key such as field_6, name it by its column as the statement gives it (for example \"the numeric outcome in column F\"); never write internal field keys and never invent a numbered name such as \"Outcome 1\" or \"Measure 2\".",
+  "Every number in a block, including percentages, must appear exactly as written in a claim statement that the same block cites: copy it character for character, never round, convert, total, average or compare it, and keep its unit, period and population as the claim states it. When a block mentions figures from several claims, cite each of those claims in that block. Write no other digits, dates, ordinals or list numbers.",
+  "Describe what the evidence records, never what it caused: do not use impact, impacts, impacted, improve, improves, increase, increases, decrease, reduce, reduces, worsen, cause, because, due to, drive, driven by, leads to, led to, results in or attributable to, unless the cited claim statement itself uses that exact word.",
   "Do not describe a value as verified; source-reported statements stay source-reported.",
   "participantStoryEvidence is none_cited: do not invent, paraphrase or attribute a participant story or quotation; quote only words that appear in a cited claim statement.",
   "Do not repeat limitation disclosures: the server appends each measured claim's disclosure to the block that cites it.",
   "Never state or imply that this draft is approved, final or ready for funder or public use.",
+  "If the input includes correction, your previous blocks were refused: correction.blocks names each refused block's position and section, what kind of wording was unsupported and the unsupported terms. Return a complete new set of blocks that keeps every rule above and contains none of those unsupported terms unless a claim the block cites states them exactly.",
 ].join(" ");
 
 const anthropic = new Anthropic();
@@ -127,6 +128,7 @@ export function createProductionFreeImpactAssessmentDraftGenerator({
           requestedAudience: generatorInput.requestedAudience,
           assessment: generatorInput.assessment,
           claims: generatorInput.claims,
+          ...(generatorInput.correction ? { correction: generatorInput.correction } : {}),
         }),
       }],
       output_config: { format: { type: "json_schema", schema: FREE_IMPACT_ASSESSMENT_OUTPUT_SCHEMA } },
