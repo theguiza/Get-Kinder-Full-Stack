@@ -47205,3 +47205,35 @@ Operating Model §7 permits authorized normal processing/drafts without per-step
 5. Real SQL execution of the Project scope predicate, the connected DB-backed browser workflow, and deployed/production behaviour are NOT_CONFIRMED (no database authorized). Real-model prose is NOT_CONFIRMED (stubbed provider).
 
 **Status:** IMPACT_EVIDENCE_DRAFT_FIRST_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; PROJECT_SCOPE_IMPLEMENTED_SQL_EXECUTION_NOT_CONFIRMED; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED. Package ends with a coherent local commit. Stop here; push and deployment remain separately authorized.
+
+## Impact-evidence workflow simplification — report composition completion (2026-11-06)
+
+**Owner authorization / package boundary (USER_CONFIRMED):** owner task "KAI — Complete impact-evidence workflow simplification acceptance". It is a bounded correction to the package above (limit 3). It authorizes local implementation, synthetic test updates, this record and a local commit. It does not authorize production access, push, deployment, schema, database, flag or environment change, real client data, or a Current State update.
+
+**Root cause (TOOL_VERIFIED in `6f56e744`):**
+
+- `postgresClientInternalReportRepository.js::readClaimFacts` sets `measurement` only for source-record-count evidence (`source_record_count_measurement`). A derived measurement (`source_derived_measurement`) or a document statement (`source_document_statement`) arrives with `measurement: null` and no evidence type. Only the derived limitation codes were carried.
+- `kaiInternalReportMarkdownSerializer.js` composed "What this evidence does not establish", "Analysis" and "Conclusion" only from `measuredFacts(model)` (facts with a `measurement`), then added blanket denials. The cited observation and the 25-of-38 paired outcome were therefore omitted from Analysis and Conclusion and contradicted by "Any outcome for participants … or any change over time" and "no comparison, baseline or attribution evidence is cited".
+- In a derived-only or document-only report the same path wrote "no measured value is available for further analysis" and called the evidence a "volume-of-activity figure".
+
+**Change:**
+
+1. `readClaimFacts` projection adds `evidenceType` and, for a derived measurement, `derivedMeasurement` (persisted `measurement_family`, `percentage`, `component_counts`; restated, never recomputed). The facts are not part of the client DTO.
+2. The serializer classifies each fact as row count, source-reported document statement, paired baseline/follow-up outcome, or other derived measurement (reported by its recorded statement).
+   - **Does not establish:** limitations are specific and cited. Improvement is not established when the direction is not established. Only the comparable pairs are compared (24 of 62 excluded). Causation is not established: there is no comparison group. The observation is unverified and unmeasured. Row-count participant and period lines are scoped to the counted records. The period-verified line appears only when a period is stated. The blanket outcome and baseline denials appear only when no observation or paired outcome is cited.
+   - **Analysis:** adds a qualitative observation entry and an outcome-measurement entry (exact pairs, percentage, unchanged and lower counts, exclusions, direction). It states how a row count relates to the other findings, and that the observation and the measured change do not confirm each other. "Volume-of-activity" appears only for a non-count-only record measurement.
+   - **Conclusion:** when an observation or derived measurement is cited, it summarizes every finding with its qualification and states potential impact as qualified internal evidence. It does not claim improvement or causation. Count-only and claim-only conclusions are unchanged.
+   - **Adjacent:** the period, method and duplicate sections recognize a derived measurement instead of "No measured value is cited".
+3. No change to admission, P2-06, permissions, Project scope, story/sensitivity handling, validators, prompts, provider, release, export, schema or migrations.
+
+**Synthetic acceptance (TOOL_VERIFIED; stubbed provider; the generated Markdown of all four scenarios was read in full):** `kai-impact-evidence-draft-first.spec.js` 11/11 (7 existing + 4 new).
+
+- **(A) Mixed** (37 rows, observation, 25 of 38): all three findings appear in Analysis and Conclusion. The 24-of-62 limitation, no improvement or causation claim, no blanket denials, the generated narrative kept, and exact traceability rows are asserted.
+- **(B) Count only:** rows stay rows, and the existing count-only conclusion is unchanged. No "37 service events/people/participants".
+- **(C) Document only:** the observation is in Analysis and Conclusion as qualified, source-reported evidence.
+- **(D) Derived only:** recognized as an outcome measurement with its period, direction and subset limitations. It is not described as missing measured evidence or as volume of activity.
+- **(E) Regression:** focused report, count-only, story-flag and canary specs 56/56. Full `npm test`: **6140 tests, 6015 pass, 0 fail, 125 skipped** (database-dependent, unchanged). No frontend code changed; the build was not re-run. `git diff --check` is clean, and the complete diff was inspected.
+
+**Remaining:** real-model prose NOT_CONFIRMED (stubbed). The tabular and cross-source derived families are rendered by their recorded statement only (no synthetic report scenario). Real SQL and production NOT_CONFIRMED. Limit 3 of the package above is resolved.
+
+**Status:** IMPACT_EVIDENCE_REPORT_COMPOSITION_CORRECTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED. Stop here.

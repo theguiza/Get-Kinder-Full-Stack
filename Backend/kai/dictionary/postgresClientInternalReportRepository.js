@@ -112,6 +112,9 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
     profileCanonicalSha256: versionRow?.profile_canonical_sha256 ?? null,
     claimStatement: data.claim.statement,
     evidenceStatement: data.evidence.statement,
+    // The cited evidence's type, so the report describes a source-reported
+    // statement, a row count and a derived measurement each as what it is.
+    evidenceType: evidenceItemRow?.evidence_type ?? null,
     currentlyEligible: data.eligible === true,
     blockerCodes: [...data.blockerCodes],
     // Every row-count measurement has unverified human meaning, irrespective
@@ -136,6 +139,15 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         inclusionRule: definitionRow.inclusion_rule,
         exclusionRule: definitionRow.exclusion_rule,
         definitionRecordedAt: iso(definitionRow.created_at),
+      }
+      : null,
+    // A derived measurement's persisted family and result counts, restated
+    // by the report exactly as recorded (never recomputed).
+    derivedMeasurement: derivedRow
+      ? {
+        family: derivedRow.measurement_family,
+        percentage: derivedRow.percentage ?? null,
+        componentCounts: { ...(derivedRow.component_counts || {}) },
       }
       : null,
     // Every other source version a cross-source measurement combines, cited

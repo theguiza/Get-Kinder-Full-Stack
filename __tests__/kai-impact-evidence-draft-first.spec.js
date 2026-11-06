@@ -304,3 +304,136 @@ test("12 draft versus release: a provisional draft is readable but not released,
   assert.equal(funder.error.code, "funder_use_not_currently_eligible", JSON.stringify(funder));
   assert.equal(h.providerInputs.length, calls);
 });
+
+// Report composition across evidence types (2026-11-06 completion): the
+// deterministic sections describe every cited evidence type on its own terms
+// and never negate a finding the report presents elsewhere.
+function sectionOf(md, from, to) {
+  const start = md.indexOf(`\n## ${from}\n`);
+  const end = md.indexOf(`\n## ${to}\n`, start + 1);
+  assert.ok(start >= 0 && end > start, `${from} section present`);
+  return md.slice(start, end);
+}
+function sectionsOf(md) {
+  return {
+    limits: sectionOf(md, "What this evidence does not establish", "Analysis"),
+    analysis: sectionOf(md, "Analysis", "Generated narrative"),
+    conclusion: sectionOf(md, "Conclusion", "References"),
+  };
+}
+async function dumpScenario(name, md) {
+  if (process.env.KAI_DRAFT_FIRST_DEMO_DIR) (await import("node:fs")).writeFileSync(`${process.env.KAI_DRAFT_FIRST_DEMO_DIR}/${name}.md`, md);
+}
+// Statements that would contradict a cited observation or paired outcome.
+const BLANKET_NEGATIONS = [
+  /Any outcome for participants or the community, or any change over time/,
+  /no comparison, baseline or attribution evidence is cited/,
+  /no measured value is (?:cited|available)/i,
+  /volume-of-activity/,
+  /not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact/,
+];
+// Over the deterministic sections only (an assessment's model-authored
+// "Recommended Improvements" heading is about the programme, not a result).
+function assertNoUnqualifiedImprovement(md) {
+  const { limits, analysis, conclusion } = sectionsOf(md);
+  for (const line of [limits, analysis, conclusion].join("\n").split("\n").filter((entry) => /improv/i.test(entry))) {
+    assert.match(line, /not (?:an established |)improvement|is an improvement: whether a higher value is better has not been established|not presented as a better result|a comparison[^.]*would be needed/, `qualified: ${line}`);
+  }
+}
+
+test("A mixed evidence: activity rows, a participant observation and a paired outcome are each analysed and concluded on their own terms, with no contradiction", async () => {
+  const h = harness([ACTIVITY, FEEDBACK, OUTCOME]);
+  const [activity, feedback, outcome] = h.fixtures;
+  const result = await createFreeImpactAssessmentDraft(h.input(h.fixtures.map((f) => f.claimId), "composition-mixed"),
+    { ...h.dependencies, draftGenerator: assessmentGenerator(h, [activity.claimId, feedback.claimId]) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const md = (await readReport(h, result.data.generatedContentDraftId)).markdown.data.markdown;
+  await dumpScenario("A-mixed", md);
+  const { limits, analysis, conclusion } = sectionsOf(md);
+  // Analysis: all three findings, each in its own analytical context.
+  assert.match(analysis, /\[CIT-001\] 37 of the 37 data rows after the header .* were nonblank and counted/);
+  assert.match(analysis, /\[CIT-002\] \*\*Source-reported observation \(qualitative\):\*\* the source records that "Participants told staff the weekly sessions helped them feel more confident about finding work\."/);
+  assert.match(analysis, /\[CIT-003\] \*\*Outcome measurement \(derived baseline and follow-up comparison\):\*\* 25 of 38 comparable participant pairs \(65\.79%\) recorded a numerically higher follow-up value than baseline, 10 the same and 3 lower\. 24 of 62 participants lacked comparable baseline and follow-up observations/);
+  assert.match(analysis, /The row count \[CIT-001\] describes what was recorded, not who took part or what changed/);
+  assert.match(analysis, /neither confirms the other/);
+  // Limitations: specific to the evidence, not blanket denials.
+  assert.match(limits, /That the numerical change \[CIT-003\] is an improvement: whether a higher value is better has not been established\./);
+  assert.match(limits, /only the 38 comparable pairs are compared; 24 of 62 participants lacked comparable/);
+  assert.match(limits, /That the programme caused any result: the baseline and follow-up comparison \[CIT-003\] follows the same participants over time, with no comparison group/);
+  assert.match(limits, /That the source-reported observation \[CIT-002\] is verified or representative/);
+  assert.match(limits, /How many distinct people the counted records represent \[CIT-001\]: .* no participant count was measured from them\./);
+  // Conclusion: substantive, qualified, covers every finding.
+  assert.match(conclusion, /37 nonblank data rows in the source version's CSV data records \[CIT-001\]/);
+  assert.match(conclusion, /"Participants told staff the weekly sessions helped them feel more confident about finding work\." \[CIT-002\]/);
+  assert.match(conclusion, /25 of 38 comparable participant pairs \(65\.79%\) recorded a numerically higher follow-up value than baseline, 10 the same and 3 lower \[CIT-003\]; 24 of 62 participants/);
+  assert.match(conclusion, /this is an observed numerical change, not an established improvement/);
+  assert.match(conclusion, /Taken together, these findings are relevant to the programme's potential impact and may be used internally as qualified evidence of it/);
+  assert.match(conclusion, /They do not establish that the programme caused any change/);
+  // No contradiction with the cited findings or the generated narrative.
+  for (const negation of BLANKET_NEGATIONS) assert.doesNotMatch(md, negation);
+  assert.doesNotMatch(md, /\b(?:caused|causes) (?:the|this|an?) (?:change|improvement|increase)\b(?![^.]*not)/i);
+  assertNoUnqualifiedImprovement(md);
+  assert.match(md, /suggests the programme may be supporting participants toward employment/, "the generated narrative is kept");
+  // Exact citations and source versions.
+  for (const [index, f] of [activity, feedback, outcome].entries()) {
+    assert.ok(md.includes(`| CIT-00${index + 1} | \`${f.claimId}\` | \`${f.evidenceItemId}\` |`), "traceability row");
+    assert.ok(md.includes(`\`${f.sourceVersionId}\``));
+  }
+});
+
+test("B count-only evidence: rows stay rows in the analysis, limitations and conclusion", async () => {
+  const h = harness([ACTIVITY]);
+  const result = await createImpactNarrativeDraft(h.input([h.fixtures[0].claimId], "composition-count"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const md = (await readReport(h, result.data.generatedContentDraftId)).markdown.data.markdown;
+  await dumpScenario("B-count-only", md);
+  const { limits, analysis, conclusion } = sectionsOf(md);
+  assert.match(analysis, /37 of the 37 data rows after the header .* were nonblank and counted/);
+  assert.match(analysis, /A count-only figure is a number of worksheet rows\. It is not a measure of activity, reach or results/);
+  assert.doesNotMatch(analysis, /Source-reported observation|Outcome measurement|Derived measurement|volume-of-activity/);
+  assert.match(limits, /Any outcome for participants or the community, or any change over time\./, "no outcome evidence is cited, so none is claimed");
+  assert.match(limits, /That the source is complete: activity not recorded in this source is not reflected\./);
+  assert.doesNotMatch(limits, /reporting period is verified/, "no period was defined, so none is described as stated");
+  assert.match(conclusion, /^On the available evidence, the promoted source contains 37 nonblank data rows .* It is not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact\.$/m);
+  assert.doesNotMatch(md, /\b37 (?:service events|people|participants|sessions|outcomes)\b/, "rows never become people, events or outcomes");
+});
+
+test("C document-only evidence: a source-reported observation is analysed and concluded as qualified qualitative evidence, not dismissed", async () => {
+  const h = harness([FEEDBACK]);
+  const result = await createImpactNarrativeDraft(h.input([h.fixtures[0].claimId], "composition-document"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const md = (await readReport(h, result.data.generatedContentDraftId)).markdown.data.markdown;
+  await dumpScenario("C-document-only", md);
+  const { limits, analysis, conclusion } = sectionsOf(md);
+  assert.match(analysis, /\[CIT-001\] \*\*Source-reported observation \(qualitative\):\*\* the source records that "Participants told staff the weekly sessions helped them feel more confident about finding work\." This is qualitative evidence as the source reports it\. It is not a measurement, KAI did not verify it, and how many people it reflects is not recorded\./);
+  assert.match(limits, /That the observation \[CIT-001\] is a measured outcome or a measured change over time: no baseline and follow-up comparison is cited\./);
+  assert.match(conclusion, /the source reports an observation: "Participants told staff the weekly sessions helped them feel more confident about finding work\." \[CIT-001\]\. This is qualitative, source-reported evidence/);
+  assert.match(conclusion, /This finding is relevant to the programme's potential impact and may be used internally as qualified evidence of it, with the limitations above kept with it\. It does not establish that the programme caused any change/);
+  // No baseline or comparison is cited here, so that statement stays true.
+  assert.match(limits, /That the programme caused any result: no comparison, baseline or attribution evidence is cited\./);
+  // "No measured value is cited" stays true in the method sections; the
+  // analysis and conclusion still describe the observation.
+  for (const negation of BLANKET_NEGATIONS.filter((entry) => !/baseline|measured value/.test(entry.source))) assert.doesNotMatch(md, negation);
+  assert.doesNotMatch(analysis + conclusion, /no measured value/i);
+  assert.doesNotMatch(md, /nonblank data row|Outcome measurement/);
+});
+
+test("D derived-outcome evidence: a paired outcome without a row count is recognised as a measured change with its own limitations", async () => {
+  const h = harness([OUTCOME]);
+  const result = await createImpactNarrativeDraft(h.input([h.fixtures[0].claimId], "composition-derived"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const md = (await readReport(h, result.data.generatedContentDraftId)).markdown.data.markdown;
+  await dumpScenario("D-derived-outcome", md);
+  const { limits, analysis, conclusion } = sectionsOf(md);
+  assert.match(analysis, /\[CIT-001\] \*\*Outcome measurement \(derived baseline and follow-up comparison\):\*\* 25 of 38 comparable participant pairs \(65\.79%\)/);
+  assert.match(analysis, /Whether a higher value is better has not been established, so this is an observed numerical change, not an established improvement\./);
+  assert.match(limits, /That the numerical change \[CIT-001\] is an improvement/);
+  assert.match(limits, /24 of 62 participants lacked comparable/);
+  assert.match(md, /- No reporting period was applied to the derived measurement \[CIT-001\]\./);
+  assert.match(md, /#### \[CIT-001\] Derived measurement/);
+  assert.match(conclusion, /in the baseline and follow-up comparison, 25 of 38 comparable participant pairs \(65\.79%\) recorded a numerically higher follow-up value/);
+  assert.match(conclusion, /It does not establish that the programme caused any change: no comparison with people who did not take part is cited, and the beneficial direction of the measured change is not established\./);
+  for (const negation of BLANKET_NEGATIONS) assert.doesNotMatch(md, negation);
+  assert.doesNotMatch(md, /nonblank data row|activity volume/);
+  assertNoUnqualifiedImprovement(md);
+});

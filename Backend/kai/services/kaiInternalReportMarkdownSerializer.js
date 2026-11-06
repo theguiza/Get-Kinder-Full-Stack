@@ -3,7 +3,13 @@ import { PROVISIONAL_REPORT_STATUS, reportInformationNotes } from "../../../shar
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
-import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
+import {
+  DERIVED_LIMITATION_CODES,
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  DERIVED_MEASUREMENT_FAMILIES,
+  describeDerivedLimitationCode,
+} from "../validators/kaiDerivedMeasurementValidators.js";
+import { DOCUMENT_EVIDENCE_TYPE } from "../validators/kaiDocumentEvidenceValidators.js";
 
 const COUNT_ONLY_LIMITATION_TEXT = STORY_SOURCE_NOTE;
 
@@ -51,6 +57,68 @@ function periodText(measurement) {
 
 function measuredFacts(model) {
   return model.facts.filter((fact) => fact.measurement);
+}
+
+// Each cited fact is described as the kind of evidence it is: a source row
+// count (fact.measurement), a source-reported document statement, or a
+// derived measurement. A fact without a row count is not therefore without
+// evidence: a paired outcome or an observation is reported on its own terms.
+function citedRefs(facts) {
+  return refs(facts.flatMap((fact) => fact.citationRefs));
+}
+
+function isDocumentFact(fact) {
+  return !fact.measurement && fact.evidenceType === DOCUMENT_EVIDENCE_TYPE;
+}
+
+function isDerivedFact(fact) {
+  return !fact.measurement && (Boolean(fact.derivedMeasurement) || fact.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE);
+}
+
+const PAIRED_COUNT_KEYS = Object.freeze(["participant_count", "comparable_pair_count", "increased_count", "unchanged_count", "decreased_count", "excluded_participant_count"]);
+
+// A paired baseline/follow-up outcome with every persisted count present, or
+// null (then it is reported by its recorded statement as another derived fact).
+function pairedOutcomeOf(fact) {
+  const derived = fact.derivedMeasurement;
+  if (!isDerivedFact(fact) || derived?.family !== DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) return null;
+  const counts = derived.componentCounts || {};
+  if (!PAIRED_COUNT_KEYS.every((key) => Number.isSafeInteger(counts[key]))) return null;
+  return { ...counts, percentage: derived.percentage ?? null };
+}
+
+function evidenceKinds(model) {
+  return {
+    counts: measuredFacts(model),
+    documents: model.facts.filter(isDocumentFact),
+    paired: model.facts.filter((fact) => pairedOutcomeOf(fact)),
+    otherDerived: model.facts.filter((fact) => isDerivedFact(fact) && !pairedOutcomeOf(fact)),
+  };
+}
+
+function directionNotEstablished(fact) {
+  return !(fact.limitationCodes || []).includes(DERIVED_LIMITATION_CODES.DIRECTION_HUMAN_STATED);
+}
+
+function pairedResult(p) {
+  return `${p.increased_count} of ${p.comparable_pair_count} comparable participant pairs${p.percentage === null ? "" : ` (${text(p.percentage)}%)`} `
+    + `recorded a numerically higher follow-up value than baseline, ${p.unchanged_count} the same and ${p.decreased_count} lower`;
+}
+
+function pairedCoverage(p) {
+  return `${p.excluded_participant_count} of ${p.participant_count} participants lacked comparable baseline and follow-up observations and are not included`;
+}
+
+function directionText(fact) {
+  return directionNotEstablished(fact)
+    ? "Whether a higher value is better has not been established, so this is an observed numerical change, not an established improvement."
+    : "The organization states which direction of the value is better; KAI did not verify that.";
+}
+
+// The quoted source text of a document statement claim, or the whole claim.
+function observationText(fact) {
+  const quoted = /"(.*)"/s.exec(text(fact.claimStatement));
+  return quoted ? quoted[1] : text(fact.claimStatement);
 }
 
 // A source-record-count measurement establishes rows. Apply the same honest
@@ -122,6 +190,11 @@ function periodLines(model) {
       ? `- ${period} ${refs(fact.citationRefs)}. The period is stated in the organization's recorded definition; it was not checked against dates in the records.`
       : `- No reporting period was defined for the count ${refs(fact.citationRefs)}; the count is not bounded to a period.`);
   }
+  for (const fact of model.facts.filter(isDerivedFact)) {
+    const codes = fact.limitationCodes || [];
+    if (codes.includes(DERIVED_LIMITATION_CODES.NO_REPORTING_PERIOD)) lines.push(`- No reporting period was applied to the derived measurement ${refs(fact.citationRefs)}.`);
+    else if (codes.includes(DERIVED_LIMITATION_CODES.ENGAGEMENT_PERIOD_APPLIED)) lines.push(`- The engagement's reporting period was applied to the derived measurement ${refs(fact.citationRefs)}.`);
+  }
   if (lines.length === 0) lines.push("- The cited evidence does not establish a reporting period.");
   return lines;
 }
@@ -150,6 +223,11 @@ function methodLines(model) {
       "",
     );
   }
+  for (const fact of model.facts.filter(isDerivedFact)) {
+    lines.push(`#### ${refs(fact.citationRefs)} Derived measurement`, "",
+      "- **Method:** calculated from the cited source version's recorded values under the measurement's recorded definition. "
+        + "Its result is stated under Key findings and its limitations under Data quality and limitations.", "");
+  }
   if (lines.length === 0) lines.push("No measured value is cited; the cited claims are reproduced as recorded.", "");
   return lines;
 }
@@ -162,7 +240,11 @@ function duplicateLines(model) {
       ? `- ${refs(fact.citationRefs)} The profiler reported ${plural(m.duplicateRecordCount, "exact-duplicate record")}. They are included in the count of ${m.measuredValue}, not removed or merged, because the recorded definition gives no rule that makes them invalid. The count is therefore a count of records, not of distinct sessions or events.`
       : `- ${refs(fact.citationRefs)} The profiler reported no exact-duplicate records.`);
   }
-  if (lines.length === 0) lines.push("- No measured value is cited.");
+  if (lines.length === 0) {
+    lines.push(model.facts.some(isDerivedFact)
+      ? "- No row-count measurement is cited. How each derived measurement treats repeated or excluded records is stated in its limitations."
+      : "- No measured value is cited.");
+  }
   return lines;
 }
 
@@ -200,34 +282,61 @@ function establishesLines(model) {
 }
 
 function doesNotEstablishLines(model) {
-  const measured = measuredFacts(model);
+  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
   const lines = [];
-  if (measured.length > 0) {
-    lines.push("- How many distinct people took part: the records are not linked to individuals, and no participant count was measured.");
-    if (measured.some((fact) => fact.measurement.duplicateRecordCount > 0)) {
+  if (counts.length > 0) {
+    lines.push(`- How many distinct people the counted records represent ${citedRefs(counts)}: the records are not linked to individuals, and no participant count was measured from them.`);
+    if (counts.some((fact) => fact.measurement.duplicateRecordCount > 0)) {
       lines.push("- How many distinct real-world sessions or events took place: exact-duplicate records are included in the count.");
     } else {
       lines.push("- That each record is a distinct real-world session or event: KAI counted records; it did not verify what each record represents.");
     }
-    lines.push("- That the reporting period is verified: it is stated in the definition, not checked against record dates.");
+    if (counts.some((fact) => periodText(fact.measurement))) {
+      lines.push("- That the reporting period is verified: it is stated in the definition, not checked against record dates.");
+    }
   }
-  for (const fact of measured.filter((entry) => entry.countOnly)) {
+  for (const fact of counts) {
     lines.push(`- That each counted row is one ${humanLabel(fact.measurement.countedUnit)} ${refs(fact.citationRefs)}: a person at the organization defined that meaning, and KAI did not verify it.`);
   }
-  if (measured.some((fact) => fact.countOnly)) {
+  if (counts.length > 0) {
     lines.push("- A row count does not establish a participant story or quotation.");
   }
+  for (const fact of documents) {
+    lines.push(`- That the source-reported observation ${refs(fact.citationRefs)} is verified or representative: it is an account recorded in the source, not a measurement; KAI did not verify it, and how many people it reflects is not recorded.`);
+    if (paired.length === 0) {
+      lines.push(`- That the observation ${refs(fact.citationRefs)} is a measured outcome or a measured change over time: no baseline and follow-up comparison is cited.`);
+    }
+  }
+  for (const fact of paired) {
+    const p = pairedOutcomeOf(fact);
+    lines.push(directionNotEstablished(fact)
+      ? `- That the numerical change ${refs(fact.citationRefs)} is an improvement: whether a higher value is better has not been established.`
+      : `- That the direction the organization states as better for ${refs(fact.citationRefs)} has been verified: the organization states it; KAI did not verify it.`);
+    lines.push(`- That the result ${refs(fact.citationRefs)} describes every participant: only the ${p.comparable_pair_count} comparable pairs are compared; ${pairedCoverage(p)}.`);
+  }
+  for (const fact of otherDerived) {
+    lines.push(`- Anything about ${refs(fact.citationRefs)} beyond its recorded values: its recorded limitations are listed under Data quality and limitations.`);
+  }
+  if (documents.length === 0 && paired.length === 0) {
+    lines.push(otherDerived.length > 0
+      ? "- Any change over time: no baseline and follow-up comparison is cited."
+      : "- Any outcome for participants or the community, or any change over time.");
+  }
   lines.push(
-    "- Any outcome for participants or the community, or any change over time.",
-    "- That the programme caused any result: no comparison, baseline or attribution evidence is cited.",
-    "- That the source is complete: activity not recorded in this source is not reflected.",
+    paired.length > 0
+      ? `- That the programme caused any result: the baseline and follow-up comparison ${citedRefs(paired)} follows the same participants over time, with no comparison group of people who did not take part, and no other attribution evidence is cited.`
+      : "- That the programme caused any result: no comparison, baseline or attribution evidence is cited.",
+    counts.length === model.facts.length
+      ? "- That the source is complete: activity not recorded in this source is not reflected."
+      : "- That the cited sources are complete: activity, participants or outcomes not recorded in them are not reflected.",
   );
   return lines;
 }
 
 function analysisLines(model) {
+  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
   const lines = [];
-  for (const fact of measuredFacts(model)) {
+  for (const fact of counts) {
     const m = fact.measurement;
     if (fact.countOnly) {
       lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data row")} after the header in ${worksheetOf(m)} `
@@ -243,13 +352,32 @@ function analysisLines(model) {
         ? ` ${plural(m.duplicateRecordCount, "exact-duplicate record")} ${m.duplicateRecordCount === 1 ? "is" : "are"} included, so the figure should be reported as records, not as distinct sessions.`
         : ""));
   }
+  for (const fact of documents) {
+    lines.push(`- ${refs(fact.citationRefs)} **Source-reported observation (qualitative):** the source records that "${observationText(fact)}" `
+      + "This is qualitative evidence as the source reports it. It is not a measurement, KAI did not verify it, and how many people it reflects is not recorded.");
+  }
+  for (const fact of paired) {
+    const p = pairedOutcomeOf(fact);
+    lines.push(`- ${refs(fact.citationRefs)} **Outcome measurement (derived baseline and follow-up comparison):** ${pairedResult(p)}. ${pairedCoverage(p)}. `
+      + `${directionText(fact)} It is a change observed among the comparable pairs and does not by itself show that the programme caused it.`);
+  }
+  for (const fact of otherDerived) {
+    lines.push(`- ${refs(fact.citationRefs)} **Derived measurement:** ${text(fact.claimStatement)} It is reported with its recorded limitations.`);
+  }
   if (lines.length === 0) lines.push("- The cited claims are reported as recorded; no measured value is available for further analysis.");
-  const measured = measuredFacts(model);
-  if (measured.some((fact) => fact.countOnly)) {
+  if (counts.some((fact) => fact.countOnly)) {
     lines.push("- A count-only figure is a number of worksheet rows. It is not a measure of activity, reach or results, and what a row represents was not verified.");
   }
-  if (measured.length === 0 || measured.some((fact) => !fact.countOnly)) {
-    lines.push(`- ${measured.some((fact) => fact.countOnly) ? "Each other measured figure" : "This"} is a volume-of-activity figure from one source. Interpreting it as reach or results would need further evidence (for example attendance linked to people, or outcome measures).`);
+  if (counts.some((fact) => !fact.countOnly)) {
+    lines.push(`- ${counts.some((fact) => fact.countOnly) ? "Each other measured figure" : "This"} is a volume-of-activity figure from one source. Interpreting it as reach or results would need further evidence (for example attendance linked to people, or outcome measures).`);
+  }
+  if (counts.length > 0 && counts.length < model.facts.length) {
+    lines.push(`- The row ${counts.length === 1 ? "count" : "counts"} ${citedRefs(counts)} ${counts.length === 1 ? "describes" : "describe"} what was recorded, not who took part or what changed; ${counts.length === 1 ? "it is" : "they are"} read separately from the other findings above.`);
+  }
+  if (documents.length > 0 && paired.length > 0) {
+    lines.push(`- The source-reported observation ${citedRefs(documents)} and the numerical change ${citedRefs(paired)} are separate pieces of evidence about participants. `
+      + `The observation is an unmeasured account${paired.some(directionNotEstablished) ? ", and the beneficial direction of the measured change is not established" : ""}; `
+      + "they are relevant to the same question, but neither confirms the other.");
   }
   return lines;
 }
@@ -286,8 +414,47 @@ function authorityLines(model) {
   return lines;
 }
 
+// A conclusion that summarizes every cited evidence type with its own
+// qualification: row counts as rows, observations as source-reported,
+// derived measurements by their recorded values and limitations.
+function substantiveConclusion(model) {
+  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
+  const parts = ["On the available evidence,"];
+  if (counts.length > 0) {
+    parts.push(`the promoted source contains ${counts.map((fact) => `${countedRows(fact.measurement)} ${refs(fact.citationRefs)}`).join("; ")}. `
+      + `${counts.length === 1 ? "This is a count" : "These are counts"} of rows whose meaning was defined by a person at the organization and not verified by KAI; `
+      + `${counts.length === 1 ? "it is" : "they are"} not a count of people reached, of distinct sessions, or of outcomes.`);
+  }
+  if (documents.length > 0) {
+    parts.push(`${counts.length > 0 ? "The" : "the"} source reports ${documents.length === 1 ? "an observation" : "observations"}: `
+      + `${documents.map((fact) => `"${observationText(fact)}" ${refs(fact.citationRefs)}`).join("; ")}. `
+      + `${documents.length === 1 ? "This is" : "These are"} qualitative, source-reported evidence: not measured or verified, and how many people ${documents.length === 1 ? "it reflects" : "they reflect"} is not recorded.`);
+  }
+  for (const fact of paired) {
+    const p = pairedOutcomeOf(fact);
+    parts.push(`${parts.length > 1 ? "In" : "in"} the baseline and follow-up comparison, ${pairedResult(p)} ${refs(fact.citationRefs)}; `
+      + `${pairedCoverage(p)}. ${directionText(fact)}`);
+  }
+  for (const fact of otherDerived) {
+    parts.push(`${parts.length > 1 ? "The" : "the"} cited derived measurement records: ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
+  }
+  const substantive = documents.length + paired.length;
+  if (substantive > 0) {
+    parts.push(`${substantive === 1 ? "This finding is" : "Taken together, these findings are"} relevant to the programme's potential impact and may be used internally as qualified evidence of it, `
+      + `with the limitations above kept with ${substantive === 1 ? "it" : "them"}. `
+      + `${substantive === 1 ? "It does" : "They do"} not establish that the programme caused any change: no comparison with people who did not take part is cited`
+      + `${paired.some(directionNotEstablished) ? ", and the beneficial direction of the measured change is not established" : ""}.`);
+  } else {
+    parts.push("These figures may be reported internally with their recorded limitations kept with them. They do not establish that the programme caused any result.");
+  }
+  return [parts.join(" ")];
+}
+
 function conclusionLines(model) {
   const measured = measuredFacts(model);
+  if (model.facts.some((fact) => isDocumentFact(fact) || isDerivedFact(fact))) {
+    return substantiveConclusion(model);
+  }
   if (measured.length === 0) {
     return ["The cited claims are reported for internal use exactly as recorded, with the limitations above."];
   }
