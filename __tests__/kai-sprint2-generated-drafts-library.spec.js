@@ -1208,3 +1208,90 @@ test("Generated Drafts selected-draft review surface now renders sourceCode and 
     assert.equal(noDecisionCitation.approvedAudiences, null);
   }
 });
+
+// Four-view Knowledge Studio refactor (owner direction 2026-11-06): the GK
+// Project Drafts view passes the selected Project to the existing index. The
+// read model already scoped by generation_runs.engagement_id; the route and
+// service now forward an optional, organization-owned engagement.
+const projectId = "00000000-0000-4000-8000-0000000000e1";
+
+test("Generated Drafts index route forwards an optional engagement_id and refuses a malformed one", async (t) => {
+  const current = scenario();
+  const calls = [];
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async listGeneratedDraftLibraryIndex(input) {
+      calls.push(input);
+      return current.result;
+    },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const { app, restoreActorContextMiddleware } = createApp(() => current);
+  const server = await listen(app);
+  t.after(async () => {
+    restore();
+    restoreActorContextMiddleware();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  });
+  const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts?limit=25`;
+  const malformed = await requestJson(server, `${path}&engagement_id=not-a-uuid`);
+  assert.equal(malformed.statusCode, 422);
+  assert.deepEqual(calls, []);
+  const scoped = await requestJson(server, `${path}&engagement_id=${projectId}`);
+  assert.equal(scoped.statusCode, 200);
+  assert.deepEqual(calls, [{ organizationId, limit: 25, afterGeneratedContentDraftId: null, engagementId: projectId, actorContext: current.actorContext }]);
+});
+
+test("Generated Drafts library service scopes to an engagement of the same organization before the paged read, and keeps the organization-wide index otherwise", async () => {
+  const reads = [];
+  const engagementReads = [];
+  const deps = (engagementRecord) => ({
+    env: enabledEnv,
+    async getEngagementForOrganization(input) { engagementReads.push(input); return engagementRecord; },
+    async listGeneratedDraftLibraryIndex(org, options) { reads.push(options); return [draftRow()]; },
+  });
+  const scoped = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, engagementId: projectId, actorContext },
+    deps({ engagement_id: projectId, organization_id: organizationId }),
+  );
+  assert.equal(scoped.ok, true);
+  assert.deepEqual(engagementReads, [{ organizationId, engagementId: projectId }]);
+  assert.deepEqual(reads.at(-1), { limit: 25, afterGeneratedContentDraftId: null, engagementId: projectId });
+
+  // Another organization's (or an unknown) engagement is never read.
+  const foreign = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, engagementId: projectId, actorContext },
+    deps(null),
+  );
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error.code, "not_found");
+  assert.equal(reads.length, 1);
+
+  const malformed = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, engagementId: "NOT-A-UUID", actorContext },
+    deps({ engagement_id: projectId, organization_id: organizationId }),
+  );
+  assert.equal(malformed.error.code, "validation_blocker");
+
+  // No engagement: unchanged organization-wide call, no engagement read.
+  engagementReads.length = 0;
+  const organizationWide = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    deps({ engagement_id: projectId, organization_id: organizationId }),
+  );
+  assert.equal(organizationWide.ok, true);
+  assert.deepEqual(engagementReads, []);
+  assert.deepEqual(reads.at(-1), { limit: 25, afterGeneratedContentDraftId: null });
+});
+
+test("GK Knowledge Studio passes the selected Project to the drafts index path and discards superseded responses", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.equal(generatedDraftLibraryIndexPath(organizationId, projectId),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/generated-content-drafts?limit=25&engagement_id=${projectId}`);
+  assert.equal(generatedDraftLibraryIndexPath(organizationId), `/api/kai/sprint2/intake/admin/organizations/${organizationId}/generated-content-drafts?limit=25`);
+  assert.match(uiSource, /getJson\(generatedDraftLibraryIndexPath\(requestOrganizationId, engagementId \|\| null\)\)/);
+  assert.match(uiSource, /requestGeneration !== generatedDraftsRequestGenerationRef\.current\) return;/);
+  assert.match(uiSource, /\}, \[organizationId, engagementId, workflowOperations\.readGeneratedDrafts\]\);/);
+});

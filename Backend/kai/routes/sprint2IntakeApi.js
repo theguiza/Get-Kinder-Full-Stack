@@ -4034,7 +4034,9 @@ const KAI_GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT = 25;
 const KAI_GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
 
 function generatedDraftLibraryIndexQuery(req = {}) {
-  const allowedKeys = new Set(["limit", "after_generated_content_draft_id"]);
+  // engagement_id: the optional Project scope the read model already applies
+  // (generation_runs.engagement_id), forwarded for the GK Project Drafts view.
+  const allowedKeys = new Set(["limit", "after_generated_content_draft_id", "engagement_id"]);
   const keys = Object.keys(req.query || {});
   if (!keys.every((key) => allowedKeys.has(key))) return null;
 
@@ -4052,7 +4054,9 @@ function generatedDraftLibraryIndexQuery(req = {}) {
     afterGeneratedContentDraftId = candidate;
   }
 
-  return { limit, afterGeneratedContentDraftId };
+  const engagementId = optionalProjectEngagementId(req);
+  if (engagementId === false) return null;
+  return { limit, afterGeneratedContentDraftId, ...(engagementId ? { engagementId } : {}) };
 }
 
 /**
@@ -4084,6 +4088,7 @@ router.get(
         organizationId: identifiers.organizationId,
         limit: query.limit,
         afterGeneratedContentDraftId: query.afterGeneratedContentDraftId,
+        ...(query.engagementId ? { engagementId: query.engagementId } : {}),
         actorContext: sprint2MappedActorContext(req),
       });
     });

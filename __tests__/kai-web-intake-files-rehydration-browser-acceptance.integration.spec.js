@@ -344,23 +344,30 @@ async function runBrowserAcceptance() {
     await page.clickNav("Knowledge Studio");
     await page.waitFor(async () => page.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
     await page.idle();
+    // Four-view refactor: Web Intake is in Sources (Impact is the default view).
+    await page.clickTab("Sources");
+    await page.idle();
   }
 
-  // Case 1: Project Alpha, Files tab, no manual Load click at any point.
-  async function assertAlphaReconstructed(page, label, sinceMark) {
+  // Case 1: Project Alpha, Sources (former Files), no manual Load click at any point.
+  // expectReread: false where the view stayed mounted (the client Studio keeps
+  // an opened view mounted, so returning to it shows the same batch without
+  // reading it again).
+  async function assertAlphaReconstructed(page, label, sinceMark, { expectReread = true } = {}) {
     await page.waitForText(NAMES.alphaOne);
     await page.waitForText(NAMES.alphaTwo);
     await page.idle();
     const since = page.requestsSince(sinceMark);
     logIntake(label, since);
     const lists = since.filter(isBatchList);
-    assert.ok(lists.length >= 1, `${label}: batch list read`);
+    if (expectReread) assert.ok(lists.length >= 1, `${label}: batch list read`);
     for (const r of lists) {
       assert.equal(r.status, 200, `${label}: batch list status`);
       assert.match(r.url, new RegExp(`organization_id=${ORG}`));
     }
     const alphaFiles = since.filter(isBatchFiles(BATCH.alpha));
-    assert.ok(alphaFiles.length >= 1 && alphaFiles.every((r) => r.status === 200), `${label}: Alpha batch files read (200)`);
+    if (expectReread) assert.ok(alphaFiles.length >= 1, `${label}: Alpha batch files read`);
+    assert.ok(alphaFiles.every((r) => r.status === 200), `${label}: Alpha batch files read (200)`);
     assert.equal(since.filter(isBatchFiles(BATCH.beta)).length, 0, `${label}: Beta files never read while Alpha is active`);
     const body = await page.text();
     assert.ok(body.includes(`Batch id: ${BATCH.alpha}`), `${label}: the sole Alpha batch is selected`);
@@ -380,13 +387,14 @@ async function runBrowserAcceptance() {
       await page.selectProject(PROJECT.alpha);
       await assertAlphaReconstructed(page, `${label} case 1 (Files entry, Alpha)`, mark);
 
-      // Case 2 - the original failure: Files -> another tab -> Files.
+      // Case 2 - the original failure: Sources -> another view -> Sources.
       await page.clickTab(otherTab);
       await page.idle();
-      assert.ok(!(await page.text()).includes(NAMES.alphaOne), `${label}: Files content unmounted on ${otherTab}`);
+      assert.ok(!(await page.text()).includes(NAMES.alphaOne), `${label}: Sources content not shown on ${otherTab}`);
+      const keptMounted = await page.evaluate(`document.querySelector("[data-knowledge-studio-kind]")?.getAttribute("data-knowledge-studio-kind") === "client"`);
       mark = page.mark();
-      await page.clickTab("Files");
-      await assertAlphaReconstructed(page, `${label} case 2 (Files -> ${otherTab} -> Files)`, mark);
+      await page.clickTab("Sources");
+      await assertAlphaReconstructed(page, `${label} case 2 (Sources -> ${otherTab} -> Sources)`, mark, { expectReread: !keptMounted });
 
       // Case 3 - full reload, then Project Alpha again (the Project is not
       // persisted across a page instance), then Files.
@@ -395,6 +403,7 @@ async function runBrowserAcceptance() {
       await page.clickNav("Knowledge Studio");
       await page.waitFor(async () => page.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector after reload");
       await page.idle();
+      await page.clickTab("Sources");
       mark = page.mark();
       await page.selectProject(PROJECT.alpha);
       await assertAlphaReconstructed(page, `${label} case 3 (full reload)`, mark);
@@ -415,11 +424,11 @@ async function runBrowserAcceptance() {
         const detail = page.requestsSince(mark).filter((r) => r.method === "GET" && r.url.includes(`/admin/files/${FILE.alphaOne}`));
         assert.ok(detail.length === 1 && detail[0].status === 200, `${label}: file detail read (200)`);
         assert.equal(page.requestsSince(mark).filter(isProfileLookup).length, 1, `${label}: exactly one profile lookup for the selected file`);
-        await page.clickTab("Processing");
+        await page.clickTab("Sources");
         await page.waitForText("Sensitivity & allowed-use review");
         await page.idle();
         assert.ok(page.requests().some(isProfileDetail(PROFILE_A)), `${label}: Alpha file-derived profile ${PROFILE_A} selected and read`);
-        await page.clickTab("Files");
+        await page.clickTab("Sources");
         await page.waitForText(NAMES.alphaOne);
         await page.idle();
       }
@@ -440,11 +449,11 @@ async function runBrowserAcceptance() {
         assert.ok(!body.includes(stale), `${label}: stale Alpha state survived the switch: ${stale}`);
       }
       if (sensitivity) {
-        await page.clickTab("Processing");
+        await page.clickTab("Sources");
         await page.idle();
         body = await page.text();
         assert.ok(!body.includes("Sensitivity & allowed-use review"), `${label}: Alpha's file-derived sensitivity profile survived into Beta`);
-        await page.clickTab("Files");
+        await page.clickTab("Sources");
         await page.waitForText(NAMES.beta);
         await page.idle();
       }

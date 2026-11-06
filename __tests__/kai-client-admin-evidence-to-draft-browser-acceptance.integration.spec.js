@@ -534,16 +534,22 @@ async function runBrowserAcceptance() {
       ids.adminKaiUser = mapped.user_id;
       assert.deepEqual(await query("SELECT role_id FROM kai.user_roles WHERE user_id = $1::uuid", [mapped.user_id]), [], "no global role");
       assert.deepEqual(await query("SELECT organization_id FROM kai.organization_memberships WHERE user_id = $1::uuid", [mapped.user_id]), [], "no stored membership");
-      assert.ok((await adminPage.tabLabels()).includes("Data Sources"), "Data Sources offered to client_admin");
-      await adminPage.clickTab("Data Sources");
-      await adminPage.waitForText(ids.x.sourceCode);
+      // Four-view Knowledge Studio (owner direction 2026-11-06): the workflow is
+      // one controller presenting Impact, Evidence, Sources and Drafts.
+      assert.deepEqual(await adminPage.tabLabels(), ["Impact", "Evidence", "Sources", "Drafts"]);
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector("[data-client-evidence-workflow]"))`), true, "the workflow is offered to client_admin");
+      await adminPage.clickTab("Sources");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-source-version="${ids.x.sourceVersionId}"]'))`), "the source version listed");
       await adminPage.idle();
       const projectValue = await adminPage.evaluate(`document.getElementById("gk-shell-project-select").value`);
-      if (!projectValue) await adminPage.waitForText("Select a Project above: each draft belongs to one Project.");
+      if (!projectValue) await adminPage.waitForText("No Project selected");
       await adminPage.selectProject(PROJECT_X);
       await adminPage.idle();
       // Owner prompt 2026-10-26: with no measured finding the customer is sent to Count records.
+      await adminPage.clickTab("Drafts");
       await adminPage.waitForText("No measured finding yet.");
+      await adminPage.clickTab("Sources");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-source-version="${ids.x.sourceVersionId}"]'))`), "the Project's source version listed");
       assert.ok(!(await adminPage.text()).includes(ids.y.statements[0]), "no organization-Y data");
       results.b1 = "PASS";
     });
@@ -562,6 +568,10 @@ async function runBrowserAcceptance() {
            FROM kai.evidence_items e JOIN kai.review_queue_items q ON q.organization_id = e.organization_id
             AND q.queue_type = 'evidence_review' AND q.target_object_id = e.evidence_item_id
           WHERE e.organization_id = $1::uuid ORDER BY e.statement`, [ORG_X]);
+      // Field-presence evidence is supporting source detail in the Evidence view, shown on request.
+      await adminPage.clickTab("Evidence");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean([...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())))`), "supporting source detail toggle");
+      await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())).click()`);
       for (const row of evidence) {
         assert.deepEqual([row.evidence_review_status, row.queue_status, row.created_by, row.source_version_id], ["needs_gk_review", "open", ids.adminKaiUser, ids.x.sourceVersionId]);
         await adminPage.waitForText(row.statement);
@@ -784,8 +794,9 @@ async function runBrowserAcceptance() {
       await adminPage.clickNav("Knowledge Studio");
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
       await adminPage.idle();
-      await adminPage.clickTab("Data Sources");
       await adminPage.selectProject(PROJECT_X);
+      await adminPage.idle();
+      await adminPage.clickTab("Drafts");
       await adminPage.idle();
       const summaryId = drafts.find((row) => row.content_type === "evidence_summary").generated_content_draft_id;
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-internal-draft="${summaryId}"] button'))`), "the saved draft listed");
@@ -853,6 +864,11 @@ async function runBrowserAcceptance() {
     });
 
     await test("E-setup (after the drafts): the client_admin generates the second claim's gap follow-ups, then a GK reviewer rejects that claim (real P2-12 routes); the client sees it as not usable", async () => {
+      // Four-view refactor: the structural claims are supporting source detail in Evidence.
+      await adminPage.clickTab("Evidence");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean([...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())))`), "supporting source detail toggle");
+      await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())).click()`);
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${ids.x.secondClaimId}"]'))`), "second claim listed");
       await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.secondClaimId}"]`, "Generate gap follow-ups (second claim)");
       await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.secondClaimId}"]').innerText`)).includes("Gap follow-ups generated:"), "second claim follow-ups");
       await adminPage.idle();
@@ -870,8 +886,16 @@ async function runBrowserAcceptance() {
       assert.equal(rejected.claim_strength, "reviewed_not_supported");
       ids.x.rejectedClaimId = ids.x.secondClaimId;
 
-      await adminPage.clickTab("Files");
-      await adminPage.clickTab("Data Sources");
+      // The decision was made in another session: reload, as the customer would, to see it.
+      await adminPage.goto("/impact-library");
+      await adminPage.waitForText("Knowledge Studio");
+      await adminPage.clickNav("Knowledge Studio");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
+      await adminPage.selectProject(PROJECT_X);
+      await adminPage.idle();
+      await adminPage.clickTab("Evidence");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean([...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())))`), "supporting source detail toggle");
+      await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())).click()`);
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]'))`), "claims listed");
       await adminPage.idle();
       const rejectedEntry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]').innerText`);
@@ -1003,7 +1027,7 @@ async function runBrowserAcceptance() {
       await contributorPage.clickNav("Knowledge Studio");
       await contributorPage.waitFor(async () => contributorPage.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
       await contributorPage.idle();
-      assert.ok(!(await contributorPage.tabLabels()).includes("Data Sources"));
+      assert.equal(await contributorPage.evaluate(`Boolean(document.querySelector("[data-client-evidence-workflow]"))`), false, "no evidence-to-draft workflow");
       const before = await counts(ORG_X);
       for (const [method, path, body] of [
         ["GET", organizationSourcesPath(ORG_X)],
@@ -1029,7 +1053,7 @@ async function runBrowserAcceptance() {
       await reviewerPage.clickNav("Knowledge Studio");
       await reviewerPage.waitFor(async () => reviewerPage.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
       await reviewerPage.idle();
-      assert.ok(!(await reviewerPage.tabLabels()).includes("Data Sources"));
+      assert.equal(await reviewerPage.evaluate(`Boolean(document.querySelector("[data-client-evidence-workflow]"))`), false, "no evidence-to-draft workflow");
       const capabilities = await reviewerPage.api("GET", organizationAccessCapabilitiesPath(ORG_X));
       assert.equal(capabilities.status, 200, JSON.stringify(capabilities.body));
       assert.equal(capabilities.body.data.workflowOperations.generateClaimGapFollowups, false);

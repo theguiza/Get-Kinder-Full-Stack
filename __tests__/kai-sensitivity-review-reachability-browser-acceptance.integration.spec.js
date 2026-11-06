@@ -543,13 +543,22 @@ async function runBrowserAcceptance() {
     await page.waitFor(async () => page.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
     await page.idle();
   }
+  // Four-view Knowledge Studio (owner direction 2026-11-06): the GK Review
+  // Queue is organization-wide review work in Evidence, shown on request.
+  async function openGkReviewQueue(page) {
+    await page.clickTab("Evidence");
+    if (await page.visibleButton("Show review queue and gaps")) await page.clickButton("Show review queue and gaps");
+    await page.waitForText("Review Queue");
+  }
   async function clientReviewsTab(page) {
     await openKnowledgeStudio(page);
     // gk_reviewer may not list Projects (list_engagement_contexts); a client may.
     await page.waitFor(async () => page.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
     await page.selectProject(PROJECT);
+    // Four-view refactor: file status and the former Reviews tab (the Review
+    // status card) are in Sources; Impact is the default view.
+    await page.clickTab("Sources");
     await page.waitFor(async () => Boolean(await page.pipelineFileText(FILE_QUEUE)), "pipeline entry");
-    await page.clickTab("Reviews");
     // Owner decision 2026-10-19: a file may wait on Get Kinder, on this actor,
     // or on the organization's administrator; wait for the card itself.
     await page.waitFor(async () => /Waiting for Get Kinder review|Waiting for your organization\u2019s administrator|Ready for you in Data Sources|No action is currently required from you\./
@@ -587,7 +596,7 @@ async function runBrowserAcceptance() {
       assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for your organization)`));
       assert.ok(body.includes("Waiting for your organization\u2019s administrator"));
       assert.ok(body.includes("No action is currently required from you."));
-      const clientCard = await clientPage.cardText("Reviews");
+      const clientCard = await clientPage.cardText("Review status");
       assert.ok(clientCard.includes("No action is currently required from you."), "the ordinary client's Reviews card keeps the no-action explanation");
       assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"), "no Get Kinder review work is assigned to an ordinary client");
       assert.ok(body.includes("Your organization\u2019s administrator completes these steps in Data Sources. No action is required from you."), "who does it is explained");
@@ -600,14 +609,14 @@ async function runBrowserAcceptance() {
 
     await test("case 2 (the regression): the GK Review Queue's sensitivity entry opens the review card on Processing", async () => {
       await openKnowledgeStudio(gkPage);
-      await gkPage.clickTab("Reviews");
+      await openGkReviewQueue(gkPage);
       await gkPage.waitForText("Sensitivity / allowed-use");
       await gkPage.waitFor(() => gkPage.visibleButton("Review sensitivity & allowed use"), "the Review Queue sensitivity entry");
       const mark = gkPage.mark();
       await gkPage.clickButton("Review sensitivity & allowed use");
       await gkPage.waitFor(() => gkPage.visibleButton("Submit review"), "the sensitivity review card's decision form", { timeout: 8000 });
       await gkPage.idle();
-      assert.equal(await gkPage.activeTab(), "Processing", "the reviewer is taken to the tab that holds the card");
+      assert.equal(await gkPage.activeTab(), "Sources", "the reviewer is taken to the view that holds the card");
       const reads = gkPage.requestsSince(mark).filter((r) => r.method === "GET" && r.url.endsWith(profilePath(profileQueue)));
       assert.ok(reads.length >= 1 && reads.every((r) => r.status === 200), "the selected profile's detail was read");
       const body = await gkPage.text();
@@ -675,8 +684,8 @@ async function runBrowserAcceptance() {
       console.log(`[sensitivity-review-browser] client Reviews (after):\n${body.slice(body.indexOf("Reviews"), body.indexOf("Reviews") + 900)}`);
       assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for your organization)`));
       assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for your organization)`));
-      await clientPage.clickTab("Files");
-      await clientPage.waitFor(async () => Boolean(await clientPage.pipelineFileText(FILE_QUEUE)), "Files pipeline entry");
+      await clientPage.clickTab("Sources");
+      await clientPage.waitFor(async () => Boolean(await clientPage.pipelineFileText(FILE_QUEUE)), "Sources pipeline entry");
       const entry = await clientPage.pipelineFileText(FILE_QUEUE);
       assert.match(entry, /Sensitivity review\s+Complete/);
       assert.match(entry, /Source review\s+Waiting for your organization/);
@@ -689,7 +698,8 @@ async function runBrowserAcceptance() {
       // A gk_reviewer cannot list Projects, so Web Intake stays organization-wide:
       // load the organization's batches, then the batch's files.
       await openKnowledgeStudio(gkPage);
-      assert.equal(await gkPage.activeTab(), "Files");
+      assert.equal(await gkPage.activeTab(), "Impact", "Impact is the default view");
+      await gkPage.clickTab("Sources");
       await gkPage.clickButton("Load existing batches");
       await gkPage.waitForText("synthetic-review-2026");
       await gkPage.selectRow("synthetic-review-2026");
@@ -706,7 +716,7 @@ async function runBrowserAcceptance() {
         "the GK-only file lookup found the profile");
       await gkPage.clickButton("Open sensitivity & allowed-use review");
       await gkPage.waitForText("No sensitivity review work has been started for this source yet.");
-      assert.equal(await gkPage.activeTab(), "Processing");
+      assert.equal(await gkPage.activeTab(), "Sources");
       assert.ok(gkPage.requests().some((r) => r.method === "GET" && r.url.endsWith(profilePath(profileZero)) && r.status === 200));
       assert.equal(await sensitivityQueueRow(profileZero), null, "no review work exists yet");
 
@@ -800,9 +810,21 @@ async function runBrowserAcceptance() {
     const mixedProfiles = {};
     const mixedQueueItems = {};
     const MIXED_ALLOWED_PASSIVE = new Set([`${COCKPIT}/capabilities`, `${COCKPIT}/queue`]);
-    function assertNoUnrelatedGkRequests(page, label, requests) {
+    // Four-view Knowledge Studio (owner direction 2026-11-06): an
+    // organization administrator's evidence-to-draft workflow (owner decision
+    // 2026-10-18) is the studio's shared controller, so its admitted GETs
+    // (Sources, Evidence and Claim Library, the internal traceability
+    // diagnostic) happen on opening the studio. Nothing else is admitted.
+    function adminWorkflowRead(r) {
+      const path = pathOf(r);
+      const base = `/api/kai/sprint2/intake/admin/organizations/${ORG}`;
+      return r.method === "GET" && ([`${base}/sources`, `${base}/evidence-library/candidates`, `${base}/claim-library/candidates`].includes(path)
+        || (new RegExp(`^${base}/claims/[0-9a-f-]{36}/traceability$`).test(path) && new URL(r.url).search === "?requested_audience=internal"));
+    }
+    function assertNoUnrelatedGkRequests(page, label, requests, { allowAdminWorkflowReads = false } = {}) {
       for (const r of requests) {
         const path = pathOf(r);
+        if (allowAdminWorkflowReads && adminWorkflowRead(r)) continue;
         for (const fragment of ["/claim-library", "/evidence-library", "/eligible-claims", "/traceability", "/review-queue", "/sources",
           "/evidence-items", "/source-versions", "/data-dictionaries", "/board-reporting"]) {
           assert.ok(!path.includes(fragment), `${label}: unrelated GK request ${r.method} ${path}`);
@@ -832,7 +854,9 @@ async function runBrowserAcceptance() {
       const tabs = await mixedPage.evaluate(`[...document.querySelectorAll(".nav-tabs button")].map((el) => el.innerText.trim())`);
       // Data Sources: the organization administrator's evidence-to-draft
       // workflow (owner decision 2026-10-18), offered by the client Studio only.
-      assert.deepEqual(tabs, ["Files", "Data Sources", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
+      // Four-view refactor: both studios share the four views; the studio kind tells them apart.
+      assert.deepEqual(tabs, ["Impact", "Evidence", "Sources", "Drafts"]);
+      assert.equal(await mixedPage.evaluate(`document.querySelector("[data-knowledge-studio-kind]")?.getAttribute("data-knowledge-studio-kind")`), "client", "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);
       assert.match(note, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
@@ -843,7 +867,7 @@ async function runBrowserAcceptance() {
       // administrator's own promotion step (Data Sources), not a Get Kinder wait.
       assert.ok(body.includes(`${NAMES.queue}: Your action is needed: review this file's source candidate and promote it`));
       // The Reviews card offers the action, so it must not also say no action is needed.
-      const reviewsCard = await mixedPage.cardText("Reviews");
+      const reviewsCard = await mixedPage.cardText("Review status");
       console.log(`[sensitivity-review-browser] mixed-role Reviews card:\n${reviewsCard}`);
       assert.ok(reviewsCard.includes("Review sensitivity & allowed use"), "the Reviews card shows the authorized review action");
       assert.ok(!reviewsCard.includes("No action is currently required from you."), "no contradictory no-action message beside the review action");
@@ -861,7 +885,7 @@ async function runBrowserAcceptance() {
         if (path.includes("/review-cockpit")) assert.ok(MIXED_ALLOWED_PASSIVE.has(path), `no GK lookup or detail read on load: ${r.method} ${path}`);
       }
       assert.equal(posts(since).length, 0, "loading the client Studio writes nothing");
-      assertNoUnrelatedGkRequests(mixedPage, "case 9", since);
+      assertNoUnrelatedGkRequests(mixedPage, "case 9", since, { allowAdminWorkflowReads: true });
       assert.deepEqual(mixedPage.exceptions, []);
       results.case9_mixed_role_action_offered = "PASS";
     });
@@ -963,11 +987,11 @@ async function runBrowserAcceptance() {
       assert.equal((await decisionHead(profileId)).length, 0, "starting review work records no decision");
 
       // Leave and come back: the existing item is reused, never duplicated.
-      await mixedPage.clickTab("Files");
-      await mixedPage.clickTab("Reviews");
+      await mixedPage.clickTab("Impact");
+      await mixedPage.clickTab("Sources");
       await mixedPage.waitForText("Ready for you in Data Sources");
       await mixedPage.idle();
-      assert.equal(await mixedPage.reviewPanelFileId(), null, "leaving Reviews closes the panel");
+      assert.equal(await mixedPage.reviewPanelFileId(), null, "leaving Sources closes the panel");
       mark = mixedPage.mark();
       await mixedPage.clickFileReviewAction(FILE_MIXED_ZERO);
       await mixedPage.waitFor(() => mixedPage.visibleButton("Submit review"), "the decision form on revisit");
@@ -1064,8 +1088,8 @@ async function runBrowserAcceptance() {
       await query("ALTER TABLE kai.intake_sensitivity_profiles ADD CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check CHECK (public_use_allowed = false) NOT VALID");
 
       await mixedPage.clickButton("Close review");
-      await mixedPage.clickTab("Files");
-      await mixedPage.clickTab("Reviews");
+      await mixedPage.clickTab("Impact");
+      await mixedPage.clickTab("Sources");
       await mixedPage.waitFor(async () => (await mixedPage.fileReviewActionIds()).includes(FILE_MIXED_NOT_CREATED), "the new file's action");
       await mixedPage.idle();
       await mixedPage.clickFileReviewAction(FILE_MIXED_NOT_CREATED);
@@ -1110,13 +1134,13 @@ async function runBrowserAcceptance() {
       await query("ALTER TABLE kai.intake_sensitivity_profiles ADD CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check CHECK (public_use_allowed = false) NOT VALID");
 
       await openKnowledgeStudio(gkPage);
-      await gkPage.clickTab("Reviews");
+      await openGkReviewQueue(gkPage);
       await gkPage.waitFor(() => gkPage.visibleButton("Review sensitivity & allowed use"), "a Review Queue sensitivity entry");
       // Open the entry whose card reads this file's profile.
       const entries = await gkPage.evaluate(`[...document.querySelectorAll("button")].filter((el) => el.offsetParent !== null && el.innerText.trim() === "Review sensitivity & allowed use").length`);
       let opened13A = false;
       for (let index = 0; index < entries && !opened13A; index += 1) {
-        if (index > 0) await gkPage.clickTab("Reviews");
+        if (index > 0) await openGkReviewQueue(gkPage);
         const mark = gkPage.mark();
         await gkPage.evaluate(`[...document.querySelectorAll("button")].filter((el) => el.offsetParent !== null && el.innerText.trim() === "Review sensitivity & allowed use")[${index}].click()`);
         await gkPage.idle();
@@ -1150,7 +1174,7 @@ async function runBrowserAcceptance() {
       const clientBody = await clientReviewsTab(clientPage);
       assert.deepEqual(await clientPage.fileReviewActionIds(), []);
       assert.ok(clientBody.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for your organization)`));
-      const clientCard = await clientPage.cardText("Reviews");
+      const clientCard = await clientPage.cardText("Review status");
       assert.ok(clientCard.includes("No action is currently required from you."), "a pending administrator step leaves the ordinary client's no-action explanation");
       assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"));
       assertClientBoundary(clientPage, "case 14", clientBody, clientPage.requestsSince(clientMark));
@@ -1170,9 +1194,9 @@ async function runBrowserAcceptance() {
       await twoOrgPage.idle();
       assert.ok(!(await twoOrgPage.text()).includes(NAMES.mixedNmi), "no previous-project file shown");
       // A qualified reviewer in a Project with no file at sensitivity review is given no review task.
-      await twoOrgPage.waitFor(async () => (await twoOrgPage.cardText("Reviews") || "").includes("No action is currently required from you."),
+      await twoOrgPage.waitFor(async () => (await twoOrgPage.cardText("Review status") || "").includes("No action is currently required from you."),
         "the empty Project's no-action message");
-      const emptyProjectCard = await twoOrgPage.cardText("Reviews");
+      const emptyProjectCard = await twoOrgPage.cardText("Review status");
       assert.deepEqual(await twoOrgPage.fileReviewActionIds(), []);
       assert.ok(!emptyProjectCard.includes("Get Kinder sensitivity review needed"), "no fabricated sensitivity review task");
       await twoOrgPage.selectProject(PROJECT);
@@ -1252,7 +1276,7 @@ async function runBrowserAcceptance() {
         const body = await clientReviewsTab(orgAdminPage);
         assert.ok((await orgAdminPage.fileReviewActionIds()).includes(FILE_BOUND_ORG_ADMIN));
         assert.ok(body.includes("Knowledge Studio"));
-        assert.ok((await orgAdminPage.cardText("Reviews")).includes("Review sensitivity & allowed use"));
+        assert.ok((await orgAdminPage.cardText("Review status")).includes("Review sensitivity & allowed use"));
         const accessNote = await orgAdminPage.evaluate(`document.querySelector('[data-get-kinder-review-access]')?.innerText || ''`);
         assert.match(accessNote, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
         results.case15_bound_admin_copy = "PASS: the rebuilt bundle names a bound-only client_admin's organization-scoped review access";

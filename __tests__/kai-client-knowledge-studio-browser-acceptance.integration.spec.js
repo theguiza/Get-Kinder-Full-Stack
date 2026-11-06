@@ -550,8 +550,18 @@ async function runBrowserAcceptance() {
       const ownSensitivityQueue = label === "client_admin"
         && pathname === "/api/kai/sprint2/intake/admin/review-cockpit/queue"
         && new URLSearchParams(search).get("queue_type") === "sensitivity_review";
-      assert.ok(ownSensitivityQueue || ALLOWED_CLIENT_ROUTES.some((pattern) => pattern.test(pathname)), `${label}: unexpected client request ${request.method} ${pathname}${search}`);
-      if (!ownSensitivityQueue && !/client-(generated-drafts|grant-response-packet|board-reporting|funder-requirements)/.test(pathname)) {
+      // Four-view Knowledge Studio (owner direction 2026-11-06): the
+      // organization administrator's evidence-to-draft workflow (owner
+      // decision 2026-10-18) is the studio's shared controller, so its
+      // admitted reads - Sources, Evidence and Claim Library, impact facts and
+      // the client-safe internal traceability diagnostic - happen on opening
+      // the studio rather than only on the former Data Sources tab. GETs only.
+      const adminWorkflowRead = label === "client_admin" && request.method === "GET" && (
+        new RegExp(`^${orgPath}/(sources|evidence-library/candidates|claim-library/candidates)$`).test(pathname)
+        || (new RegExp(`^${orgPath}/claims/[0-9a-f-]{36}/traceability$`).test(pathname) && search === "?requested_audience=internal")
+        || new RegExp(`^${orgPath}/engagements/[0-9a-f-]{36}/client-internal-drafts$`).test(pathname));
+      assert.ok(ownSensitivityQueue || adminWorkflowRead || ALLOWED_CLIENT_ROUTES.some((pattern) => pattern.test(pathname)), `${label}: unexpected client request ${request.method} ${pathname}${search}`);
+      if (!ownSensitivityQueue && !adminWorkflowRead && !/client-(generated-drafts|grant-response-packet|board-reporting|funder-requirements)/.test(pathname)) {
         assert.doesNotMatch(pathname, GK_ROUTE_PATTERN, `${label}: GK-internal route called ${pathname}`);
       }
       if (pathname.includes("/join-requests")) assert.ok(allowJoinReview, `${label}: join review probed without capability`);
@@ -568,12 +578,14 @@ async function runBrowserAcceptance() {
     await page.goto("/impact-library");
     await page.waitForText("Knowledge Studio");
     await page.click("Knowledge Studio", { exact: false, within: "nav" }).catch(() => page.click("Knowledge Studio", { exact: false }));
-    await page.waitForText("Funder Requirements");
+    // Four-view refactor: Impact is the default view; Funder Requirements and
+    // Generated Drafts are sections of Drafts.
+    await page.waitForText("What this Project tells us about our impact");
     await page.idle();
   }
 
   async function assertAlphaFunderRequirements(page) {
-    await page.click("Funder Requirements");
+    await page.click("Drafts");
     await page.waitForText("Intended outcomes are defined");
     await page.idle();
     const body = await page.text();
@@ -585,7 +597,7 @@ async function runBrowserAcceptance() {
   }
 
   async function assertAlphaGeneratedDrafts(page, { reviewer }) {
-    await page.click("Generated Drafts");
+    await page.click("Drafts");
     await page.waitForText("Grant Response Packet");
     await page.waitForText(TEXT.alphaFunder);
     await page.waitForText(TEXT.alphaBoard);
@@ -593,7 +605,7 @@ async function runBrowserAcceptance() {
     let body = await page.text();
     for (const hidden of [TEXT.alphaHeld, TEXT.alphaInReview, TEXT.beta]) assert.ok(!body.includes(hidden), `Alpha drafts showed ${hidden}`);
     for (const secret of SECRETS) assert.ok(!body.includes(secret), `Generated Drafts leaked ${secret}`);
-    const firstPageCount = await page.evaluate(`document.querySelectorAll(".list-group-item button").length`);
+    const firstPageCount = await page.evaluate(`document.querySelectorAll("[data-client-generated-drafts] .list-group-item button").length`);
     assert.ok(firstPageCount > 0 && firstPageCount < ALPHA_VISIBLE_COUNT, `first bounded page shows ${firstPageCount}`);
     assert.match(body, /More drafts for this project have not been checked yet\./);
     // The held draft is counted; only the reviewer is offered the follow-up link.
@@ -606,13 +618,13 @@ async function runBrowserAcceptance() {
     const loadMore = page.requestsSince(beforeLoadMore).filter((r) => r.url.includes("client-generated-drafts"));
     assert.equal(loadMore.length, 1);
     assert.match(loadMore[0].url, /client-generated-drafts\?cursor=c1\./);
-    const allCount = await page.evaluate(`document.querySelectorAll(".list-group-item button").length`);
+    const allCount = await page.evaluate(`document.querySelectorAll("[data-client-generated-drafts] .list-group-item button").length`);
     assert.equal(allCount, ALPHA_VISIBLE_COUNT, "every visible Alpha draft, once");
     body = await page.text();
     assert.ok(!body.includes("More drafts for this project have not been checked yet."), "no more pages");
     // Detail with client-safe traceability.
     await page.evaluate(`(() => {
-      const item = [...document.querySelectorAll(".list-group-item")].find((el) => el.innerText.includes("Evidence summary") && el.innerText.includes("internal use"));
+      const item = [...document.querySelectorAll("[data-client-generated-drafts] .list-group-item")].find((el) => el.innerText.includes("Evidence summary") && el.innerText.includes("internal use"));
       item.querySelector("button").click();
     })()`);
     await page.waitForText(TEXT.alphaBoard);
@@ -640,7 +652,7 @@ async function runBrowserAcceptance() {
     }
     assert.match(body, /No reviewed drafts are ready for this project yet\./, "Beta has no funder packet member");
     assert.ok(!body.includes("More drafts for this project"));
-    await page.click("Funder Requirements");
+    await page.click("Drafts");
     await page.waitForText("reviewed as not applicable");
     body = await page.text();
     assert.ok(!body.includes("Intended outcomes are defined"), "stale Alpha requirements after switching");
@@ -648,7 +660,7 @@ async function runBrowserAcceptance() {
     // Gamma: honest empty states.
     await page.selectProject(PROJECT.gamma);
     await page.waitForText("No funder or framework is selected for this project yet.");
-    await page.click("Generated Drafts");
+    await page.click("Drafts");
     await page.waitForText("No reviewed drafts yet for this project.");
     await page.idle();
     body = await page.text();
@@ -661,8 +673,16 @@ async function runBrowserAcceptance() {
     assert.ok(!body.includes(TEXT.beta));
   }
 
+  // The reviewed-draft, packet and funder-requirement surfaces offer no
+  // generation, review, export or release control. (The organization
+  // administrator's own internal-draft generation card, [data-client-draft-generation],
+  // shares the Drafts view since the four-view refactor; it is covered by the
+  // client-admin evidence-to-draft acceptance.)
   async function assertNoForbiddenControls(page, label) {
-    for (const control of await page.buttons()) assert.doesNotMatch(control, FORBIDDEN_CONTROL, `${label}: forbidden control "${control}"`);
+    const controls = await page.evaluate(`[...document.querySelectorAll("button, a")]
+      .filter((el) => el.offsetParent !== null && !el.closest("[data-client-draft-generation]"))
+      .map((el) => el.innerText.trim()).filter(Boolean)`);
+    for (const control of controls) assert.doesNotMatch(control, FORBIDDEN_CONTROL, `${label}: forbidden control "${control}"`);
   }
 
   async function authorityCounts() {
@@ -685,9 +705,9 @@ async function runBrowserAcceptance() {
           await openKnowledgeStudio(page);
           const options = await page.evaluate(`[...document.getElementById("gk-shell-project-select").options].map((o) => o.text)`);
           assert.deepEqual(options, ["All organizational knowledge", "Project Alpha", "Project Beta", "Project Gamma"]);
-          await page.click("Generated Drafts");
+          await page.click("Drafts");
           await page.waitForText("Select a project to see its Generated Drafts");
-          await page.click("Funder Requirements");
+          await page.click("Drafts");
           await page.waitForText("Select a project to see its funder requirements.");
           await page.selectProject(PROJECT.alpha);
           await assertAlphaFunderRequirements(page);
@@ -734,12 +754,12 @@ async function runBrowserAcceptance() {
 
         await openKnowledgeStudio(page);
         await page.selectProject(PROJECT.alpha);
-        await page.click("Generated Drafts");
+        await page.click("Drafts");
         await page.waitForText(TEXT.alphaFunder);
         await page.idle();
         const body = await page.text();
         assert.ok(!body.includes("waiting on answers"), "nothing is waiting any more");
-        const listed = await page.evaluate(`[...document.querySelectorAll(".list-group-item")].map((el) => el.innerText)`);
+        const listed = await page.evaluate(`[...document.querySelectorAll("[data-client-generated-drafts] .list-group-item")].map((el) => el.innerText)`);
         assert.ok(listed.some((item) => item.includes("Impact narrative")), "the formerly held impact narrative is now listed");
         assert.deepEqual(page.exceptions, []);
       } finally {

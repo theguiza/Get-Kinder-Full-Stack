@@ -170,17 +170,65 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     }
     throw new Error(`timed out waiting for ${description}\n--- page ---\n${(await text()).slice(0, 4000)}`);
   };
-  const waitForText = (needle, options) => waitFor(async () => (await text()).includes(needle), `text: ${needle}`, options);
+  // Four-view Knowledge Studio (owner direction 2026-11-06): Impact | Evidence |
+  // Sources | Drafts replace the former tabs, and a client view stays mounted
+  // (hidden) once opened. These helpers act as a person would: a control or
+  // text that is in another mounted view, in the hidden supporting-detail list,
+  // or behind an open draft reader is revealed by clicking that view's tab, the
+  // list's toggle, or "Back to drafts" first. Former tab names map to the view
+  // that now holds them ("Data Sources" opens every view once, ending in
+  // Sources, as the former tab showed all of that workflow).
+  const KS_REVEAL = `function ksReveal(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (!node.hidden) continue;
+      if (node.dataset.knowledgeStudioView) document.querySelector('[data-knowledge-studio-tab="' + node.dataset.knowledgeStudioView + '"]')?.click();
+      else if (node.dataset.knowledgeStudioReveal) document.querySelector('[data-knowledge-studio-reveal-toggle="' + node.dataset.knowledgeStudioReveal + '"]')?.click();
+    }
+  }`;
+  const KS_TAB_ALIASES = { "Data Sources": ["Impact", "Evidence", "Drafts", "Sources"], Files: ["Sources"], Reviews: ["Sources"], Processing: ["Sources"],
+    "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"], Gaps: ["Impact"] };
+  const ksRevealSelector = (selector) => evaluate(`(() => { ${KS_REVEAL}
+    let el = document.querySelector(${JSON.stringify(selector)});
+    if (!el && /data-client-internal-draft/.test(${JSON.stringify(selector)})) {
+      const back = document.querySelector("[data-client-internal-draft-back]");
+      if (back) { ksReveal(back); back.click(); }
+      el = document.querySelector(${JSON.stringify(selector)});
+    }
+    if (el && el.offsetParent === null) ksReveal(el);
+    return true;
+  })()`);
+  const ksRevealButton = (label) => evaluate(`(() => { ${KS_REVEAL}
+    const all = [...document.querySelectorAll("button")].filter((el) => el.textContent.trim() === ${JSON.stringify(label)} && !el.disabled);
+    if (all.some((el) => el.offsetParent !== null)) return true;
+    const hidden = all.find((el) => el.closest("[hidden]"));
+    if (hidden) ksReveal(hidden);
+    return true;
+  })()`);
+  const ksRevealText = (needle) => evaluate(`(() => { ${KS_REVEAL}
+    const holder = [...document.querySelectorAll("[data-knowledge-studio-reveal][hidden], [data-knowledge-studio-view][hidden]")]
+      .find((el) => el.textContent.includes(${JSON.stringify(needle)}));
+    if (holder) ksReveal(holder.firstElementChild || holder);
+    return false;
+  })()`);
+  // Text that stays out of view for 3 s is looked for in the other mounted views.
+  const waitForText = (needle, options) => {
+    const started = Date.now();
+    return waitFor(async () => (await text()).includes(needle) || (Date.now() - started > 3000 && ksRevealText(needle)), `text: ${needle}`, options);
+  };
   const clickWhere = async (description, finder) => {
     const clicked = await evaluate(`(() => { const el = (${finder})(); if (!el) return false; el.click(); return true; })()`);
     if (!clicked) throw new Error(`no visible control: ${description}\n--- page ---\n${(await text()).slice(0, 3000)}`);
   };
   const clickNav = (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
+  const clickOneTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickButton = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
+  const clickTab = async (label) => {
+    for (const view of KS_TAB_ALIASES[label] || [label]) await clickOneTab(view);
+  };
+  const clickButtonVisible = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
+  const clickButton = async (label) => { await ksRevealButton(label); return clickButtonVisible(label); };
   const selectProject = async (engagementId) => {
     const ok = await evaluate(`(() => {
       const el = document.getElementById("gk-shell-project-select");
@@ -584,9 +632,23 @@ async function runBrowserAcceptance() {
       // decision 2026-10-19) lists its own open sensitivity reviews; the server
       // authorizes that read, and no other review-cockpit queue is allowed.
       if (path === "/api/kai/sprint2/intake/admin/review-cockpit/queue" && new URL(r.url).searchParams.get("queue_type") === "sensitivity_review") continue;
+      // Four-view Knowledge Studio (owner direction 2026-11-06): the client
+      // administrator's evidence-to-draft workflow (owner decision 2026-10-18)
+      // is the studio's shared controller, so its admitted GETs - Sources,
+      // Evidence and Claim Library, internal traceability diagnostic - happen
+      // on opening the studio. Only for the client_admin page; GETs only.
+      const base = `/api/kai/sprint2/intake/admin/organizations/${ORG}`;
+      if (page === clientAdminPage && r.method === "GET" && ([`${base}/sources`, `${base}/evidence-library/candidates`, `${base}/claim-library/candidates`].includes(path)
+        || (new RegExp(`^${base}/claims/[0-9a-f-]{36}/traceability$`).test(path) && new URL(r.url).search === "?requested_audience=internal"))) continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
-    for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
+    // The client administrator's own admitted workflow actions (owner decision
+    // 2026-10-18), shown in Sources/Evidence since the four-view refactor.
+    const adminWorkflowControls = page === clientAdminPage ? new Set(["Extract evidence", "Propose claim"]) : new Set();
+    for (const control of GK_CONTROLS) {
+      if (adminWorkflowControls.has(control)) continue;
+      assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
+    }
   }
 
   async function openKnowledgeStudio(page) {
@@ -623,6 +685,7 @@ async function runBrowserAcceptance() {
       const before = await governedCounts();
       const mark = page.mark();
       await page.selectProject(PROJECT.alpha);
+      await page.clickTab("Sources");
       await page.waitForText("Processing & evidence status");
       await page.waitFor(async () => Boolean(await page.pipelineFileText(FILE.alpha)), "Alpha pipeline entry");
       await pipelineRead(page, PROJECT.alpha, mark, "case 1");
@@ -664,7 +727,7 @@ async function runBrowserAcceptance() {
       // Gamma: no files -> "Upload data in Files".
       await page.selectProject(PROJECT.gamma);
       await page.waitForText("No files have been uploaded to this project yet, so there is no evidence to review.");
-      await page.clickButton("Upload data in Files");
+      await page.clickButton("Add files in Sources");
       await page.waitForText("No files have been uploaded to this project yet.");
       assert.ok(!(await page.text()).includes(NAMES.alpha), "no Alpha state under Gamma");
       results.case2 = "PASS";

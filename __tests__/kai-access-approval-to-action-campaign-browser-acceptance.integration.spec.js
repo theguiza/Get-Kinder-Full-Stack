@@ -208,6 +208,43 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     })()`);
     assert.ok(ok, `select set to ${value}`);
   };
+  // Four-view Knowledge Studio (owner direction 2026-11-06): former tab names
+  // map to the view that now holds them, per studio. In the GK studio the
+  // organization-wide Review Queue and Gaps are opened from Evidence, and a
+  // reviewer opening Evidence also opens its supporting source detail (the
+  // field-presence evidence it reviews); in the client studio Files, Reviews
+  // and Processing are Sources and Data Sources opens every view once.
+  const KS_VIEW_ALIASES = {
+    client: { "Data Sources": ["Impact", "Evidence", "Drafts", "Sources"], Files: ["Sources"], Reviews: ["Sources"], Processing: ["Sources"],
+      "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"], Gaps: ["Impact"] },
+    gk: { Files: ["Sources"], Processing: ["Sources"], Reviews: ["Evidence"], Gaps: ["Evidence"], "Data Sources": ["Sources"],
+      "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"] },
+  };
+  const clickOneTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
+    .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
+  const ksClickTab = async (label) => {
+    const kind = await evaluate(`document.querySelector("[data-knowledge-studio-kind]")?.getAttribute("data-knowledge-studio-kind") || "client"`);
+    const views = KS_VIEW_ALIASES[kind]?.[label] || [label];
+    for (const view of views) await clickOneTab(view);
+    if (views.at(-1) === "Evidence") {
+      // The Evidence list loads after the view opens: give its disclosures a moment to appear.
+      const wantQueue = kind === "gk" && ["Reviews", "Gaps"].includes(label);
+      for (let attempt = 0, detailDone = false, queueDone = !wantQueue; attempt < 40 && !(detailDone && queueDone); attempt += 1) {
+        const state = await evaluate(`(() => {
+          const visible = (text) => [...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && el.innerText.trim().startsWith(text));
+          const detail = visible("Show supporting source detail");
+          if (detail) detail.click();
+          const queue = ${JSON.stringify(wantQueue)} ? visible("Show review queue and gaps") : null;
+          if (queue) queue.click();
+          return { detail: Boolean(detail || visible("Hide supporting source detail")), queue: Boolean(queue || visible("Hide review queue and gaps")) };
+        })()`);
+        detailDone = detailDone || state.detail;
+        queueDone = queueDone || state.queue;
+        if (!(detailDone && queueDone)) await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  };
+
   return {
     requests: () => requests.slice(),
     mark: () => requests.length,
@@ -225,8 +262,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     activeTab: () => evaluate(`(() => { const el = document.querySelector(".nav-tabs button.active"); return el ? el.innerText.trim() : null; })()`),
     clickNav: (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
       .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
-    clickTab: (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
-      .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
+    clickTab: (label) => ksClickTab(label),
     clickButton: (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
       .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
     clickLink: (label) => clickWhere(`link ${label}`, `() => [...document.querySelectorAll("a")]

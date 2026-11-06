@@ -125,6 +125,7 @@ function responseEvidenceItem(row, organizationId, { includeWriteCoordinates = f
     || !isOptionalBoolean(row.internal_only ?? null)
     || !isOptionalBoolean(row.public_use_allowed ?? null)
     || !isOptionalBoolean(row.funder_use_allowed ?? null)
+    || !isOptionalMachineToken(row.measurement_family ?? null)
   ) {
     return null;
   }
@@ -143,6 +144,9 @@ function responseEvidenceItem(row, organizationId, { includeWriteCoordinates = f
     publicUseAllowed: row.public_use_allowed ?? null,
     funderUseAllowed: row.funder_use_allowed ?? null,
     sensitivityLevel: row.sensitivity_level ?? null,
+    // The recorded derived-measurement family (paired_outcome_change,
+    // cross_source_reach, ...) or null: a display classification only.
+    measurementFamily: row.measurement_family ?? null,
     evidenceReview,
   };
 }

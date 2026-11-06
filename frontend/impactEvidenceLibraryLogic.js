@@ -515,6 +515,8 @@ export function projectEvidenceLibraryItems(dto) {
     publicUseAllowed: item.publicUseAllowed,
     funderUseAllowed: item.funderUseAllowed,
     sensitivityLevel: item.sensitivityLevel ?? null,
+    // The recorded derived-measurement family, or null (display grouping only).
+    measurementFamily: typeof item.measurementFamily === "string" ? item.measurementFamily : null,
     evidenceReview: projectEvidenceLibraryReview(item.evidenceReview),
   })).filter((item) => isRouteUuid(item.evidenceItemId));
 }
@@ -670,8 +672,10 @@ export function createDataGapMemoPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/data-gap-memo`;
 }
 
-export function generatedDraftLibraryIndexPath(organizationId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts?limit=25`;
+// engagementId: the optional Project scope (GK Project Drafts view); omitted,
+// the organization-wide index.
+export function generatedDraftLibraryIndexPath(organizationId, engagementId = null) {
+  return withProjectScope(`${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts?limit=25`, engagementId);
 }
 
 export function generatedDraftReviewPacketPath(organizationId, generatedContentDraftId) {

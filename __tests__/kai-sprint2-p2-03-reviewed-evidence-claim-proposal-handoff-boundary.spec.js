@@ -673,7 +673,9 @@ test("J: the Evidence tab reports the server handoff and re-reads Claims, with n
 
 test("J: the existing Claims card shows the proposed claim's text and that Get Kinder claim review is still required", () => {
   const card = librarySource.slice(librarySource.indexOf('<h5 className="mb-0">Claims</h5>'), librarySource.indexOf("Generate evidence summary"));
-  assert.match(card, /\{claim\.claimStatement \? <div className="small mt-1 text-break">\{claim\.claimStatement\}<\/div> : null\}/);
+  // Four-view refactor: the claim's own text is the card headline (the claim
+  // id moved to a tooltip).
+  assert.match(card, /shortStatement\(claim\.claimStatement \|\| claim\.evidenceStatement \|\| "Claim statement not yet available", 200\)\.text/);
   assert.match(card, /\{claim\.claimReviewStatus === "needs_gk_review" \? \(\s*<div className="small mt-1">Get Kinder claim review required<\/div>/);
   assert.doesNotMatch(card, /claimReviewComplete|Record claim review|approved_audiences/);
   assert.match(librarySource, /A supported decision lets KAI propose an internal-only claim that still needs Get Kinder\s*\n\s*claim review\./);

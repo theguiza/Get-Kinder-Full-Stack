@@ -840,6 +840,14 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     />
   );
 
+  // The Knowledge Studio's page identity: the selected Project's label, as the
+
+  // shell's Project selector shows it.
+
+  const selectedProject = engagements.find((engagement) => engagement.engagement_id === selectedEngagementId);
+
+  const selectedProjectName = selectedProject ? (selectedProject.engagement_code || selectedProject.engagement_id) : "";
+
   let sectionContent;
   if (activeSection === TEAM_ACCESS_SECTION_KEY && platformAdministration) {
     // A platform superuser reaches Team & Access with or without any
@@ -876,6 +884,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   } else if (activeSection === "knowledgeStudio" && !internalKnowledgeWorkspace) {
     sectionContent = (
       <ClientKnowledgeStudio
+        projectName={selectedProjectName}
         organizationId={selectedOrganizationId}
         engagementId={selectedEngagementId}
         onEngagementIdChange={setSelectedEngagementId}
@@ -903,6 +912,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onOrganizationIdChange={setSelectedOrganizationId}
         engagementId={selectedEngagementId}
         onEngagementIdChange={setSelectedEngagementId}
+        projectName={selectedProjectName}
         workflowOperations={accessCapabilities.data?.workflowOperations}
         onAddImprovementPractice={createImprovementPractice}
       />

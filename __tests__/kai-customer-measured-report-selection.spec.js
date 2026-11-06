@@ -367,7 +367,10 @@ test("UI wiring: library reads keep completeness and continue from the cursor; p
   assert.match(workflow, /claims: claims\.status === "success" \? claims\.items : undefined, claimsComplete: claims\.complete/);
   assert.match(workflow, /getJson\(claimTraceabilityPath\(organizationId, claimId, "internal"\)\)/);
   assert.match(workflow, /<LibraryCompleteness read=\{claims\} noun="claims" \/>/);
-  assert.match(workflow, /\{orderedClaims\.map\(\(claim\) => \{/);
+  // Four-view refactor: every loaded claim renders under its finding (claims
+  // whose evidence is not loaded get their own entry from buildFindings).
+  assert.match(workflow, /const findings = buildFindings\(\{ evidenceItems: evidence\.items, claims: claims\.items, sources: sources\.items \}\);/);
+  assert.match(workflow, /\{finding\.claims\.map\(\(claim\) => renderClaim\(claim, finding\.statement\)\)\}/);
   assert.match(workflow, /data-client-claim-kind=\{kind\} data-client-claim-internal-use=\{use\}/);
   assert.match(workflow, /const \{ \[contentType\]: _retired, \.\.\.rest \} = current;/);
   assert.doesNotMatch(workflow, /Review: \{claim\.claimReviewStatus\}|everything else wait for Get Kinder/);

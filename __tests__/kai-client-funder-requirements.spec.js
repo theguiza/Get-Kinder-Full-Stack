@@ -649,7 +649,11 @@ test("frontend: the client Funder Requirements tab makes only the client-safe re
     assert.ok(!componentSource.includes(forbidden), forbidden);
   }
   assert.match(componentSource, /\{data && canReviewFollowups \? \(\s*<a className="btn btn-sm btn-outline-primary mt-2" href=\{clientFollowupReviewHref\(organizationId\)\}>/);
-  assert.match(clientStudioSource, /\["funderRequirements", "Funder Requirements"\]/);
+  // Four-view refactor (owner direction 2026-11-06): Funder Requirements and
+  // Generated Drafts are sections of the Drafts view for every client role.
+  assert.match(clientStudioSource, /const draftsAfter = \(\s*<>\s*<div data-client-generated-drafts="">\s*<ClientGeneratedDrafts[\s\S]*?<ClientFunderRequirements[\s\S]*?<\/>\s*\);/);
+  assert.match(clientStudioSource, /<ViewPane \{\.\.\.pane\("drafts"\)\}>\{draftsAfter\}<\/ViewPane>/);
+  assert.match(clientStudioSource, /draftsAfter=\{draftsAfter\}/);
   assert.match(clientStudioSource, /<ClientFunderRequirements\s+organizationId=\{organizationId\}\s+engagementId=\{engagementId\}\s+canReviewFollowups=\{canReviewFollowups\}\s+\/>/);
   assert.doesNotMatch(clientStudioSource, /getJson\(|postJson\(|fetch\(/);
 });

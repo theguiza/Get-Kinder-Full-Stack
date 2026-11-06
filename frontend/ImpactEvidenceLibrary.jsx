@@ -168,6 +168,16 @@ import { engagementsPath } from "./kaiWebIntakeLogic.js";
 import KaiWebIntake from "./KaiWebIntake.jsx";
 import KnowledgeStudioGapDetail from "./knowledgeStudio/KnowledgeStudioGapDetail.jsx";
 import ImpactLibraryKai from "./ImpactLibraryKai.jsx";
+import { CategoryHeading, ImpactView, KnowledgeStudioNav, ProjectHeading, StatementText } from "./knowledgeStudio/KnowledgeStudioViews.jsx";
+import {
+  DEFAULT_KNOWLEDGE_STUDIO_VIEW,
+  FINDING_CATEGORIES,
+  buildFindings,
+  findingTypeLabel,
+  projectFindingsState,
+  shortStatement,
+  sourceVersionIndex,
+} from "./knowledgeStudio/knowledgeStudioViewsLogic.js";
 
 function ValueRow({ label, value }) {
   return (
@@ -197,6 +207,8 @@ const PACKET_READ_NOT_PERMITTED_TEXT = "Your Get Kinder role for this organizati
 
 export default function ImpactEvidenceLibrary({
   workflowOperations: parentWorkflowOperations,
+  // The selected Project's display label from the shell (page identity).
+  projectName = "",
   // KAI Impact Library redesign, Package C0 (shared Project/Engagement
   // context): when a parent (frontend/ImpactLibraryApp.jsx) supplies these,
   // they are the one authoritative organization/engagement for the whole
@@ -286,7 +298,11 @@ export default function ImpactEvidenceLibrary({
   // always visible below the tab content: their eventual destination is
   // not yet decided by any accepted package, so they stay reachable rather
   // than being hidden or removed.
-  const [knowledgeStudioTab, setKnowledgeStudioTab] = useState("files");
+  const [knowledgeStudioTab, setKnowledgeStudioTab] = useState(DEFAULT_KNOWLEDGE_STUDIO_VIEW);
+  // Organization-wide review work (Review Queue, Gaps and Risks) is shown in
+  // Evidence on request, labelled as organization-wide, never as the Project's.
+  const [showOrganizationReviewWork, setShowOrganizationReviewWork] = useState(false);
+  const [showGkTechnicalEvidence, setShowGkTechnicalEvidence] = useState(false);
   // Package D: the one Gaps-tab item (a real gap/coverage-finding/conflict/
   // followup object from organizationGapsAndRisks, or null) currently
   // showing its Gap Detail view instead of the Gaps grid.
@@ -323,7 +339,7 @@ export default function ImpactEvidenceLibrary({
     setAddedImprovementPracticeGapId(null);
   }, [selectedGap]);
   useEffect(() => {
-    if (knowledgeStudioTab !== "gaps") setSelectedGap(null);
+    if (knowledgeStudioTab !== "evidence") setSelectedGap(null);
   }, [knowledgeStudioTab]);
   // The all-state governed Claim Library and the audience-scoped eligible-claims
   // result are independent requests with independent loading/data/error state:
@@ -343,6 +359,17 @@ export default function ImpactEvidenceLibrary({
   const [evidenceItems, setEvidenceItems] = useState([]);
   const [loadingEvidenceItems, setLoadingEvidenceItems] = useState(false);
   const [evidenceItemsError, setEvidenceItemsError] = useState("");
+  // Whether the Evidence / Claim Library first page is all the server has
+  // (four-view refactor): a summary of a partial read says so.
+  const [evidenceItemsTruncated, setEvidenceItemsTruncated] = useState(false);
+  const [candidateClaimsTruncated, setCandidateClaimsTruncated] = useState(false);
+  // The organization:Project each read last settled for, so Impact never
+  // reports "no results" before the current Project's reads have answered.
+  const [evidenceItemsSettledKey, setEvidenceItemsSettledKey] = useState("");
+  const [candidateClaimsSettledKey, setCandidateClaimsSettledKey] = useState("");
+  const organizationSourcesRequestGenerationRef = useRef(0);
+  const generatedDraftsRequestGenerationRef = useRef(0);
+  const generatedDraftPacketRequestRef = useRef(0);
   // Candidate (governed Claim Library) and eligibility (audience-scoped)
   // requests are invalidated independently: organization change invalidates
   // both, audience change invalidates eligibility only. See
@@ -637,10 +664,15 @@ export default function ImpactEvidenceLibrary({
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
   // invalidate the other's successful result. See annotateGovernedAvailability.
+  // With a Project selected the list is that Project's scoped Claim Library
+  // read: the organization-wide eligible-claims read only annotates those
+  // claims and never adds another Project's claim to the list.
   const claims = useMemo(() => {
-    const merged = mergeClaims(eligibleClaims, candidateClaims);
+    const candidateIds = new Set(candidateClaims.map((claim) => claim.claimId));
+    const listedEligible = engagementId ? eligibleClaims.filter((claim) => candidateIds.has(claim.claimId)) : eligibleClaims;
+    const merged = mergeClaims(listedEligible, candidateClaims);
     return annotateGovernedAvailability(merged, candidateClaims, eligibleClaims, eligibleRequestState);
-  }, [candidateClaims, eligibleClaims, eligibleRequestState]);
+  }, [candidateClaims, eligibleClaims, eligibleRequestState, engagementId]);
 
   // Review Queue composition: the sensitivity/allowed-use category reuses the
   // EXISTING Phase-5 capability/queue state already fetched above (see the
@@ -1006,7 +1038,9 @@ export default function ImpactEvidenceLibrary({
     const requestOrganizationId = organizationId;
     setLoadingCandidateClaims(true);
     setCandidateClaimsError("");
-    const result = await getJson(claimLibraryCandidatesPath(organizationId));
+    // The selected Project's working view, scoped on the server before paging
+    // (owner direction 2026-11-06); no Project, the organization-wide library.
+    const result = await getJson(claimLibraryCandidatesPath(organizationId, null, engagementId || null));
     if (!shouldApplyCandidateResponse({
       requestGeneration,
       currentGeneration: candidateRequestGenerationRef.current,
@@ -1014,16 +1048,22 @@ export default function ImpactEvidenceLibrary({
       currentOrganizationId: organizationIdRef.current,
     })) return;
     setLoadingCandidateClaims(false);
+    setCandidateClaimsSettledKey(`${requestOrganizationId}:${engagementId || ""}`);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setCandidateClaimsError(errorText(result));
       return;
     }
     setCandidateClaims(projectCandidateClaims(result.body.data));
-  }, [organizationId]);
+    setCandidateClaimsTruncated(result.body.data?.truncated === true);
+  }, [organizationId, engagementId]);
 
   // Persisted proposals and their review items must be discoverable by the
   // next reviewer on a fresh workspace mount, without a manual Load claims.
   useEffect(() => {
+    // A Project switch never shows the previous Project's claims while the
+    // new read is in flight.
+    setCandidateClaims([]);
+    setCandidateClaimsTruncated(false);
     if (organizationId) loadCandidateClaims();
   }, [organizationId, loadCandidateClaims]);
 
@@ -1062,7 +1102,7 @@ export default function ImpactEvidenceLibrary({
     const requestOrganizationId = organizationId;
     setLoadingEvidenceItems(true);
     setEvidenceItemsError("");
-    const result = await getJson(evidenceLibraryCandidatesPath(organizationId));
+    const result = await getJson(evidenceLibraryCandidatesPath(organizationId, null, engagementId || null));
     // A late response for a previous organization (or superseded by a newer
     // read) never repopulates the current view.
     if (!shouldApplyCandidateResponse({
@@ -1072,6 +1112,7 @@ export default function ImpactEvidenceLibrary({
       currentOrganizationId: organizationIdRef.current,
     })) return;
     setLoadingEvidenceItems(false);
+    setEvidenceItemsSettledKey(`${requestOrganizationId}:${engagementId || ""}`);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setEvidenceItems([]);
       setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(null));
@@ -1079,13 +1120,15 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setEvidenceItems(projectEvidenceLibraryItems(result.body.data));
+    setEvidenceItemsTruncated(result.body.data?.truncated === true);
     setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(result.body.data));
-  }, [organizationId]);
+  }, [organizationId, engagementId]);
 
   useEffect(() => {
     evidenceRequestGenerationRef.current += 1;
     setLoadingEvidenceItems(false);
     setEvidenceItems([]);
+    setEvidenceItemsTruncated(false);
     setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(null));
     setEvidenceItemsError("");
     setEvidenceReviewTargetId("");
@@ -1201,9 +1244,13 @@ export default function ImpactEvidenceLibrary({
   const loadGeneratedDrafts = useCallback(async () => {
     if (!organizationId || !workflowOperations.readGeneratedDrafts) return;
     const requestOrganizationId = organizationId;
+    const requestGeneration = ++generatedDraftsRequestGenerationRef.current;
     setLoadingGeneratedDrafts(true);
-    const result = await getJson(generatedDraftLibraryIndexPath(requestOrganizationId));
-    if (requestOrganizationId !== organizationIdRef.current) return;
+    // GK Project Drafts: the selected Project's drafts, scoped on the server
+    // (generation_runs.engagement_id) before paging; no Project, the
+    // organization-wide index.
+    const result = await getJson(generatedDraftLibraryIndexPath(requestOrganizationId, engagementId || null));
+    if (requestOrganizationId !== organizationIdRef.current || requestGeneration !== generatedDraftsRequestGenerationRef.current) return;
     setLoadingGeneratedDrafts(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setGeneratedDrafts([]);
@@ -1211,7 +1258,7 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setGeneratedDrafts(projectGeneratedDraftLibraryItems(result.body.data));
-  }, [organizationId, workflowOperations.readGeneratedDrafts]);
+  }, [organizationId, engagementId, workflowOperations.readGeneratedDrafts]);
 
   // Rediscover persisted drafts on every fresh Library load, independent of
   // any transient in-browser generation state.
@@ -1220,6 +1267,12 @@ export default function ImpactEvidenceLibrary({
     setSelectedGeneratedDraftId("");
     if (organizationId) loadGeneratedDrafts();
   }, [organizationId, loadGeneratedDrafts]);
+  // An open draft belongs to the Project it was opened in; a packet read still
+  // in flight for the previous Project is discarded (selectGeneratedDraft).
+  useEffect(() => {
+    generatedDraftPacketRequestRef.current += 1;
+    setGeneratedDraftPacket(null);
+  }, [organizationId, engagementId]);
 
   // A different selected draft must never carry over a previous draft's
   // export-review-request outcome (link or blockers) - same convention as
@@ -2053,10 +2106,13 @@ export default function ImpactEvidenceLibrary({
   // request-lifecycle convention as loadReviewQueue above.
   const loadOrganizationSources = useCallback(async () => {
     if (!organizationId) return;
+    const requestGeneration = ++organizationSourcesRequestGenerationRef.current;
     setLoadingOrganizationSources(true);
     setOrganizationSourcesError("");
     setOrganizationSourcesRequestState("loading");
-    const result = await getJson(organizationSourcesPath(organizationId));
+    const result = await getJson(organizationSourcesPath(organizationId, engagementId || null));
+    // A late response for a previous organization or Project is discarded.
+    if (requestGeneration !== organizationSourcesRequestGenerationRef.current) return;
     setLoadingOrganizationSources(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setOrganizationSources([]);
@@ -2066,7 +2122,7 @@ export default function ImpactEvidenceLibrary({
     }
     setOrganizationSources(projectOrganizationSources(result.body.data));
     setOrganizationSourcesRequestState("success");
-  }, [organizationId]);
+  }, [organizationId, engagementId]);
 
   useEffect(() => {
     setOrganizationSources([]);
@@ -2296,9 +2352,11 @@ export default function ImpactEvidenceLibrary({
   }, [organizationId, assessingRequirementId, loadRequirementsReadiness, workflowOperations.assessRequirement]);
 
   const selectGeneratedDraft = useCallback(async (generatedContentDraftId) => {
+    const request = ++generatedDraftPacketRequestRef.current;
     setSelectedGeneratedDraftId(generatedContentDraftId);
     setMessage("");
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, generatedContentDraftId));
+    if (request !== generatedDraftPacketRequestRef.current) return;
     if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
       setGeneratedDraftPacket(null);
       setMessage(errorText(packetResult));
@@ -2930,7 +2988,7 @@ export default function ImpactEvidenceLibrary({
   const [sensitivityReviewFocusRequest, setSensitivityReviewFocusRequest] = useState(0);
   const openSensitivityReview = useCallback((profileId) => {
     setSelectedSensitivityProfileId(profileId);
-    setKnowledgeStudioTab("processing");
+    setKnowledgeStudioTab("sources");
     setSensitivityReviewFocusRequest((current) => current + 1);
   }, []);
   useEffect(() => {
@@ -2966,29 +3024,69 @@ export default function ImpactEvidenceLibrary({
     await loadSensitivityDetail();
   }, [organizationId, intakeSensitivityProfileId, sensitivityDetail, sensitivityActionPending, sensitivityFormState, loadSensitivityDetail]);
 
-  return (
-    <section>
-      <h1 className="admin-title mb-3">Impact Evidence Library</h1>
+  // --- Four-view presentation (owner direction 2026-11-06) ------------------
+  // Display only, from the reads above: the selected Project's evidence and
+  // claims grouped by recorded type. Organization-wide rollups (review queue,
+  // gaps, sensitivity queue) are labelled as such, never as the Project's.
+  const gkContextKey = `${organizationId}:${engagementId || ""}`;
+  const gkSourceVersions = sourceVersionIndex(organizationSources);
+  const gkFindings = buildFindings({ evidenceItems, claims: candidateClaims, sources: organizationSources });
+  const gkFindingsState = projectFindingsState({
+    engagementId,
+    grouped: gkFindings,
+    reads: [
+      {
+        status: evidenceItemsSettledKey !== gkContextKey || loadingEvidenceItems ? "loading" : evidenceItemsError ? "error" : "success",
+        complete: !evidenceItemsTruncated,
+        message: evidenceItemsError,
+      },
+      {
+        status: candidateClaimsSettledKey !== gkContextKey || loadingCandidateClaims ? "loading" : candidateClaimsError ? "error" : "success",
+        complete: !candidateClaimsTruncated,
+        message: candidateClaimsError,
+      },
+    ],
+  });
+  const gkEvidenceSections = FINDING_CATEGORIES
+    .filter((category) => category !== "technical" || showGkTechnicalEvidence)
+    .map((category) => ({ category, items: gkFindings[category].filter((entry) => entry.evidence).map((entry) => entry.evidence) }))
+    .filter((section) => section.items.length > 0);
+  const gkTechnicalEvidenceCount = gkFindings.technical.filter((entry) => entry.evidence).length;
+  const gkUnclaimedCount = FINDING_CATEGORIES.filter((category) => category !== "technical")
+    .flatMap((category) => gkFindings[category]).filter((entry) => entry.evidence && entry.claims.length === 0).length;
+  const gkAttention = [];
+  if (gkUnclaimedCount > 0) {
+    gkAttention.push({
+      key: "unclaimed_evidence",
+      text: `${gkUnclaimedCount} evidence item(s)${evidenceItemsTruncated ? " on the first page" : ""} have no claim proposed yet.`,
+      actionLabel: "Open Evidence", onAction: () => setKnowledgeStudioTab("evidence"),
+    });
+  }
+  if (reviewQueueRequestState === "success" && reviewQueueItems.length > 0) {
+    gkAttention.push({
+      key: "organization_review_queue",
+      text: `Across the organization (all Projects), ${reviewQueueItems.length} claim(s) have open review conditions.`,
+      actionLabel: "Open review work", onAction: () => { setKnowledgeStudioTab("evidence"); setShowOrganizationReviewWork(true); },
+    });
+  }
+  if (sensitivityAttention.status === "ready" && sensitivityAttention.items.length > 0) {
+    gkAttention.push({
+      key: "organization_sensitivity_queue",
+      text: `Across the organization, ${sensitivityAttention.items.length} source(s) wait for sensitivity & allowed-use review.`,
+      actionLabel: "Open Sources", onAction: () => setKnowledgeStudioTab("sources"),
+    });
+  }
 
-      <ul className="nav nav-tabs mb-3">
-        {[
-          ["files", "Files"],
-          ["processing", "Processing"],
-          ["evidence", "Evidence"],
-          ["gaps", "Gaps"],
-          ["reviews", "Reviews"],
-        ].map(([key, label]) => (
-          <li className="nav-item" key={key}>
-            <button
-              type="button"
-              className={`nav-link${knowledgeStudioTab === key ? " active" : ""}`}
-              onClick={() => setKnowledgeStudioTab(key)}
-            >
-              {label}
-            </button>
-          </li>
-        ))}
-      </ul>
+  return (
+    <section data-knowledge-studio-kind="gk">
+      <ProjectHeading
+        projectName={projectName || (engagementId ? engagementId : "")}
+        engagementId={engagementId}
+        subtitle={engagementId ? "Get Kinder Knowledge Studio" : "Get Kinder Knowledge Studio: no Project selected, so reads cover the whole organization."}
+      />
+
+      <KnowledgeStudioNav view={knowledgeStudioTab} onSelect={setKnowledgeStudioTab} />
+      {parentOrganizationId === undefined || parentEngagementId === undefined || knowledgeStudioTab === "evidence" || knowledgeStudioTab === "drafts" ? (
       <div className="admin-card mb-3">
         <div className="row g-3 align-items-end">
           <div className="col-12 col-lg-5">
@@ -3051,10 +3149,25 @@ export default function ImpactEvidenceLibrary({
           </div>
         </div>
       </div>
+      ) : null}
 
-      <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
+      {knowledgeStudioTab === "impact" ? (
+        <ImpactView
+          projectName={projectName}
+          engagementId={engagementId}
+          state={gkFindingsState}
+          grouped={gkFindings}
+          attention={gkAttention}
+          statusFor={(finding) => (finding.claims.length === 0 ? "No claim proposed yet" : "Claim proposed")}
+          onOpenFinding={() => setKnowledgeStudioTab("evidence")}
+          onOpenEvidence={() => setKnowledgeStudioTab("evidence")}
+          intro={engagementId
+            ? "From this Project's own files and the evidence its drafts use (first page of each read)."
+            : "No Project is selected: this covers the whole organization."}
+        />
+      ) : null}
 
-      {knowledgeStudioTab === "files" && organizationId ? (
+      {knowledgeStudioTab === "sources" && organizationId ? (
         <KaiWebIntake
           organizationId={organizationId}
           engagementId={engagementId}
@@ -3067,9 +3180,9 @@ export default function ImpactEvidenceLibrary({
           }
         />
       ) : null}
-      {knowledgeStudioTab === "files" && sensitivityCapability === true && intakeSensitivityProfileId ? (
+      {knowledgeStudioTab === "sources" && sensitivityCapability === true && intakeSensitivityProfileId ? (
         <div className="admin-card mb-3 d-flex justify-content-between align-items-center gap-2">
-          <span className="small">The selected source&rsquo;s sensitivity &amp; allowed-use review is on Processing.</span>
+          <span className="small">The selected source&rsquo;s sensitivity &amp; allowed-use review is further down this page.</span>
           <button
             type="button"
             className="btn btn-sm btn-outline-primary flex-shrink-0"
@@ -3082,7 +3195,20 @@ export default function ImpactEvidenceLibrary({
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
 
-      {knowledgeStudioTab === "gaps" ? (
+      {knowledgeStudioTab === "evidence" ? (
+        <div className="admin-card mb-3 d-flex flex-wrap justify-content-between align-items-center gap-2" data-gk-organization-review-work="">
+          <div className="small">
+            <span className="fw-semibold">Organization-wide review work</span>
+            <span className="text-muted"> (all Projects): {reviewQueueRequestState === "success" ? `${reviewQueueItems.length} claim(s) with open review conditions` : "review queue loading or unavailable"}. This is not limited to the selected Project.</span>
+          </div>
+          <button type="button" className="btn btn-sm btn-outline-secondary" aria-expanded={showOrganizationReviewWork}
+            onClick={() => setShowOrganizationReviewWork((value) => !value)}>
+            {showOrganizationReviewWork ? "Hide review queue and gaps" : "Show review queue and gaps"}
+          </button>
+        </div>
+      ) : null}
+
+      {knowledgeStudioTab === "evidence" && showOrganizationReviewWork ? (
       <div className="admin-card mb-3">
         <div className="d-flex justify-content-between align-items-center mb-2">
           <h5 className="mb-0">Gaps and Risks</h5>
@@ -3281,7 +3407,7 @@ export default function ImpactEvidenceLibrary({
       </div>
       ) : null}
 
-      {knowledgeStudioTab === "reviews" ? (
+      {knowledgeStudioTab === "evidence" && showOrganizationReviewWork ? (
       <div className="admin-card mb-3">
         <div className="d-flex justify-content-between align-items-center mb-2">
           <h5 className="mb-0">Review Queue</h5>
@@ -3426,7 +3552,7 @@ export default function ImpactEvidenceLibrary({
       ) : null}
 
       <div className="row g-3">
-        <div className="col-12 col-xl-5">
+        <div className={knowledgeStudioTab === "evidence" ? "col-12 col-xl-5" : "col-12"}>
           {knowledgeStudioTab === "evidence" ? (
           <div className="admin-card">
             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -3434,19 +3560,26 @@ export default function ImpactEvidenceLibrary({
               <span className="text-muted small">{evidenceItems.length} shown</span>
             </div>
             <div className="small text-muted mb-2">
-              What KAI has extracted from your organization's information, with its source and current review
-              posture - not an interpreted statement, and not filtered to only evidence that already has a
-              claim proposed for it.
+              {engagementId ? "What KAI extracted from this Project's sources" : "What KAI extracted from your organization's sources"}, grouped by
+              what it records, including evidence that has no claim yet.
             </div>
             {evidenceItemsError ? (
               <div className="alert alert-warning py-2 small">Evidence: {evidenceItemsError}</div>
             ) : null}
             {loadingEvidenceItems ? <div className="text-muted small">Loading evidence...</div> : null}
-            {evidenceItems.length === 0 && !loadingEvidenceItems ? (
-              <div className="text-muted small">No evidence extracted yet for this organization.</div>
+            {evidenceItems.length === 0 && !loadingEvidenceItems && !evidenceItemsError ? (
+              <div className="text-muted small">{engagementId ? "No evidence extracted yet for this Project." : "No evidence extracted yet for this organization."}</div>
             ) : null}
+            {evidenceItemsTruncated ? (
+              <div className="alert alert-secondary py-2 small" data-gk-evidence-incomplete="">
+                Showing the first page of evidence; more exists. Groups below cover only what is shown.
+              </div>
+            ) : null}
+            {gkEvidenceSections.map(({ category, items: categoryItems }) => (
+            <div key={category} data-gk-evidence-category={category}>
+            <CategoryHeading category={category} count={categoryItems.length} complete={!evidenceItemsTruncated} />
             <ul className="list-group">
-              {evidenceItems.map((item) => {
+              {categoryItems.map((item) => {
                 // Evidence can exist without a claim yet - only offer the
                 // jump into Traceability when a governed claim actually
                 // references this evidence item (existing Claims data,
@@ -3454,10 +3587,12 @@ export default function ImpactEvidenceLibrary({
                 const linkedClaim = claims.find((claim) => claim.evidenceItemId === item.evidenceItemId);
                 return (
                   <li key={item.evidenceItemId} className="list-group-item" data-evidence-item-id={item.evidenceItemId}>
-                    <div className="fw-semibold small">
-                      {item.statement || "Evidence statement not yet available"}
-                    </div>
+                    <StatementText className="fw-semibold small" text={item.statement || "Evidence statement not yet available"} />
                     <div className="d-flex flex-wrap gap-2 mt-1">
+                      <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily)}</span>
+                      {gkSourceVersions.get(item.sourceVersionId)?.fileName ? (
+                        <span className="small text-muted">Source: {gkSourceVersions.get(item.sourceVersionId).fileName}</span>
+                      ) : null}
                       {item.supportStrength ? (
                         <span className="badge text-bg-secondary">{item.supportStrength}</span>
                       ) : null}
@@ -3587,10 +3722,21 @@ export default function ImpactEvidenceLibrary({
                 );
               })}
             </ul>
+            </div>
+            ))}
+            {gkTechnicalEvidenceCount > 0 ? (
+              <div className="mt-3" data-gk-technical-evidence="">
+                <button type="button" className="btn btn-sm btn-outline-secondary" aria-expanded={showGkTechnicalEvidence}
+                  data-knowledge-studio-reveal-toggle="gk-technical-evidence" onClick={() => setShowGkTechnicalEvidence((value) => !value)}>
+                  {showGkTechnicalEvidence ? "Hide supporting source detail" : `Show supporting source detail (${gkTechnicalEvidenceCount})`}
+                </button>
+              </div>
+            ) : null}
           </div>
           ) : null}
 
-          <div className="admin-card">
+          {knowledgeStudioTab === "evidence" ? (
+          <div className="admin-card mt-3">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Claims</h5>
               <span className="text-muted small">{claims.length} shown</span>
@@ -3617,9 +3763,12 @@ export default function ImpactEvidenceLibrary({
                   onClick={() => setSelectedClaimId(claim.claimId)}
                 >
                   <div className="d-flex justify-content-between gap-2">
-                    <span className="text-break">{claim.claimId}</span>
+                    <span className="text-break" title={claim.claimId}>
+                      {shortStatement(claim.claimStatement || claim.evidenceStatement || "Claim statement not yet available", 200).text}
+                    </span>
                     <StatusBadge status={claim.libraryStatus} />
                   </div>
+                  <div className="small mt-1">{findingTypeLabel(claim.evidenceType, null)}</div>
                   {workflowOperations.generateDrafts && canSelectClaimForInternalGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input
@@ -3642,7 +3791,6 @@ export default function ImpactEvidenceLibrary({
                       <span className="form-check-label">Include in funder evidence summary</span>
                     </div>
                   ) : null}
-                  {claim.claimStatement ? <div className="small mt-1 text-break">{claim.claimStatement}</div> : null}
                   <div className="small mt-1">
                     {claim.claimType || "claim"} · {claim.claimReviewStatus || claim.claimStatus || "status unknown"}
                   </div>
@@ -3677,6 +3825,23 @@ export default function ImpactEvidenceLibrary({
                 ) : null}
                 </React.Fragment>
               ))}
+            </div>
+            {workflowOperations.generateDrafts ? (
+              <div className="small mt-2 d-flex flex-wrap align-items-center gap-2" data-gk-generation-selection={selectedGenerationClaimIds.length}>
+                <span>{selectedGenerationClaimIds.length}/20 selected for an internal draft{selectedFunderGenerationClaimIds.length ? `, ${selectedFunderGenerationClaimIds.length} for a funder summary` : ""}.</span>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => setKnowledgeStudioTab("drafts")}>Go to Drafts</button>
+              </div>
+            ) : null}
+          </div>
+          ) : null}
+
+          {knowledgeStudioTab === "drafts" && !generatedDraftPacket ? (
+          <>
+          <div className="admin-card" data-gk-draft-generation="">
+            <h5 className="mb-2">Create a draft</h5>
+            <div className="small text-muted mb-2">
+              {engagementId ? "Drafts are created for the selected Project from the claims selected in Evidence." : "Select a Project to create a draft."}
+              {" "}Audience: {audience}.
             </div>
             {workflowOperations.generateDrafts && audience === "internal" ? (
               <div className="small mt-2">{selectedGenerationClaimIds.length}/20 claims selected. Choose relevant measurements and document statements, including limitations. Unselected claims are not included; deselect claims to change the set.</div>
@@ -4653,11 +4818,11 @@ export default function ImpactEvidenceLibrary({
           <div className="admin-card mt-3">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Generated Drafts</h5>
-              <span className="text-muted small">{generatedDrafts.length} shown</span>
+              <span className="text-muted small">{engagementId ? "This Project" : "All Projects"} · {generatedDrafts.length} shown</span>
             </div>
             {loadingGeneratedDrafts ? <div className="text-muted">Loading generated drafts...</div> : null}
             {!loadingGeneratedDrafts && generatedDrafts.length === 0 ? (
-              <div className="text-muted">No persisted generated drafts for this organization yet.</div>
+              <div className="text-muted">{engagementId ? "No generated drafts for this Project yet." : "No persisted generated drafts for this organization yet."}</div>
             ) : null}
             <div className="list-group">
               {generatedDrafts.map((draft) => {
@@ -4707,9 +4872,12 @@ export default function ImpactEvidenceLibrary({
               })}
             </div>
           </div>
+          </>
+          ) : null}
         </div>
 
-        <div className="col-12 col-xl-7">
+        <div className={knowledgeStudioTab === "evidence" ? "col-12 col-xl-7" : "col-12"}>
+          {knowledgeStudioTab === "evidence" ? (
           <div className="admin-card" ref={traceabilityPanelRef} tabIndex={-1}>
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Traceability</h5>
@@ -4897,19 +5065,20 @@ export default function ImpactEvidenceLibrary({
               </>
             ) : null}
           </div>
+          ) : null}
 
-          {knowledgeStudioTab === "processing" ? (
+          {knowledgeStudioTab === "sources" ? (
             <div className="small text-muted mb-2">
               Processing currently covers sensitivity &amp; allowed-use classification - the stage where KAI
               determines what an uploaded file is allowed to be used for. Other processing stages (intake,
               profiling, data-dictionary mapping, source promotion) are not yet exposed here.
             </div>
           ) : null}
-          {knowledgeStudioTab === "processing" && sensitivityCapability !== true ? (
+          {knowledgeStudioTab === "sources" && sensitivityCapability !== true ? (
             <div className="text-muted small">Sensitivity &amp; allowed-use classification is not currently available for this organization.</div>
           ) : null}
 
-          {knowledgeStudioTab === "processing" && sensitivityCapability === true ? (
+          {knowledgeStudioTab === "sources" && sensitivityCapability === true ? (
             <div className="admin-card mt-3">
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Sources needing sensitivity &amp; allowed-use review</h5>
@@ -4919,7 +5088,7 @@ export default function ImpactEvidenceLibrary({
                 Pre-claim: no claim, evidence item, or source promotion is required to reach these. This list shows
                 only sources with EXISTING open review work - not every P1-05 sensitivity profile for this
                 organization. To start a first review for a file that has none yet, select the file in KAI Web
-                Intake on the Files tab once its sensitivity profile is complete, then open its review from there.
+                Intake above (Sources) once its sensitivity profile is complete, then open its review from there.
               </div>
               {loadingSensitivityReviewQueue ? <div className="text-muted small">Loading review queue...</div> : null}
               {sensitivityReviewQueueError ? <div className="alert alert-warning py-2 small">{sensitivityReviewQueueError}</div> : null}
@@ -4946,7 +5115,7 @@ export default function ImpactEvidenceLibrary({
             </div>
           ) : null}
 
-          {knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true ? (
+          {knowledgeStudioTab === "sources" && intakeSensitivityProfileId && sensitivityCapability === true ? (
             <div className="admin-card mt-3" ref={sensitivityReviewPanelRef} tabIndex={-1}>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>
@@ -4971,16 +5140,16 @@ export default function ImpactEvidenceLibrary({
             </div>
           ) : null}
 
-          {knowledgeStudioTab === "files" ? (
+          {knowledgeStudioTab === "sources" ? (
           <div className="admin-card mt-3">
             <h5 className="mb-2">Data Sources</h5>
             <div className="small text-muted mb-2">
-              Governed sources and source versions already promoted for this organization. Select one to use it below - historical (non-current) versions remain visible, not hidden.
+              {engagementId ? "Promoted sources for this Project." : "Promoted sources for the whole organization."} Select a version to extract evidence from it below; earlier versions stay listed.
             </div>
             {organizationSourcesError ? <div className="alert alert-warning py-2 small">{organizationSourcesError}</div> : null}
             {loadingOrganizationSources ? <div className="text-muted small">Loading data sources...</div> : null}
             {!loadingOrganizationSources && !organizationSourcesError && organizationSourcesRequestState === "success" && organizationSources.length === 0 ? (
-              <div className="text-muted small">No governed sources found for this organization yet.</div>
+              <div className="text-muted small">{engagementId ? "No promoted sources for this Project yet." : "No governed sources found for this organization yet."}</div>
             ) : null}
             {!loadingOrganizationSources && organizationSources.length > 0 ? (
               <div className="table-responsive mb-2">
@@ -4988,9 +5157,8 @@ export default function ImpactEvidenceLibrary({
                   <thead>
                     <tr>
                       <th>Source</th>
-                      <th>Reviewed type</th>
-                      <th>Source version</th>
-                      <th>Current</th>
+                      <th>Type</th>
+                      <th>Version</th>
                       <th>Created</th>
                       <th></th>
                     </tr>
@@ -5000,14 +5168,18 @@ export default function ImpactEvidenceLibrary({
                       (source.sourceVersions.length > 0 ? source.sourceVersions : [null]).map((version, index) => (
                         <tr key={version ? version.sourceVersionId : `${source.sourceId}-no-version`}>
                           {index === 0 ? (
-                            <td rowSpan={source.sourceVersions.length || 1} className="small font-monospace">{source.sourceCode}</td>
+                            <td rowSpan={source.sourceVersions.length || 1} className="small" title={source.sourceCode}>
+                              {source.sourceVersions.find((entry) => entry.isCurrent)?.safeFilename || source.sourceVersions.find((entry) => entry.safeFilename)?.safeFilename || source.sourceCode}
+                            </td>
                           ) : null}
                           {index === 0 ? (
-                            <td rowSpan={source.sourceVersions.length || 1} className="small">{source.reviewedSourceType}</td>
+                            <td rowSpan={source.sourceVersions.length || 1} className="small">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</td>
                           ) : null}
-                          <td className="small font-monospace">{version ? version.sourceVersionId : "none"}</td>
-                          <td className="small">{version ? (version.isCurrent ? "current" : "historical") : ""}</td>
-                          <td className="small">{version ? version.createdAt : ""}</td>
+                          <td className="small" title={version ? version.sourceVersionId : ""}>
+                            {version ? (version.isCurrent ? "Current" : "Earlier") : "No version"}
+                            {version?.safeFilename ? <div className="text-muted">{version.safeFilename}</div> : null}
+                          </td>
+                          <td className="small">{version?.createdAt ? new Date(version.createdAt).toLocaleDateString() : ""}</td>
                           <td>
                             {version ? (
                               <button
@@ -5015,7 +5187,7 @@ export default function ImpactEvidenceLibrary({
                                 className="btn btn-sm btn-outline-secondary"
                                 onClick={() => setSourceVersionId(version.sourceVersionId)}
                               >
-                                Select
+                                {sourceVersionId === version.sourceVersionId ? "Selected" : "Select"}
                               </button>
                             ) : null}
                           </td>
@@ -5029,13 +5201,14 @@ export default function ImpactEvidenceLibrary({
           </div>
           ) : null}
 
-          <div className="admin-card mt-3">
-            <h5 className="mb-2">Claim &amp; evidence workflow</h5>
+          {knowledgeStudioTab === "sources" ? (
+          <div className="admin-card mt-3" data-gk-source-extraction="">
+            <h5 className="mb-2">Extract evidence from a source version</h5>
             {workflowResult ? <div className="alert alert-info py-2">{workflowResult}</div> : null}
 
             <div className="row g-2 align-items-end mb-3">
               <div className="col-12 col-lg-6">
-                <label className="form-label small fw-semibold">Source version id</label>
+                <label className="form-label small fw-semibold">Selected source version</label>
                 <input
                   className="form-control form-control-sm"
                   value={sourceVersionId}
@@ -5062,10 +5235,19 @@ export default function ImpactEvidenceLibrary({
                 ))}
               </div>
             ) : null}
+          </div>
+          ) : null}
+
+          {knowledgeStudioTab === "evidence" ? (
+          <div className="admin-card mt-3">
+            <h5 className="mb-2">Claim &amp; evidence workflow</h5>
+            {workflowResult ? <div className="alert alert-info py-2">{workflowResult}</div> : null}
 
             <div className="row g-2 align-items-end mb-3">
               <div className="col-12">
-                <div className="small text-muted">Selected claim: {selectedClaimId || "none"} · evidence item: {selectedClaim?.evidenceItemId || "none"}</div>
+                <div className="small text-muted">
+                  Selected claim: {selectedClaim ? shortStatement(selectedClaim.claimStatement || selectedClaim.evidenceStatement || selectedClaimId, 120).text : "none"}
+                </div>
               </div>
               <div className="col-6 col-lg-4">
                 {workflowOperations.proposeClaim ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !isRouteUuid(selectedClaim?.evidenceItemId)}>
@@ -5113,9 +5295,16 @@ export default function ImpactEvidenceLibrary({
               </div>
             </div>
           </div>
+          ) : null}
 
+          {knowledgeStudioTab === "drafts" ? (
+          <>
           {generatedDraftPacket ? (
-            <div className="admin-card mt-3">
+            <div className="admin-card" data-gk-draft-reader="">
+              <button type="button" className="btn btn-sm btn-link px-0 mb-2" data-gk-draft-back=""
+                onClick={() => { generatedDraftPacketRequestRef.current += 1; setGeneratedDraftPacket(null); setSelectedGeneratedDraftId(""); }}>
+                &larr; Back to drafts
+              </button>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Generated draft</h5>
                 <StatusBadge status={generatedDraftPacket.queueStatus === "open" ? "needs_review" : "usable"} />
@@ -5216,8 +5405,17 @@ export default function ImpactEvidenceLibrary({
               ))}
             </div>
           ) : null}
+          </>
+          ) : null}
         </div>
       </div>
+
+      {organizationId ? (
+        <details className="mt-3" data-knowledge-studio-ask-kai="">
+          <summary className="small fw-semibold mb-2">Ask KAI (answers from the whole organization library)</summary>
+          <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
+        </details>
+      ) : null}
     </section>
   );
 }

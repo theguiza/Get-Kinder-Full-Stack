@@ -4,6 +4,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../db/kaiGeneratedDraftLibraryReadModels.js";
+import { resolveProjectScope } from "./kaiProjectScope.js";
 import { __generatedContentServiceContract } from "./kaiGeneratedContentService.js";
 import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
 import {
@@ -190,10 +191,14 @@ export async function listGeneratedDraftLibraryIndex(input = {}, dependencies = 
   const organizationId = typeof input.organizationId === "string" ? input.organizationId.trim().toLowerCase() : "";
   const limit = normalizeLimit(input.limit);
   const afterGeneratedContentDraftId = input.afterGeneratedContentDraftId ?? null;
+  // Optional Project scope (GK Project Drafts view); omitted, the existing
+  // organization-wide index.
+  const engagementId = input.engagementId ?? null;
   if (
     !canonicalUuid(organizationId)
     || !limit
     || (afterGeneratedContentDraftId !== null && !canonicalUuid(afterGeneratedContentDraftId))
+    || (engagementId !== null && !canonicalUuid(engagementId))
   ) {
     return buildKaiError("validation_blocker");
   }
@@ -233,8 +238,13 @@ export async function listGeneratedDraftLibraryIndex(input = {}, dependencies = 
   );
   const exportReviewVisible = exportReviewAuth.ok;
 
+  // The engagement must belong to this organization (the same check the
+  // Sources/Evidence/Claims Project scope applies), before the paged read.
+  const projectScope = await resolveProjectScope({ organizationId, engagementId }, dependencies);
+  if (projectScope.error) return projectScope.error;
+
   const readIndex = dependencies.listGeneratedDraftLibraryIndex || readGeneratedDraftLibraryIndex;
-  const rows = await readIndex(organizationId, { limit, afterGeneratedContentDraftId });
+  const rows = await readIndex(organizationId, { limit, afterGeneratedContentDraftId, ...projectScope.readOptions });
   if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
 
   const summaries = [];

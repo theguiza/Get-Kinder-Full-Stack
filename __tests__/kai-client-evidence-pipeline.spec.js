@@ -651,11 +651,15 @@ test("frontend source: one pipeline request, keyed to organization + Project, wi
   }
 });
 
-test("frontend source: Files shows the status card; Evidence uses the Project pipeline when a Project is selected; Reviews shows client work", () => {
-  assert.match(studioSource, /\{tab === "files" && organizationId \? \(\s*<ClientEvidencePipelineStatus\s+request=\{pipeline\}/);
-  assert.match(studioSource, /\{tab === "evidence" && engagementId \? \(\s*<ProjectEvidence\s+view=\{evidenceTabView\(pipeline\)\}/);
-  assert.match(studioSource, /\{tab === "evidence" && !engagementId \? \(/);
-  assert.match(studioSource, /<ProjectReviews\s+view=\{engagementId \? reviewsTabView\(pipeline\) : null\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(reviewAccess, Boolean\(capabilities\)\)\}\s+canReviewSensitivity=\{canReviewSensitivity\}/);
+test("frontend source: Sources shows the status card; Evidence uses the Project pipeline when a Project is selected; Sources shows client review work", () => {
+  // Four-view refactor (owner direction 2026-11-06): the former Files and
+  // Reviews tabs are the Sources view.
+  assert.match(studioSource, /const fileStatusSection = organizationId \? \(\s*<ClientEvidencePipelineStatus\s+request=\{pipeline\}/);
+  assert.match(studioSource, /<ViewPane \{\.\.\.pane\("sources"\)\}>\{sourcesAfter\}<\/ViewPane>/);
+  assert.match(studioSource, /sourcesAfter=\{sourcesAfter\}/);
+  assert.match(studioSource, /<ViewPane \{\.\.\.pane\("evidence"\)\}>\s*\{engagementId \? \(\s*<ProjectEvidence\s+view=\{evidenceTabView\(pipeline\)\}/);
+  assert.match(studioSource, /const reviews = engagementId \? reviewsTabView\(pipeline\) : null;/);
+  assert.match(studioSource, /<ProjectReviews\s+view=\{reviews\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(reviewAccess, Boolean\(capabilities\)\)\}\s+canReviewSensitivity=\{canReviewSensitivity\}/);
   assert.match(statusSource, /Processing &amp; evidence status/);
   assert.match(statusSource, /file\.nextAction === "answer_client_followups" && canReviewFollowups \?/);
   // The org-wide zero message is reachable only without a selected Project.
@@ -820,11 +824,11 @@ test("shared sensitivity form: the AI disposition is an explicit permitted / not
   assert.match(sharedBodySource, /withSensitivityAllowedUse\(current, event\.target\.value\)/);
 });
 
-test("client Studio: the review action and panel need this organization's 'allowed' answer, an engagement-keyed selection, and the Reviews tab", () => {
+test("client Studio: the review action and panel need this organization's 'allowed' answer, an engagement-keyed selection, and the Sources view", () => {
   assert.match(studioSource, /const canReviewSensitivity = reviewAccess === "allowed" && Boolean\(capabilities\);/);
   assert.match(studioSource, /const reviewContextKey = organizationId && engagementId \? `\$\{organizationId\}:\$\{engagementId\}` : "";/);
-  assert.match(studioSource, /const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "reviews"\s+&& sensitivityReviewSelection\?\.contextKey === reviewContextKey/);
-  assert.match(studioSource, /if \(key !== "reviews"\) setSensitivityReviewSelection\(null\);/);
+  assert.match(studioSource, /const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "sources"\s+&& sensitivityReviewSelection\?\.contextKey === reviewContextKey/);
+  assert.match(studioSource, /if \(key !== "sources"\) setSensitivityReviewSelection\(null\);/);
   assert.match(studioSource, /useEffect\(\(\) => \{\s*setSensitivityReviewSelection\(null\);\s*\}, \[organizationId, engagementId\]\);/);
   assert.match(studioSource, /\{canReviewSensitivity && sensitivityReviewActionAvailable\(file\) \? \(/);
   assert.match(studioSource, /key=\{`\$\{openSensitivityReview\.contextKey\}:\$\{openSensitivityReview\.intakeFileId\}`\}/);

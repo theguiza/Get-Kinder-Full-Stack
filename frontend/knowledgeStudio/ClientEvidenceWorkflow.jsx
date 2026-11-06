@@ -55,7 +55,6 @@ import {
   internalDraftTraceabilityDiagnosis,
   isInternalDraftTraceabilityRefusal,
   isUseForImpactCandidate,
-  orderClaimsForReports,
   processingPermissionReviewFiles,
   readLibraryPages,
   retainSelectableClaimIds,
@@ -79,6 +78,8 @@ import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
 import ClientSourceMeasurementPanel from "./ClientSourceMeasurementPanel.jsx";
 import ClientMeasuredClaimReviewPanel from "./ClientMeasuredClaimReviewPanel.jsx";
+import { CategoryHeading, FindingMeta, ImpactView, StatementText, ViewPane } from "./KnowledgeStudioViews.jsx";
+import { FINDING_CATEGORIES, buildFindings, findingCount, projectFindingsState, shortStatement } from "./knowledgeStudioViewsLogic.js";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -168,9 +169,11 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
 }
 
 /**
- * Data Sources tab of the client Knowledge Studio for an organization
- * administrator (owner decision 2026-10-18). Mounted only while the tab is
- * open and only when the access-capabilities read admits at least one of
+ * The organization administrator's evidence-to-draft workflow in the client
+ * Knowledge Studio (owner decision 2026-10-18). Since the four-view refactor
+ * (owner direction 2026-11-06) it is mounted once for the whole studio as the
+ * shared controller of Impact, Evidence, Sources and Drafts, and only when
+ * the access-capabilities read admits at least one of
  * extractEvidence / proposeClaim / generateClaimGapFollowups /
  * generateDrafts; each action is shown only for its own flag, and the server
  * re-authorizes every request.
@@ -226,7 +229,14 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
  * persisted internal drafts with their true review state; a draft just
  * generated is opened from that read.
  */
-export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh, canUploadNewIntakeVersion, onContinueXlsxInFiles }) {
+export default function ClientEvidenceWorkflow({
+  organizationId, engagementId, access, pipeline, onPipelineRefresh, canUploadNewIntakeVersion, onContinueXlsxInFiles,
+  // Four-view Knowledge Studio (owner direction 2026-11-06): this one mounted
+  // controller presents Impact, Evidence, Sources and Drafts; the parent owns
+  // the view selection and passes its own sections for each view.
+  view = "sources", visitedViews = ["impact", "evidence", "sources", "drafts"], onSelectView, projectName = "",
+  extraAttention = [], impactAfter = null, evidenceAfter = null, sourcesBefore = null, sourcesAfter = null, draftsAfter = null,
+}) {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
   // Owner direction 2026-11-06: with a Project selected, Sources, Evidence and
@@ -248,7 +258,6 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   // Authoritative internal usability of each claim (P2-08 / P2-06, internal audience).
   const internalUse = useOrganizationRead(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken);
   const internalUseIndex = internalUse.status === "success" ? internalUse.items : null;
-  const orderedClaims = orderClaimsForReports(claims.items);
 
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
@@ -266,6 +275,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setLastDraft(null);
     setGapFollowupsByClaim({});
     setNotice(null);
+    // A write still in flight for the previous Project discards its own
+    // result (runWrite's context check); its pending label must not keep this
+    // Project's controls disabled.
+    setPending("");
   }, [organizationId, engagementId]);
 
   // Each claim's own P2-06 internal evaluation (the client-safe traceability
@@ -607,19 +620,239 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     runUseForImpact(file);
   };
 
-  return (
-    <div data-client-evidence-workflow="">
-      {notice ? (
-        <div className={`alert alert-${notice.kind} py-2 small`} role="status" data-client-workflow-notice="">{notice.text}</div>
-      ) : null}
+  // --- Four-view presentation (owner direction 2026-11-06) --------------------
+  // This one controller owns every read, selection, pending action and
+  // idempotency key; the views below only present it, so switching views never
+  // resets a selection, repeats a write, or loses an action's feedback.
+  const findings = buildFindings({ evidenceItems: evidence.items, claims: claims.items, sources: sources.items });
+  const findingsState = projectFindingsState({ engagementId, reads: [evidence, claims], grouped: findings });
+  const claimStatusText = (claim) => {
+    if (selectedClaimIds.includes(claim.claimId)) return "Selected for a draft";
+    if (claimKind(claim) === "structural") return "";
+    const use = useOfClaim(claim.claimId);
+    if (use === "usable") return "Usable in internal drafts";
+    if (use === "not_usable") return "Not usable in drafts right now";
+    return "";
+  };
+  const findingStatus = (finding) => {
+    if (finding.claims.length === 0) return access.proposeClaim ? "Not yet proposed for use in drafts" : "";
+    return finding.claims.map(claimStatusText).find(Boolean) || "Proposed for use in drafts";
+  };
+  const openFinding = (finding) => {
+    setFocusFinding({ contextKey, evidenceItemId: finding.evidenceItemId, technical: finding.category === "technical" });
+    onSelectView?.("evidence");
+  };
+  const loadedFindings = FINDING_CATEGORIES.filter((category) => category !== "technical").flatMap((category) => findings[category]);
+  const unclaimedCount = loadedFindings.filter((finding) => finding.evidence && finding.claims.length === 0).length;
+  const notUsableCount = claims.items.filter((claim) => claimKind(claim) !== "structural" && useOfClaim(claim.claimId) === "not_usable").length;
+  const attention = [];
+  if (engagementId && pipeline?.status === "error") {
+    attention.push({ key: "pipeline_error", text: "This Project's file status could not be loaded, so files waiting for a step may not be listed." });
+  }
+  if (preparationFiles.length > 0) {
+    attention.push({
+      key: "source_preparation",
+      text: `${preparationFiles.length} file(s) in this Project need a step before their evidence can be used.`,
+      actionLabel: "Open Sources", onAction: () => onSelectView?.("sources"),
+    });
+  }
+  if (access.proposeClaim && unclaimedCount > 0) {
+    attention.push({
+      key: "unclaimed_evidence",
+      text: `${unclaimedCount} finding(s)${findingsState.complete === false ? " loaded so far" : ""} are not yet proposed for use in drafts.`,
+      actionLabel: "Review in Evidence", onAction: () => onSelectView?.("evidence"),
+    });
+  }
+  if (notUsableCount > 0) {
+    attention.push({
+      key: "claims_not_usable",
+      text: `${notUsableCount} proposed finding(s) cannot be used in drafts right now; Evidence says why for each.`,
+      actionLabel: "Review in Evidence", onAction: () => onSelectView?.("evidence"),
+    });
+  }
+  if (findingsState.kind === "ready" && findingsState.complete && findings.outcomes.length === 0 && access.recordSourceMeasurement) {
+    attention.push({
+      key: "no_outcome_measurement",
+      text: "No baseline and follow-up outcome measurement is recorded yet. A source with baseline and follow-up values can be measured with Count records in Sources.",
+      actionLabel: "Open Sources", onAction: () => onSelectView?.("sources"),
+    });
+  }
+  for (const item of extraAttention) attention.push(item);
 
+  const [showTechnical, setShowTechnical] = useState(false);
+  const [focusFinding, setFocusFinding] = useState(null);
+  useEffect(() => { setFocusFinding(null); setShowTechnical(false); }, [organizationId, engagementId]);
+  const focusedEvidenceItemId = focusFinding && focusFinding.contextKey === contextKey ? focusFinding.evidenceItemId : null;
+  useEffect(() => {
+    if (!focusedEvidenceItemId || view !== "evidence") return;
+    if (focusFinding?.technical) setShowTechnical(true);
+    const element = globalThis.document?.querySelector(`[data-client-finding="${focusedEvidenceItemId}"]`);
+    element?.scrollIntoView?.({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedEvidenceItemId, view]);
+
+  const renderClaim = (claim, findingStatement) => {
+    const selectability = claimInternalDraftSelectability(claim, claimDiagnostics.get(claim.claimId));
+    const kind = claimKind(claim);
+    const use = useOfClaim(claim.claimId);
+    const diagnosis = claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))
+      ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
+    const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
+    const claimText = claim.claimStatement || claim.evidenceStatement || "";
+    return (
+      <div key={claim.claimId} className="border-top mt-2 pt-2 small" data-client-claim={claim.claimId}
+        data-client-claim-kind={kind} data-client-claim-internal-use={use}>
+        {claimText && claimText !== findingStatement ? <div className="text-break">Claim: {claimText}</div> : null}
+        {kind !== "structural" && use === "usable" ? (
+          <div className="text-success" data-client-claim-usable="">Usable in internal reports now. No further review is needed for internal use.</div>
+        ) : null}
+        {kind !== "structural" && use === "not_usable" ? (
+          <div data-client-claim-not-usable="">{claimNotUsableMessage(diagnosis)}</div>
+        ) : null}
+        {kind !== "structural" && use === "unknown" ? (
+          <div className="text-muted" data-client-claim-use-unknown="">
+            {CLAIM_USE_UNKNOWN_MESSAGE}
+            {access.readClaimTraceabilityDiagnostics && !diagnosedOnceRef.current.has(claim.claimId) ? (
+              <button type="button" className="btn btn-sm btn-link p-0 ms-1 align-baseline" data-client-check-claim-use={claim.claimId}
+                onClick={() => { diagnosedOnceRef.current.add(claim.claimId); diagnoseClaims([claim.claimId]); }}>
+                Check internal use
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="d-flex flex-wrap align-items-center gap-2 mt-1">
+          {access.generateDrafts && selectability.selectable ? (
+            <label className="form-check mb-0">
+              <input className="form-check-input" type="checkbox" checked={selectedClaimIds.includes(claim.claimId)}
+                data-client-select-claim={claim.claimId} onChange={() => toggleClaim(claim.claimId)} />
+              <span className="form-check-label">Use in an internal draft</span>
+            </label>
+          ) : null}
+          {access.generateClaimGapFollowups && (selectability.selectable || selectability.reason === "structural_fact") ? (
+            <button type="button" className="btn btn-sm btn-outline-secondary" disabled={Boolean(pending)}
+              data-client-claim-gap-followups={claim.claimId} onClick={() => generateGapFollowups(claim.claimId)}>
+              {pending === `gaps:${claim.claimId}` ? "Generating..." : "Generate gap follow-ups"}
+            </button>
+          ) : null}
+          {access.reviewMeasuredClaimFactualContent && !claimSourceVersionUnavailable(claim, diagnosis) && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
+            <button type="button" className="btn btn-sm btn-outline-primary" data-client-open-measured-claim-review={claim.claimId}
+              onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
+              {use === "not_usable" ? "View review status" : "View measurement"}
+            </button>
+          ) : null}
+        </div>
+        {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
+        {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
+        {access.recordSourceMeasurement && recoveryVersion ? (
+          <div className="mt-1">
+            <button type="button" className="btn btn-sm btn-outline-primary"
+              data-client-recover-current-count={claim.claimId}
+              onClick={() => {
+                setMeasuring({ contextKey, sourceVersionId: recoveryVersion.sourceVersionId });
+                onSelectView?.("sources");
+              }}>
+              Count records on current version
+            </button>
+            <div className="text-muted">Choose the worksheet in Count records. Use its existing measurement if one is recorded, or define the count there, then propose its claim. Earlier reviews stay with the earlier finding.</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderFinding = (finding) => (
+    <li key={finding.key} className={`list-group-item small${focusedEvidenceItemId === finding.evidenceItemId ? " border-primary" : ""}`}
+      data-client-finding={finding.evidenceItemId} {...(finding.evidence ? { "data-client-evidence": finding.evidenceItemId } : {})}>
+      <StatementText text={finding.statement} max={260} />
+      <FindingMeta finding={finding} />
+      {finding.claims.length > 0 ? <div className="text-muted mt-1">Claim proposed</div> : null}
+      {finding.evidence && finding.claims.length === 0 ? (
+        access.proposeClaim ? (
+          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending)}
+            data-client-propose-claim={finding.evidenceItemId} onClick={() => propose(finding.evidenceItemId)}>
+            {pending === `propose:${finding.evidenceItemId}` ? "Proposing..." : "Propose claim"}
+          </button>
+        ) : <div className="text-muted mt-1">Not yet proposed for use in drafts.</div>
+      ) : null}
+      {finding.claims.map((claim) => renderClaim(claim, finding.statement))}
+      <TechnicalDetails label="Details">
+        <div>Evidence item: {finding.evidenceItemId}</div>
+        {finding.sourceVersionId ? <div>Source version: {finding.sourceVersionId}</div> : null}
+        {finding.evidence?.evidenceReviewStatus ? <div>Recorded review status: {finding.evidence.evidenceReviewStatus}</div> : null}
+        {finding.evidence?.sensitivityLevel ? <div>Sensitivity: {finding.evidence.sensitivityLevel}</div> : null}
+        {finding.evidence?.supportStrength ? <div>Support strength: {finding.evidence.supportStrength}</div> : null}
+        {finding.claims.map((claim) => <div key={claim.claimId}>Claim: {claim.claimId}</div>)}
+        {!finding.evidence ? <div>This claim&rsquo;s evidence item is not among the evidence loaded so far.</div> : null}
+      </TechnicalDetails>
+    </li>
+  );
+
+  const evidenceReads = [evidence, claims];
+  const evidenceView = (
+    <div className="admin-card mb-3" data-client-evidence-view="">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h5 className="mb-0">Evidence</h5>
+        {access.generateDrafts ? (
+          <div className="small d-flex align-items-center gap-2" data-client-selection-summary={selectedClaimIds.length}>
+            <span>{selectedClaimIds.length}/20 selected for a draft</span>
+            {selectedClaimIds.length > 0 ? (
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => onSelectView?.("drafts")}>Create a draft</button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {isRouteUuid(engagementId) ? (
+        <div className="form-check small mb-2">
+          <input className="form-check-input" type="checkbox" id="client-include-organization-library" data-client-include-organization-library=""
+            checked={includeOrganizationLibrary} onChange={(event) => setIncludeOrganizationLibrary(event.target.checked)} />
+          <label className="form-check-label" htmlFor="client-include-organization-library">
+            Include evidence from other Projects (organization library). This only widens what you can see and select here; a
+            finding you use in this Project&rsquo;s draft then appears in this Project.
+          </label>
+        </div>
+      ) : null}
+      {!engagementId ? <div className="text-muted small mb-2">No Project is selected, so this is your organization&rsquo;s whole library.</div> : null}
+      {evidence.status === "loading" && evidence.items.length === 0 ? <div className="text-muted small">Loading evidence...</div> : null}
+      {evidence.status === "error" ? <div className="alert alert-warning py-2 small">Evidence could not be loaded. This does not mean there is none. {evidence.message}</div> : null}
+      {claims.status === "loading" && claims.items.length === 0 ? <div className="text-muted small">Loading claims...</div> : null}
+      {claims.status === "error" ? <div className="alert alert-warning py-2 small">Claims could not be loaded. {claims.message}</div> : null}
+      {evidenceReads.every((read) => read.status === "success" && read.complete) && findingCount(findings) === 0 ? (
+        <div className="text-muted small">No evidence yet. Use a source for impact in Sources to extract its evidence.</div>
+      ) : null}
+      {FINDING_CATEGORIES.filter((category) => category !== "technical" && findings[category].length > 0).map((category) => (
+        <div key={category}>
+          <CategoryHeading category={category} count={findings[category].length} complete={evidence.complete && claims.complete} />
+          <ul className="list-group">{findings[category].map(renderFinding)}</ul>
+        </div>
+      ))}
+      {findings.technical.length > 0 ? (
+        <div className="mt-3" data-client-technical-evidence="">
+          <button type="button" className="btn btn-sm btn-outline-secondary" aria-expanded={showTechnical}
+            data-knowledge-studio-reveal-toggle="technical-evidence" onClick={() => setShowTechnical((value) => !value)}>
+            {showTechnical ? "Hide supporting source detail" : `Show supporting source detail (${findings.technical.length})`}
+          </button>
+          <div className="small text-muted mt-1">Which columns each source has. Kept for checking a source; not offered as impact findings.</div>
+          {/* Kept mounted while hidden, so an open action's state survives hiding the list. */}
+          <ul className="list-group mt-2" hidden={!showTechnical} data-knowledge-studio-reveal="technical-evidence">{findings.technical.map(renderFinding)}</ul>
+        </div>
+      ) : null}
+      <LibraryCompleteness read={evidence} noun="evidence items" />
+      <LibraryCompleteness read={claims} noun="claims" />
+      {openReview ? (
+        // Outside the list, so the list's own refresh after a decision does not unmount it.
+        <ClientMeasuredClaimReviewPanel key={`${contextKey}:${openReview}`} organizationId={organizationId} claimId={openReview}
+          onClose={() => setReviewing(null)} onRecorded={refresh} />
+      ) : null}
+    </div>
+  );
+
+  const sourcesView = (
+    <>
       {access.reviewSensitivity || access.promoteSource ? (
         <div className="admin-card mb-3" data-client-source-preparation="">
-          <h5 className="mb-2">Source preparation</h5>
+          <h5 className="mb-1">Files that need a step</h5>
           <div className="small text-muted mb-2">
-            Before evidence can be extracted, each uploaded file needs its sensitivity &amp; allowed-use review and then a source
-            review that promotes it as a governed source. Promotion keeps the file&rsquo;s recorded restrictions and approves no
-            evidence, claim, or external use.
+            Each uploaded file needs its sensitivity &amp; allowed-use review and a source review before its evidence can be used.
           </div>
           {!engagementId ? <div className="text-muted small">Select a Project to see its files.</div> : null}
           {engagementId && pipeline?.status === "error" ? (
@@ -627,7 +860,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           ) : null}
           {engagementId && !pipelineReady && pipeline?.status !== "error" ? <div className="text-muted small">Loading this Project&rsquo;s files...</div> : null}
           {engagementId && pipelineReady && preparationFiles.length === 0 ? (
-            <div className="text-muted small">No files in this Project are waiting for sensitivity review or source promotion.</div>
+            <div className="text-muted small">No files in this Project are waiting for a step.</div>
           ) : null}
           {engagementId && preparationFiles.length > 0 ? (
             <ul className="list-group">
@@ -695,14 +928,101 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         </div>
       ) : null}
 
+      <div className="admin-card mb-3" data-client-data-sources="">
+        <h5 className="mb-1">Data Sources</h5>
+        <div className="small text-muted mb-2">
+          {scope ? "Sources for this Project." : "Your organization's sources."} A file appears here once it has been reviewed and
+          promoted. Extract evidence to see what a source supports, or count its records under your own definition of what one record represents.
+        </div>
+        {sources.status === "loading" && sources.items.length === 0 ? <div className="text-muted small">Loading sources...</div> : null}
+        {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
+        {sources.status === "success" && sources.items.length === 0 ? (
+          <div className="text-muted small">No promoted sources yet. Upload data below; each file is reviewed before it becomes a source.</div>
+        ) : null}
+        {/* A refresh after a recorded measurement keeps the loaded list (and an open panel with its confirmation) mounted. */}
+        {(sources.status === "success" || sources.status === "loading") && sources.items.length > 0 ? (
+          <ul className="list-group">
+            {sources.items.map((source) => {
+              const currentVersion = source.sourceVersions.find((version) => version.isCurrent);
+              const title = currentVersion?.safeFilename || source.sourceVersions.find((version) => version.safeFilename)?.safeFilename || "Source";
+              return (
+                <li key={source.sourceId} className="list-group-item" data-client-source={source.sourceId}>
+                  <div className="fw-semibold small">{title}</div>
+                  <div className="small text-muted">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</div>
+                  {source.sourceVersions.map((version) => (
+                    <div key={version.sourceVersionId} className="d-flex flex-wrap align-items-center gap-2 mt-1 small" data-client-source-version={version.sourceVersionId}>
+                      <span className={version.isCurrent ? "" : "text-muted"}>
+                        {version.isCurrent ? "Current version" : "Earlier version"}
+                        {version.safeFilename && version.safeFilename !== title ? `: ${version.safeFilename}` : ""}
+                        {version.createdAt ? ` · ${new Date(version.createdAt).toLocaleDateString()}` : ""}
+                      </span>
+                      {version.profileFormat === "xlsx" ? (
+                        <span data-client-xlsx-measurement-readiness={version.hasXlsxRecordCountBasis ? "basis_recorded" : "new_version_required"}>
+                          {version.hasXlsxRecordCountBasis
+                            ? "Workbook ready: use Count records and choose the worksheet."
+                            : "This workbook's earlier profile cannot be counted."}
+                        </span>
+                      ) : null}
+                      {version.profileFormat === "xlsx" && !version.hasXlsxRecordCountBasis && version.safeFilename
+                        && version.engagementId === engagementId && canUploadNewIntakeVersion && typeof onContinueXlsxInFiles === "function" ? (
+                        <button type="button" className="btn btn-sm btn-outline-primary" data-client-continue-xlsx={version.sourceVersionId}
+                          onClick={() => onContinueXlsxInFiles({ sourceVersionId: version.sourceVersionId, safeFilename: version.safeFilename })}>
+                          Prepare workbook for counting
+                        </button>
+                      ) : null}
+                      {access.extractEvidence && isRouteUuid(version.sourceVersionId) && canOfferEvidenceExtraction(version) ? (
+                        <button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending)}
+                          data-client-extract-evidence={version.sourceVersionId}
+                          onClick={() => extract(version.sourceVersionId)}>
+                          {pending === `extract:${version.sourceVersionId}` ? "Extracting..." : "Extract evidence"}
+                        </button>
+                      ) : null}
+                      {access.extractEvidence && version.isCurrent && EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability] ? (
+                        <span className="text-muted" data-client-extraction-unavailable={version.evidenceExtractionCapability}>
+                          {EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability]}
+                        </span>
+                      ) : null}
+                      {access.recordSourceMeasurement && version.isCurrent && isRouteUuid(version.sourceVersionId) ? (
+                        <button type="button" className="btn btn-sm btn-outline-secondary" data-client-open-source-measurement={version.sourceVersionId}
+                          onClick={() => setMeasuring({ contextKey, sourceVersionId: version.sourceVersionId })}>
+                          Count records
+                        </button>
+                      ) : null}
+                      {openMeasurement === version.sourceVersionId ? (
+                        <div className="w-100" ref={measurementPanelRef}>
+                          <ClientSourceMeasurementPanel key={`${contextKey}:${version.sourceVersionId}`} organizationId={organizationId}
+                            sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
+                            initialWorksheetKey={measuring.worksheetKey || ""}
+                            onWorksheetChange={(worksheetKey) => setMeasuring((current) => (current ? { ...current, worksheetKey } : current))}
+                            onClose={() => setMeasuring(null)} onRecorded={refresh}
+                            linkableVersions={currentVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && candidate.profileFormat === "csv")}
+                            versionsById={versionsById}
+                            earlierVersionIds={source.sourceVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && !candidate.isCurrent).map((candidate) => candidate.sourceVersionId)} />
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                  <TechnicalDetails label="Technical details">
+                    <div>Source code: {source.sourceCode}</div>
+                    {source.sourceVersions.map((version) => (
+                      <div key={version.sourceVersionId} className="text-break">
+                        Source version: {version.sourceVersionId} ({version.isCurrent ? "current" : "earlier"})
+                      </div>
+                    ))}
+                  </TechnicalDetails>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
+
       {access.reviewSensitivity ? (
         <div className="admin-card mb-3" data-client-processing-permissions="">
-          <h5 className="mb-2">Processing permissions</h5>
+          <h5 className="mb-1">Processing permissions</h5>
           <div className="small text-muted mb-2">
-            Files whose sensitivity &amp; allowed-use review is complete. If a recorded decision is wrong - for example, AI
-            processing was recorded as not permitted by mistake - review the file&rsquo;s processing permissions again. A new
-            review supersedes the current decision, which stays in the file&rsquo;s history. Ordinary processing does not need
-            this, and recording a review runs no processing.
+            Only needed to correct a recorded decision, for example AI processing recorded as not permitted by mistake. A new review
+            supersedes the current one, which stays in the file&rsquo;s history, and runs no processing.
           </div>
           {!engagementId ? <div className="text-muted small">Select a Project to see its files.</div> : null}
           {engagementId && pipeline?.status === "error" ? (
@@ -717,13 +1037,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               {reviewedFiles.map((file) => {
                 const current = file.stages.find((entry) => entry.key === file.currentStage);
                 return (
-                  <li key={file.intakeFileId} className="list-group-item small" data-client-reviewed-file={file.intakeFileId}>
-                    <div className="fw-semibold">{file.safeFilename}</div>
-                    <div className="text-muted">
-                      Sensitivity review: Complete
-                      {file.currentStage ? ` · ${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}` : ""}
-                    </div>
-                    <button type="button" className="btn btn-sm btn-outline-secondary mt-1" data-client-review-processing-permissions={file.intakeFileId}
+                  <li key={file.intakeFileId} className="list-group-item small d-flex flex-wrap align-items-center gap-2" data-client-reviewed-file={file.intakeFileId}>
+                    <span className="fw-semibold">{file.safeFilename}</span>
+                    <span className="text-muted">
+                      {file.currentStage ? `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}` : "Sensitivity review: Complete"}
+                    </span>
+                    <button type="button" className="btn btn-sm btn-outline-secondary ms-auto" data-client-review-processing-permissions={file.intakeFileId}
                       onClick={() => setPreparation({ contextKey, kind: "permissions", file })}>
                       Review processing permissions
                     </button>
@@ -745,229 +1064,30 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
           ) : null}
         </div>
       ) : null}
+    </>
+  );
 
-      <div className="admin-card mb-3">
-        <h5 className="mb-2">Data Sources</h5>
-        {isRouteUuid(engagementId) ? (
-          <div className="form-check small mb-2">
-            <input className="form-check-input" type="checkbox" id="client-include-organization-library" data-client-include-organization-library=""
-              checked={includeOrganizationLibrary} onChange={(event) => setIncludeOrganizationLibrary(event.target.checked)} />
-            <label className="form-check-label" htmlFor="client-include-organization-library">
-              Include evidence from other Projects (organization library). Evidence you use in this Project&rsquo;s drafts then appears in this Project.
-            </label>
-          </div>
-        ) : null}
-        <div className="small text-muted mb-2">
-          Sources appear here once an uploaded file has been reviewed and promoted. Extract evidence from a source version
-          to see what it supports, or count its records under your own definition of what one record represents.
-        </div>
-        {sources.status === "loading" && sources.items.length === 0 ? <div className="text-muted small">Loading sources...</div> : null}
-        {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
-        {sources.status === "success" && sources.items.length === 0 ? (
-          <div className="text-muted small">No promoted sources yet. Upload data in Files; each file is reviewed before it becomes a source.</div>
-        ) : null}
-        {/* A refresh after a recorded measurement keeps the loaded list (and an open panel with its confirmation) mounted. */}
-        {(sources.status === "success" || sources.status === "loading") && sources.items.length > 0 ? (
-          <ul className="list-group">
-            {sources.items.map((source) => (
-              <li key={source.sourceId} className="list-group-item" data-client-source={source.sourceId}>
-                <div className="fw-semibold small">{source.sourceCode}</div>
-                <div className="small text-muted">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</div>
-                {source.sourceVersions.map((version) => (
-                  <div key={version.sourceVersionId} className="d-flex flex-wrap align-items-center gap-2 mt-1 small" data-client-source-version={version.sourceVersionId}>
-                    <span className="text-break">Source version: {version.sourceVersionId}</span>
-                    {version.safeFilename ? <span className="text-muted">File: {version.safeFilename}</span> : null}
-                    <span>{version.isCurrent ? "Current version" : "Earlier version"}</span>
-                    {version.profileFormat === "xlsx" ? (
-                      <span data-client-xlsx-measurement-readiness={version.hasXlsxRecordCountBasis ? "basis_recorded" : "new_version_required"}>
-                        {version.hasXlsxRecordCountBasis
-                          ? "XLSX worksheet basis recorded; use Count records and choose the worksheet to count."
-                          : "XLSX measurement basis missing; this historical profile cannot be changed."}
-                      </span>
-                    ) : null}
-                    {version.profileFormat === "xlsx" && !version.hasXlsxRecordCountBasis && version.safeFilename
-                      && version.engagementId === engagementId && canUploadNewIntakeVersion && typeof onContinueXlsxInFiles === "function" ? (
-                      <button type="button" className="btn btn-sm btn-outline-primary" data-client-continue-xlsx={version.sourceVersionId}
-                        onClick={() => onContinueXlsxInFiles({ sourceVersionId: version.sourceVersionId, safeFilename: version.safeFilename })}>
-                        Prepare workbook for counting
-                      </button>
-                    ) : null}
-                    {access.extractEvidence && isRouteUuid(version.sourceVersionId) && canOfferEvidenceExtraction(version) ? (
-                      <button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending)}
-                        data-client-extract-evidence={version.sourceVersionId}
-                        onClick={() => extract(version.sourceVersionId)}>
-                        {pending === `extract:${version.sourceVersionId}` ? "Extracting..." : "Extract evidence"}
-                      </button>
-                    ) : null}
-                    {access.extractEvidence && version.isCurrent && EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability] ? (
-                      <span className="text-muted" data-client-extraction-unavailable={version.evidenceExtractionCapability}>
-                        {EXTRACTION_UNAVAILABLE_MESSAGES[version.evidenceExtractionCapability]}
-                      </span>
-                    ) : null}
-                    {access.recordSourceMeasurement && version.isCurrent && isRouteUuid(version.sourceVersionId) ? (
-                      <button type="button" className="btn btn-sm btn-outline-secondary" data-client-open-source-measurement={version.sourceVersionId}
-                        onClick={() => setMeasuring({ contextKey, sourceVersionId: version.sourceVersionId })}>
-                        Count records
-                      </button>
-                    ) : null}
-                    {openMeasurement === version.sourceVersionId ? (
-                      <div className="w-100" ref={measurementPanelRef}>
-                        <ClientSourceMeasurementPanel key={`${contextKey}:${version.sourceVersionId}`} organizationId={organizationId}
-                          sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
-                          initialWorksheetKey={measuring.worksheetKey || ""}
-                          onWorksheetChange={(worksheetKey) => setMeasuring((current) => (current ? { ...current, worksheetKey } : current))}
-                          onClose={() => setMeasuring(null)} onRecorded={refresh}
-                          linkableVersions={currentVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && candidate.profileFormat === "csv")}
-                          versionsById={versionsById}
-                          earlierVersionIds={source.sourceVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && !candidate.isCurrent).map((candidate) => candidate.sourceVersionId)} />
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-
-      <div className="admin-card mb-3">
-        <h5 className="mb-2">Evidence</h5>
-        <div className="small text-muted mb-2">
-          Evidence from your sources: record counts you defined with Count records, and structural facts (which columns a source
-          has). Whether a claim can be used in internal reports now is shown on each claim below, from its current eligibility.
-          Proposing a claim approves nothing for funders or the public.
-        </div>
-        {evidence.status === "loading" ? <div className="text-muted small">Loading evidence...</div> : null}
-        {evidence.status === "error" ? <div className="alert alert-warning py-2 small">Evidence could not be loaded. {evidence.message}</div> : null}
-        {evidence.status === "success" && evidence.items.length === 0 && evidence.complete ? <div className="text-muted small">No evidence yet.</div> : null}
-        {evidence.status === "success" && evidence.items.length > 0 ? (
-          <ul className="list-group">
-            {evidence.items.map((item) => {
-              const proposed = proposedByEvidence.get(item.evidenceItemId) || [];
-              return (
-                <li key={item.evidenceItemId} className="list-group-item small" data-client-evidence={item.evidenceItemId}>
-                  <div className="text-break">{item.statement || "Statement not available"}</div>
-                  <div className="text-muted mt-1" data-client-evidence-kind={claimKind(item)}>
-                    {claimKind(item) === "measurement" ? "Record-count measurement" : null}
-                    {claimKind(item) === "structural" ? "Structural fact (which columns a source has)" : null}
-                    {claimKind(item) === "other" ? `Recorded review status: ${item.evidenceReviewStatus || "unknown"}` : null}
-                    {item.sensitivityLevel ? ` · Sensitivity: ${item.sensitivityLevel}` : ""}
-                  </div>
-                  {proposed.length > 0 ? <div className="mt-1">Claim proposed</div> : null}
-                  {access.proposeClaim && proposed.length === 0 ? (
-                    <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending)}
-                      onClick={() => propose(item.evidenceItemId)}>
-                      {pending === `propose:${item.evidenceItemId}` ? "Proposing..." : "Propose claim"}
-                    </button>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
-        <LibraryCompleteness read={evidence} noun="evidence items" />
-      </div>
-
-      <div className="admin-card mb-3">
-        <h5 className="mb-2">Claims for internal drafts</h5>
-        <div className="small text-muted mb-2">
-          Measured findings come first: a report needs at least one. Structural facts only say which columns a source has and are not
-          offered as impact findings. Using a claim here does not approve it for funders or the public.
-          {access.generateClaimGapFollowups
-            ? " Draft generation evaluates missing claim gaps automatically; it does not approve the claim."
-            : null}
-        </div>
-        {claims.status === "loading" ? <div className="text-muted small">Loading claims...</div> : null}
-        {claims.status === "error" ? <div className="alert alert-warning py-2 small">Claims could not be loaded. {claims.message}</div> : null}
-        {claims.status === "success" && claims.items.length === 0 && claims.complete ? <div className="text-muted small">No claims yet. Propose one from evidence above.</div> : null}
-        {claims.status === "success" && claims.items.length > 0 ? (
-          <ul className="list-group">
-            {orderedClaims.map((claim) => {
-              const selectability = claimInternalDraftSelectability(claim, claimDiagnostics.get(claim.claimId));
-              const kind = claimKind(claim);
-              const use = useOfClaim(claim.claimId);
-              const diagnosis = claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))
-                ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
-              const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
-              return (
-                <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}
-                  data-client-claim-kind={kind} data-client-claim-internal-use={use}>
-                  <div className="text-break">
-                    {kind === "measurement" ? <span className="badge text-bg-primary me-1">Measured finding</span> : null}
-                    {kind === "structural" ? <span className="badge text-bg-light me-1">Structural fact</span> : null}
-                    {claim.claimStatement || claim.evidenceStatement || "Statement not available"}
-                  </div>
-                  {/* The server's current internal eligibility; the stored review
-                      status is not shown as a pending step it may no longer be. */}
-                  {kind !== "structural" && use === "usable" ? (
-                    <div className="text-success mt-1" data-client-claim-usable="">Usable in internal reports now. No further review is needed for internal use.</div>
-                  ) : null}
-                  {kind !== "structural" && use === "not_usable" ? (
-                    <div className="mt-1" data-client-claim-not-usable="">{claimNotUsableMessage(diagnosis)}</div>
-                  ) : null}
-                  {kind !== "structural" && use === "unknown" ? (
-                    <div className="text-muted mt-1" data-client-claim-use-unknown="">
-                      {CLAIM_USE_UNKNOWN_MESSAGE}
-                      {access.readClaimTraceabilityDiagnostics && !diagnosedOnceRef.current.has(claim.claimId) ? (
-                        <button type="button" className="btn btn-sm btn-link p-0 ms-1 align-baseline" data-client-check-claim-use={claim.claimId}
-                          onClick={() => { diagnosedOnceRef.current.add(claim.claimId); diagnoseClaims([claim.claimId]); }}>
-                          Check internal use
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {access.generateDrafts && selectability.selectable ? (
-                    <label className="form-check mt-1">
-                      <input className="form-check-input" type="checkbox" checked={selectedClaimIds.includes(claim.claimId)}
-                        onChange={() => toggleClaim(claim.claimId)} />
-                      <span className="form-check-label">Use in an internal draft</span>
-                    </label>
-                  ) : null}
-                  {access.generateClaimGapFollowups && (selectability.selectable || selectability.reason === "structural_fact") ? (
-                    <button type="button" className="btn btn-sm btn-outline-secondary mt-1" disabled={Boolean(pending)}
-                      data-client-claim-gap-followups={claim.claimId} onClick={() => generateGapFollowups(claim.claimId)}>
-                      {pending === `gaps:${claim.claimId}` ? "Generating..." : "Generate gap follow-ups"}
-                    </button>
-                  ) : null}
-                  {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
-                  {access.reviewMeasuredClaimFactualContent && !claimSourceVersionUnavailable(claim, diagnosis) && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
-                    <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
-                      onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
-                      {use === "not_usable" ? "View review status" : "View measurement"}
-                    </button>
-                  ) : null}
-                  {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
-                  {access.recordSourceMeasurement && recoveryVersion ? (
-                    <div className="mt-1">
-                      <button type="button" className="btn btn-sm btn-outline-primary"
-                        data-client-recover-current-count={claim.claimId}
-                        onClick={() => {
-                          setMeasuring({ contextKey, sourceVersionId: recoveryVersion.sourceVersionId });
-                          if (openMeasurement === recoveryVersion.sourceVersionId) measurementPanelRef.current?.scrollIntoView({ block: "center" });
-                        }}>
-                        Count records on current version
-                      </button>
-                      <div className="text-muted">Choose the worksheet in Count records. Use its existing measurement if one is recorded, or define the count there, then propose its claim. Earlier reviews stay with the earlier finding.</div>
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
-        <LibraryCompleteness read={claims} noun="claims" />
-        {openReview ? (
-          // Outside the list, so the list's own refresh after a decision does not unmount it.
-          <ClientMeasuredClaimReviewPanel key={`${contextKey}:${openReview}`} organizationId={organizationId} claimId={openReview}
-            onClose={() => setReviewing(null)} onRecorded={refresh} />
-        ) : null}
-      </div>
-
+  const claimById = new Map(claims.items.map((claim) => [claim.claimId, claim]));
+  const draftsView = (
+    <>
       {access.generateDrafts ? (
-        <div className="admin-card mb-3">
+        <div className="admin-card mb-3" data-client-draft-generation="">
           <h5 className="mb-2">Internal drafts</h5>
-          <div className="small mb-2">{selectedClaimIds.length}/20 claims selected. Choose the measurements and document statements needed for this assessment; unselected claims are not included. You can deselect claims to change the set. Include evidence of limitations as well as findings.</div>
-          {assessmentReadiness.ready ? <div className="small mb-2">The assessment checks each selected claim after evaluating its gaps. Claims with unresolved conditions are explained and excluded from assertions.</div> : null}
+          <div className="small mb-2" data-client-draft-selection-count={selectedClaimIds.length}>
+            {selectedClaimIds.length}/20 claims selected in Evidence.{" "}
+            <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => onSelectView?.("evidence")}>
+              {selectedClaimIds.length > 0 ? "Change selection" : "Choose findings in Evidence"}
+            </button>
+          </div>
+          {selectedClaimIds.length > 0 ? (
+            <ul className="small mb-2" data-client-draft-selected-claims="">
+              {selectedClaimIds.map((claimId) => {
+                const claim = claimById.get(claimId);
+                return <li key={claimId}>{shortStatement(claim?.claimStatement || claim?.evidenceStatement || "Selected finding", 140).text}</li>;
+              })}
+            </ul>
+          ) : null}
+          {assessmentReadiness.ready ? <div className="small text-muted mb-2">The assessment checks each selected finding and explains any it cannot use as an assertion.</div> : null}
           {!readiness.ready ? <div className="small mb-2" data-client-draft-readiness={readiness.reason}>{INTERNAL_DRAFT_READINESS_MESSAGES[readiness.reason]}</div> : null}
           {readiness.ready && !selectionUse.immediatelyUsable ? (
             <div className="small mb-2" data-client-draft-selection-usability={selectionUse.notUsable.length > 0 ? "not_usable" : "unknown"}>
@@ -995,7 +1115,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               </div>
               <div>
                 Internal use only. {access.readInternalDrafts
-                  ? "It is opened from your saved drafts below; when every cited claim is usable for internal use it is ready to read and download there."
+                  ? "It is open below."
                   : "It appears under Generated Drafts once Get Kinder has reviewed it."}
               </div>
             </div>
@@ -1007,9 +1127,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3" data-client-internal-drafts="">
           <h5 className="mb-2">Your internal drafts</h5>
           <div className="small text-muted mb-2">
-            Drafts generated for this Project. A draft whose cited claims are usable for internal use, from sources cleared for internal
-            use, is your organization&apos;s internal report: open or download it here, with no further review or release step. Drafts
-            from high-risk sources wait for Get Kinder. Internal use only: nothing here approves a draft for funders or the public.
+            Drafts generated for this Project, for internal use only. A draft whose findings are usable internally can be opened and downloaded
+            here; drafts from high-risk sources wait for Get Kinder.
           </div>
           <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
             refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null}
@@ -1017,6 +1136,51 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             canReadInternalReports={access.readInternalDrafts === true} />
         </div>
       ) : null}
+    </>
+  );
+
+  return (
+    <div data-client-evidence-workflow="">
+      {notice ? (
+        <div className={`alert alert-${notice.kind} py-2 small`} role="status" data-client-workflow-notice="">{notice.text}</div>
+      ) : null}
+      <ViewPane name="impact" active={view === "impact"} mounted={visitedViews.includes("impact")}>
+        <ImpactView projectName={projectName} engagementId={engagementId} state={findingsState} grouped={findings}
+          attention={attention} statusFor={findingStatus} onOpenFinding={openFinding}
+          onOpenEvidence={() => onSelectView?.("evidence")}
+          onLoadMore={!evidence.complete ? evidence.loadMore : (!claims.complete ? claims.loadMore : null)}
+          loadingMore={evidence.loadingMore || claims.loadingMore}
+          intro={includeOrganizationLibrary
+            ? "Includes evidence from other Projects, because that option is switched on in Evidence."
+            : "From this Project's own files and the findings its drafts use."} />
+        {impactAfter}
+      </ViewPane>
+      <ViewPane name="evidence" active={view === "evidence"} mounted={visitedViews.includes("evidence")}>
+        {evidenceView}
+        {evidenceAfter}
+      </ViewPane>
+      <ViewPane name="sources" active={view === "sources"} mounted={visitedViews.includes("sources")}>
+        {sourcesBefore}
+        {sourcesView}
+        {sourcesAfter}
+      </ViewPane>
+      <ViewPane name="drafts" active={view === "drafts"} mounted={visitedViews.includes("drafts")}>
+        {draftsView}
+        {draftsAfter}
+      </ViewPane>
+    </div>
+  );
+}
+
+// Identifiers and stored states, available on request rather than in the list.
+function TechnicalDetails({ label, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1">
+      <button type="button" className="btn btn-link btn-sm p-0 text-muted" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        {open ? `Hide ${label.toLowerCase()}` : label}
+      </button>
+      {open ? <div className="small text-muted border rounded p-2 mt-1" data-client-technical-details="">{children}</div> : null}
     </div>
   );
 }

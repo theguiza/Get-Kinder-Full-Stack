@@ -694,7 +694,11 @@ test("frontend: the Generated Drafts tab makes only client-safe reads and offers
   assert.match(componentSource, /list\.status === "success" && list\.awaitingClientInputCount > 0 && canReviewFollowups \? \(/);
   assert.match(componentSource, /onClick=\{list\.loadMore\}/);
   assert.match(componentSource, /if \(keyRef\.current !== requestKey\) return;/, "late responses for a previous project are dropped");
-  assert.match(clientStudioSource, /\["generatedDrafts", "Generated Drafts"\]/);
+  // Four-view refactor (owner direction 2026-11-06): Funder Requirements and
+  // Generated Drafts are sections of the Drafts view for every client role.
+  assert.match(clientStudioSource, /const draftsAfter = \(\s*<>\s*<div data-client-generated-drafts="">\s*<ClientGeneratedDrafts[\s\S]*?<ClientFunderRequirements[\s\S]*?<\/>\s*\);/);
+  assert.match(clientStudioSource, /<ViewPane \{\.\.\.pane\("drafts"\)\}>\{draftsAfter\}<\/ViewPane>/);
+  assert.match(clientStudioSource, /draftsAfter=\{draftsAfter\}/);
   assert.match(clientStudioSource, /<ClientGeneratedDrafts\s+organizationId=\{organizationId\}\s+engagementId=\{engagementId\}\s+facts=\{facts\}\s+canReviewFollowups=\{canReviewFollowups\}\s+\/>/);
   assert.doesNotMatch(clientStudioSource, /getJson\(|postJson\(|fetch\(/);
 });

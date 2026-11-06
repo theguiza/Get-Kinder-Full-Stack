@@ -83,19 +83,40 @@ export default function ClientInternalDrafts({
   // must not switch the open draft back.
   const focusedRef = useRef("");
 
+  // Every detail or report response is applied only for the organization and
+  // Project it was requested in: a slow response from the previous Project is
+  // discarded (four-view refactor: the reader stays mounted across views).
+  const contextKey = `${organizationId}:${engagementId || ""}`;
+  const contextRef = useRef(contextKey);
+  contextRef.current = contextKey;
+  const reportSeqRef = useRef(0);
+
   const openMarkdown = async (draftId, path) => {
+    reportSeqRef.current += 1;
+    const seq = reportSeqRef.current;
+    const requestContext = contextRef.current;
+    const current = () => reportSeqRef.current === seq && contextRef.current === requestContext;
     setReport({ status: "loading", draftId, markdown: "", error: "" });
-    const response = await fetch(path, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "text/markdown" },
-    });
+    let response;
+    try {
+      response = await fetch(path, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "text/markdown" },
+      });
+    } catch {
+      if (current()) setReport({ status: "error", draftId, markdown: "", error: "The report could not be reached." });
+      return;
+    }
+    if (!current()) return;
     if (response.status === 200) {
-      setReport({ status: "success", draftId, markdown: await response.text(), error: "" });
+      const markdown = await response.text();
+      if (current()) setReport({ status: "success", draftId, markdown, error: "" });
       return;
     }
     let body = null;
     try { body = await response.json(); } catch { body = null; }
+    if (!current()) return;
     const reasons = Array.isArray(body?.blockers)
       ? body.blockers.map((blocker) => INTERNAL_REPORT_REASON_MESSAGES[blocker?.blocking_reason]).filter(Boolean)
       : [];
@@ -105,9 +126,10 @@ export default function ClientInternalDrafts({
   const openDraft = async (generatedContentDraftId) => {
     detailSeqRef.current += 1;
     const seq = detailSeqRef.current;
+    const requestContext = contextRef.current;
     setDetail({ status: "loading", draft: null, error: "" });
     const result = await getJson(clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId));
-    if (detailSeqRef.current !== seq) return;
+    if (detailSeqRef.current !== seq || contextRef.current !== requestContext) return;
     const draft = result.statusCode === 200 && result.body?.ok ? projectClientInternalDraft(result.body.data) : null;
     setDetail(draft ? { status: "success", draft, error: "" } : { status: "error", draft: null, error: errorText(result) });
   };
@@ -141,10 +163,19 @@ export default function ClientInternalDrafts({
   };
 
   useEffect(() => {
+    detailSeqRef.current += 1;
+    reportSeqRef.current += 1;
     setDetail({ status: "idle", draft: null, error: "" });
     setReport({ status: "idle", draftId: "", markdown: "", error: "" });
     focusedRef.current = "";
   }, [organizationId, engagementId]);
+  // Focused reader: an open draft replaces the list until "Back to drafts".
+  const closeDraft = () => {
+    detailSeqRef.current += 1;
+    reportSeqRef.current += 1;
+    setDetail({ status: "idle", draft: null, error: "" });
+    setReport({ status: "idle", draftId: "", markdown: "", error: "" });
+  };
 
   // A newly generated draft is opened by its own id, never only when a list
   // page happens to include it.
@@ -161,12 +192,18 @@ export default function ClientInternalDrafts({
   const claimById = new Map((Array.isArray(claims) ? claims : []).map((claim) => [claim.claimId, claim]));
   const draft = detail.draft;
   const structuralOnly = Boolean(draft) && !draft.internalReport.available && isStructuralOnlyDraft(draft);
-  const listShown = list.status === "success" || list.status === "loading_more";
+  const readerOpen = detail.status !== "idle";
+  const listShown = !readerOpen && (list.status === "success" || list.status === "loading_more");
 
   return (
     <div data-client-internal-draft-list="">
-      {list.status === "loading" ? <div className="text-muted small">Loading internal drafts...</div> : null}
-      {list.status === "error" ? <div className="alert alert-warning py-2 small">Internal drafts could not be loaded. {list.error}</div> : null}
+      {!readerOpen && list.status === "loading" ? <div className="text-muted small">Loading internal drafts...</div> : null}
+      {!readerOpen && list.status === "error" ? <div className="alert alert-warning py-2 small">Internal drafts could not be loaded. {list.error}</div> : null}
+      {readerOpen ? (
+        <button type="button" className="btn btn-sm btn-link px-0 mb-2" data-client-internal-draft-back="" onClick={closeDraft}>
+          &larr; Back to drafts
+        </button>
+      ) : null}
       {listShown && list.items.length === 0 && !list.nextCursor ? <div className="text-muted small">No internal drafts for this Project yet.</div> : null}
       {listShown && list.items.length > 0 ? (
         <ul className="list-group mb-2">

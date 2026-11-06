@@ -166,21 +166,76 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     }
     throw new Error(`timed out waiting for ${description}\n--- page ---\n${(await text()).slice(0, 4000)}`);
   };
-  const waitForText = (needle, options) => waitFor(async () => (await text()).includes(needle), `text: ${needle}`, options);
+  // Four-view Knowledge Studio (owner direction 2026-11-06): Impact | Evidence |
+  // Sources | Drafts replace the former tabs, and a client view stays mounted
+  // (hidden) once opened. These helpers act as a person would: a control or
+  // text that is in another mounted view, in the hidden supporting-detail list,
+  // or behind an open draft reader is revealed by clicking that view's tab, the
+  // list's toggle, or "Back to drafts" first. Former tab names map to the view
+  // that now holds them ("Data Sources" opens every view once, ending in
+  // Sources, as the former tab showed all of that workflow).
+  const KS_REVEAL = `function ksReveal(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (!node.hidden) continue;
+      if (node.dataset.knowledgeStudioView) document.querySelector('[data-knowledge-studio-tab="' + node.dataset.knowledgeStudioView + '"]')?.click();
+      else if (node.dataset.knowledgeStudioReveal) document.querySelector('[data-knowledge-studio-reveal-toggle="' + node.dataset.knowledgeStudioReveal + '"]')?.click();
+    }
+  }`;
+  const KS_TAB_ALIASES = { "Data Sources": ["Impact", "Evidence", "Drafts", "Sources"], Files: ["Sources"], Reviews: ["Sources"], Processing: ["Sources"],
+    "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"], Gaps: ["Impact"] };
+  const ksRevealSelector = (selector) => evaluate(`(() => { ${KS_REVEAL}
+    let el = document.querySelector(${JSON.stringify(selector)});
+    if (!el && /data-client-internal-draft/.test(${JSON.stringify(selector)})) {
+      const back = document.querySelector("[data-client-internal-draft-back]");
+      if (back) { ksReveal(back); back.click(); }
+      el = document.querySelector(${JSON.stringify(selector)});
+    }
+    if (el && el.offsetParent === null) ksReveal(el);
+    return true;
+  })()`);
+  const ksRevealButton = (label) => evaluate(`(() => { ${KS_REVEAL}
+    const all = [...document.querySelectorAll("button")].filter((el) => el.textContent.trim() === ${JSON.stringify(label)} && !el.disabled);
+    if (all.some((el) => el.offsetParent !== null)) return true;
+    const hidden = all.find((el) => el.closest("[hidden]"));
+    if (hidden) ksReveal(hidden);
+    return true;
+  })()`);
+  const ksRevealText = (needle) => evaluate(`(() => { ${KS_REVEAL}
+    const holder = [...document.querySelectorAll("[data-knowledge-studio-reveal][hidden], [data-knowledge-studio-view][hidden]")]
+      .find((el) => el.textContent.includes(${JSON.stringify(needle)}));
+    if (holder) ksReveal(holder.firstElementChild || holder);
+    return false;
+  })()`);
+  // Text that stays out of view for 3 s is looked for in the other mounted views.
+  const waitForText = (needle, options) => {
+    const started = Date.now();
+    return waitFor(async () => (await text()).includes(needle) || (Date.now() - started > 3000 && ksRevealText(needle)), `text: ${needle}`, options);
+  };
   const clickWhere = async (description, finder) => {
     const clicked = await evaluate(`(() => { const el = (${finder})(); if (!el) return false; el.click(); return true; })()`);
     if (!clicked) throw new Error(`no visible control: ${description}\n--- page ---\n${(await text()).slice(0, 3000)}`);
   };
   const clickNav = (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
+  const clickOneTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickButton = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
+  const clickTab = async (label) => {
+    for (const view of KS_TAB_ALIASES[label] || [label]) await clickOneTab(view);
+  };
+  const clickButtonVisible = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
     .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickIn = (selector, description) => clickWhere(description, `() => {
+  const clickButton = async (label) => { await ksRevealButton(label); return clickButtonVisible(label); };
+  const clickInVisible = (selector, description) => clickWhere(description, `() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     return el && el.offsetParent !== null && !el.disabled ? el : null;
   }`);
+  const clickIn = async (selector, description) => {
+    await ksRevealSelector(selector);
+    // Wait for the revealed control to be rendered (a view or list may still be loading).
+    await waitFor(() => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return Boolean(el && el.offsetParent !== null && !el.disabled); })()`),
+      description, { timeout: 30000 }).catch(() => {});
+    return clickInVisible(selector, description);
+  };
   // A real pointer click (CDP mouse input at the element's on-screen centre),
   // not el.click(): it proves the control is visible, not covered, and wired
   // to the event a person's click produces.
@@ -600,7 +655,7 @@ async function runBrowserAcceptance() {
       const cockpit = await adminPage.api("GET", `${COCKPIT}/capabilities?organization_id=${ORG_X}`);
       assert.deepEqual(cockpit.body.data, { can_manage_sensitivity_review: true, can_review_source_candidates: false, can_promote_source_candidates: true });
 
-      assert.ok((await adminPage.tabLabels()).includes("Data Sources"));
+      assert.ok(await adminPage.evaluate(`Boolean(document.querySelector("[data-client-evidence-workflow]"))`), "the evidence-to-draft workflow is offered");
       await adminPage.clickTab("Data Sources");
       await adminPage.selectProject(PROJECT_X);
       await adminPage.idle();
@@ -914,7 +969,16 @@ async function runBrowserAcceptance() {
       const VERSION = `[data-client-source-version="${ids.sourceVersionId}"]`;
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(VERSION)}))`), "promoted source version listed after reload");
       assert.ok((await adminPage.evaluate(`document.querySelector(${JSON.stringify(VERSION)}).innerText`)).includes("Current version"));
-      assert.ok((await adminPage.text()).includes(ids.sourceCode));
+      // Four-view refactor: the list names the source by its file; its source
+      // code and version ids remain one click away under "Technical details".
+      const entryText = await adminPage.evaluate(`document.querySelector(${JSON.stringify(VERSION)}).closest("[data-client-source]").innerText`);
+      assert.ok(!entryText.includes(ids.sourceCode), "no source code on the source's list entry");
+      await adminPage.evaluate(`(() => {
+        const li = document.querySelector(${JSON.stringify(VERSION)}).closest("[data-client-source]");
+        [...li.querySelectorAll("button")].find((el) => el.innerText.trim() === "Technical details").click();
+        return true;
+      })()`);
+      await adminPage.waitForText(ids.sourceCode);
       assert.ok(!(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-open-source-review="${FILE.main}"]'))`)), "no promotion offered again");
       const mark = adminPage.mark();
       await adminPage.pointerClick(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");

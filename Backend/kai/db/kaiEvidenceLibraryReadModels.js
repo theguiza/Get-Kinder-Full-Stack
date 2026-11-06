@@ -84,5 +84,35 @@ export async function listOrganizationEvidenceItems(
       LIMIT $2::int`,
     params,
   );
-  return rows;
+  return withDerivedMeasurementFamilies(organizationId, rows, db);
+}
+
+const DERIVED_MEASUREMENT_EVIDENCE_TYPE = "source_derived_measurement";
+
+/**
+ * Knowledge Studio four-view refactor (2026-11-06): the recorded family
+ * (paired_outcome_change, cross_source_reach, tabular_count, ...) of the
+ * source-derived measurement each derived-measurement evidence item on this
+ * page states, so the Impact and Evidence views group outcome and reach
+ * measurements by their recorded definition, never by inferring from prose.
+ * One batched, tenant-scoped, read-only lookup for the page, issued only when
+ * the page holds derived-measurement evidence (which is written only through
+ * kai.evidence_derived_measurements, so an organization without derived
+ * measurements never reads those tables). Every other row gets null.
+ */
+async function withDerivedMeasurementFamilies(organizationId, rows, db) {
+  const derivedIds = rows.filter((row) => row.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id);
+  if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null }));
+  const { rows: families } = await db.query(
+    `SELECT edm.evidence_item_id::text AS evidence_item_id, dm.measurement_family
+       FROM kai.evidence_derived_measurements edm
+       JOIN kai.source_derived_measurements dm
+         ON dm.organization_id = edm.organization_id
+        AND dm.source_derived_measurement_id = edm.source_derived_measurement_id
+      WHERE edm.organization_id = $1::uuid
+        AND edm.evidence_item_id = ANY($2::uuid[])`,
+    [organizationId, derivedIds],
+  );
+  const familyById = new Map(families.map((row) => [row.evidence_item_id, row.measurement_family]));
+  return rows.map((row) => ({ ...row, measurement_family: familyById.get(row.evidence_item_id) ?? null }));
 }

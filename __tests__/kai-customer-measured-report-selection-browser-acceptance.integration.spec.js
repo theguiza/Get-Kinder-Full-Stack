@@ -205,21 +205,76 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     }
     throw new Error(`timed out waiting for ${description}\n--- page ---\n${(await text()).slice(0, 4000)}`);
   };
-  const waitForText = (needle, options) => waitFor(async () => (await text()).includes(needle), `text: ${needle}`, options);
+  // Four-view Knowledge Studio (owner direction 2026-11-06): Impact | Evidence |
+  // Sources | Drafts replace the former tabs, and a client view stays mounted
+  // (hidden) once opened. These helpers act as a person would: a control or
+  // text that is in another mounted view, in the hidden supporting-detail list,
+  // or behind an open draft reader is revealed by clicking that view's tab, the
+  // list's toggle, or "Back to drafts" first. Former tab names map to the view
+  // that now holds them ("Data Sources" opens every view once, ending in
+  // Sources, as the former tab showed all of that workflow).
+  const KS_REVEAL = `function ksReveal(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (!node.hidden) continue;
+      if (node.dataset.knowledgeStudioView) document.querySelector('[data-knowledge-studio-tab="' + node.dataset.knowledgeStudioView + '"]')?.click();
+      else if (node.dataset.knowledgeStudioReveal) document.querySelector('[data-knowledge-studio-reveal-toggle="' + node.dataset.knowledgeStudioReveal + '"]')?.click();
+    }
+  }`;
+  const KS_TAB_ALIASES = { "Data Sources": ["Impact", "Evidence", "Drafts", "Sources"], Files: ["Sources"], Reviews: ["Sources"], Processing: ["Sources"],
+    "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"], Gaps: ["Impact"] };
+  const ksRevealSelector = (selector) => evaluate(`(() => { ${KS_REVEAL}
+    let el = document.querySelector(${JSON.stringify(selector)});
+    if (!el && /data-client-internal-draft/.test(${JSON.stringify(selector)})) {
+      const back = document.querySelector("[data-client-internal-draft-back]");
+      if (back) { ksReveal(back); back.click(); }
+      el = document.querySelector(${JSON.stringify(selector)});
+    }
+    if (el && el.offsetParent === null) ksReveal(el);
+    return true;
+  })()`);
+  const ksRevealButton = (label) => evaluate(`(() => { ${KS_REVEAL}
+    const all = [...document.querySelectorAll("button")].filter((el) => el.textContent.trim() === ${JSON.stringify(label)} && !el.disabled);
+    if (all.some((el) => el.offsetParent !== null)) return true;
+    const hidden = all.find((el) => el.closest("[hidden]"));
+    if (hidden) ksReveal(hidden);
+    return true;
+  })()`);
+  const ksRevealText = (needle) => evaluate(`(() => { ${KS_REVEAL}
+    const holder = [...document.querySelectorAll("[data-knowledge-studio-reveal][hidden], [data-knowledge-studio-view][hidden]")]
+      .find((el) => el.textContent.includes(${JSON.stringify(needle)}));
+    if (holder) ksReveal(holder.firstElementChild || holder);
+    return false;
+  })()`);
+  // Text that stays out of view for 3 s is looked for in the other mounted views.
+  const waitForText = (needle, options) => {
+    const started = Date.now();
+    return waitFor(async () => (await text()).includes(needle) || (Date.now() - started > 3000 && ksRevealText(needle)), `text: ${needle}`, options);
+  };
   const clickWhere = async (description, finder) => {
     const clicked = await evaluate(`(() => { const el = (${finder})(); if (!el) return false; el.click(); return true; })()`);
     if (!clicked) throw new Error(`no visible control: ${description}\n--- page ---\n${(await text()).slice(0, 3000)}`);
   };
   const clickNav = (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
+  const clickOneTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickButton = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
+  const clickTab = async (label) => {
+    for (const view of KS_TAB_ALIASES[label] || [label]) await clickOneTab(view);
+  };
+  const clickButtonVisible = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
     .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickIn = (selector, description) => clickWhere(description, `() => {
+  const clickButton = async (label) => { await ksRevealButton(label); return clickButtonVisible(label); };
+  const clickInVisible = (selector, description) => clickWhere(description, `() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     return el && el.offsetParent !== null && !el.disabled ? el : null;
   }`);
+  const clickIn = async (selector, description) => {
+    await ksRevealSelector(selector);
+    // Wait for the revealed control to be rendered (a view or list may still be loading).
+    await waitFor(() => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return Boolean(el && el.offsetParent !== null && !el.disabled); })()`),
+      description, { timeout: 30000 }).catch(() => {});
+    return clickInVisible(selector, description);
+  };
   const tabLabels = () => evaluate(`[...document.querySelectorAll(".nav-tabs button")].map((el) => el.innerText.trim())`);
   const selectProject = async (engagementId) => {
     const ok = await evaluate(`(() => {
@@ -865,6 +920,9 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       assert.equal(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`), null, "the older field_2 draft is not reopened");
       assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
+      // Four-view refactor: the open draft is a focused reader; the list is one click back.
+      await adminPage.clickIn("[data-client-internal-draft-back]", "Back to drafts");
+      await adminPage.waitFor(async () => (await listedDraftIds()).length > 0, "the draft list");
       assert.equal((await listedDraftIds())[0], newDraft, "the newest draft is listed first");
       assert.deepEqual(await draftState(ids.historicalDraftId), ids.historicalState, "the historical draft keeps its citations and status");
       // The file's status no longer tells the customer it waits for Get Kinder's evidence review once its measured claim is usable.

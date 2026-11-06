@@ -23,23 +23,17 @@ import {
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
 import { clientFollowupReviewHref } from "../impactEvidenceLibraryLogic.js";
+import { AttentionList, KnowledgeStudioNav, ProjectHeading, ViewPane } from "./KnowledgeStudioViews.jsx";
+import { DEFAULT_KNOWLEDGE_STUDIO_VIEW, nextVisitedViews } from "./knowledgeStudioViewsLogic.js";
 
-const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
-  ["files", "Files"],
-  ["evidence", "Evidence"],
-  ["gaps", "Gaps"],
-  ["funderRequirements", "Funder Requirements"],
-  ["generatedDrafts", "Generated Drafts"],
-  ["reviews", "Reviews"],
-]);
+// Four-view Knowledge Studio (owner direction 2026-11-06): Impact | Evidence
+// | Sources | Drafts, Impact by default. The former Files, Data Sources and
+// Reviews tabs are Sources; Gaps is "What needs attention" on Impact; Funder
+// Requirements and Generated Drafts are Drafts.
 
-// Offered only when the access-capabilities read admits the organization
-// administrator's evidence-to-draft workflow (clientEvidenceWorkflowAccess).
-const DATA_SOURCES_TAB = Object.freeze(["dataSources", "Data Sources"]);
-
-// Tabs that render the selected project's evidence pipeline; entering one
+// Views that render the selected project's evidence pipeline; entering one
 // re-reads it so a status never lags behind an upload or a review.
-const PIPELINE_TABS = new Set(["files", "dataSources", "evidence", "reviews"]);
+const PIPELINE_TABS = new Set(["impact", "evidence", "sources"]);
 
 function dimensionLabel(dimensionKey) {
   return String(dimensionKey || "").replace(/_/g, " ");
@@ -88,28 +82,32 @@ function PipelineReasonList({ reasons }) {
  *   writes;
  * - ImpactLibraryKai's message POST (engagement context policy);
  * - ClientFunderRequirements' client-safe funder-requirements read for the
- *   selected project (Funder Requirements tab only);
+ *   selected project (Drafts view, read once that view is first opened);
  * - ClientGeneratedDrafts' client-safe generated-draft, draft-detail, and
- *   Grant Response Packet / Board Reporting preview reads (Generated Drafts
- *   tab only);
+ *   Grant Response Packet / Board Reporting preview reads (Drafts view, read
+ *   once that view is first opened);
  * - useClientEvidencePipeline's client-safe evidence-pipeline read for the
- *   selected project (Files, Evidence, and Reviews tabs): per uploaded file
+ *   selected project (re-read on entering Impact, Evidence or Sources): per uploaded file
  *   its governed stage, responsible party, and next permitted action, plus
  *   the governed reviewed Impact Facts descending from the project's files;
  * - only for an organization administrator the access-capabilities read
- *   admits (extractEvidence / proposeClaim / generateDrafts), and only while
- *   the Data Sources tab is open: ClientEvidenceWorkflow's Sources, Evidence
- *   Library, and Claim Library reads, extraction, claim proposal, and
- *   internal evidence-summary / impact-narrative generation;
+ *   admits (extractEvidence / proposeClaim / generateDrafts):
+ *   ClientEvidenceWorkflow, mounted once for the whole studio as the shared
+ *   controller of all four views (its Sources, Evidence Library and Claim
+ *   Library reads - re-read after each action and on Project change, not on
+ *   switching views, so loaded pages survive navigation - extraction,
+ *   claim proposal, claim selection, and internal draft generation), so a
+ *   selection or an in-progress action survives switching views;
  * - nothing else: organization-wide reviewed Impact Facts arrive as the
  *   `facts` prop, fetched once per organization by ImpactLibraryApp from the
  *   client-safe impact-facts read, and are shown only when no project is
  *   selected.
  *
- * Gaps and Reviews are GK review workflow. A client reviewer is linked to
+ * Review status (in Sources) and "What needs attention" (on Impact) replace
+ * the former Gaps and Reviews tabs. A client reviewer is linked to
  * the existing client follow-up page (clientFollowupReview capability);
  * everyone else sees who the project's files are waiting on, never a GK
- * queue. Reviews also says whether this actor may perform Get Kinder reviews
+ * queue. Review status also says whether this actor may perform Get Kinder reviews
  * (`getKinderReviewAccess`, the shell's existing review-cockpit capabilities
  * answer, for the organization named by `getKinderReviewAccessOrganizationId`).
  *
@@ -120,7 +118,7 @@ function PipelineReasonList({ reasons }) {
  * opens ClientSensitivityReviewPanel. Only that explicit action issues the
  * panel's review-cockpit reads; the review-work and decision writes need a
  * further explicit action in the panel. The selection is keyed to
- * organization + Project and cleared on leaving Reviews, so a stale panel is
+ * organization + Project and cleared on leaving Sources, so a stale panel is
  * never rendered for another context.
  */
 export default function ClientKnowledgeStudio({
@@ -133,12 +131,15 @@ export default function ClientKnowledgeStudio({
   facts,
   onRefreshFacts,
   onViewImpactLibrary,
+  projectName = "",
 }) {
-  const [tab, setTab] = useState("files");
-  // Files persistence/rehydration: the Files tab's selected intake batch is
-  // retained outside the tab-gated KaiWebIntake mount (re-validated by
-  // KaiWebIntake against a fresh server read) and cleared whenever the
-  // organization or Project changes.
+  const [tab, setTab] = useState(DEFAULT_KNOWLEDGE_STUDIO_VIEW);
+  // Views are mounted on first visit and kept (hidden) afterwards, so an open
+  // panel, an upload or an in-progress form survives switching views.
+  const [visitedViews, setVisitedViews] = useState([DEFAULT_KNOWLEDGE_STUDIO_VIEW]);
+  // Files persistence/rehydration: the selected intake batch is retained here
+  // (re-validated by KaiWebIntake against a fresh server read) and cleared
+  // whenever the organization or Project changes.
   const [filesIntakeBatchId, setFilesIntakeBatchId] = useState("");
   const [filesContinuation, setFilesContinuation] = useState(null);
   useEffect(() => {
@@ -157,79 +158,153 @@ export default function ClientKnowledgeStudio({
   useEffect(() => {
     setSensitivityReviewSelection(null);
   }, [organizationId, engagementId]);
-  const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "reviews"
+  const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "sources"
     && sensitivityReviewSelection?.contextKey === reviewContextKey
     ? sensitivityReviewSelection
     : null;
   const selectTab = (key) => {
     setTab(key);
-    if (key !== "reviews") setSensitivityReviewSelection(null);
+    setVisitedViews((current) => nextVisitedViews(current, key));
+    if (key !== "sources") setSensitivityReviewSelection(null);
     if (key !== tab && PIPELINE_TABS.has(key)) refreshPipeline();
     if (key !== tab && key === "evidence") onRefreshFacts?.();
   };
   const continueXlsxInFiles = (source) => {
     setFilesContinuation(source);
-    selectTab("files");
+    selectTab("sources");
   };
   // Returning to the page re-reads the selected project's pipeline while a
-  // tab that shows it is open, so a review completed meanwhile is reflected.
+  // view that shows it is open, so a review completed meanwhile is reflected.
   useRevalidateOnReturn(() => {
     if (PIPELINE_TABS.has(tab)) refreshPipeline();
   }, Boolean(organizationId && engagementId));
   const canContribute = capabilities?.intakeContribution === true;
   const workflowAccess = clientEvidenceWorkflowAccess(capabilities);
-  const tabs = workflowAccess.visible
-    ? [...CLIENT_KNOWLEDGE_STUDIO_TABS.slice(0, 1), DATA_SOURCES_TAB, ...CLIENT_KNOWLEDGE_STUDIO_TABS.slice(1)]
-    : CLIENT_KNOWLEDGE_STUDIO_TABS;
   const canReviewFollowups = capabilities?.clientFollowupReview === true;
   const factsStatus = facts?.status || "loading";
   const factItems = Array.isArray(facts?.items) ? facts.items : [];
+  const pane = (name) => ({ name, active: tab === name, mounted: visitedViews.includes(name) });
 
-  return (
-    <section>
-      <h1 className="admin-title mb-3">Knowledge Studio</h1>
+  // What needs attention, from the pipeline read every role may make.
+  const reviews = engagementId ? reviewsTabView(pipeline) : null;
+  const extraAttention = [];
+  if (reviews?.kind === "ready" && reviews.waitingForClient.length > 0) {
+    extraAttention.push({
+      key: "client_followups",
+      text: `${reviews.waitingForClient.length} file(s) wait for answers to follow-up questions from your organization.`,
+      ...(canReviewFollowups ? { actionLabel: "Answer follow-up questions", href: clientFollowupReviewHref(organizationId) } : {}),
+    });
+  }
+  if (reviews?.kind === "ready" && reviews.waitingForGetKinder.length > 0) {
+    extraAttention.push({
+      key: "waiting_for_get_kinder",
+      text: `${reviews.waitingForGetKinder.length} file(s) are with Get Kinder for review. No action is needed from you.`,
+      actionLabel: "See file status", onAction: () => selectTab("sources"),
+    });
+  }
 
-      <ul className="nav nav-tabs mb-3">
-        {tabs.map(([key, label]) => (
-          <li className="nav-item" key={key}>
-            <button
-              type="button"
-              className={`nav-link${tab === key ? " active" : ""}`}
-              onClick={() => selectTab(key)}
-            >
-              {label}
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
-
-      {tab === "files" && organizationId ? (
-        <KaiWebIntake
+  const fileStatusSection = organizationId ? (
+    <ClientEvidencePipelineStatus
+      request={pipeline}
+      organizationId={organizationId}
+      canReviewFollowups={canReviewFollowups}
+      canContribute={canContribute}
+      onRefresh={refreshPipeline}
+    />
+  ) : null;
+  const uploadSection = organizationId ? (
+    <KaiWebIntake
+      organizationId={organizationId}
+      engagementId={engagementId}
+      onEngagementIdChange={onEngagementIdChange}
+      intakeBatchId={filesIntakeBatchId}
+      onIntakeBatchIdChange={setFilesIntakeBatchId}
+      continuationSource={filesContinuation}
+      embedded
+      canContribute={canContribute}
+      processingStatus={pipeline}
+      onProcessingStatusRefresh={refreshPipeline}
+    />
+  ) : null;
+  const reviewStatusSection = (
+    <div className="admin-card mb-3" data-client-review-status="">
+      <h5 className="mb-2">Review status</h5>
+      <div className="small text-muted mb-2">
+        Get Kinder reviewers complete the required reviews of your Project&rsquo;s files: sensitivity review, source
+        review, evidence review, and Impact Fact review.
+      </div>
+      <ProjectReviews
+        view={reviews}
+        canReviewFollowups={canReviewFollowups}
+        getKinderReviewAccessNote={getKinderReviewAccessText(reviewAccess, Boolean(capabilities))}
+        canReviewSensitivity={canReviewSensitivity}
+        onOpenSensitivityReview={(file) => setSensitivityReviewSelection({
+          contextKey: reviewContextKey,
+          intakeFileId: file.intakeFileId,
+          safeFilename: file.safeFilename,
+        })}
+        organizationId={organizationId}
+        onOpenDataSources={null}
+      />
+      {openSensitivityReview ? (
+        <ClientSensitivityReviewPanel
+          key={`${openSensitivityReview.contextKey}:${openSensitivityReview.intakeFileId}`}
+          organizationId={organizationId}
+          intakeFileId={openSensitivityReview.intakeFileId}
+          safeFilename={openSensitivityReview.safeFilename}
+          onClose={() => setSensitivityReviewSelection(null)}
+          onDecisionRecorded={refreshPipeline}
+        />
+      ) : null}
+    </div>
+  );
+  const sourcesAfter = (
+    <>
+      {fileStatusSection}
+      {uploadSection}
+      {reviewStatusSection}
+    </>
+  );
+  const draftsAfter = (
+    <>
+      <div data-client-generated-drafts="">
+        <ClientGeneratedDrafts
           organizationId={organizationId}
           engagementId={engagementId}
-          onEngagementIdChange={onEngagementIdChange}
-          intakeBatchId={filesIntakeBatchId}
-          onIntakeBatchIdChange={setFilesIntakeBatchId}
-          continuationSource={filesContinuation}
-          embedded
-          canContribute={canContribute}
-          processingStatus={pipeline}
-          onProcessingStatusRefresh={refreshPipeline}
-        />
-      ) : null}
-      {tab === "files" && organizationId ? (
-        <ClientEvidencePipelineStatus
-          request={pipeline}
-          organizationId={organizationId}
+          facts={facts}
           canReviewFollowups={canReviewFollowups}
-          canContribute={canContribute}
-          onRefresh={refreshPipeline}
         />
-      ) : null}
+      </div>
+      <ClientFunderRequirements
+        organizationId={organizationId}
+        engagementId={engagementId}
+        canReviewFollowups={canReviewFollowups}
+      />
+    </>
+  );
+  // Reviewed Impact Facts and where the Project's files are (the pipeline
+  // read every role may make), shown in Evidence for every role.
+  const projectEvidenceSection = engagementId ? (
+    <ProjectEvidence
+      view={evidenceTabView(pipeline)}
+      canReviewFollowups={canReviewFollowups}
+      onViewImpactLibrary={onViewImpactLibrary}
+      onOpenTab={selectTab}
+    />
+  ) : null;
+  const askKai = (
+    <details className="mt-3" data-knowledge-studio-ask-kai="">
+      <summary className="small fw-semibold mb-2">Ask KAI (answers from your whole organization library)</summary>
+      <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
+    </details>
+  );
 
-      {tab === "dataSources" && workflowAccess.visible && organizationId ? (
+  return (
+    <section data-knowledge-studio-kind="client">
+      <ProjectHeading projectName={projectName} engagementId={engagementId} />
+      <KnowledgeStudioNav view={tab} onSelect={selectTab} />
+
+      {workflowAccess.visible && organizationId ? (
         <ClientEvidenceWorkflow
           organizationId={organizationId}
           engagementId={engagementId}
@@ -238,108 +313,107 @@ export default function ClientKnowledgeStudio({
           onPipelineRefresh={refreshPipeline}
           canUploadNewIntakeVersion={canContribute}
           onContinueXlsxInFiles={continueXlsxInFiles}
+          view={tab}
+          visitedViews={visitedViews}
+          onSelectView={selectTab}
+          projectName={projectName}
+          extraAttention={extraAttention}
+          evidenceAfter={projectEvidenceSection}
+          sourcesAfter={sourcesAfter}
+          draftsAfter={draftsAfter}
         />
-      ) : null}
-
-      {tab === "evidence" && engagementId ? (
-        <ProjectEvidence
-          view={evidenceTabView(pipeline)}
-          canReviewFollowups={canReviewFollowups}
-          onViewImpactLibrary={onViewImpactLibrary}
-          onOpenTab={selectTab}
-        />
-      ) : null}
-
-      {tab === "evidence" && !engagementId ? (
-        <div className="admin-card">
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <h5 className="mb-0">Reviewed evidence</h5>
-            {factsStatus === "success" ? <span className="text-muted small">{factItems.length} shown</span> : null}
-          </div>
-          <div className="small text-muted mb-2">
-            Evidence appears here once it has been reviewed and supports an Impact Fact your organization can use
-            internally. Select a project to see where its uploaded files are in the review process.
-          </div>
-          {factsStatus === "loading" ? <div className="text-muted small">Loading reviewed evidence...</div> : null}
-          {factsStatus === "error" ? <div className="alert alert-warning py-2 small">Reviewed evidence could not be loaded.</div> : null}
-          {factsStatus === "success" && factItems.length === 0 ? (
-            <div className="text-muted small">No reviewed evidence yet for this organization.</div>
-          ) : null}
-          {factsStatus === "success" && factItems.length > 0 ? <ReviewedFactList facts={factItems} /> : null}
-          {typeof onViewImpactLibrary === "function" && factsStatus === "success" && factItems.length > 0 ? (
-            <button type="button" className="btn btn-sm btn-outline-primary mt-2" onClick={onViewImpactLibrary}>
-              Open the Impact Library
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {tab === "gaps" ? (
-        <div className="admin-card">
-          <h5 className="mb-2">Gaps and Risks</h5>
-          <div className="small text-muted">
-            Get Kinder reviewers identify evidence gaps and risks while reviewing your organization&rsquo;s information.
-            Questions that need an answer from your organization are sent to your client reviewers.
-          </div>
-          {canReviewFollowups ? (
-            <a className="btn btn-sm btn-outline-primary mt-2" href={clientFollowupReviewHref(organizationId)}>
-              Answer follow-up questions
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-
-      {tab === "funderRequirements" ? (
-        <ClientFunderRequirements
-          organizationId={organizationId}
-          engagementId={engagementId}
-          canReviewFollowups={canReviewFollowups}
-        />
-      ) : null}
-
-      {tab === "generatedDrafts" ? (
-        <ClientGeneratedDrafts
-          organizationId={organizationId}
-          engagementId={engagementId}
-          facts={facts}
-          canReviewFollowups={canReviewFollowups}
-        />
-      ) : null}
-
-      {tab === "reviews" ? (
-        <div className="admin-card">
-          <h5 className="mb-2">Reviews</h5>
-          <div className="small text-muted mb-2">
-            Get Kinder reviewers complete the required reviews of your project&rsquo;s files: sensitivity review, source
-            review, evidence review, and Impact Fact review. Reviewed results appear in the Impact Library and under
-            Evidence.
-          </div>
-          <ProjectReviews
-            view={engagementId ? reviewsTabView(pipeline) : null}
-            canReviewFollowups={canReviewFollowups}
-            getKinderReviewAccessNote={getKinderReviewAccessText(reviewAccess, Boolean(capabilities))}
-            canReviewSensitivity={canReviewSensitivity}
-            onOpenSensitivityReview={(file) => setSensitivityReviewSelection({
-              contextKey: reviewContextKey,
-              intakeFileId: file.intakeFileId,
-              safeFilename: file.safeFilename,
-            })}
-            organizationId={organizationId}
-            onOpenDataSources={workflowAccess.visible ? () => selectTab("dataSources") : null}
-          />
-          {openSensitivityReview ? (
-            <ClientSensitivityReviewPanel
-              key={`${openSensitivityReview.contextKey}:${openSensitivityReview.intakeFileId}`}
-              organizationId={organizationId}
-              intakeFileId={openSensitivityReview.intakeFileId}
-              safeFilename={openSensitivityReview.safeFilename}
-              onClose={() => setSensitivityReviewSelection(null)}
-              onDecisionRecorded={refreshPipeline}
+      ) : (
+        <>
+          <ViewPane {...pane("impact")}>
+            <ReviewedImpact
+              engagementId={engagementId}
+              view={engagementId ? evidenceTabView(pipeline) : null}
+              attention={extraAttention}
+              onOpenTab={selectTab}
             />
-          ) : null}
+          </ViewPane>
+          <ViewPane {...pane("evidence")}>
+            {engagementId ? (
+              <ProjectEvidence
+                view={evidenceTabView(pipeline)}
+                canReviewFollowups={canReviewFollowups}
+                onViewImpactLibrary={onViewImpactLibrary}
+                onOpenTab={selectTab}
+              />
+            ) : (
+              <div className="admin-card">
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <h5 className="mb-0">Reviewed evidence</h5>
+                  {factsStatus === "success" ? <span className="text-muted small">{factItems.length} shown</span> : null}
+                </div>
+                <div className="small text-muted mb-2">
+                  Reviewed evidence for your whole organization. Select a Project to see its own evidence and file status.
+                </div>
+                {factsStatus === "loading" ? <div className="text-muted small">Loading reviewed evidence...</div> : null}
+                {factsStatus === "error" ? <div className="alert alert-warning py-2 small">Reviewed evidence could not be loaded.</div> : null}
+                {factsStatus === "success" && factItems.length === 0 ? (
+                  <div className="text-muted small">No reviewed evidence yet for this organization.</div>
+                ) : null}
+                {factsStatus === "success" && factItems.length > 0 ? <ReviewedFactList facts={factItems} /> : null}
+                {typeof onViewImpactLibrary === "function" && factsStatus === "success" && factItems.length > 0 ? (
+                  <button type="button" className="btn btn-sm btn-outline-primary mt-2" onClick={onViewImpactLibrary}>
+                    Open the Impact Library
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </ViewPane>
+          <ViewPane {...pane("sources")}>{sourcesAfter}</ViewPane>
+          <ViewPane {...pane("drafts")}>{draftsAfter}</ViewPane>
+        </>
+      )}
+
+      {organizationId ? askKai : null}
+    </section>
+  );
+}
+
+// Impact for an actor without the evidence-to-draft workflow: the Project's
+// reviewed Impact Facts from the pipeline read. Their evidence type is not in
+// that read, so they are not sorted into outcome or reach sections.
+function ReviewedImpact({ engagementId, view, attention, onOpenTab }) {
+  return (
+    <div data-knowledge-studio-impact="" data-knowledge-studio-impact-project={engagementId || ""}>
+      <h2 className="h5 mb-2">What this Project tells us about our impact</h2>
+      {!engagementId ? <div className="admin-card" data-impact-state="no_project">Select a Project above to see what its evidence shows.</div> : null}
+      {view?.kind === "loading" ? <div className="admin-card text-muted small" data-impact-state="loading">Loading this Project&rsquo;s evidence...</div> : null}
+      {view?.kind === "error" ? (
+        <div className="alert alert-warning small" data-impact-state="error">
+          This Project&rsquo;s evidence could not be loaded. This does not mean the Project has no evidence.
         </div>
       ) : null}
-    </section>
+      {view?.kind === "no_files" ? (
+        <div className="admin-card small" data-impact-state="empty">
+          No files have been added to this Project yet.
+          <button type="button" className="btn btn-sm btn-outline-primary ms-2" onClick={() => onOpenTab("sources")}>Add files in Sources</button>
+        </div>
+      ) : null}
+      {view?.kind === "explained_empty" ? (
+        <div className="admin-card small" data-impact-state="empty">No reviewed findings for this Project yet.</div>
+      ) : null}
+      {view?.kind === "facts" ? (
+        <div className="admin-card mb-3" data-impact-section="reviewed">
+          <h5 className="mb-1">Reviewed findings</h5>
+          <div className="small text-muted mb-2">Findings from this Project&rsquo;s files that are reviewed for internal use, with their known limitations.</div>
+          <ReviewedFactList facts={view.facts} />
+        </div>
+      ) : null}
+      {view && view.kind !== "loading" && view.kind !== "error" ? (
+        <AttentionList items={[
+          ...(view.upstream?.length ? [{
+            key: "files_in_progress",
+            text: view.upstream.map((entry) => pipelineReasonMessage(entry.reason, entry.fileCount)).join(" "),
+            actionLabel: "See file status", onAction: () => onOpenTab("sources"),
+          }] : []),
+          ...attention,
+        ]} />
+      ) : null}
+    </div>
   );
 }
 
@@ -364,8 +438,8 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
       {view.kind === "no_files" ? (
         <div className="small">
           <div className="text-muted mb-2">No files have been uploaded to this project yet, so there is no evidence to review.</div>
-          <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => onOpenTab("files")}>
-            Upload data in Files
+          <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => onOpenTab("sources")}>
+            Add files in Sources
           </button>
         </div>
       ) : null}
@@ -383,12 +457,12 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
         </div>
       ) : null}
       {(view.kind === "explained_empty" || view.kind === "facts") && needsClient ? (
-        <button type="button" className="btn btn-sm btn-outline-primary mt-2 me-2" onClick={() => onOpenTab("reviews")}>
+        <button type="button" className="btn btn-sm btn-outline-primary mt-2 me-2" onClick={() => onOpenTab("sources")}>
           {canReviewFollowups ? "Go to your reviews" : "See what is needed"}
         </button>
       ) : null}
       {(view.kind === "explained_empty" || view.kind === "facts") ? (
-        <button type="button" className="btn btn-sm btn-outline-secondary mt-2 me-2" onClick={() => onOpenTab("files")}>
+        <button type="button" className="btn btn-sm btn-outline-secondary mt-2 me-2" onClick={() => onOpenTab("sources")}>
           See file status
         </button>
       ) : null}

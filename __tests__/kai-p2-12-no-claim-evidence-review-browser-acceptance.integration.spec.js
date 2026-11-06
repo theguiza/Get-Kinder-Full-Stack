@@ -163,8 +163,42 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   };
   const clickNav = (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
-  const clickTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
+  // Four-view Knowledge Studio (owner direction 2026-11-06): former tab names
+  // map to the view that now holds them, per studio. In the GK studio the
+  // organization-wide Review Queue and Gaps are opened from Evidence, and a
+  // reviewer opening Evidence also opens its supporting source detail (the
+  // field-presence evidence it reviews); in the client studio Files, Reviews
+  // and Processing are Sources and Data Sources opens every view once.
+  const KS_VIEW_ALIASES = {
+    client: { "Data Sources": ["Impact", "Evidence", "Drafts", "Sources"], Files: ["Sources"], Reviews: ["Sources"], Processing: ["Sources"],
+      "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"], Gaps: ["Impact"] },
+    gk: { Files: ["Sources"], Processing: ["Sources"], Reviews: ["Evidence"], Gaps: ["Evidence"], "Data Sources": ["Sources"],
+      "Generated Drafts": ["Drafts"], "Funder Requirements": ["Drafts"] },
+  };
+  const clickOneTab = (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
     .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
+  const clickTab = async (label) => {
+    const kind = await evaluate(`document.querySelector("[data-knowledge-studio-kind]")?.getAttribute("data-knowledge-studio-kind") || "client"`);
+    const views = KS_VIEW_ALIASES[kind]?.[label] || [label];
+    for (const view of views) await clickOneTab(view);
+    if (views.at(-1) === "Evidence") {
+      // The Evidence list loads after the view opens: give its disclosures a moment to appear.
+      const wantQueue = kind === "gk" && ["Reviews", "Gaps"].includes(label);
+      for (let attempt = 0, detailDone = false, queueDone = !wantQueue; attempt < 40 && !(detailDone && queueDone); attempt += 1) {
+        const state = await evaluate(`(() => {
+          const visible = (text) => [...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && el.innerText.trim().startsWith(text));
+          const detail = visible("Show supporting source detail");
+          if (detail) detail.click();
+          const queue = ${JSON.stringify(wantQueue)} ? visible("Show review queue and gaps") : null;
+          if (queue) queue.click();
+          return { detail: Boolean(detail || visible("Hide supporting source detail")), queue: Boolean(queue || visible("Hide review queue and gaps")) };
+        })()`);
+        detailDone = detailDone || state.detail;
+        queueDone = queueDone || state.queue;
+        if (!(detailDone && queueDone)) await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  };
   const clickButton = (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
     .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`);
   // Sets a <select> nested in the <label> whose text starts with labelText,
@@ -419,9 +453,23 @@ async function runBrowserAcceptance() {
       // decision 2026-10-19) lists its own open sensitivity reviews; the server
       // authorizes that read, and no other review-cockpit queue is allowed.
       if (path === "/api/kai/sprint2/intake/admin/review-cockpit/queue" && new URL(r.url).searchParams.get("queue_type") === "sensitivity_review") continue;
+      // Four-view Knowledge Studio (owner direction 2026-11-06): this client
+      // administrator's evidence-to-draft workflow (owner decision 2026-10-18)
+      // is the studio's shared controller, so its admitted GETs happen on
+      // opening the studio. GETs only; nothing else is admitted.
+      const workflowBase = `/api/kai/sprint2/intake/admin/organizations/${ORG}`;
+      if (r.method === "GET" && ([`${workflowBase}/sources`, `${workflowBase}/evidence-library/candidates`, `${workflowBase}/claim-library/candidates`].includes(path)
+        || (new RegExp(`^${workflowBase}/claims/[0-9a-f-]{36}/traceability$`).test(path) && new URL(r.url).search === "?requested_audience=internal"))) continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
-    for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
+    // This client is the organization administrator: its own admitted workflow
+    // actions (owner decision 2026-10-18) are shown in Sources/Evidence since the
+    // four-view refactor. Every other GK control stays absent.
+    const adminWorkflowControls = new Set(["Extract evidence", "Propose claim"]);
+    for (const control of GK_CONTROLS) {
+      if (adminWorkflowControls.has(control)) continue;
+      assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
+    }
   }
 
   /** Drives the GK cockpit to the open source-candidate item and promotes it. */
@@ -621,14 +669,24 @@ async function runBrowserAcceptance() {
       await clientPage.waitFor(async () => clientPage.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
       await clientPage.idle();
       await clientPage.selectProject(PROJECT);
+      // Four-view refactor: file status is in Sources (Impact is the default view).
+      await clientPage.clickTab("Sources");
       await clientPage.waitFor(async () => Boolean(await clientPage.pipelineFileText(FILE)), "pipeline entry");
       return clientPage.pipelineFileText(FILE);
     };
-    function assertNoClientLeak(label, body) {
+    // Four-view refactor: this client is the organization administrator, who
+    // may read its evidence list (owner decision 2026-10-18; formerly in Data
+    // Sources, now in Evidence). The reviewed-evidence card - what a client
+    // sees as reviewed - still holds no unreviewed statement or id.
+    const reviewedEvidenceCard = () => clientPage.evaluate(`(() => {
+      const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Reviewed evidence");
+      return h ? h.closest(".admin-card").innerText : "";
+    })()`);
+    function assertNoClientLeak(label, body, card = body) {
       for (const row of evidence) {
-        assert.ok(!body.includes(row.statement), `${label}: no evidence statement`);
-        assert.ok(!body.includes(row.review_queue_item_id), `${label}: no queue id`);
-        assert.ok(!body.includes(row.evidence_item_id), `${label}: no evidence id`);
+        assert.ok(!card.includes(row.statement), `${label}: no evidence statement`);
+        assert.ok(!card.includes(row.review_queue_item_id), `${label}: no queue id`);
+        assert.ok(!card.includes(row.evidence_item_id), `${label}: no evidence id`);
       }
       for (const forbidden of [kaiUserIds.gk_reviewer, "reviewed_supported", "reviewed_not_supported", "not_supported", ...GK_REVIEW_CONTROLS]) {
         assert.ok(!body.includes(forbidden), `${label}: no ${forbidden}`);
@@ -644,7 +702,7 @@ async function runBrowserAcceptance() {
       assert.match(entry, /Evidence review\s+Waiting for Get Kinder/);
       await clientPage.clickTab("Evidence");
       await clientPage.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
-      assertNoClientLeak("client partial", await clientPage.text());
+      assertNoClientLeak("client partial", await clientPage.text(), await reviewedEvidenceCard());
       assert.deepEqual(clientPage.exceptions, []);
       results.case4_client_partial = "PASS";
     });
@@ -682,7 +740,7 @@ async function runBrowserAcceptance() {
       await clientPage.waitForText("Evidence from 1 file has been reviewed. Get Kinder has not yet completed the Impact Fact review.");
       const body = await clientPage.text();
       assert.ok(!body.includes("Reviewed for internal use") && !body.includes("1 shown"), "no reviewed Impact Fact");
-      assertNoClientLeak("client all reviewed", body);
+      assertNoClientLeak("client all reviewed", body, await reviewedEvidenceCard());
       assert.equal((await governedCounts()).claims, 1, "only the supported item has a (proposed) claim");
       assert.equal((await governedCounts()).claim_decisions, 0);
       assert.deepEqual(clientPage.exceptions, []);

@@ -42,7 +42,9 @@ test("proof: kai.evidence_items has no column and no foreign key referencing kai
 test("1 & 2: Knowledge Studio Evidence is wired to the new evidence-native read path, independent of the Claim Library", () => {
   const libSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   assert.match(libSource, /evidenceLibraryCandidatesPath,\s*\n\s*projectEvidenceLibraryItems,/);
-  assert.match(libSource, /getJson\(evidenceLibraryCandidatesPath\(organizationId\)\)/);
+  // Four-view refactor: the selected Project's scope is passed to the existing
+  // read (organization-wide only when no Project is selected).
+  assert.match(libSource, /getJson\(evidenceLibraryCandidatesPath\(organizationId, null, engagementId \|\| null\)\)/);
   // The evidence fetch effect is independent of (not derived from) candidateClaims.
   assert.doesNotMatch(libSource, /loadEvidenceItems[\s\S]{0,200}candidateClaims/);
 });

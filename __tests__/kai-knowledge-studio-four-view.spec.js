@@ -1,0 +1,363 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { build } from "esbuild";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import {
+  DEFAULT_KNOWLEDGE_STUDIO_VIEW,
+  FINDING_CATEGORIES,
+  KNOWLEDGE_STUDIO_VIEWS,
+  buildFindings,
+  findingCategory,
+  findingTypeLabel,
+  nextVisitedViews,
+  projectFindingsState,
+  shortStatement,
+} from "../frontend/knowledgeStudio/knowledgeStudioViewsLogic.js";
+import { projectEvidenceLibraryItems } from "../frontend/impactEvidenceLibraryLogic.js";
+import { listOrganizationEvidenceItems } from "../Backend/kai/db/kaiEvidenceLibraryReadModels.js";
+import { listOrganizationEvidenceLibrary } from "../Backend/kai/services/kaiEvidenceLibraryService.js";
+
+/**
+ * Knowledge Studio four-view MVP (owner direction 2026-11-06): Impact |
+ * Evidence | Sources | Drafts for the client Knowledge Studio and the Get
+ * Kinder Impact Evidence Library. Pure logic, the read-model display field,
+ * statically rendered components, and the state/race wiring.
+ */
+
+const ORG = "00000000-0000-4000-8000-0000000000a1";
+const PROJECT = "00000000-0000-4000-8000-0000000000b1";
+const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+const evidence = (n, overrides = {}) => ({
+  evidenceItemId: id(n),
+  sourceVersionId: id(900),
+  evidenceType: "source_document_statement",
+  measurementFamily: null,
+  statement: `Statement ${n}`,
+  ...overrides,
+});
+const claim = (n, evidenceItemId, overrides = {}) => ({
+  claimId: id(n),
+  evidenceItemId,
+  claimStatement: `Claim ${n}`,
+  evidenceType: "source_document_statement",
+  ...overrides,
+});
+const sources = [{ sourceId: id(800), sourceVersions: [{ sourceVersionId: id(900), safeFilename: "programme.csv", isCurrent: true }] }];
+
+// ---------------------------------------------------------------------------
+// Classification and grouping
+// ---------------------------------------------------------------------------
+
+test("exactly four views, Impact first and the default", () => {
+  assert.deepEqual(KNOWLEDGE_STUDIO_VIEWS.map(([key]) => key), ["impact", "evidence", "sources", "drafts"]);
+  assert.equal(DEFAULT_KNOWLEDGE_STUDIO_VIEW, "impact");
+  assert.deepEqual(nextVisitedViews(["impact"], "drafts"), ["impact", "drafts"]);
+  assert.deepEqual(nextVisitedViews(["impact", "drafts"], "drafts"), ["impact", "drafts"]);
+});
+
+test("classification uses only recorded discriminators: outcome and reach need their recorded family; prose is never an outcome", () => {
+  assert.equal(findingCategory("source_derived_measurement", "paired_outcome_change"), "outcomes");
+  assert.equal(findingCategory("source_derived_measurement", "cross_source_reach"), "reach");
+  assert.equal(findingCategory("source_derived_measurement", "tabular_count"), "measurements");
+  assert.equal(findingCategory("source_derived_measurement", null), "measurements", "an unknown family stays neutral");
+  // A record count is a count of records under its own definition, never relabelled as reach or impact.
+  assert.equal(findingCategory("source_record_count_measurement", null), "measurements");
+  assert.equal(findingCategory("source_record_count_measurement", "paired_outcome_change"), "measurements");
+  // Document prose, whatever it says, is a finding, never an outcome.
+  assert.equal(findingCategory("source_document_statement", "paired_outcome_change"), "findings");
+  assert.equal(findingCategory("some_future_type", null), "findings", "other existing types keep a neutral fallback");
+  assert.equal(findingCategory("dictionary_field_presence_fact", null), "technical");
+  assert.equal(findingTypeLabel("source_record_count_measurement"), "Record count");
+  assert.equal(findingTypeLabel("source_derived_measurement", "paired_outcome_change"), "Baseline and follow-up measurement");
+  assert.deepEqual(FINDING_CATEGORIES, ["outcomes", "reach", "measurements", "findings", "technical"]);
+});
+
+test("buildFindings groups evidence with its claims, keeps claims whose evidence is not loaded, and orders by source and statement - never by id", () => {
+  const items = [
+    evidence(3, { statement: "Zebra statement" }),
+    evidence(1, { statement: "Apple statement" }),
+    evidence(2, { evidenceType: "source_derived_measurement", measurementFamily: "paired_outcome_change", statement: "12 of 20 improved" }),
+    evidence(4, { evidenceType: "dictionary_field_presence_fact", statement: "Source has column field_5 (text_like)" }),
+    evidence(5, { evidenceType: "source_derived_measurement", measurementFamily: "cross_source_reach", statement: "40 participants linked" }),
+  ];
+  const claims = [claim(11, id(1)), claim(12, id(1)), claim(13, id(77), { evidenceType: "source_record_count_measurement", claimStatement: "Orphan count" })];
+  const grouped = buildFindings({ evidenceItems: items, claims, sources });
+  assert.deepEqual(grouped.outcomes.map((entry) => entry.statement), ["12 of 20 improved"]);
+  assert.deepEqual(grouped.reach.map((entry) => entry.statement), ["40 participants linked"]);
+  assert.deepEqual(grouped.findings.map((entry) => entry.statement), ["Apple statement", "Zebra statement"]);
+  assert.deepEqual(grouped.technical.map((entry) => entry.evidenceItemId), [id(4)]);
+  assert.deepEqual(grouped.findings[0].claims.map((entry) => entry.claimId), [id(11), id(12)]);
+  assert.equal(grouped.findings[0].sourceFileName, "programme.csv");
+  // A claim whose evidence item is not loaded is still listed (selectable), as a neutral measurement.
+  assert.equal(grouped.measurements.length, 1);
+  assert.equal(grouped.measurements[0].evidence, null);
+  assert.equal(grouped.measurements[0].claims[0].claimId, id(13));
+});
+
+test("Impact state distinguishes no Project, loading, error, no results and incomplete results; a failed or partial read is never 'no evidence'", () => {
+  const empty = buildFindings({});
+  const some = buildFindings({ evidenceItems: [evidence(1)] });
+  const ok = { status: "success", complete: true };
+  assert.deepEqual(projectFindingsState({ engagementId: "", reads: [ok], grouped: some }), { kind: "no_project" });
+  assert.deepEqual(projectFindingsState({ engagementId: PROJECT, reads: [{ status: "loading" }], grouped: empty }), { kind: "loading" });
+  assert.deepEqual(projectFindingsState({ engagementId: PROJECT, reads: [ok, { status: "error", message: "x" }], grouped: some }), { kind: "error", message: "x" });
+  assert.deepEqual(projectFindingsState({ engagementId: PROJECT, reads: [ok, ok], grouped: empty }), { kind: "empty" });
+  assert.deepEqual(projectFindingsState({ engagementId: PROJECT, reads: [{ status: "success", complete: false }], grouped: empty }), { kind: "incomplete_empty" });
+  assert.deepEqual(projectFindingsState({ engagementId: PROJECT, reads: [{ status: "success", complete: false }], grouped: some }), { kind: "ready", complete: false, loading: false });
+  // Structural facts alone are not results.
+  assert.equal(projectFindingsState({ engagementId: PROJECT, reads: [ok], grouped: buildFindings({ evidenceItems: [evidence(4, { evidenceType: "dictionary_field_presence_fact" })] }) }).kind, "empty");
+  assert.deepEqual(shortStatement("short"), { text: "short", shortened: false });
+  assert.equal(shortStatement("word ".repeat(100), 50).shortened, true);
+});
+
+// ---------------------------------------------------------------------------
+// Evidence Library: the recorded measurement family (display field only)
+// ---------------------------------------------------------------------------
+
+function fakeDb(rows, families) {
+  const queries = [];
+  return {
+    queries,
+    async query(sql, params) {
+      queries.push({ sql, params });
+      return { rows: queries.length === 1 ? rows : families };
+    },
+  };
+}
+
+test("the evidence read adds the derived-measurement family with one tenant-scoped batched lookup, only when the page holds derived-measurement evidence", async () => {
+  const plain = fakeDb([{ evidence_item_id: id(1), evidence_type: "source_document_statement" }], []);
+  const plainRows = await listOrganizationEvidenceItems(ORG, { limit: 25 }, plain);
+  assert.equal(plain.queries.length, 1, "no derived-measurement table is read without derived evidence");
+  assert.equal(plainRows[0].measurement_family, null);
+
+  const derived = fakeDb(
+    [{ evidence_item_id: id(1), evidence_type: "source_derived_measurement" }, { evidence_item_id: id(2), evidence_type: "source_record_count_measurement" }],
+    [{ evidence_item_id: id(1), measurement_family: "paired_outcome_change" }],
+  );
+  const derivedRows = await listOrganizationEvidenceItems(ORG, { limit: 25 }, derived);
+  assert.equal(derived.queries.length, 2);
+  assert.deepEqual(derived.queries[1].params, [ORG, [id(1)]]);
+  assert.match(derived.queries[1].sql, /WHERE edm\.organization_id = \$1::uuid\s+AND edm\.evidence_item_id = ANY\(\$2::uuid\[\]\)/);
+  assert.doesNotMatch(derived.queries[1].sql, /\b(INSERT|UPDATE|DELETE)\b/i);
+  assert.deepEqual(derivedRows.map((row) => row.measurement_family), ["paired_outcome_change", null]);
+});
+
+test("the Evidence Library DTO carries measurementFamily, fails closed on a malformed one, and the client projection keeps it", async () => {
+  const actorContext = { actorType: "human", actorUserId: "user-1", globalRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] };
+  const row = (family) => ({ evidence_item_id: id(1), organization_id: ORG, evidence_type: "source_derived_measurement", statement: "s", measurement_family: family });
+  const deps = (family) => ({ env: { KAI_SPRINT2_ENABLED: "true" }, listOrganizationEvidenceItems: async () => [row(family)] });
+  const ok = await listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, actorContext }, deps("cross_source_reach"));
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.data.items[0].measurementFamily, "cross_source_reach");
+  const none = await listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, actorContext }, deps(undefined));
+  assert.equal(none.data.items[0].measurementFamily, null);
+  const malformed = await listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, actorContext }, deps("Paired Outcome!"));
+  assert.equal(malformed.ok, false);
+  assert.equal(projectEvidenceLibraryItems({ items: [{ evidenceItemId: id(1), measurementFamily: "paired_outcome_change" }] })[0].measurementFamily, "paired_outcome_change");
+  assert.equal(projectEvidenceLibraryItems({ items: [{ evidenceItemId: id(1) }] })[0].measurementFamily, null);
+});
+
+// ---------------------------------------------------------------------------
+// Rendered components (static render: no effects, so no request is issued)
+// ---------------------------------------------------------------------------
+
+const repoRoot = new URL("..", import.meta.url).pathname;
+async function loadComponent(relativePath) {
+  const cacheRoot = join(repoRoot, "node_modules", ".cache");
+  mkdirSync(cacheRoot, { recursive: true });
+  const dir = mkdtempSync(join(cacheRoot, "kai-four-view-"));
+  const outfile = join(dir, "component.mjs");
+  await build({
+    entryPoints: [join(repoRoot, relativePath)],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    outfile,
+    jsx: "automatic",
+    loader: { ".js": "jsx", ".css": "empty" },
+    external: ["react", "react/*", "react-dom", "react-dom/*"],
+    logLevel: "silent",
+  });
+  try {
+    return await import(pathToFileURL(outfile).href);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const markupOrder = (markup, needles) => needles.map((needle) => {
+  const index = markup.indexOf(needle);
+  assert.ok(index > -1, `missing: ${needle}`);
+  return index;
+});
+
+test("rendered Impact: outcomes, then reach, then other findings, then what needs attention; structural facts are not shown; each finding links to its evidence", async () => {
+  const { ImpactView } = await loadComponent("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  const grouped = buildFindings({
+    evidenceItems: [
+      evidence(1, { statement: "Document says the programme ran weekly" }),
+      evidence(2, { evidenceType: "source_derived_measurement", measurementFamily: "paired_outcome_change", statement: "12 of 20 participants improved" }),
+      evidence(3, { evidenceType: "source_derived_measurement", measurementFamily: "cross_source_reach", statement: "40 distinct participants attended" }),
+      evidence(4, { evidenceType: "dictionary_field_presence_fact", statement: "Source has column field_5 (text_like)" }),
+    ],
+    sources,
+  });
+  const state = projectFindingsState({ engagementId: PROJECT, reads: [{ status: "success", complete: true }], grouped });
+  const markup = renderToStaticMarkup(React.createElement(ImpactView, {
+    projectName: "Harbourline", engagementId: PROJECT, state, grouped,
+    attention: [{ key: "x", text: "2 file(s) need a step" }], onOpenFinding: () => {}, onOpenEvidence: () => {},
+  }));
+  const [heading, outcomes, reach, other, attention] = markupOrder(markup, [
+    "What this Project tells us about our impact", "12 of 20 participants improved", "40 distinct participants attended",
+    "Document says the programme ran weekly", "2 file(s) need a step",
+  ]);
+  assert.ok(heading < outcomes && outcomes < reach && reach < other && other < attention);
+  assert.doesNotMatch(markup, /field_5|text_like/);
+  assert.match(markup, /Evidence, definition and limitations/);
+  assert.doesNotMatch(markup, /data-impact-state="incomplete"/);
+});
+
+test("rendered Impact: partial, failed, empty and no-Project states say so and never claim there is no evidence", async () => {
+  const { ImpactView } = await loadComponent("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  const render = (state, grouped = buildFindings({ evidenceItems: [evidence(1)] })) => renderToStaticMarkup(React.createElement(ImpactView, {
+    engagementId: state.kind === "no_project" ? "" : PROJECT, state, grouped, onLoadMore: () => {},
+  }));
+  const partial = render({ kind: "ready", complete: false });
+  assert.match(partial, /data-impact-state="incomplete"/);
+  assert.match(partial, /covers the evidence loaded so far/);
+  assert.match(partial, /in the evidence loaded so far/, "an empty section of a partial read is not 'none recorded'");
+  assert.match(partial, /Load more evidence/);
+  assert.match(render({ kind: "error", message: "" }), /This does not mean the Project has no evidence/);
+  assert.match(render({ kind: "loading" }), /data-impact-state="loading"/);
+  assert.match(render({ kind: "empty" }, buildFindings({})), /No findings or measurements are recorded for this Project yet/);
+  assert.match(render({ kind: "incomplete_empty" }, buildFindings({})), /more evidence exists/);
+  const none = render({ kind: "no_project" });
+  assert.match(none, /Select a Project above/);
+  assert.doesNotMatch(none, /What needs attention/);
+});
+
+const adminCapabilities = {
+  internalKnowledgeWorkspace: false,
+  intakeContribution: true,
+  workflowOperations: { extractEvidence: true, proposeClaim: true, generateDrafts: true, readInternalDrafts: true, recordSourceMeasurement: true },
+};
+
+test("rendered client Knowledge Studio: the Project name leads, four tabs, Impact is open, and only the Impact view is mounted (one shared workflow controller)", async () => {
+  const { default: ClientKnowledgeStudio } = await loadComponent("frontend/knowledgeStudio/ClientKnowledgeStudio.jsx");
+  for (const capabilities of [adminCapabilities, { internalKnowledgeWorkspace: false, intakeContribution: true }]) {
+    const markup = renderToStaticMarkup(React.createElement(ClientKnowledgeStudio, {
+      organizationId: ORG, engagementId: PROJECT, projectName: "Harbourline Project", capabilities, facts: { status: "success", items: [] },
+    }));
+    const tabs = [...markup.matchAll(/data-knowledge-studio-tab="([a-z]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(tabs, ["impact", "evidence", "sources", "drafts"]);
+    assert.match(markup, /aria-selected="true"[^>]*data-knowledge-studio-tab="impact"/);
+    assert.match(markup, /<h1 class="admin-title mb-0">Harbourline Project<\/h1>/);
+    const views = [...markup.matchAll(/data-knowledge-studio-view="([a-z]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(views, ["impact"], "only the active view is mounted on open");
+    assert.match(markup, /What this Project tells us about our impact/);
+    for (const old of ["Data Sources", "Funder Requirements", "Generated Drafts", "Gaps and Risks"]) {
+      assert.ok(!markup.includes(`>${old}<`), `${old} is not stacked under Impact`);
+    }
+    const controllers = (markup.match(/data-client-evidence-workflow=""/g) || []).length;
+    assert.equal(controllers, capabilities === adminCapabilities ? 1 : 0);
+    // Ask KAI keeps its function but states its organization-wide scope.
+    assert.match(markup, /answers from your whole organization library/);
+  }
+  const noProject = renderToStaticMarkup(React.createElement(ClientKnowledgeStudio, {
+    organizationId: ORG, engagementId: "", capabilities: adminCapabilities, facts: { status: "success", items: [] },
+  }));
+  assert.match(noProject, /No Project selected/);
+  assert.match(noProject, /Select a Project above to see what its evidence shows/);
+});
+
+test("rendered GK Knowledge Studio: four tabs with Impact open; Claims, Traceability, drafting and Sources sections are not stacked under it", async () => {
+  const { default: ImpactEvidenceLibrary } = await loadComponent("frontend/ImpactEvidenceLibrary.jsx");
+  const markup = renderToStaticMarkup(React.createElement(ImpactEvidenceLibrary, {
+    organizationId: ORG, onOrganizationIdChange: () => {}, engagementId: PROJECT, onEngagementIdChange: () => {},
+    projectName: "Harbourline Project", workflowOperations: { generateDrafts: true, readGeneratedDrafts: true, extractEvidence: true },
+  }));
+  const tabs = [...markup.matchAll(/data-knowledge-studio-tab="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ["impact", "evidence", "sources", "drafts"]);
+  assert.match(markup, /aria-selected="true"[^>]*data-knowledge-studio-tab="impact"/);
+  assert.match(markup, /What this Project tells us about our impact/);
+  for (const heading of ["Claims", "Traceability", "Generated Drafts", "Grant Response Packet", "Board Reporting", "KAI Baseline Readiness", "Data Sources", "Review Queue", "Gaps and Risks"]) {
+    assert.ok(!markup.includes(`>${heading}</h5>`), `${heading} is not stacked under Impact`);
+  }
+  assert.match(markup, /answers from the whole organization library/);
+});
+
+// ---------------------------------------------------------------------------
+// Shared state and asynchronous context safety (wiring)
+// ---------------------------------------------------------------------------
+
+const read = (path) => readFileSync(path, "utf8");
+
+test("client: one stable workflow controller presents all four views; selections, pending state and idempotency keys live in it, not in a view", () => {
+  const studio = read("frontend/knowledgeStudio/ClientKnowledgeStudio.jsx");
+  const workflow = read("frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx");
+  assert.equal((studio.match(/<ClientEvidenceWorkflow\b/g) || []).length, 1, "a single controller instance");
+  // Mounted for the studio, not inside one view pane.
+  const mount = studio.indexOf("<ClientEvidenceWorkflow");
+  assert.doesNotMatch(studio.slice(Math.max(0, mount - 120), mount), /<ViewPane/);
+  assert.match(studio, /view=\{tab\}\s+visitedViews=\{visitedViews\}\s+onSelectView=\{selectTab\}/);
+  for (const pane of ["impact", "evidence", "sources", "drafts"]) {
+    assert.match(workflow, new RegExp(`<ViewPane name="${pane}" active=\\{view === "${pane}"\\} mounted=\\{visitedViews\\.includes\\("${pane}"\\)\\}>`));
+  }
+  // Views stay mounted (hidden) once opened, so forms and open panels survive navigation.
+  const views = read("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  assert.match(views, /if \(!mounted\) return null;\s*return \(\s*<div hidden=\{!active\}/);
+  // Selection is cleared only on an organization/Project change, never on a view change.
+  assert.match(workflow, /useEffect\(\(\) => \{\s*setSelectedClaimIds\(\[\]\);[\s\S]*?setPending\(""\);\s*\}, \[organizationId, engagementId\]\);/);
+  assert.doesNotMatch(workflow, /\[view\][^\n]*setSelectedClaimIds|setSelectedClaimIds\(\[\]\);[^\n]*view/);
+  // Generation still uses the selected claim ids and the retained idempotency key.
+  assert.match(workflow, /internalDraftRequestBody\(\{ claimIds: selectedClaimIds, idempotencyKey, engagementId \}\)/);
+  assert.match(workflow, /const idempotencyKey = draftKeys\[contentType\] \|\| `client-\$\{contentType\}-\$\{globalThis\.crypto\.randomUUID\(\)\}`;/);
+  // Draft citations resolve from the controller's claims, not from a mounted Evidence view.
+  assert.match(workflow, /<ClientInternalDrafts organizationId=\{organizationId\} engagementId=\{engagementId\} claims=\{claims\.items\}/);
+  // Switching views neither re-reads the libraries (loaded pages survive) nor clears a selection.
+  assert.doesNotMatch(studio, /setWorkflowRefreshSignal|refreshSignal/);
+  assert.doesNotMatch(workflow, /refreshSignal/);
+  // The organization-library expansion is unchanged and resets per Project.
+  assert.match(workflow, /useEffect\(\(\) => \{ setIncludeOrganizationLibrary\(false\); \}, \[organizationId, engagementId\]\);/);
+  assert.match(workflow, /const scope = isRouteUuid\(engagementId\) && !includeOrganizationLibrary \? engagementId : "";/);
+});
+
+test("context safety: Ask KAI, internal draft reading and GK draft packets discard responses from a previous Project and recover pending controls", () => {
+  const kai = read("frontend/ImpactLibraryKai.jsx");
+  assert.match(kai, /const requestContext = contextRef\.current;[\s\S]*?if \(contextRef\.current !== requestContext\) return;\s*setSending\(false\);/);
+  assert.match(kai, /setInput\(""\);\s*setSending\(false\);\s*\}, \[organizationId, engagementId\]\);/);
+  assert.match(kai, /not only the selected Project/);
+  const drafts = read("frontend/knowledgeStudio/ClientInternalDrafts.jsx");
+  assert.match(drafts, /if \(detailSeqRef\.current !== seq \|\| contextRef\.current !== requestContext\) return;/);
+  assert.match(drafts, /const current = \(\) => reportSeqRef\.current === seq && contextRef\.current === requestContext;/);
+  assert.match(drafts, /detailSeqRef\.current \+= 1;\s*reportSeqRef\.current \+= 1;\s*setDetail\(\{ status: "idle"/);
+  // Focused reader with a return path.
+  assert.match(drafts, /data-client-internal-draft-back=""/);
+  assert.match(drafts, /const listShown = !readerOpen && /);
+  const gk = read("frontend/ImpactEvidenceLibrary.jsx");
+  assert.match(gk, /const request = \+\+generatedDraftPacketRequestRef\.current;[\s\S]*?if \(request !== generatedDraftPacketRequestRef\.current\) return;/);
+  assert.match(gk, /generatedDraftPacketRequestRef\.current \+= 1;\s*setGeneratedDraftPacket\(null\);\s*\}, \[organizationId, engagementId\]\);/);
+});
+
+test("GK: Evidence, Claims, Sources and Drafts reads pass the selected Project; organization-wide eligibility never adds another Project's claim; rollups are labelled organization-wide", () => {
+  const gk = read("frontend/ImpactEvidenceLibrary.jsx");
+  assert.match(gk, /getJson\(claimLibraryCandidatesPath\(organizationId, null, engagementId \|\| null\)\)/);
+  assert.match(gk, /getJson\(evidenceLibraryCandidatesPath\(organizationId, null, engagementId \|\| null\)\)/);
+  assert.match(gk, /getJson\(organizationSourcesPath\(organizationId, engagementId \|\| null\)\)/);
+  assert.match(gk, /getJson\(generatedDraftLibraryIndexPath\(requestOrganizationId, engagementId \|\| null\)\)/);
+  assert.match(gk, /const listedEligible = engagementId \? eligibleClaims\.filter\(\(claim\) => candidateIds\.has\(claim\.claimId\)\) : eligibleClaims;/);
+  assert.match(gk, /setCandidateClaims\(\[\]\);\s*setCandidateClaimsTruncated\(false\);\s*if \(organizationId\) loadCandidateClaims\(\);/);
+  assert.match(gk, /Across the organization \(all Projects\)/);
+  assert.match(gk, /This is not limited to the selected Project\./);
+  // Generation still requires a selected Project and the existing selection rules.
+  assert.match(gk, /if \(audience !== "internal" \|\| !engagementId\) return;/);
+  assert.match(gk, /canSelectClaimForInternalGeneration\(claim, audience\)/);
+  assert.match(gk, /canSelectClaimForFunderGeneration\(claim, audience\)/);
+});

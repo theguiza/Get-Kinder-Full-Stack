@@ -143,8 +143,10 @@ test("Case 2 (wiring): the retained batch lives in each parent outside the tab-g
     );
   }
   // The retained state is declared before (outside) the Files-tab conditional mount.
-  assert.ok(libSource.indexOf("const [filesIntakeBatchId") < libSource.indexOf('knowledgeStudioTab === "files" && organizationId ? ('));
-  assert.ok(clientStudioSource.indexOf("const [filesIntakeBatchId") < clientStudioSource.indexOf('tab === "files" && organizationId ? ('));
+  // (Four-view refactor: Web Intake is in Sources; the client keeps the Sources
+  // view mounted once opened, and the retained id still lives in the parent.)
+  assert.ok(libSource.indexOf("const [filesIntakeBatchId") < libSource.indexOf('knowledgeStudioTab === "sources" && organizationId ? ('));
+  assert.ok(clientStudioSource.indexOf("const [filesIntakeBatchId") < clientStudioSource.indexOf("const uploadSection = organizationId ? ("));
   // Every validated selection flows back to the parent: bootstrap results
   // and explicit chooser selections alike.
   assert.match(webIntakeSource, /reportIntakeBatchSelection\(outcome\.intakeBatchId\);/);
@@ -379,7 +381,7 @@ test("Project switch A: an authoritative engagementId change clears a profile di
   assert.deepEqual(sensitivityReviewFormStateFromDecision(null), defaultSensitivityReviewFormState());
   // With no selected id the review card is not rendered, so no prior
   // Project's profile detail can be shown.
-  assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
+  assert.match(libSource, /\{knowledgeStudioTab === "sources" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
 
   // Behavior of the reset's update rule: a file-derived id from Project A is
   // cleared; a different (queue/traceability) selection is kept.
