@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import PDFDocument from "pdfkit";
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
 import { composeFreeImpactAssessmentView, renderFreeImpactAssessmentPdf } from "./kaiFreeImpactAssessmentRenderer.js";
@@ -106,6 +107,7 @@ export function serializeExportManifestRenderModelToPdf(renderModel) {
   doc.text(`Render model contract: ${normalizeScalar(renderModel.renderModelContractVersion)}`);
   doc.text(`Content type: ${normalizeScalar(renderModel.exportCandidate.contentType)}`);
   doc.text(`Requested audience: ${normalizeScalar(renderModel.exportCandidate.requestedAudience)}`);
+  doc.text(STORY_SOURCE_NOTE);
 
   heading(doc, "Content");
   for (const block of renderModel.content.blocks) {

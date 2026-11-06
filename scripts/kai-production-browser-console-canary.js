@@ -36,15 +36,14 @@
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
   ]);
-  // Operating Model 7.2 categories: all 'absent' makes the measured fact
+  // Independently governed categories: all 'absent' makes the measured fact
   // ordinary (usable internally with no further review); anything else keeps
-  // it with Get Kinder.
+  // it with Get Kinder. Source story presence is informational only.
   const ORDINARY_CATEGORIES = Object.freeze([
     "reviewed_personal_data_status",
     "reviewed_minor_data_status",
     "reviewed_health_housing_justice_immigration_status",
     "reviewed_indigenous_governance_status",
-    "reviewed_story_testimonial_status",
     "reviewed_small_cell_risk_status",
   ]);
   const REQUIRED_CUSTOMER_CAPABILITIES = Object.freeze({
@@ -493,7 +492,7 @@
   function contentChecks(text, state) {
     const count = new RegExp(`\\b(?:5|five)\\s+${state.unit.unitLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
     return {
-      countAndUnit: count.test(text),
+      countAndUnit: count.test(text) || /\b5 nonblank data rows\b/.test(text),
       periodStart: text.includes(state.period.start),
       periodEnd: text.includes(state.period.end),
       blankDisclosed: /\bblank\b/i.test(text),
@@ -553,13 +552,13 @@
       organizationLine: new RegExp(`^- \\*\\*Organization:\\*\\* .*\\(\`${escaped(state.organizationId)}\`\\)$`, "m").test(text),
       engagementLine: new RegExp(`^- \\*\\*Project / engagement:\\*\\* .*\\(\`${escaped(state.engagementId)}\`\\)$`, "m").test(text),
       internalEvidenceSummary: text.startsWith("# Internal Evidence Summary\n") && /internal use by this organization only/.test(text),
-      countAndUnit: new RegExp(`\\*\\*(?:5|five)\\s+${escaped(state.unit.unitLabel)}\\*\\*`, "i").test(section("Key findings")),
+      countAndUnit: /\*\*5 nonblank data rows were counted/.test(section("Key findings")),
       methodAndArithmetic: /minus 1 blank record excluded = \*\*5\*\* counted/.test(section("Measurement definition and counting method")),
       duplicatesIncluded: /2 exact-duplicate records\. They are included in the count of 5/.test(section("Duplicate records")),
       doesNotEstablish: /distinct people/.test(section("What this evidence does not establish")),
-      conclusion: /records 5 /.test(section("Conclusion")),
+      conclusion: /5 nonblank data rows/.test(section("Conclusion")),
       reportingPeriod: text.includes(state.period.start) && text.includes(state.period.end),
-      claimEvidenceCitation: text.includes(`Claim \`${state.ids.claimId}\``) && text.includes(`Evidence \`${state.ids.evidenceItemId}\``),
+      claimEvidenceCitation: text.includes(`Claim \`${state.ids.claimId}\``) && text.includes(`evidence \`${state.ids.evidenceItemId}\``),
       sourceVersionCitation: text.includes(`version \`${state.ids.sourceVersionId}\``),
       measurementLimitations: MEASUREMENT_LIMITATION_CODES.every((code) => text.includes(`\`${code}\``)),
       periodNotRowVerified: /not checked against dates in the records/.test(text),

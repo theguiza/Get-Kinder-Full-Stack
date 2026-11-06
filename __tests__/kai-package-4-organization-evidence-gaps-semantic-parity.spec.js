@@ -516,7 +516,7 @@ test("traceability keeps historical small-cell gaps and binds acceptance to the 
 // that still says 'unknown' and a historical unresolved small-cell gap. The
 // actual traceability and organization-gap responses are read the way the
 // browser reads them (JSON), then projected by the real UI logic.
-test("final acceptance: a reviewed small-cell 'absent' reaches traceability, organization gaps and the UI projection; the story restriction stays", async () => {
+test("final acceptance: a reviewed small-cell 'absent' reaches traceability, organization gaps and the UI projection; story metadata does not gate", async () => {
   const smallGapId = "00000000-0000-4000-8000-000000009999";
   const head = {
     organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_id: "00000000-0000-4000-8000-000000009911",
@@ -565,12 +565,11 @@ test("final acceptance: a reviewed small-cell 'absent' reaches traceability, org
   assert.equal(codes.some((code) => code.startsWith("coverage.small_cell_risk.")), false, JSON.stringify(codes));
   assert.doesNotMatch(composeMeasurementDisclosure(codes) || "", /small/i);
 
-  // The independent story/testimonial restriction is untouched.
-  assert.deepEqual(classifySourceDecision(head), { getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] });
+  // Story metadata does not reappear as an ordinary-rule condition.
+  assert.deepEqual(classifySourceDecision(head), { getKinderReviewReasons: [], blockedReasons: [] });
   const conditions = ordinaryRuleConditions({ sourcePermissions: { isCurrent: true, sensitivityReviewComplete: true, allowedUseStatus: "allowed",
     aiProcessingAllowed: true, categories: recordedSourcePermissions(head).categories } });
-  assert.equal(conditions.length, 1, JSON.stringify(conditions));
-  assert.doesNotMatch(conditions[0], /small/i);
+  assert.deepEqual(conditions, []);
 
   // Reviewed 'unknown' keeps the dimension unresolved (and blocking) end to end.
   state.head = { ...head, decision_id: "00000000-0000-4000-8000-000000009913", reviewed_small_cell_risk_status: "unknown" };
@@ -708,19 +707,18 @@ test("connected: a story-present source's paired claim becomes internally eligib
     return result.data;
   };
 
-  // Before (story recorded 'unknown', where the refusal still applies): exactly the four
-  // internal blockers the production browser reported for both claims.
-  const unknown = await trace({ ...storyPresent, reviewed_story_testimonial_status: "unknown" });
-  assert.deepEqual(unknown.blockerCodes, ["claim_review_unresolved", "evidence_review_unresolved", "support_strength_unassessed", "coverage_dimension_unresolved"]);
-  assert.equal(unknown.eligible, false);
-  assert.equal(ordinaryInternalAuthorityOf(unknown).basis, null);
-  const blocking = Object.entries(unknown.dimensions).filter(([, d]) => d.blocks_requested_audience).map(([k]) => k).sort();
-  assert.deepEqual(blocking, ["conflicting_source_indicators", "requirement_alignment"], "the coverage blocker is the two source-level dimensions only");
+  // Every presence value has the same actual P2-06 result and authority.
+  const all = [];
+  for (const value of ["absent", "present", "unknown"]) {
+    all.push(await trace({ ...storyPresent, reviewed_story_testimonial_status: value }));
+  }
+  assert.deepEqual(all[1], all[0]); assert.deepEqual(all[2], all[0]);
+  for (const result of all) assert.deepEqual([result.eligible, result.blockerCodes], [true, []]);
 
   // After (story recorded 'present'): the ordinary rule answers all four; nothing is accepted or approved.
   const present = await trace(storyPresent);
   assert.deepEqual([present.eligible, present.blockerCodes], [true, []]);
-  assert.deepEqual({ ...ordinaryInternalAuthorityOf(present) }, { basis: "numerical_measurement_story_testimonial_present", reliedOn: true });
+  assert.deepEqual({ ...ordinaryInternalAuthorityOf(present) }, { basis: "all_sensitive_categories_absent", reliedOn: true });
   for (const key of ["conflicting_source_indicators", "requirement_alignment"]) {
     assert.deepEqual([present.dimensions[key].assessment_status, present.dimensions[key].blocks_requested_audience, present.dimensions[key].internal_limitation_accepted],
       ["unresolved", false, false], `${key} is carried as an internal limitation, not accepted`);
@@ -740,6 +738,6 @@ test("connected: a story-present source's paired claim becomes internally eligib
   // A recorded negative evidence decision still governs its own lineage.
   const negative = await trace(storyPresent, { decision_outcome: "not_supported", decided_by_role: "gk_reviewer" });
   assert.equal(negative.eligible, false);
-  assert.equal(ordinaryInternalAuthorityOf(negative).basis, null);
+  assert.equal(ordinaryInternalAuthorityOf(negative).basis, "all_sensitive_categories_absent");
   assert.ok(negative.blockerCodes.includes("support_strength_unassessed"));
 });

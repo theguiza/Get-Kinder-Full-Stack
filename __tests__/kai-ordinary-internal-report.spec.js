@@ -124,7 +124,8 @@ test("internal report: an available report is returned as complete Markdown with
     assert.ok(markdown.includes(`\n## ${section}\n`), section);
   }
   assert.ok(markdown.startsWith("# Internal Evidence Summary\n"));
-  assert.match(markdown, /records \*\*5 programme sessions\*\* for the reporting period 2026-09-01 to 2026-09-30/);
+  assert.match(markdown, /\*\*5 nonblank data rows were counted/);
+  assert.match(markdown, /reporting period 2026-09-01 to 2026-09-30/);
   assert.match(markdown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
   assert.match(markdown, /2 exact-duplicate records\. They are included in the count of 5/);
   assert.match(markdown, /no further approval is required for internal use/);
@@ -142,7 +143,7 @@ test("internal report: a recorded review decision is reported as the basis, and 
   const narrative = serializeInternalReportToMarkdown(model({ contentType: "impact_narrative" }));
   assert.ok(narrative.startsWith("# Internal Impact Narrative\n"));
   assert.match(narrative, /\*\*Purpose:\*\* this report describes the programme activity/);
-  assert.match(narrative, /records \*\*5 programme sessions\*\*/);
+  assert.match(narrative, /\*\*5 nonblank data rows were counted/);
   assert.throws(() => serializeInternalReportToMarkdown(model({ available: false })), /available internal report model/);
 });
 

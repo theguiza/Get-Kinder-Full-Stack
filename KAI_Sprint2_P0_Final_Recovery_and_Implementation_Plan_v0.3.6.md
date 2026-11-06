@@ -46967,3 +46967,94 @@ Operating Model §7 permits authorized normal processing/drafts without per-step
 **Next action:** a separately authorized push/deployment. Then the owner runs one Free Impact Assessment with the same two claims and returns either the 201 draft or the 422 blocker, whose `evidence` will now name the class, sections, origin and attempts.
 
 **Status:** FREE_IMPACT_ASSESSMENT_VAL_GEN_004_RELIABILITY_REPAIRED_LOCALLY; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED.
+
+
+## Source story/testimonial metadata: complete operational independence (2026-11-06)
+
+**Owner authorization / package boundary (USER_CONFIRMED):** owner task “Eliminate every direct and indirect story/testimonial source-flag blocker throughout KAI.” Implement the complete cross-surface correction, synthetic verification, this living ExecPlan evidence and coherent local commit; stop after that scope. Source presence (`absent`, `present`, `unknown`) and storytelling style are informational only. They cannot independently or indirectly alter authorization, processing, claims, measurements, generation, validation severity, review, reports, downloads, exports or release. No production, database, schema, migration, feature-flag/configuration, remote, secret or real-client-data work authorized.
+
+**Preflight (TOOL_VERIFIED):** repository-root AGENTS.md; no nested AGENTS.md; clean `main` at `a30e24a0aaecc5c66b044dad7c07a21524fc5bd9`; implementation, callers, tests, scripts and governing local contracts inspected. This entry supersedes earlier implementation-specific story-present/count-only/numerical exceptions and story-unknown holds in this plan. Accepted unrelated completed work is preserved. Operating Model v0.2 §7.2 says “KAI should still generate the proposed output immediately” and separates drafting from actual external-release concerns. The original named architecture/backend-contract documents were not available as separate local files; repository architecture, P0/service/decision contracts and the accepted plan provided the available implementation basis. No remote document or production request was made.
+
+**Root causes and confirmed consumers (TOOL_VERIFIED repository):**
+
+1. `postgresOrdinaryInternalFactAuthority.js` included `reviewed_story_testimonial_status` in `HIGH_RISK_SENSITIVITY_FIELDS`, emitting `story_testimonial_not_cleared` for present/unknown. Its special `count_only_story_testimonial_present` / `numerical_measurement_story_testimonial_present` authority branches replaced ordinary authority and imposed extra conditions. These classifications propagated through P2-06 traceability and P2-08 eligible-claims projections; organization evidence/claim factual review; coverage; generated review packets; report availability; organization release/readiness; final export's existing current-eligibility checks; API DTOs and frontend action selectors. Shared authority now excludes story from risk and permission predicates while retaining its recorded display value. It uses the existing ordinary basis for all three values. Other sensitivity, allowed-use/AI-processing, source currentness, tenant, factual restatement, definition and contributing-source rules remain.
+2. `postgresGeneratedContentRepository.js` had TWO direct Evidence-Summary-only refusal branches, for record counts and derived measurements. Both used `VAL-GEN-MEASURED-P2-01M-001` / `story_testimonial_count_only_operation_not_permitted` and `rollbackFailure()`. It also excluded story-present count claims from the model and composed a special source-restricted output. Both refusals and that flag-dependent route are removed. All ten supported generator entry points use the normal selected-claim path, including Impact Narrative, Evidence Summary and Free Impact Assessment. Normal measured eligibility, counts, derived arithmetic, numerators/denominators, lineage, citations, limitations, AI-processing and post-generation revalidation remain. Parser record counts receive truthful row-count model text for EVERY source; the original authoritative claim statement remains separately available to validators. Source metadata supplies neither model context nor an output exemption.
+3. `kaiGeneratedContentValidators.js` used `source.story_testimonial_present_count_only` to activate a special lexical/exact-content boundary (`VAL-GEN-010` / `count_only_content_boundary_exceeded`) and to change disclosure behavior. The marker is now ignored as an operational input. Measurement disclosure and evidence validation use the same rules regardless of source metadata. VAL-GEN-010 independently checks actual attributed output quotations against cited statements for every source; quote typography and a storytelling heading do not activate a refusal. This is a bounded quotation-grounding check, not a new comprehensive semantic consent classifier. Existing audience consent and final human release controls remain authoritative.
+4. `postgresOrganizationInternalReviewRepository.js` carried another count-only content boundary and source-dependent report exception. Removed; review/report/release classifications inherit the corrected shared rule. Content-type, actor, audience and actual-content authority requirements are preserved and identical across flags. `postgresOrganizationFactualReviewRepository.js` inherits the same rule for organization factual/claim/coverage operations.
+5. `postgresClientInternalReportRepository.js` suppressed human definition fields, added the source restriction marker and used the special authority basis. It now reads the same fields and limitations for all flags. Every record-count finding retains the honest rows-versus-human-meaning presentation independent of source status. `kaiInternalReportMarkdownSerializer.js` likewise removes source-specific authority/boundary language and keeps row counts, duplicate treatment, method, citations and unverified human meaning explicit.
+6. `clientMeasuredClaimReviewLogic.js` inherited the special basis and independently treated every non-absent source category as an ordinary-rule condition. It now excludes story explicitly; old basis values cannot reactivate the UI exceptions. `GkFindingReviewPanel`, `ClientMeasuredClaimReviewPanel`, `ClientInternalDrafts`, `ClientGeneratedDrafts`, workflow reason messages and Evidence Library enums no longer show the retired restrictions. The source checkbox/category remains displayable in sensitivity forms/read DTOs. No separate operational storytelling-style consumer was found; typography/style-only wording is tested as nonblocking.
+7. `scripts/kai-production-browser-console-canary.js` repeated story in its ordinary-category gate; corrected. `kai-measured-finding-eligibility-read-only.sql` now labels the recorded story value INFO, not R7. Neither production diagnostic was executed.
+8. Note transport required generation-service success forwarding, client saved/list/preview/review/release response forwarding, API warning allowlisting and attachment delivery. These were corrected across `kaiGeneratedContentService`, `kaiClientGeneratedContentService`, `sprint2IntakeApi` and internal/export/assessment serializers. No unrelated operation permission was broadened.
+
+**Historical state and replay (TOOL_VERIFIED synthetic):** no data rewrite/migration. Current authoritative classifications are recomputed from the remaining valid controls; old source-based authority strings have no active predicate. The old source limitation marker is removed before validation and no longer changes disclosures. Exact retired machine failures (VAL-GEN-010 `count_only_content_boundary_exceeded`, or VAL-GEN-MEASURED-P2-01M-001 `story_testimonial_count_only_operation_not_permitted`) cannot independently hold an internal report. A historical failed draft is revalidated against actual current cited claims/blocks before delivery, so an unsupported quotation still holds it. Unrelated saved failures and negative evidence/claim decisions remain effective. Existing queue/review projections may retain their audit history, but the corrected ordinary classification removes the source-only review dependency. Previous transaction refusals never persisted successful drafts. No historical human decision is silently erased. Generic unstructured historical decisions cannot be attributed to the checkbox without data inspection; no production records were inspected. Saved drafts/readback and same-key replay gain the note without changing fingerprints or creating a new generation; changing the flag after saving also leaves the replay identical.
+
+**Informational note end to end (TOOL_VERIFIED):**
+
+> This source may contain stories or testimonials. Check permission before sharing a participant story or quotation externally.
+
+`shared/kaiStorySourceInformation.js` supplies a fixed supported warning code (`story_source_information`) and an existing-JSON pass result (`INFO-SOURCE-STORY-001`). The reminder is universal for drafts, deliberately independent of the checkbox and style, including older drafts lacking note metadata. It is persisted outside generated prose/citations and reconstructed on read/replay; it has no acknowledgment, task, control or eligibility dependency. The API allowlist forwards only the fixed text. `StorySourceInformation` renders a neutral muted paragraph in all four relevant review/draft panels. Server-rendered markup proves there is no input/button/disabled/error/alert role. Vite built the mounted frontend bundle. Markdown, assessment, PDF and DOCX representations contain the note; authenticated attachment responses carry `X-KAI-Information`. CSV keeps its existing table schema/bytes and carries the note through that header and the UI. Actual PDF text extraction and DOCX XML inspection pass. This is component/render/build and synthetic HTTP proof; a connected browser with a real database was not run.
+
+**Verification (TOOL_VERIFIED local):** every Node/npm command used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`; local/production URL aliases were also set to that sentinel, dotenv loading disabled, test mode and a synthetic provider placeholder set. Provider and transaction storage boundaries were synthetic; no database or provider network call was used. Test-only feature flags were isolated/restored, with no persistent configuration change.
+
+- Focused 11-file set: **111 tests, 111 pass, 0 fail, 0 skipped**. Command:
+  `node --test __tests__/kai-count-only-story-authority.spec.js __tests__/kai-story-flag-assembled-independence.spec.js __tests__/kai-count-only-truthful-summary.spec.js __tests__/kai-measured-finding-review.spec.js __tests__/kai-ordinary-internal-report.spec.js __tests__/kai-organization-internal-release.spec.js __tests__/kai-organization-internal-review.spec.js __tests__/kai-package-4-organization-evidence-gaps-semantic-parity.spec.js __tests__/kai-paired-measurement-review-projection.spec.js __tests__/kai-small-cell-effective-decision.spec.js __tests__/kai-val-gen-008-evidence-summary-disclosure.spec.js`
+  Local log: `/tmp/kai-story-focused-final2.log`.
+- Assembled suite within that set: **18/18 pass**. All three flag values with otherwise identical synthetic data are compared for outcomes, blocker/reason sets, selected claims/evidence, authority, persisted validator results, provider input, review requirements/actions, reports and replay. Covers counts, derived measurements and mixed sources; actual P2-06 → Impact Narrative service → production adapter with stubbed provider → persisted rows → saved service read → actual report repository → Markdown service → replay. Separate real production Evidence Summary adapter test preserves derived prompt controls. All other generator entry points, organization factual/coverage/release evaluations, actual final-export gate, historical state, role denial, unsupported numbers/citations/quotations and independent consent are exercised. Authenticated local HTTP POST/GET/download/replay crosses actual routes/services/adapter boundaries. Export candidate/authority storage seams are synthetic; no external release was performed.
+- API/service/delivery contracts: **159/159 pass**. Command:
+  `node --test __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-intake-service-contract.spec.js __tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js __tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js __tests__/kai-sprint2-authorized-csv-export-delivery-route.spec.js`
+  Local log: `/tmp/kai-story-api-final2.log`.
+- Full `npm test`: **6123 tests; 5998 pass; 0 fail; 125 skipped** (database-dependent runners). Local log: `/tmp/kai-story-full-final2.log`. Final executable code passed; subsequent edits only corrected explanatory comments and added this package evidence.
+- `npm run build`: success, 99 modules, generated `public/js/bundles/entry.js`. Local log: `/tmp/kai-story-build-final2.log`.
+- Obsolete DB-browser expectations for source-only refusal/special no-model composition were replaced with current flag matrices, both report types, replay, mixed worksheets and independent quotation refusal. These connected DB/browser workflows were NOT executed. Existing independent review/permission/tenant regression suites passed under the synthetic/default test runner.
+- Final search of Backend, frontend, shared and scripts for all five retired reason/basis strings finds only the two exact failure names in `isRetiredStoryValidationResult`, where they remove historical restrictions. No active source-presence denial emitter remains. Source field references left elsewhere store, validate the three enum values, or display metadata; none interprets a presence value as permission. No operational cache or exported authoritative story marker was found beyond the corrected projections. Existing VAL-GEN-MEASURED-P2-01M-001 remains for genuine measured eligibility failures.
+- Complete handwritten diff inspected, including replacement/deleted obsolete tests, new synthetic fixtures and latest historical revalidation. Generated bundle inspected through its build, source changes and fixed-note/retired-message audit. `git diff --check` passes. No migration, schema, feature configuration or `00_KAI_CURRENT_STATE.md` change.
+
+**Exact changed-file manifest (this package):**
+
+- `Backend/kai/dictionary/postgresClientInternalReportRepository.js`
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+- `Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js`
+- `Backend/kai/dictionary/postgresOrganizationFactualReviewRepository.js`
+- `Backend/kai/dictionary/postgresOrganizationInternalReviewRepository.js`
+- `Backend/kai/routes/sprint2IntakeApi.js`
+- `Backend/kai/services/kaiClientGeneratedContentService.js`
+- `Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js`
+- `Backend/kai/services/kaiExportManifestDocxSerializer.js`
+- `Backend/kai/services/kaiExportManifestMarkdownSerializer.js`
+- `Backend/kai/services/kaiExportManifestPdfSerializer.js`
+- `Backend/kai/services/kaiFreeImpactAssessmentRenderer.js`
+- `Backend/kai/services/kaiGeneratedContentService.js`
+- `Backend/kai/services/kaiInternalReportMarkdownSerializer.js`
+- `Backend/kai/validators/kaiGeneratedContentValidators.js`
+- `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md`
+- `__tests__/fixtures/kai-story-evidence-memory.js`
+- `__tests__/kai-count-only-story-authority.spec.js`
+- `__tests__/kai-count-only-truthful-summary.spec.js`
+- `__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js`
+- `__tests__/kai-customer-xlsx-file-to-report-browser-acceptance.integration.spec.js`
+- `__tests__/kai-measured-finding-review.spec.js`
+- `__tests__/kai-ordinary-internal-report.spec.js`
+- `__tests__/kai-organization-internal-release.spec.js`
+- `__tests__/kai-organization-internal-review.spec.js`
+- `__tests__/kai-package-4-organization-evidence-gaps-semantic-parity.spec.js`
+- `__tests__/kai-paired-measurement-review-projection.spec.js`
+- `__tests__/kai-small-cell-effective-decision.spec.js`
+- `__tests__/kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`
+- `__tests__/kai-story-flag-assembled-independence.spec.js`
+- `__tests__/kai-val-gen-008-evidence-summary-disclosure.spec.js`
+- `frontend/GkFindingReviewPanel.jsx`
+- `frontend/StorySourceInformation.js`
+- `frontend/impactEvidenceLibraryLogic.js`
+- `frontend/knowledgeStudio/ClientGeneratedDrafts.jsx`
+- `frontend/knowledgeStudio/ClientInternalDrafts.jsx`
+- `frontend/knowledgeStudio/ClientMeasuredClaimReviewPanel.jsx`
+- `frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js`
+- `frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js`
+- `public/js/bundles/entry.js`
+- `scripts/kai-measured-finding-eligibility-read-only.sql`
+- `scripts/kai-production-browser-console-canary.js`
+- `shared/kaiStorySourceInformation.js`
+
+**Remaining NOT_CONFIRMED:** deployed behavior/live endpoint, actual production historical record contents, PostgreSQL transaction/lock/constraint behavior and connected DB-backed browser acceptance. The named original architecture/backend-contract documents were not separately available locally. Synthetic service/adapter/HTTP/readback and flag-independence acceptance pass; this does not claim deployed closure. No deployment, push, cloud/DB mutation, schema/feature change, secret or real-client-data handling occurred.
+
+**Status:** SOURCE_STORY_FLAG_OPERATIONAL_INDEPENDENCE_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; INFORMATION_ONLY_NOTE_PERSISTS_AND_REPLAYS; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED. Package ends with a coherent local commit. Stop here; deployment remains separately authorized.

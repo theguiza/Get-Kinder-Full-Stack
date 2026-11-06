@@ -60,7 +60,7 @@ test("I4 regression: a count-only block is accepted only when it is exactly the 
 function i4Model() {
   return {
     modelContractVersion: "kai-sprint2-internal-report-model-v1", available: true, getKinderReviewReasons: [], blockedReasons: [],
-    report: { generatedContentDraftId: "d0000000-0000-4000-8000-000000000001", generationRunId: "a0000000-0000-4000-8000-000000000001", contentType: "evidence_summary", audience: "internal", createdAt: "2026-10-30T10:00:00.000Z", validatorKeys: ["VAL-GEN-008", "VAL-GEN-010"] },
+    report: { generatedContentDraftId: "d0000000-0000-4000-8000-000000000001", generationRunId: "a0000000-0000-4000-8000-000000000001", contentType: "evidence_summary", audience: "internal", createdAt: "2026-10-30T10:00:00.000Z", validatorKeys: ["VAL-GEN-008"] },
     context: { organizationId: "11111111-2222-4333-8444-555555555555", organizationName: "Synthetic Society" },
     blocks: [{ ordinal: 1, text: "37 nonblank data rows were counted in worksheet sheet_5.", citationRefs: ["CIT-001"] }],
     citations: [{ citationRef: "CIT-001", claimId: CLAIM_5, evidenceItemId: EVIDENCE_5, sourceId: SOURCE, sourceCode: "svc", sourceVersionId: VERSION, worksheetKey: "sheet_5", worksheetName: "Data_Dictionary" }],
@@ -110,8 +110,12 @@ test("composed finding: each worksheet's text is its own measurement's numbers a
       generationClaims: [{ ...generationClaim(statement, limitationCodes), claimId, evidenceItemId }],
       blocks: [{ ordinal: 1, text, citations: [{ claimId, evidenceItemId }] }],
     });
-    assert.equal(result.ok, true, `${measurement.worksheet_key}: ${JSON.stringify(result.blockers)}`);
-    assert.deepEqual(result.results.map((entry) => entry.validator_key), ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-008", "VAL-GEN-010", "VAL-GEN-005"]);
+    const ordinary = validateGeneratedContentDraft({ requestedAudience: "internal", contentType: "evidence_summary",
+      generationClaims: [{ ...generationClaim(statement, limitationCodes.filter(code => code !== COUNT_ONLY_LIMITATION_CODE)), claimId, evidenceItemId }],
+      blocks: [{ ordinal: 1, text, citations: [{ claimId, evidenceItemId }] }],
+    });
+    assert.deepEqual(result, ordinary, "historical source marker has no validation effect");
+    assert.ok(!result.results.some(entry => entry.validator_key === "VAL-GEN-010"));
     assert.doesNotMatch(text, /service|event|participant|outcome|completion|Data_Dictionary|Service_Events|"/i, "no label, worksheet name, or free text");
   }
   const s3 = composeCountOnlyFindingText(SHEET_3_MEASUREMENT);
@@ -163,7 +167,7 @@ test("two worksheets of one version: each section states each worksheet's own co
   assert.doesNotMatch(findings[0], /\b37\b|sheet_5|Data_Dictionary/);
   assert.doesNotMatch(markdown, /\b(?:37|364) service events\b|\b(?:37|364) \w+ (?:events|participants|completions|outcomes)\b/);
   assert.doesNotMatch(markdown, /\b401\b/, "the two counts are never combined");
-  assert.match(section("Generated narrative", "Source and evidence traceability"), /composed by KAI from the persisted measurement of each cited claim, not written by a language model/);
+  assert.match(section("Generated narrative", "Source and evidence traceability"), /findings from the cited claims and measurements/);
   const references = markdown.slice(markdown.indexOf("\n## References\n"));
   assert.match(references, new RegExp(`\\[CIT-001\\] Claim \`${CLAIM_3}\` and evidence \`${EVIDENCE_3}\`: authoritative measurement 364 nonblank data rows in Service_Events \\(\`sheet_3\`\\)`));
   assert.match(references, new RegExp(`\\[CIT-002\\] Claim \`${CLAIM_5}\` and evidence \`${EVIDENCE_5}\`: authoritative measurement 37 nonblank data rows in Data_Dictionary \\(\`sheet_5\`\\)`));

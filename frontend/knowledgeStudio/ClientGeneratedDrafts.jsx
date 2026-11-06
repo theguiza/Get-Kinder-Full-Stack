@@ -1,3 +1,4 @@
+import StorySourceInformation from "../StorySourceInformation.js";
 import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
@@ -64,6 +65,7 @@ function useClientRead(key, path, project) {
 function DraftBody({ draft, factsById }) {
   return (
     <div>
+      <StorySourceInformation />
       {draft.blocks.map((block) => (
         <div key={block.ordinal} className="mb-3">
           <p className="small mb-1" style={{ whiteSpace: "pre-wrap" }}>{assessmentBlockDisplay(block.text)}</p>

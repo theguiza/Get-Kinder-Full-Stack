@@ -1,10 +1,10 @@
+import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
 import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
-const COUNT_ONLY_LIMITATION_TEXT = "The source is recorded as containing stories or testimonials. Only its record count is used here; "
-  + "no story or testimonial content is used, and Get Kinder's review still applies to any other use.";
+const COUNT_ONLY_LIMITATION_TEXT = STORY_SOURCE_NOTE;
 
 /**
  * Markdown for the organization's internal report (owner decision
@@ -52,13 +52,8 @@ function measuredFacts(model) {
   return model.facts.filter((fact) => fact.measurement);
 }
 
-// A count used under the count-only basis (its source is recorded as
-// containing stories or testimonials) is reported, in every section, as the
-// parser-established count of nonblank rows in the worksheet of its own cited
-// measurement. What a row represents is the human-defined label, quoted as
-// recorded and attributed to the person who defined it; it is never the
-// counted thing, and the label-bearing claim and evidence statements are not
-// reproduced as findings.
+// A source-record-count measurement establishes rows. Apply the same honest
+// rendering to every such measurement, independently of source metadata.
 function worksheetOf(m) {
   return m.worksheetKey ? `${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)})` : "the source version's CSV data records";
 }
@@ -141,7 +136,7 @@ function methodLines(model) {
         ? `- **What one record represents (human-defined, not verified):** one ${humanLabel(m.countedUnit)}, as defined by a person at the organization; KAI counted rows only.`
         : `- **What one record represents:** one ${text(m.countedUnit)}, as defined by a person at the organization.`,
       ...(fact.countOnly
-        ? ["- **Definition, inclusion and exclusion text:** not reproduced. The source is recorded as containing stories or testimonials, so this report uses its record count only and carries no free text from it or about it."]
+        ? ["- **Definition, inclusion and exclusion text:** not reproduced. This report states the measured row count; the human-defined meaning is not independently verified."]
         : [
           `- **Definition:** ${text(m.definitionText)}`,
           `- **Included:** ${text(m.inclusionRule)}`,
@@ -217,7 +212,7 @@ function doesNotEstablishLines(model) {
     lines.push(`- That each counted row is one ${humanLabel(fact.measurement.countedUnit)} ${refs(fact.citationRefs)}: a person at the organization defined that meaning, and KAI did not verify it.`);
   }
   if (measured.some((fact) => fact.countOnly)) {
-    lines.push("- Anything from the stories or testimonials the source is recorded as containing: none of that content is used in this report.");
+    lines.push("- A row count does not establish a participant story or quotation.");
   }
   lines.push(
     "- Any outcome for participants or the community, or any change over time.",
@@ -274,18 +269,10 @@ function traceabilityLines(model) {
 }
 
 function authorityLines(model) {
-  const lines = [
-    model.facts.some((fact) => fact.countOnly)
-      ? "- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing. "
-        + "A source recorded as containing stories or testimonials is used for its record count only: no story or testimonial content is used, and its recorded category is unchanged. "
-        + "Every other high-risk category is recorded as absent."
-      : "- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing, and records none of the high-risk categories.",
-  ];
+  const lines = ["- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing. Source story presence is informational metadata."];
   for (const fact of model.facts) {
     const basis = fact.evidenceReviewOutcome || fact.claimReviewOutcome
       ? `recorded review decisions (evidence: ${fact.evidenceReviewOutcome ? code(fact.evidenceReviewOutcome) : "none"}; claim: ${fact.claimReviewOutcome ? code(fact.claimReviewOutcome) : "none"})`
-      : fact.countOnly
-      ? "a count-only use of a source recorded as containing stories or testimonials: the record count restated from its source, with no story or testimonial content; no further approval is required for this internal Evidence Summary"
       : "an ordinary measured fact restated from its source; no further approval is required for internal use";
     lines.push(`- ${refs(fact.citationRefs)} Currently eligible for internal use: ${fact.currentlyEligible ? "yes" : "no"}; basis: ${basis}.`);
   }
@@ -347,28 +334,21 @@ function referenceLines(model) {
   });
 }
 
-// A block citing a count-only claim is the finding composed by the server
-// from that claim's persisted measurement (the read refuses any other); any
-// other block was drafted by KAI from its cited claims.
-function narrativeIntroduction(model) {
-  const countOnlyRefs = new Set(model.facts.filter((fact) => fact.countOnly).flatMap((fact) => fact.citationRefs));
-  const composed = model.blocks.filter((block) => (block.citationRefs || []).some((ref) => countOnlyRefs.has(ref)));
-  const checks = "passed the automated checks for citations, numbers, causal language and limitation disclosure.";
-  if (composed.length === 0) return `The text below was drafted by KAI from the cited claims only, and ${checks}`;
-  if (composed.length === model.blocks.length) {
-    return `The text below was composed by KAI from the persisted measurement of each cited claim, not written by a language model, and ${checks}`;
-  }
-  return `Text citing a count-only claim was composed by KAI from that claim's persisted measurement, not written by a language model; the other text was drafted by KAI from the cited claims only. All of it ${checks}`;
+function narrativeIntroduction() {
+  return "The text below states findings from the cited claims and measurements, with their limitations. Automated checks cover citations, numbers, causal language and limitation disclosure.";
 }
 
 export function serializeInternalReportToMarkdown(model) {
   if (!model || model.available !== true || !Array.isArray(model.blocks) || !Array.isArray(model.facts) || model.facts.length === 0) {
     throw new TypeError("An available internal report model is required.");
   }
+  model = { ...model, facts: model.facts.map((fact) => ({ ...fact, countOnly: Boolean(fact.measurement) })) };
   const lines = [
     `# ${REPORT_TITLES[model.report.contentType] || "Internal Report"}`,
     "",
     `Markdown contract: ${MARKDOWN_CONTRACT_VERSION}`,
+    "",
+    STORY_SOURCE_NOTE,
     "",
     "## Context",
     "",

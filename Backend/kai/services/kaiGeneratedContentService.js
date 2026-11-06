@@ -330,7 +330,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   /**
@@ -395,7 +395,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createImpactNarrativeDraft(input, dependencies = {}) {
@@ -451,7 +451,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createReadinessAssessmentDraft(input, dependencies = {}) {
@@ -520,7 +520,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createCaseForSupportDraft(input, dependencies = {}) {
@@ -573,7 +573,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createBoardUpdateDraft(input, dependencies = {}) {
@@ -626,7 +626,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createAnnualReportSectionDraft(input, dependencies = {}) {
@@ -679,7 +679,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createFunderOutcomeTableDraft(input, dependencies = {}) {
@@ -732,7 +732,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function createGrantResponseParagraphDraft(input, dependencies = {}) {
@@ -785,7 +785,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   function uniqueSortedClaimIdsFromGaps(items) {
@@ -905,7 +905,7 @@
         ...(result.blockers ? { blockers: result.blockers } : {}),
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   const PACKET_KEYS = new Set([
@@ -1127,7 +1127,7 @@
         data: null,
       });
     }
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export async function completeGeneratedContentReview(input, dependencies = {}) {
@@ -1161,7 +1161,7 @@
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
     if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
-    return { ok: true, data: result.data, error: null };
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
   }
 
   export const __generatedContentServiceContract = Object.freeze({

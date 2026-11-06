@@ -1444,7 +1444,7 @@ async function runBrowserAcceptance() {
       const { evaluateClaimTraceabilityInTransaction } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
       const { ordinaryInternalAuthorityOf } = await import("../Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js");
       const authority = await evaluateClaimTraceabilityInTransaction(seedPool, { organizationId: ORG_X, claimId: countClaimId, requestedAudience: "internal" });
-      assert.deepEqual(ordinaryInternalAuthorityOf(authority.data), { basis: "count_only_story_testimonial_present", reliedOn: true });
+      assert.deepEqual(ordinaryInternalAuthorityOf(authority.data), { basis: "all_sensitive_categories_absent", reliedOn: true });
       assert.equal(authority.data.eligible, true);
       const selected = [ids.claimId, docClaimId, countClaimId].sort();
       await openDataSources(PROJECT_X2);
@@ -1477,7 +1477,7 @@ async function runBrowserAcceptance() {
       assert.match(body.idempotency_key, /^client-free_impact_assessment-/);
       assert.equal(modelCalls.length, callsBefore + 1);
       assert.equal(modelCalls.at(-1).assessment.composition, "free_impact_assessment");
-      assert.deepEqual(modelCalls.at(-1).claims.map((claim) => claim.claimId), [ids.claimId]);
+      assert.deepEqual(modelCalls.at(-1).claims.map((claim) => claim.claimId).sort(), [ids.claimId, countClaimId].sort());
       const saved = await draftState(draftId);
       const [run] = await query("SELECT r.engagement_id::text FROM kai.generation_runs r JOIN kai.generated_content_drafts d ON d.generation_run_id = r.generation_run_id WHERE d.generated_content_draft_id = $1::uuid", [draftId]);
       assert.equal(run.engagement_id, PROJECT_X2);
@@ -1533,20 +1533,19 @@ async function runBrowserAcceptance() {
         claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "count-only-six-section-assessment",
       });
       created(countOnlyAssessment, "count-only assessment");
-      assert.equal(modelCalls.length, callsAfterMixed, "no model call for a count-only selection");
+      assert.equal(modelCalls.length, callsAfterMixed + 1, "all counts use the normal generation path");
       const { parseFreeImpactAssessment } = await import("../Backend/kai/services/kaiFreeImpactAssessmentComposition.js");
       assert.equal(parseFreeImpactAssessment(countOnlyAssessment.body.data.blocks).length, 6);
       const refusedNarrative = await adminPage.api("POST", createImpactNarrativePath(ORG_X), {
-        claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "count-only-narrative-still-refused",
+        claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "story-source-narrative-available",
       });
-      assert.equal(refusedNarrative.status, 422);
-      assert.equal(refusedNarrative.body.blockers[0].blocking_reason, "story_testimonial_count_only_operation_not_permitted");
+      created(refusedNarrative, "story source Impact Narrative");
       const nonqualifying = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
         claim_ids: [ids.riskClaimId], engagement_id: PROJECT_X2, idempotency_key: "nonqualifying-assessment-still-refused",
       });
       assert.equal(nonqualifying.status, 422);
       assert.equal(nonqualifying.body.blockers[0].blocking_reason, "assessment_no_eligible_evidence");
-      assert.equal(modelCalls.length, callsAfterMixed);
+      assert.equal(modelCalls.length, callsAfterMixed + 2);
       // Existing GK review/release actions, through the real authenticated routes.
       // This is API-boundary release proof, not a claim that the GK buttons were clicked.
       const draftPath = `${orgPath}/generated-content-drafts/${draftId}`;
@@ -1879,7 +1878,7 @@ async function runBrowserAcceptance() {
       const callsBefore = modelCalls.length;
       const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created", () => adminPage.clickControl(null, "Generate Free Impact Assessment"));
       const state = await draftState(draftId);
-      assert.equal(modelCalls.length, callsBefore, "count-only assertions never reach the model");
+      assert.equal(modelCalls.length, callsBefore + 1, "source flags do not select a special generation path");
       assert.deepEqual([...new Set(state.cited_claim_ids)], [currentClaimId]);
       for (const section of ["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]) assert.ok(state.text.includes(`[[assessment:${section}]]`), section);
       assert.match(state.text, /5 nonblank data rows/);

@@ -112,9 +112,9 @@ test("batch head lookup scopes identities and rejects ambiguous heads", async ()
     { organizationId: org, intakeSensitivityProfileIds: [id] }), /outside requested scope/);
 });
 
-test("clearing small-cell risk does not clear a separate story risk or establish public consent", () => {
+test("story metadata does not establish public consent", () => {
   const reviewed = { ...decision, reviewed_story_testimonial_status: "present", reviewed_small_cell_risk_status: "absent" };
-  assert.ok(classifySourceDecision(reviewed).getKinderReviewReasons.includes("story_testimonial_not_cleared"));
+  assert.ok(!classifySourceDecision(reviewed).getKinderReviewReasons.includes("story_testimonial_not_cleared"));
   const snapshot = Object.fromEntries(Object.entries(reviewed).filter(([key]) => key.startsWith("reviewed_")));
   snapshot.reviewed_allowed_use_status = "allowed";
   snapshot.reviewed_public_use_allowed = true;

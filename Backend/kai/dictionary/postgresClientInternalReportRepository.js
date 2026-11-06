@@ -1,3 +1,4 @@
+import { storySourceWarnings, isRetiredStoryValidationResult } from "../../../shared/kaiStorySourceInformation.js";
 import { withTransaction } from "../db/kaiDb.js";
 import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId, getScopedDerivedMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
@@ -7,7 +8,7 @@ import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrgan
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
-import { COUNT_ONLY_LIMITATION_CODE, ORDINARY_AUTHORITY_BASIS, ordinaryInternalAuthorityOf } from "./postgresOrdinaryInternalFactAuthority.js";
+import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const INTERNAL_REPORT_MODEL_CONTRACT_VERSION = "kai-sprint2-internal-report-model-v1";
@@ -99,10 +100,6 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
     : null;
   const versionRow = await readSourceVersion(tx, { organizationId, sourceVersionId: citation.sourceVersionId });
   const decision = (head) => (head ? head.decision_outcome : null);
-  // A count used under the count-only basis (its source is recorded as
-  // containing stories or testimonials): the report carries the count, the
-  // defined unit and the method, never the free-text definition fields.
-  const countOnly = ordinaryInternalAuthorityOf(data)?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
   return {
     citationRefs,
     claimId: citation.claimId,
@@ -117,7 +114,9 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
     evidenceStatement: data.evidence.statement,
     currentlyEligible: data.eligible === true,
     blockerCodes: [...data.blockerCodes],
-    countOnly,
+    // Every row-count measurement has unverified human meaning, irrespective
+    // of source metadata. Never present the label as an established outcome.
+    countOnly: Boolean(measurementRow),
     evidenceReviewOutcome: decision(data.evidence_review_decision),
     claimReviewOutcome: decision(data.claim_review_decision),
     measurement: measurementRow && definitionRow
@@ -133,9 +132,9 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         worksheetName: measurementRow.worksheet_name || null,
         periodStart: definitionRow.period_start,
         periodEnd: definitionRow.period_end,
-        definitionText: countOnly ? null : definitionRow.definition_text,
-        inclusionRule: countOnly ? null : definitionRow.inclusion_rule,
-        exclusionRule: countOnly ? null : definitionRow.exclusion_rule,
+        definitionText: definitionRow.definition_text,
+        inclusionRule: definitionRow.inclusion_rule,
+        exclusionRule: definitionRow.exclusion_rule,
         definitionRecordedAt: iso(definitionRow.created_at),
       }
       : null,
@@ -151,7 +150,7 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         fieldKeys: [...source.field_keys],
       })),
     limitationCodes: measurementRow
-      ? [...measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }), ...(countOnly ? [COUNT_ONLY_LIMITATION_CODE] : [])]
+      ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions })
       : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions }) : [],
   };
 }
@@ -187,7 +186,7 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
 
           const availability = await evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet });
           const validatorResults = Array.isArray(draftRow.validator_results) ? draftRow.validator_results : [];
-          const validatorsPassed = validatorResults.length > 0 && validatorResults.every((result) => result?.severity === "pass");
+          const validatorsPassed = validatorResults.length > 0 && validatorResults.every((result) => result?.severity === "pass" || isRetiredStoryValidationResult(result));
           const blockedReasons = [...availability.blockedReasons, ...(validatorsPassed ? [] : ["validator_results_not_passed"])];
 
           const citationRefByKey = new Map();
@@ -212,11 +211,32 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
             facts.push(fact);
           }
 
+          // A historical source-only refusal is retired, not an approval of
+          // its text. Re-run independent output checks before delivering a
+          // draft whose recorded failure was solely one of those restrictions.
+          if (validatorResults.some((result) => result?.severity !== "pass" && isRetiredStoryValidationResult(result))) {
+            const currentValidation = validateGeneratedContentDraft({
+              requestedAudience: packet.requestedAudience,
+              contentType: packet.contentType,
+              generationClaims: facts.map((fact) => ({
+                claimId: fact.claimId, evidenceItemId: fact.evidenceItemId,
+                claimStatement: fact.claimStatement, limitationCodes: fact.limitationCodes,
+                requestedAudience: packet.requestedAudience, revalidatedForGeneration: true,
+                audienceAuthority: { internal: true },
+              })),
+              blocks: packet.blocks,
+            });
+            if (!currentValidation.ok && !blockedReasons.includes("validator_results_not_passed")) {
+              blockedReasons.push("validator_results_not_passed");
+            }
+          }
+
           const context = await loadReportContextInTransaction(tx, { organizationId, generatedContentDraftId });
           const engagementType = await readEngagementType(tx, { organizationId, engagementId: context?.engagementId });
           return {
             ok: true,
             error: null,
+            warnings: storySourceWarnings(),
             data: {
               modelContractVersion: INTERNAL_REPORT_MODEL_CONTRACT_VERSION,
               available: availability.getKinderReviewReasons.length === 0 && blockedReasons.length === 0,

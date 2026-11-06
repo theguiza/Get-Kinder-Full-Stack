@@ -6,16 +6,10 @@ import {
   evaluateGeneratedDraftReviewPacketInTransaction,
 } from "./postgresGeneratedContentRepository.js";
 import {
-  COUNT_ONLY_CONTENT_TYPE,
   HIGH_RISK_SENSITIVITY_FIELDS,
-  ORDINARY_AUTHORITY_BASIS,
   classifySourceDecision,
   classifySourceVersionInTransaction,
-  isCountOnlyStoryTestimonialSource,
-  ordinaryInternalAuthorityOf,
 } from "./postgresOrdinaryInternalFactAuthority.js";
-import { countOnlyBlockMatchesMeasurement, countOnlyBlockViolations } from "../validators/kaiGeneratedContentValidators.js";
-import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 
 // The source classification is shared with P2-06's ordinary internal factual
 // authority (postgresOrdinaryInternalFactAuthority.js) and re-exported here
@@ -35,7 +29,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
  * records each Operating Model section 7.2 high-risk category as 'absent':
  * personal (identifying) information, minors, health/housing/justice/
  * immigration information, Indigenous or governance-sensitive information,
- * stories or testimonials, and small-cell re-identification risk. 'present'
+ * and small-cell re-identification risk. Story presence is metadata. 'present'
  * and 'unknown' both keep Get Kinder's review; nothing is inferred upward.
  *
  * Reasons come in two kinds:
@@ -139,71 +133,12 @@ async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
   return rows.length === evidenceItemIds.length && rows.every((row) => row.evidence_type === STRUCTURAL_EVIDENCE_TYPE);
 }
 
-// The count-only basis at the internal report (owner prompt 2026-10-30;
-// postgresOrdinaryInternalFactAuthority.js). A cited source whose only reason
-// is its recorded story/testimonial 'present' is no reason for Get Kinder's
-// review of this draft only when the draft is an internal Evidence Summary,
-// every claim it cites from that source is - re-evaluated now by P2-06 -
-// under the count-only basis, and every persisted block citing one of those
-// claims is exactly the server-composed finding of that claim's own current
-// measurement (and still passes VAL-GEN-010). Model prose stored before that
-// composition, including prose VAL-GEN-010 once passed, is not delivered;
-// a new draft composes the finding. One qualifying claim never covers the
-// draft. 'covered' is null when no such source is cited.
-export const COUNT_ONLY_CONTENT_REASON = "count_only_content_boundary_exceeded";
-const STORY_TESTIMONIAL_REASON = HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status;
-
-async function evaluateCountOnlyStorySourcesInTransaction(tx, { organizationId, packet }) {
-  const citations = packet.blocks.flatMap((block) => block.citations);
-  const sourceVersionIds = [...new Set(citations.map((citation) => citation.sourceVersionId))];
-  const countOnlySourceIds = new Set();
-  for (const sourceVersionId of sourceVersionIds) {
-    const source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId });
-    if (isCountOnlyStoryTestimonialSource(source)) countOnlySourceIds.add(sourceVersionId);
-    // A story reason from any other source (recorded 'unknown', or with
-    // another reason beside it) is never covered.
-    else if (source.getKinderReviewReasons.includes(STORY_TESTIMONIAL_REASON)) return { covered: false, contentExceeded: false };
-  }
-  if (countOnlySourceIds.size === 0) return { covered: null, contentExceeded: false };
-  if (packet.contentType !== COUNT_ONLY_CONTENT_TYPE || packet.requestedAudience !== ORGANIZATION_REVIEWABLE_AUDIENCE) {
-    return { covered: false, contentExceeded: false };
-  }
-  const claims = new Map();
-  for (const claimId of [...new Set(citations.map((citation) => citation.claimId))]) {
-    const traceability = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId, requestedAudience: "internal" });
-    if (!traceability.ok) return { covered: false, contentExceeded: false };
-    const countOnly = traceability.data.eligible === true
-      && ordinaryInternalAuthorityOf(traceability.data)?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
-    claims.set(claimId, {
-      statement: traceability.data.claim.statement,
-      countOnly,
-      measurementRow: countOnly
-        ? await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: traceability.data.evidence.evidence_item_id }, tx)
-        : null,
-    });
-  }
-  if (!citations.every((citation) => !countOnlySourceIds.has(citation.sourceVersionId) || claims.get(citation.claimId).countOnly)) {
-    return { covered: false, contentExceeded: false };
-  }
-  const contentExceeded = packet.blocks.some((block) => (
-    block.citations.some((citation) => countOnlySourceIds.has(citation.sourceVersionId))
-    && (!countOnlyBlockMatchesMeasurement(block, claims.get(block.citations[0].claimId).measurementRow)
-      || countOnlyBlockViolations(block.text, block.citations.map((citation) => claims.get(citation.claimId).statement)).length > 0)
-  ));
-  return { covered: !contentExceeded, contentExceeded };
-}
-
 export async function evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }) {
   const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
-  const countOnly = evaluation.getKinderReviewReasons.includes(STORY_TESTIMONIAL_REASON)
-    ? await evaluateCountOnlyStorySourcesInTransaction(tx, { organizationId, packet })
-    : { covered: null, contentExceeded: false };
   const getKinderReviewReasons = evaluation.getKinderReviewReasons
-    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType))
-    .filter((reason) => reason !== STORY_TESTIMONIAL_REASON || countOnly.covered !== true);
+    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType));
   const blockedReasons = [
     ...evaluation.blockedReasons,
-    ...(countOnly.contentExceeded ? [COUNT_ONLY_CONTENT_REASON] : []),
     ...(await citesOnlyStructuralFacts(tx, { organizationId, packet }) ? [STRUCTURAL_FACTS_ONLY_REASON] : []),
   ];
   return {

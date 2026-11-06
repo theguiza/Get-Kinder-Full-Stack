@@ -1,3 +1,4 @@
+import { storySourceWarnings } from "../../../shared/kaiStorySourceInformation.js";
 import { isKaiSprint2Enabled, isKaiGenerationEnabled, isKaiPublicExportEnabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
@@ -265,6 +266,7 @@ export async function listClientGeneratedDrafts(input, dependencies = {}) {
       nextCursor: moreRows && lastScanned ? encodeCursor(lastScanned) : null,
     },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -288,7 +290,7 @@ export async function getClientGeneratedDraft(input, dependencies = {}) {
   // A draft that exists but is not client-visible is indistinguishable from
   // one that does not exist.
   if (!isClientVisibleDraftPacket(packet)) return buildKaiError("not_found");
-  return { ok: true, data: toClientDraft(packet), error: null };
+  return { ok: true, data: toClientDraft(packet), error: null, warnings: storySourceWarnings() };
 }
 
 function toClientPacketPreview(result, { engagementId, audience }) {
@@ -317,7 +319,7 @@ async function readClientPacketPreview(input, dependencies, { method, audience }
   // are internal; only the code crosses.
   if (!result.ok) return buildKaiError(result.error?.code || "system_error");
   try {
-    return { ok: true, data: toClientPacketPreview(result, { engagementId: input.engagementId, audience }), error: null };
+    return { ok: true, data: toClientPacketPreview(result, { engagementId: input.engagementId, audience }), error: null, warnings: storySourceWarnings() };
   } catch (error) {
     if (error instanceof ClientProjectionError) return buildKaiError("system_error");
     throw error;
@@ -531,6 +533,7 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
     ok: true,
     data: { items, nextCursor: moreRows && lastScanned ? encodeCursor(lastScanned) : null },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -582,6 +585,7 @@ export async function getClientInternalDraft(input, dependencies = {}) {
       organizationRelease: internalReport.available ? { ...organizationRelease, actorMayRelease: false } : organizationRelease,
     },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -635,6 +639,7 @@ export async function getClientInternalReportMarkdown(input, dependencies = {}) 
       markdown: serializeInternalReportToMarkdown(model),
     },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -716,7 +721,7 @@ export async function approveClientInternalDraftFactualReview(input, dependencie
   if (!lifecycle) return buildKaiError("conflict_current_state_changed");
   if (lifecycle === "resolved") {
     const { reviewState } = await internalReviewView({ organizationId, packet: current.packet }, dependencies);
-    return { ok: true, data: { generatedContentDraftId, reviewState, replayed: true }, error: null };
+    return { ok: true, data: { generatedContentDraftId, reviewState, replayed: true }, error: null, warnings: storySourceWarnings() };
   }
 
   const evaluateInTransaction = dependencies.evaluateOrganizationInternalReviewInTransaction
@@ -760,6 +765,7 @@ export async function approveClientInternalDraftFactualReview(input, dependencie
     ok: true,
     data: { generatedContentDraftId, reviewState: CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_ORGANIZATION, replayed: completed.data?.replayed === true },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -913,6 +919,7 @@ export async function getClientReleasedReportMarkdown(input, dependencies = {}) 
       markdown: serializeExportManifestRenderModelToMarkdown(rendered.data),
     },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 
@@ -1022,6 +1029,7 @@ export async function releaseClientInternalReport(input, dependencies = {}) {
         replayed: true,
       },
       error: null,
+      warnings: storySourceWarnings(),
     };
   }
   const organizationReview = await organizationReviewRepository(dependencies);
@@ -1118,6 +1126,7 @@ export async function releaseClientInternalReport(input, dependencies = {}) {
       replayed: false,
     },
     error: null,
+    warnings: storySourceWarnings(),
   };
 }
 

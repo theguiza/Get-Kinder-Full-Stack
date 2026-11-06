@@ -171,8 +171,8 @@ test("classification: an ordinary source is a complete 'reviewed' decision permi
   assert.deepEqual(classifyDraftPacket(packet({ contentType: "impact_narrative" })).getKinderReviewReasons, ["content_type_requires_get_kinder_review"]);
   assert.deepEqual(classifyDraftPacket(packet({ audience: "funder" })).getKinderReviewReasons, ["audience_requires_get_kinder_review"]);
   assert.deepEqual(classifyDraftPacket(packet({ eligible: false })).blockedReasons, ["cited_claims_not_currently_eligible"]);
-  assert.deepEqual(organizationReviewBlockers({ getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] }),
-    [{ validator_key: "VAL-KAI-ORG-REVIEW-001", severity: "blocker", blocking_reason: "story_testimonial_not_cleared" }]);
+  assert.deepEqual(organizationReviewBlockers({ getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [] }),
+    [{ validator_key: "VAL-KAI-ORG-REVIEW-001", severity: "blocker", blocking_reason: "minor_information_not_cleared" }]);
   // The browser knows every server reason, with words for each.
   assert.deepEqual([...CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS].sort(), [...GET_KINDER_REVIEW_REASONS, ...BLOCKED_REASONS].sort());
   for (const reason of CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS) assert.ok(INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[reason], reason);
@@ -201,7 +201,6 @@ test("approval: the administrator's one action runs the existing start then comp
 
 test("approval: a high-risk, unsupported, stale or no-longer-permitted draft is refused with structured blockers and nothing is written", async () => {
   for (const [label, options, reason] of [
-    ["story/testimonial present", { decision: { ...CLEARED, reviewed_story_testimonial_status: "present" } }, "story_testimonial_not_cleared"],
     ["identifying personal information present", { decision: { ...CLEARED, reviewed_personal_data_status: "present" } }, "personal_information_not_cleared"],
     ["minors unknown", { decision: { ...CLEARED, reviewed_minor_data_status: "unknown" } }, "minor_information_not_cleared"],
     ["governance unresolved", { decision: { ...CLEARED, reviewed_indigenous_governance_status: "unknown" } }, "indigenous_governance_not_cleared"],
@@ -303,10 +302,10 @@ test("detail: an ordinary unreviewed summary is the organization's internal repo
   assert.equal(projectClientInternalDraft({ ...detail.data, factualReview: { actorMayApprove: true, getKinderReviewReasons: ["invented"], blockedReasons: [] } })
     .factualReview.actorMayApprove, false, "a malformed view offers no approval");
 
-  const held = harness({ decision: { ...CLEARED, reviewed_story_testimonial_status: "present" } });
+  const held = harness({ decision: { ...CLEARED, reviewed_minor_data_status: "present" } });
   const heldDetail = await read(held.dependencies);
   assert.equal(heldDetail.data.reviewState, "awaiting_get_kinder_review");
-  assert.deepEqual(heldDetail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] });
+  assert.deepEqual(heldDetail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [] });
 
   const blocked = harness({ initial: packet({ eligible: false }) });
   const blockedDetail = await read(blocked.dependencies);
@@ -342,4 +341,17 @@ test("capability: reviewInternalDraftFactualContent is the service's own role ch
   }
   const inactive = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext: actor("client_admin", { status: "inactive" }) }, { env: ENV });
   assert.notEqual(inactive.data?.workflowOperations?.reviewInternalDraftFactualContent, true);
+});
+
+// The real service invokes the same in-transaction admission as production.
+test("story flag independence: factual approval and saved detail keep identical outcomes and actions", async () => {
+  const results = [];
+  for (const value of ["absent", "present", "unknown"]) {
+    const { dependencies, state } = harness({ decision: { ...CLEARED, reviewed_story_testimonial_status: value } });
+    const result = await approve(dependencies);
+    const detail = await getClientInternalDraft({ organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: id("d", 1), actorContext: actor("client_admin") }, dependencies);
+    results.push({ result, detail, writes: state.writes });
+  }
+  assert.deepEqual(results[1], results[0]); assert.deepEqual(results[2], results[0]);
+  assert.equal(results[0].result.ok, true);
 });

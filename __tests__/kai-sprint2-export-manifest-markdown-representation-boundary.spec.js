@@ -256,5 +256,5 @@ test("Plan A: report context, when the render model carries it, is stated after 
     ...renderModel(),
     context: { organizationId: ORG, organizationName: null, engagementId: null, engagementCode: null },
   });
-  assert.match(nameless, new RegExp(`\\nOrganization: \\(\`${ORG}\`\\)\\n\\n## Content`));
+  assert.match(nameless, new RegExp(`\\nOrganization: \\(\`${ORG}\`\\)\\n\\nThis source may contain stories or testimonials\.[^\\n]+\\n\\n## Content`));
 });

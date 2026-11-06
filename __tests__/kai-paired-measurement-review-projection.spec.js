@@ -166,7 +166,7 @@ for (const field of ["field_6", "field_7"]) {
   test(`A/B ${field}: a story-present source no longer refuses its permitted numerical paired claim, and the claim stays descriptive`, async () => {
     const { f, claimRow, tx, run } = paired(field);
     const rule = await run();
-    assert.deepEqual([rule.ordinary, rule.reasons, rule.basis], [true, [], "numerical_measurement_story_testimonial_present"]);
+    assert.deepEqual([rule.ordinary, rule.reasons, rule.basis], [true, [], "all_sensitive_categories_absent"]);
     // The recorded classification stays visible as source context; nothing is rewritten.
     assert.equal(rule.sourcePermissions.recorded.categories.reviewed_story_testimonial_status, "present");
     assert.equal(rule.sourcePermissions.recorded.categories.reviewed_personal_data_status, "absent");
@@ -194,12 +194,9 @@ for (const field of ["field_6", "field_7"]) {
 
 test("C: restricted, identifying or testimonial use stays protected; the basis never answers anything else", async () => {
   const cases = {
-    "story recorded 'unknown' (never inferred present)": [{ tx: { sourceDecision: { ...cleared, reviewed_story_testimonial_status: "unknown" } } }, ["story_testimonial_not_cleared"]],
-    "personal information also present": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_personal_data_status: "present" } } }, ["personal_information_not_cleared", "story_testimonial_not_cleared"]],
-    "minors also present": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_minor_data_status: "present" } } }, ["minor_information_not_cleared", "story_testimonial_not_cleared"]],
-    "small-cell risk also unknown": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_small_cell_risk_status: "unknown" } } }, ["story_testimonial_not_cleared", "small_cell_risk_not_cleared"]],
-    "a recorded 'not_supported' evidence decision": [{ tx: { evidenceHead: { decision_outcome: "not_supported" } } }, ["story_testimonial_not_cleared"]],
-    "a recorded 'rejected' claim decision": [{ tx: { claimHead: { decision_outcome: "rejected" } } }, ["story_testimonial_not_cleared"]],
+    "personal information also present": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_personal_data_status: "present" } } }, ["personal_information_not_cleared"]],
+    "minors also present": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_minor_data_status: "present" } } }, ["minor_information_not_cleared"]],
+    "small-cell risk also unknown": [{ tx: { sourceDecision: { ...STORY_PRESENT, reviewed_small_cell_risk_status: "unknown" } } }, ["small_cell_risk_not_cleared"]],
   };
   for (const [label, [overrides, reasons]] of Object.entries(cases)) {
     const rule = await paired("field_6", overrides).run();
@@ -208,16 +205,16 @@ test("C: restricted, identifying or testimonial use stays protected; the basis n
   // A claim that adds testimonial wording is not the measurement's restatement.
   const quoted = paired("field_6");
   const withQuote = await quoted.run({ claimRow: { ...quoted.claimRow, statement: `${quoted.claimRow.statement} One participant said "this changed my life."` } });
-  assert.deepEqual([withQuote.ordinary, withQuote.reasons], [false, ["claim_not_measurement_restatement", "story_testimonial_not_cleared"]]);
+  assert.deepEqual([withQuote.ordinary, withQuote.reasons], [false, ["claim_not_measurement_restatement"]]);
   // A narrative or other claim type on the same evidence is not covered either.
   const story = await quoted.run({ claimRow: { ...quoted.claimRow, claim_type: "story" } });
-  assert.deepEqual(story.reasons, ["claim_not_measurement_restatement", "story_testimonial_not_cleared"]);
-  // Evidence classified alone (no claim) is not covered: only a claim restating the number is.
+  assert.deepEqual(story.reasons, ["claim_not_measurement_restatement"]);
+  // Evidence without a claim uses the same ordinary source classification.
   const evidenceOnly = await quoted.run({ claimRow: null });
-  assert.deepEqual([evidenceOnly.ordinary, evidenceOnly.reasons], [false, ["story_testimonial_not_cleared"]]);
+  assert.deepEqual([evidenceOnly.ordinary, evidenceOnly.reasons], [true, []]);
   // Positive recorded decisions keep the basis (the ordinary rule never overrides a decision).
   const reviewed = await paired("field_6", { tx: { evidenceHead: { decision_outcome: "supported" }, claimHead: { decision_outcome: "approved" } } }).run();
-  assert.equal(reviewed.basis, "numerical_measurement_story_testimonial_present");
+  assert.equal(reviewed.basis, "all_sensitive_categories_absent");
 });
 
 test("C: a paired measurement that names another contributing source fails closed and is never covered", async () => {
@@ -231,7 +228,7 @@ test("C: a paired measurement that names another contributing source fails close
     const tx = transaction(f, { sourceDecision: STORY_PRESENT, versions, decisionsByProfile: { [REF_PROFILE]: referenceDecision } });
     const rule = await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, { organizationId: ORG, ...f, claimRow });
     assert.deepEqual([rule.ordinary, rule.basis], [false, null]);
-    assert.deepEqual(rule.reasons, ["measurement_definition_not_confirmed", "story_testimonial_not_cleared"]);
+    assert.deepEqual(rule.reasons, ["measurement_definition_not_confirmed"]);
   }
 });
 
@@ -240,10 +237,10 @@ test("D: stale lineage, prohibited use, AI-processing denial, another tenant's d
   const staleRule = await evaluateOrdinaryMeasurementAuthorityInTransaction(
     transaction(stale.f, { sourceDecision: STORY_PRESENT, versions: { [VERSION]: { ...stale.f.sourceVersionRow } } }),
     { organizationId: ORG, ...stale.f, claimRow: stale.claimRow });
-  assert.deepEqual([staleRule.ordinary, staleRule.reasons], [false, ["story_testimonial_not_cleared", "source_version_not_current"]]);
+  assert.deepEqual([staleRule.ordinary, staleRule.reasons], [false, ["source_version_not_current"]]);
   const cases = {
-    "use not allowed": [{ ...STORY_PRESENT, reviewed_allowed_use_status: "not_allowed" }, ["story_testimonial_not_cleared", "processing_permission_not_established"]],
-    "AI processing denied": [{ ...STORY_PRESENT, reviewed_llm_processing_allowed: false }, ["story_testimonial_not_cleared", "processing_permission_not_established"]],
+    "use not allowed": [{ ...STORY_PRESENT, reviewed_allowed_use_status: "not_allowed" }, ["processing_permission_not_established"]],
+    "AI processing denied": [{ ...STORY_PRESENT, reviewed_llm_processing_allowed: false }, ["processing_permission_not_established"]],
     "another organization's decision": [{ ...STORY_PRESENT, organization_id: "11000000-0000-4000-8000-000000000099" }, ["sensitivity_review_not_complete"]],
     "review not complete": [{ ...STORY_PRESENT, decision_outcome: "deferred" }, ["sensitivity_review_not_complete"]],
   };
@@ -290,9 +287,8 @@ test("authenticated factual-review API retains the paired projection through the
 });
 
 // The real generation repository, with P2-06 stubbed to the eligible result it now returns for
-// the reported claims: under the numerical basis only the internal Evidence Summary (and so the
-// Free Impact Assessment) is admitted; every other content type is refused before the model.
-test("generation: the numerical story-present basis admits the internal Evidence Summary and refuses other content before the model", async () => {
+// the reported claims: source metadata cannot restrict the generated content type.
+test("generation: source story metadata does not restrict internal content types", async () => {
   const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   const { attachOrdinaryInternalAuthority } = await import("../Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js");
   const f = fixture("field_6");
@@ -330,13 +326,11 @@ test("generation: the numerical story-present basis admits the internal Evidence
     });
     return { result, writes, modelCalls };
   };
-  const refused = await run("createImpactNarrativeDraft", "numerical_measurement_story_testimonial_present");
-  assert.equal(refused.result.ok, false);
-  assert.deepEqual([refused.result.blockers[0].validator_key, refused.result.blockers[0].blocking_reason],
-    ["VAL-GEN-MEASURED-P2-01M-001", "story_testimonial_count_only_operation_not_permitted"]);
-  assert.deepEqual(refused.modelCalls, [], "no model call for a refused content type");
+  const refused = await run("createImpactNarrativeDraft", "all_sensitive_categories_absent");
+  assert.equal(refused.modelCalls.length, 1, "Impact Narrative reaches the model under the same authority");
+  assert.notEqual(refused.result.blockers?.[0]?.blocking_reason, "story_testimonial_count_only_operation_not_permitted");
   // The Evidence Summary reaches the model with only the governed numerical statement and its limitations.
-  const admitted = await run("createEvidenceSummaryDraft", "numerical_measurement_story_testimonial_present");
+  const admitted = await run("createEvidenceSummaryDraft", "all_sensitive_categories_absent");
   assert.equal(admitted.modelCalls.length, 1, JSON.stringify(admitted.result));
   const [claim] = admitted.modelCalls[0];
   assert.equal(claim.statement, D.composeDerivedClaimStatementFromRow(f.row));

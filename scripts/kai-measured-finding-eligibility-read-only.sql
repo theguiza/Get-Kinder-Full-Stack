@@ -15,8 +15,8 @@
 --   R4 the source version is current
 --   R5 its current sensitivity decision is complete ('reviewed')
 --   R6 allowed use = 'allowed' and AI processing permitted
---   R7 each of the six section 7.2 categories recorded 'absent'
---      ('unknown' and 'present' both fail; the value says which)
+--   R7 each independently governed sensitivity category recorded 'absent'
+--      (story/testimonial presence is displayed as metadata only)
 -- The capability canRecordEvidenceReviewDecision needs a gk_reviewer or
 -- gk_admin role (global or membership) plus an ACTIVE membership in the
 -- organization (A1..A3), or platform superuser authority (not in kai.*).
@@ -81,7 +81,7 @@ rows(seq, item, value) AS (
   UNION ALL SELECT 25, 'R7 reviewed_minor_data_status', (SELECT reviewed_minor_data_status FROM head)
   UNION ALL SELECT 26, 'R7 reviewed_health_housing_justice_immigration_status', (SELECT reviewed_health_housing_justice_immigration_status FROM head)
   UNION ALL SELECT 27, 'R7 reviewed_indigenous_governance_status', (SELECT reviewed_indigenous_governance_status FROM head)
-  UNION ALL SELECT 28, 'R7 reviewed_story_testimonial_status', (SELECT reviewed_story_testimonial_status FROM head)
+  UNION ALL SELECT 28, 'INFO reviewed_story_testimonial_status', (SELECT reviewed_story_testimonial_status FROM head)
   UNION ALL SELECT 29, 'R7 reviewed_small_cell_risk_status', (SELECT reviewed_small_cell_risk_status FROM head)
   UNION ALL SELECT 30, 'sensitivity_decision.decided_by_role', (SELECT decided_by_role FROM head)
   UNION ALL SELECT 40, 'measurement.count', (SELECT count(*) FROM m)::text

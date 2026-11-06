@@ -1,3 +1,4 @@
+import StorySourceInformation from "../StorySourceInformation.js";
 import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -207,6 +208,7 @@ export default function ClientInternalDrafts({
               {draft.internalReport.available ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState] || "Review state unavailable"}
             </span>
           </div>
+          <StorySourceInformation />
           {structuralOnly ? (
             <div className="alert alert-secondary py-2 small mb-2" data-client-internal-draft-metadata-only="">{STRUCTURAL_ONLY_DRAFT_MESSAGE}</div>
           ) : null}

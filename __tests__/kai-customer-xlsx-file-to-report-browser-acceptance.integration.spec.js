@@ -1016,9 +1016,9 @@ async function runXlsxAcceptance() {
 
     // Superseded expectation (owner prompt 2026-10-30): before the count-only
     // basis this claim was ineligible and every generation was refused. The
-    // count is now internally usable as a count only; the organization still
-    // may not decide its reviews, and every other draft type is refused.
-    await test("C2: the story-present count is internally eligible as a count only, with no decision; the organization may not decide; an Impact Narrative is refused", async () => {
+    // count is internally usable under ordinary authority; each draft type
+    // follows the same rules regardless of the source story value.
+    await test("C2: story presence changes no eligibility, factual-review admission or Impact Narrative availability", async () => {
       const decisionsBefore = await approvalState();
       const internal = await internalEligibility(ids.story.claimId);
       assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], J(internal.blockerCodes));
@@ -1026,16 +1026,15 @@ async function runXlsxAcceptance() {
       const review = await adminApi("GET", organizationFactualReviewPath(ORG_X, ids.story.claimId));
       assert.equal(review.status, 200, J(review.body));
       ids.story.organizationReview = review.body.data;
-      assert.deepEqual(review.body.data.ordinary_internal_rule, { applies: true, reasons: [], basis: "count_only_story_testimonial_present" });
+      assert.deepEqual(review.body.data.ordinary_internal_rule, { applies: true, reasons: [], basis: "all_sensitive_categories_absent" });
       assert.equal(review.body.data.source_permissions.categories.reviewed_story_testimonial_status, "present");
-      assert.ok(J(review.body.data.evidence_review).includes("story_testimonial_not_cleared"), "the organization's own review decision stays with Get Kinder");
+      assert.ok(!J(review.body.data.evidence_review).includes("story_testimonial_not_cleared"));
       const refused = await generate(adminApi, "impact-narrative", [ids.story.claimId], "c2-refused");
-      assert.equal(refused.status, 422, J(refused.body));
-      ids.story.generationRefusal = refused.body.blockers?.map((b) => b.blocking_reason);
-      assert.deepEqual(ids.story.generationRefusal, ["story_testimonial_count_only_operation_not_permitted"]);
+      assert.ok([200, 201].includes(refused.status), J(refused.body));
+      ids.story.generationRefusal = [];
       assert.deepEqual(await approvalState(), decisionsBefore, "no decision was recorded or needed");
       for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(ids.story.claimId, audience)).eligible, false, `${audience} stays closed`);
-      results.c2 = { eligible: true, basis: "count_only_story_testimonial_present", impactNarrative: ids.story.generationRefusal };
+      results.c2 = { eligible: true, basis: "all_sensitive_categories_absent", impactNarrative: ids.story.generationRefusal };
     });
 
     await test("C3: Get Kinder's authorized reviewer records the evidence review, the internal claim approval and the internal coverage acceptances; internal eligibility is re-evaluated", async () => {
@@ -1070,43 +1069,42 @@ async function runXlsxAcceptance() {
 
     // Superseded expectation (owner prompt 2026-10-30): the Evidence Summary's
     // internal download was 422 story_testimonial_not_cleared. It is now
-    // available as a count only; the Impact Narrative stays with Get Kinder.
-    await test("C4: after Get Kinder's review the Evidence Summary's internal download is available as a count only; an Impact Narrative may be generated through Get Kinder's review but its download stays with Get Kinder", async () => {
+    // available under the ordinary rules, as is the Impact Narrative.
+    await test("C4: both Evidence Summary and Impact Narrative downloads remain available with the neutral note", async () => {
       const callsBeforeSummary = modelCalls.length;
       const summary = await generate(adminApi, "evidence-summary", [ids.story.claimId], "c4-summary");
       assert.ok([200, 201].includes(summary.status), J(summary.body));
       const draftId = summary.body.data.generatedContentDraftId;
-      // Package 3: the count-only finding is composed by the server from the measurement; the model is not asked.
-      assert.equal(modelCalls.length, callsBeforeSummary, "the model is not called for a count-only claim");
-      assert.deepEqual((await storedBlocksOf(draftId)).map((block) => [block.text, block.evidence_item_id]),
-        [[await composedFor(ids.story.evidenceItemId), ids.story.evidenceItemId]]);
+      // The normal generation path receives the measurement-based row-count statement.
+      assert.equal(modelCalls.length, callsBeforeSummary + 1, "source metadata does not change the normal model path");
+      assert.equal((await storedBlocksOf(draftId))[0].evidence_item_id, ids.story.evidenceItemId);
       const report = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draftId));
       ids.story.report = { status: report.status, body: typeof report.body === "string" ? report.body.slice(0, 600) : report.body };
       assert.equal(report.status, 200, J(report.body).slice(0, 400));
-      assert.match(report.body, /used for its record count only: no story or testimonial content is used/);
+      assert.match(report.body, /This source may contain stories or testimonials/);
       assert.match(report.body, /recorded review decisions \(evidence: `supported`; claim: `approved`\)/);
       assert.doesNotMatch(report.body, /\*\*5 programme sessions\*\*/, "the human meaning is not the stated finding");
       // With Get Kinder's decisions recorded the eligibility no longer rests on the count-only basis, so a narrative is generated (the existing route) ...
       const narrative = await generate(adminApi, "impact-narrative", [ids.story.claimId], "c4-narrative");
       assert.ok([200, 201].includes(narrative.status), J(narrative.body));
       const narrativeReport = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, narrative.body.data.generatedContentDraftId));
-      // ... but the count-only basis covers an Evidence Summary only.
-      assert.equal(narrativeReport.status, 422, J(narrativeReport.body).slice(0, 400));
-      assert.ok(J(narrativeReport.body).includes("story_testimonial_not_cleared"), J(narrativeReport.body).slice(0, 600));
+      // The same source classification permits the Impact Narrative report.
+      assert.equal(narrativeReport.status, 200, J(narrativeReport.body).slice(0, 400));
+      assert.match(narrativeReport.body, /This source may contain stories or testimonials/);
       // Nothing changed the recorded source decision.
       const [decision] = await query(
         `SELECT reviewed_story_testimonial_status FROM kai.intake_sensitivity_review_decisions WHERE intake_sensitivity_profile_id = $1::uuid`,
         [ids.story.intake_sensitivity_profile_id]);
       assert.equal(decision.reviewed_story_testimonial_status, "present");
       ids.story.draftId = draftId;
-      results.c4 = { generated: draftId, markdownStatus: report.status, impactNarrativeMarkdown: [narrativeReport.status, "story_testimonial_not_cleared"] };
+      results.c4 = { generated: draftId, markdownStatus: report.status, impactNarrativeMarkdown: [narrativeReport.status, "informational note"] };
     });
 
     await test("C5: the existing Get Kinder route for that draft - GK content review, export review, limitation snapshot, candidate, internal release and manifest - delivers it to the administrator read-only; funder and public stay closed", async () => {
       const draftId = ids.story.draftId;
       const queue = await queueOf("generated_content_review", draftId);
       const adminStart = await adminApi("POST", generatedContentReviewStartPath(ORG_X, draftId, queue.review_queue_item_id), { expected_updated_at: new Date(queue.updated_at).toISOString() });
-      assert.equal(adminStart.status, 403, "the administrator cannot review a story-present draft");
+      assert.equal(adminStart.status, 403, "this GK review route retains its role boundary");
       const started = await gkApi("POST", generatedContentReviewStartPath(ORG_X, draftId, queue.review_queue_item_id), { expected_updated_at: new Date(queue.updated_at).toISOString() });
       assert.equal(started.status, 200, J(started.body));
       const inProgress = await queueOf("generated_content_review", draftId);
@@ -1485,7 +1483,7 @@ async function runXlsxAcceptance() {
       return { fileId, ...promoted, evidenceItemId, claimId: proposed.body.data.claim.claim_id, worksheetKey };
     };
 
-    await test("H1 (A, B): worksheet counts keep their identity; an ordinary count is eligible with no approval; a count from a source with an undetermined category is restricted, and the exact recorded condition is explained", async () => {
+    await test("H1 (A, B): worksheet counts keep their identity; an ordinary count is eligible with no approval; a count from a source with an independent minor-data risk is restricted, and the exact recorded condition is explained", async () => {
       // A historical structural-only draft, read before anything below runs.
       const [structuralClaim] = await query(
         `SELECT c.claim_id::text, c.statement FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
@@ -1501,8 +1499,8 @@ async function runXlsxAcceptance() {
       ids.h.draftDigest = draftDigest;
       ids.h.structuralDigest = await draftDigest(ids.h.structuralDraftId);
 
-      // The restricted source: story/testimonial not determined ('unknown'), everything else ordinary.
-      const restrictedSnapshot = { ...SNAPSHOT, reviewed_story_testimonial_status: "unknown" };
+      // The restricted source has minor data present. Story unknown remains metadata.
+      const restrictedSnapshot = { ...SNAPSHOT, reviewed_story_testimonial_status: "unknown", reviewed_minor_data_status: "present" };
       const first = productionShapedWorkbook("h-restricted-a");
       const bases = {};
       {
@@ -1559,7 +1557,7 @@ async function runXlsxAcceptance() {
         assert.ok(restricted.blockerCodes.includes("evidence_review_unresolved") && restricted.blockerCodes.includes("claim_review_unresolved"), J(restricted.blockerCodes));
         const view = await findingReview(adminApi, entry.claimId);
         assert.equal(view.status, 200, J(view.body));
-        assert.deepEqual(view.body.data.ordinary_internal_rule, { applies: false, reasons: ["story_testimonial_not_cleared"], basis: null });
+        assert.deepEqual(view.body.data.ordinary_internal_rule, { applies: false, reasons: ["minor_information_not_cleared"], basis: null });
         assert.deepEqual([view.body.data.source_permissions.categories.reviewed_story_testimonial_status, view.body.data.source_permissions.allowed_use_status,
           view.body.data.source_permissions.ai_processing_allowed, view.body.data.source_permissions.is_current], ["unknown", "allowed", true, true]);
         assert.equal(view.body.data.review_requirement.responsible_role, "gk_reviewer");
@@ -1588,17 +1586,17 @@ async function runXlsxAcceptance() {
       };
       const asAdmin = await runReadOnly(`user${USERS.clientAdmin}@harbourline.test`);
       assert.deepEqual([asAdmin["R4 source_version.is_current"], asAdmin["sensitivity_decision.current_heads"], asAdmin["R5 sensitivity_decision.decision_outcome"],
-        asAdmin["R6 reviewed_allowed_use_status"], asAdmin["R6 reviewed_llm_processing_allowed"], asAdmin["R7 reviewed_story_testimonial_status"],
+        asAdmin["R6 reviewed_allowed_use_status"], asAdmin["R6 reviewed_llm_processing_allowed"], asAdmin["INFO reviewed_story_testimonial_status"],
         asAdmin["R7 reviewed_minor_data_status"], asAdmin["measurement.count"], asAdmin["A0 actor.found (params.actor_email)"],
         asAdmin["A3 actor.may_record_gk_evidence_review (excluding platform superuser)"]],
-      ["true", "1", "reviewed", "allowed", "true", "unknown", "absent", "1", "1", "false"], J(asAdmin));
+      ["true", "1", "reviewed", "allowed", "true", "unknown", "present", "1", "1", "false"], J(asAdmin));
       assert.match(asAdmin.measurement, /R1 evidence_type=source_record_count_measurement; R2 definition_status=human_confirmed, same_version=true; method=p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1; sheet_key=sheet_5; measured=37 \(data 37, blank 0, duplicates 0\)/);
       assert.match(asAdmin.claim, /R3 claim_type=finding; claim_review_status=needs_gk_review/);
       assert.equal(asAdmin["evidence_review_decision.heads"], "none");
       const asReviewer = await runReadOnly(`user${USERS.gkReviewer}@harbourline.test`);
       assert.equal(asReviewer["A3 actor.may_record_gk_evidence_review (excluding platform superuser)"], "true", J(asReviewer));
-      results.h1 = { bases, ordinary: "eligible with 0 decisions", restricted: "story_testimonial_not_cleared (recorded unknown)", s5: [s5View.measurement.worksheet_name, s5View.measurement.measured_value],
-        readOnlySql: { story: asAdmin["R7 reviewed_story_testimonial_status"], adminMayRecordGkReview: false, gkReviewerMayRecordGkReview: true } };
+      results.h1 = { bases, ordinary: "eligible with 0 decisions", restricted: "minor_information_not_cleared (recorded present)", s5: [s5View.measurement.worksheet_name, s5View.measurement.measured_value],
+        readOnlySql: { story: asAdmin["INFO reviewed_story_testimonial_status"], adminMayRecordGkReview: false, gkReviewerMayRecordGkReview: true } };
     });
 
     await test("H2 (C): the organization administrator sees 'View review status' with the responsible Get Kinder role and the review items, and no approval", async () => {
@@ -1612,8 +1610,8 @@ async function runXlsxAcceptance() {
       await adminPage.idle();
       const shown = await textOf(adminPage, `[data-client-measured-claim-review="${ids.h.s5.claimId}"]`);
       assert.match(shown, /Worksheet counted: Data_Dictionary \(sheet_5\)/);
-      assert.match(shown, /Stories or testimonials: not determined \(recorded as unknown\)/);
-      assert.doesNotMatch(shown, /recorded as present/);
+      assert.match(shown, /This source may contain stories or testimonials/);
+      assert.match(shown, /Minor|minor/);
       assert.match(shown, /Get Kinder review required\. Responsible: a Get Kinder reviewer \(gk_reviewer\)\. Outstanding: [^.]*claim review[^.]*evidence review/);
       assert.match(shown, /Evidence review item: open \/ needs gk review\. Claim review item: open \/ needs gk review\./);
       assert.match(shown, /listed in Get Kinder's Review Queue; no separate request is needed/);
@@ -1629,7 +1627,7 @@ async function runXlsxAcceptance() {
       const refused = await adminApi("POST", evidenceReviewCompletePath(ORG_X, ids.h.s5.evidenceItemId, evidenceQueue.review_queue_item_id),
         evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
       assert.equal(refused.status, 422, J(refused.body));
-      assert.ok(J(refused.body).includes("story_testimonial_not_cleared"), J(refused.body));
+      assert.ok(J(refused.body).includes("minor_information_not_cleared"), J(refused.body));
       results.h2 = { clientAction: "View review status", responsible: "gk_reviewer", organizationDecision: refused.status };
     });
 
@@ -1719,7 +1717,7 @@ async function runXlsxAcceptance() {
       // Independent restrictions stay: the source's recorded category, the
       // unverified meaning, unresolved coverage (accepted only as limitations),
       // and funder/public eligibility.
-      assert.deepEqual(freshView.ordinary_internal_rule, { applies: false, reasons: ["story_testimonial_not_cleared"], basis: null });
+      assert.deepEqual(freshView.ordinary_internal_rule, { applies: false, reasons: ["minor_information_not_cleared"], basis: null });
       assert.equal(freshView.source_permissions.categories.reviewed_story_testimonial_status, "unknown");
       assert.ok(freshView.limitations.some((row) => row.code === "measurement.record_meaning_human_defined"));
       assert.deepEqual(freshView.coverage_limitations.filter((row) => row.assessment_status === "unresolved").map((row) => [row.dimension_key, row.internal_limitation_accepted]).sort(),
@@ -1888,306 +1886,45 @@ async function runXlsxAcceptance() {
       return false;
     };
 
-    await test("I1: a story-present five-worksheet workbook's Service_Events count (364 rows, 2 exact duplicates) persists with its worksheet identity, the claim restates it exactly, and it is internally usable as a count only with no decision", async () => {
-      const approvalsBefore = await approvalState();
-      const entry = await countOnlyMeasure("i-positive", "sheet_3", ROW_DEFINITION);
-      ids.i = { row: entry, approvalsBefore };
-      const [row] = await query(
-        `SELECT m.measured_value::int, m.total_record_count::int, m.blank_record_count::int, m.duplicate_record_count::int, m.calculation_method,
-                l.coordinates, c.statement, c.claim_type
-           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
-           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id JOIN kai.claims c ON c.evidence_item_id = e.evidence_item_id
-          WHERE m.evidence_item_id = $1::uuid`, [entry.evidenceItemId]);
-      // The worksheet's identity: its locator key, and its name from the version's committed profile (the authorized read).
-      const persisted = (await findingReview(adminApi, entry.claimId)).body.data.measurement;
-      Object.assign(row, { worksheet_key: persisted.worksheet_key, worksheet_name: persisted.worksheet_name });
-      assert.deepEqual([row.measured_value, row.total_record_count, row.blank_record_count, row.duplicate_record_count, row.calculation_method, row.worksheet_key, row.worksheet_name, row.coordinates],
-        [364, 364, 0, 2, SELECTED_XLSX_METHOD, "sheet_3", "Service_Events", { scope: "data_records_after_header", sheet_key: "sheet_3" }]);
-      assert.deepEqual([row.claim_type, row.statement], ["finding", ROW_STATEMENT], "the claim is exactly the governed restatement");
-      // The shared authority: eligible for internal use, as a count only, with no evidence, claim or coverage decision.
-      const internal = await internalEligibility(entry.claimId);
-      assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], J(internal.blockerCodes));
-      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 0, claim: 0, coverage: 0 });
-      for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} needs its own authority`);
-      const view = (await findingReview(adminApi, entry.claimId)).body.data;
-      assert.deepEqual([view.ordinary_internal_rule, view.review_requirement, view.internal_eligibility],
-        [{ applies: true, reasons: [], basis: "count_only_story_testimonial_present" }, null, { eligible: true, blocker_codes: [] }]);
-      assert.deepEqual([view.source_permissions.categories.reviewed_story_testimonial_status, view.source_permissions.allowed_use_status, view.source_permissions.ai_processing_allowed],
-        ["present", "allowed", true]);
-      // P2-08: the eligible-claims projection lists it for internal use, and not for funder use.
-      const eligibleClaims = { internal: await claimListedFor(entry.claimId, "internal"), funder: await claimListedFor(entry.claimId, "funder") };
-      assert.deepEqual(eligibleClaims, { internal: true, funder: false });
-      // Nothing was recorded: no decision, no queue resolution, the category unchanged.
-      assert.deepEqual(await queueStates(entry), ["open", "needs_gk_review"]);
-      assert.equal(await storyCategoryOf(entry.intake_sensitivity_profile_id), "present");
-      assert.deepEqual(await approvalState(), approvalsBefore);
-      results.i1 = { measured: [row.measured_value, row.duplicate_record_count, row.worksheet_name, row.worksheet_key], statement: row.statement, eligible: true,
-        basis: view.ordinary_internal_rule.basis, decisions: 0, eligibleClaimsProjection: eligibleClaims };
-    });
-
-    await test("I2: the administrator sees the count-only basis, generates the Evidence Summary in the drafting UI and opens its internal Markdown; the model request, stored draft and report carry the governed count only", async () => {
-      const entry = ids.i.row;
-      await openStudioTab("Data Sources");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${entry.claimId}"]`)), "the count-only claim");
-      await adminPage.clickIn(`[data-client-open-measured-claim-review="${entry.claimId}"]`, "View measurement");
-      const panel = `[data-client-measured-claim-review="${entry.claimId}"]`;
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${panel} [data-client-measured-claim-count-only]`)), "the count-only explanation");
-      const shownReview = await textOf(adminPage, panel);
-      assert.match(shownReview, /Worksheet counted: Service_Events \(sheet_3\)/);
-      assert.match(shownReview, /internal Evidence Summary as a record count, with no story or testimonial content/);
-      assert.doesNotMatch(shownReview, /Get Kinder review required|Confirm: the count is supported/);
-      // Generate in the drafting interface.
-      await openStudioTab("Data Sources");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${entry.claimId}"]`)), "the count-only claim");
-      // Package 3: whatever a model would say, the count-only finding is composed by the server.
-      modelOverride.text = ROW_TEXT;
-      const callsBefore = modelCalls.length;
-      await adminPage.clickIn(`[data-client-claim="${entry.claimId}"] input[type=checkbox]`, "Use in an internal draft");
-      await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("Internal evidence summary created");
-      await adminPage.idle();
+    await test("I: every story flag permits both internal report types, saved retrieval and replay; actual unsupported quotations still refuse", async () => {
+      const { composeMeasurementDisclosure } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
+      const { STORY_SOURCE_NOTE } = await import("../shared/kaiStorySourceInformation.js");
+      const outcomes = [];
+      for (const flag of ["absent", "present", "unknown"]) {
+        const entry = await countOnlyMeasure(`i-flag-${flag}`, "sheet_3", ROW_DEFINITION, { ...SNAPSHOT, reviewed_story_testimonial_status: flag });
+        const before = await decisionCounts(entry.claimId, entry.evidenceItemId);
+        const view = (await findingReview(adminApi, entry.claimId)).body.data;
+        assert.deepEqual(view.ordinary_internal_rule, { applies: true, reasons: [], basis: "all_sensitive_categories_absent" });
+        assert.equal(view.source_permissions.categories.reviewed_story_testimonial_status, flag);
+        assert.equal(view.review_requirement, null);
+        const reports = [];
+        modelOverride.text = claim => `${claim.claimStatement} ${composeMeasurementDisclosure(claim.limitationCodes)}`;
+        for (const type of ["evidence-summary", "impact-narrative"]) {
+          const key = `i-${flag}-${type}`;
+          const result = await generate(adminApi, type, [entry.claimId], key);
+          assert.ok([200, 201].includes(result.status), J(result.body));
+          assert.ok(result.body.warnings.some(note => note.message === STORY_SOURCE_NOTE));
+          const draftId = result.body.data.generatedContentDraftId;
+          assert.equal((await adminApi("GET", clientInternalDraftPath(ORG_X, PROJECT_X, draftId))).status, 200);
+          const report = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draftId));
+          assert.equal(report.status, 200, J(report.body));
+          assert.ok(report.body.includes(STORY_SOURCE_NOTE));
+          assert.match(report.body, /364 nonblank data rows/);
+          const replay = await generate(adminApi, type, [entry.claimId], key);
+          assert.equal(replay.body.data.replayed, true);
+          assert.deepEqual(replay.body.warnings, result.body.warnings);
+          reports.push({ status: result.status, report: report.status, replay: replay.status });
+        }
+        modelOverride.text = claim => `${claim.claimStatement} ${composeMeasurementDisclosure(claim.limitationCodes)} One participant said "it changed my life".`;
+        const unsupported = await generate(adminApi, "evidence-summary", [entry.claimId], `i-${flag}-unsupported-quote`);
+        assert.equal(unsupported.status, 422);
+        assert.ok(unsupported.body.blockers.some(item => item.blocking_reason === "unsupported_quotation"));
+        assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), before);
+        outcomes.push(reports);
+      }
       modelOverride.text = null;
-      assert.equal(modelCalls.length, callsBefore, "no model request: nothing from the source or its definition reaches a provider");
-      const composed = await composedFor(entry.evidenceItemId);
-      assert.equal(composed, "364 nonblank data rows were counted in worksheet sheet_3, with 0 blank rows excluded and 2 exact-duplicate rows included in the count. "
-        + "This is a count of data records in that one worksheet only: what one record represents is human-defined by the organization and was not verified by KAI, "
-        + "so the number is a row count and nothing more. The reporting period 2026-09-01 to 2026-09-30 is attested in that definition and was not verified against dates in the rows. "
-        + "Any coverage limitations recorded for the claim apply and are listed with the report's limitations.");
-      assert.doesNotMatch(composed, SENTINEL_RE);
-      assert.doesNotMatch(composed, /service|event|Service_Events|Data_Dictionary/i, "no human label or worksheet name in the composed finding");
-      // The persisted draft, its citation and its validator results.
-      const [draft] = await query(
-        "SELECT generated_content_draft_id::text, content_type, requested_audience, validator_results FROM kai.generated_content_drafts WHERE organization_id = $1::uuid ORDER BY created_at DESC LIMIT 1", [ORG_X]);
-      assert.deepEqual([draft.content_type, draft.requested_audience], ["evidence_summary", "internal"]);
-      assert.deepEqual(draft.validator_results.map((result) => [result.validator_key, result.severity]),
-        [["VAL-GEN-001", "pass"], ["VAL-GEN-002", "pass"], ["VAL-GEN-003", "pass"], ["VAL-GEN-004", "pass"], ["VAL-GEN-008", "pass"], ["VAL-GEN-010", "pass"], ["VAL-GEN-005", "pass"]]);
-      const stored = await query(
-        `SELECT b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
-           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id WHERE b.generated_content_draft_id = $1::uuid`,
-        [draft.generated_content_draft_id]);
-      assert.deepEqual(stored, [{ text: composed, claim_id: entry.claimId, evidence_item_id: entry.evidenceItemId }]);
-      // Open the internal report in the UI; the download through the normal client route is the report shown.
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${draft.generated_content_draft_id}"]`)), "the internal report action");
-      await adminPage.clickIn(`[data-client-open-internal-report="${draft.generated_content_draft_id}"]`, "Open report");
-      await adminPage.waitFor(async () => ((await textOf(adminPage, "[data-client-internal-report-markdown]")) || "").startsWith("# Internal Evidence Summary"), "the report");
-      const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
-      const fetched = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draft.generated_content_draft_id));
-      assert.deepEqual([fetched.status, fetched.body], [200, shown], "the download is the report shown");
-      const section = (from, to) => shown.slice(shown.indexOf(`\n## ${from}\n`), shown.indexOf(`\n## ${to}\n`));
-      assert.match(section("Key findings", "Reporting period"), /\*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 exact-duplicate records\*\*; 0 blank rows were excluded\. The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\. A person at the organization defined each row as one `service event record`; KAI did not verify that meaning, so this is a count of rows, not an established count of `service event records`\./);
-      assert.match(section("Generated narrative", "Source and evidence traceability"), /composed by KAI from the persisted measurement of each cited claim, not written by a language model/);
-      assert.doesNotMatch(shown, /\b364 service event records?\b|volume-of-activity/, "the human label is never the count, and the rows are not an activity figure");
-      assert.match(shown, /364 data records after the header, minus 0 blank records excluded = \*\*364\*\* counted/);
-      assert.match(shown, /2 exact-duplicate records\. They are included in the count of 364, not removed or merged/);
-      assert.match(shown, /Definition, inclusion and exclusion text:\*\* not reproduced/);
-      assert.match(shown, /used for its record count only: no story or testimonial content is used, and its recorded category is unchanged/);
-      assert.match(shown, /a count-only use of a source recorded as containing stories or testimonials/);
-      assert.match(shown, /`source\.story_testimonial_present_count_only`/);
-      assert.match(shown, /`measurement\.record_meaning_human_defined`/);
-      assert.match(shown, /`VAL-GEN-010`/);
-      for (const id of [entry.claimId, entry.evidenceItemId, entry.source_version_id]) assert.ok(shown.includes(`\`${id}\``), id);
-      assert.ok(shown.includes(`${composed} [CIT-001]`), "the composed, validated finding, cited");
-      assert.doesNotMatch(shown, SENTINEL_RE, "no sentinel in the delivered report");
-      assert.doesNotMatch(shown, SOURCE_TEXT_RE, "no cell value, column name or other worksheet in the delivered report");
-      for (const affirmed of [section("Key findings", "Reporting period"), section("What this evidence establishes", "What this evidence does not establish"),
-        section("Generated narrative", "Source and evidence traceability"), section("Conclusion", "References")]) {
-        assert.doesNotMatch(affirmed.replace(/not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact/, ""),
-          /participant|people|unique|distinct|outcome|completion|(?<!not )verified|because of|caused|increase|impact/i, "no person, completion, outcome or causal claim");
-      }
-      writeFileSync(join(WORKDIR, "xlsx-i-count-only-evidence-summary.md"), shown);
-      // Nothing was approved, accepted, released or reclassified.
-      assert.deepEqual(await approvalState(), ids.i.approvalsBefore, "no GK approval, coverage acceptance, release decision or manifest");
-      assert.deepEqual(await queueStates(entry), ["open", "needs_gk_review"]);
-      assert.equal(await storyCategoryOf(entry.intake_sensitivity_profile_id), "present");
-      ids.i.rowDraftId = draft.generated_content_draft_id;
-      results.i2 = { draft: draft.generated_content_draft_id, markdown: fetched.status, modelCalled: false, composed,
-        validators: draft.validator_results.map((result) => result.validator_key), newDecisions: 0, manifests: 0 };
-    });
-
-    await test("I3: the count-only claim is refused for every other operation, and an adversarial model reply cannot reach a count-only draft because the model is not asked", async () => {
-      const entry = ids.i.row;
-      const draftsBefore = await draftCount();
-      // Other draft types and audiences.
-      const narrative = await generate(adminApi, "impact-narrative", [entry.claimId], "i3-narrative");
-      assert.deepEqual([narrative.status, narrative.body.blockers?.map((b) => b.blocking_reason)], [422, ["story_testimonial_count_only_operation_not_permitted"]]);
-      // Funder use needs its own authority, which the count-only basis never gives.
-      const funder = await gkAdminApi("POST", `${orgPath()}/generated-content-drafts/evidence-summary/funder`, { claim_ids: [entry.claimId], idempotency_key: "i3-funder", engagement_id: PROJECT_X });
-      assert.ok([403, 422].includes(funder.status), J(funder.body));
-      assert.ok(!J(funder.body).includes("invalid_funder_evidence_summary_generation_request"), "refused for authority, not request shape");
-      // Adversarial replies: testimonial quotation, story-derived assertion, unsupported people/outcome/completion claims, an unnamed worksheet.
-      const adversarial = {
-        "testimonial quotation": `${ROW_TEXT} One attendee said “this changed my life.”`,
-        "story-derived assertion": `${ROW_TEXT} Stories shared by families describe a welcoming service.`,
-        "unsupported outcome": `${ROW_TEXT} The records show participants achieved better outcomes.`,
-        "unique people": `${ROW_TEXT} They represent 364 unique people.`,
-        "verified completions": `${ROW_TEXT} These are 364 verified service completions.`,
-        "worksheet not named": ROW_TEXT.replace("In selected worksheet sheet_3 the", "The"),
-      };
-      // Package 3: these replies were refused by VAL-GEN-010 when the model drafted count-only text; now it is
-      // never asked, so each request persists exactly the composed finding and none of the reply.
-      const rejected = {};
-      const composed = await composedFor(entry.evidenceItemId);
-      for (const [label, text] of Object.entries(adversarial)) {
-        modelOverride.text = text;
-        const callsBefore = modelCalls.length;
-        const reply = await generate(adminApi, "evidence-summary", [entry.claimId], `i3-${label.replace(/\W+/g, "-")}`);
-        modelOverride.text = null;
-        assert.ok([200, 201].includes(reply.status), `${label}: ${J(reply.body)}`);
-        assert.equal(modelCalls.length, callsBefore, `${label}: the model is not called`);
-        const stored = await storedBlocksOf(reply.body.data.generatedContentDraftId);
-        assert.deepEqual(stored.map((block) => block.text), [composed], `${label}: only the composed finding is stored`);
-        assert.doesNotMatch(stored[0].text, /said|stories|participants|unique|completions|“/, label);
-        rejected[label] = "model not asked; composed finding stored";
-      }
-      assert.equal(await draftCount(), draftsBefore + Object.keys(adversarial).length, "one composed draft per request");
-      // Other actors and organizations cannot read the count-only report.
-      const path = clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.i.rowDraftId);
-      const refusals = {
-        contributor: (await contributorApi("GET", path)).status, reviewer: (await reviewerApi("GET", path)).status,
-        otherOrganizationAdmin: (await adminYApi("GET", path)).status, gkReviewerOnCustomerRoute: (await gkApi("GET", path)).status,
-        crossTenantPath: (await adminYApi("GET", clientInternalReportMarkdownPath(ORG_Y, PROJECT_Y, ids.i.rowDraftId))).status,
-        otherProject: (await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, ids.i.rowDraftId))).status,
-      };
-      for (const [label, status] of Object.entries(refusals)) assert.ok([403, 404].includes(status), `${label}: ${status}`);
-      results.i3 = { impactNarrative: 422, funder: funder.status, adversarialRejected: rejected, refusals };
-    });
-
-    await test("I4 (semantic integrity): the misleading Data_Dictionary 37-row 'service events' reading stays a 37-row count of Data_Dictionary whose meaning is unverified; the count-only basis does not make it an established count of service events", async () => {
-      const entry = await countOnlyMeasure("i-dictionary", "sheet_5", SERVICE_DEFINITION);
-      ids.i.dictionary = entry;
-      const [row] = await query(
-        "SELECT m.measured_value::int, c.statement FROM kai.evidence_measurements m JOIN kai.claims c ON c.evidence_item_id = m.evidence_item_id WHERE m.evidence_item_id = $1::uuid",
-        [entry.evidenceItemId]);
-      const persisted = (await findingReview(adminApi, entry.claimId)).body.data.measurement;
-      Object.assign(row, { worksheet_key: persisted.worksheet_key, worksheet_name: persisted.worksheet_name });
-      assert.deepEqual([row.measured_value, row.worksheet_key, row.worksheet_name], [37, "sheet_5", "Data_Dictionary"], "the actual row count and worksheet identity");
-      assert.match(row.statement, /^The promoted source records 37 service events with no reporting period defined in selected worksheet sheet_5 \(record count: one service event per selected worksheet data row;/);
-      const view = (await findingReview(adminApi, entry.claimId)).body.data;
-      assert.equal(view.ordinary_internal_rule.basis, "count_only_story_testimonial_present");
-      assert.ok(view.limitations.some((limitation) => limitation.code === "measurement.record_meaning_human_defined"), "the human meaning stays an unverified limitation");
-      // Package 3: the misleading readings (including the I4 sentence once accepted) cannot become the finding;
-      // the model is not asked, and every request stores the composed 37-row finding for sheet_5.
-      const composed = await composedFor(entry.evidenceItemId);
-      assert.match(composed, /^37 nonblank data rows were counted in worksheet sheet_5, with 0 blank rows excluded and 0 exact-duplicate rows included in the count\. /);
-      let generated;
-      for (const text of [
-        "In sheet_5 the organization delivered 37 service events to participants.",
-        "The promoted source records 37 service events, a count of records under the human-defined definition; 37 verified service completions.",
-        DICTIONARY_TEXT,
-      ]) {
-        modelOverride.text = text;
-        const callsBefore = modelCalls.length;
-        generated = await generate(adminApi, "evidence-summary", [entry.claimId], `i4-${createHash("sha256").update(text).digest("hex").slice(0, 12)}`);
-        modelOverride.text = null;
-        assert.ok([200, 201].includes(generated.status), `${text}: ${J(generated.body)}`);
-        assert.equal(modelCalls.length, callsBefore, "the model is not called");
-        assert.deepEqual((await storedBlocksOf(generated.body.data.generatedContentDraftId)).map((block) => block.text), [composed]);
-      }
-      const report = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, generated.body.data.generatedContentDraftId));
-      assert.equal(report.status, 200, J(report.body).slice(0, 400));
-      assert.match(report.body, /\*\*37 nonblank data rows were counted in Data_Dictionary \(`sheet_5`\)\*\*; 0 blank rows were excluded\. A person at the organization defined each row as one `service event`; KAI did not verify that meaning, so this is a count of rows, not an established count of `service events`\./);
-      assert.match(report.body, /That each counted row is one `service event` \[CIT-001\]: a person at the organization defined that meaning, and KAI did not verify it\./);
-      assert.doesNotMatch(report.body, /\b37 service events\b/, "37 service events is never stated, in any section including References");
-      assert.doesNotMatch(report.body, /volume-of-activity|activity volume/, "a Data_Dictionary row count is not an activity figure");
-      assert.match(report.body, /## Conclusion\n\nOn the available evidence, the promoted source contains 37 nonblank data rows in Data_Dictionary \(`sheet_5`\)\. Each figure is a count of rows\./);
-      writeFileSync(join(WORKDIR, "xlsx-i-data-dictionary-37.md"), report.body);
-      // Nothing was rewritten or decided.
-      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 0, claim: 0, coverage: 0 });
-      assert.equal((await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [entry.claimId]))[0].statement, row.statement);
-      results.i4 = { measured: [row.measured_value, row.worksheet_name, row.worksheet_key], keyFinding: "37 nonblank data rows were counted in Data_Dictionary (sheet_5); meaning 'service event' human-defined, not verified", misleadingRepliesNeverAsked: 3 };
-    });
-
-    await test("I5: an undetermined story category, another category present or unknown, AI processing denied, and a stale source version stay restricted", async () => {
-      // H's sources record story/testimonial 'unknown': still outside the rule, and its Get Kinder-reviewed Evidence Summary stays with Get Kinder.
-      assert.equal((await findingReview(adminApi, ids.h.s5.claimId)).body.data.ordinary_internal_rule.basis, null);
-      const [hDraft] = await query(
-        `SELECT d.generated_content_draft_id::text FROM kai.generated_content_drafts d JOIN kai.generated_content_blocks b ON b.generated_content_draft_id = d.generated_content_draft_id
-           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
-          WHERE c.claim_id = $1::uuid AND d.content_type = 'evidence_summary' ORDER BY d.created_at DESC LIMIT 1`, [ids.h.s3Restricted.claimId]);
-      const unknownReport = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, hDraft.generated_content_draft_id));
-      assert.equal(unknownReport.status, 422, J(unknownReport.body).slice(0, 300));
-      assert.ok(J(unknownReport.body).includes("story_testimonial_not_cleared"));
-      const variants = {
-        "minors present": { ...STORY_PRESENT, reviewed_minor_data_status: "present" },
-        "personal information unknown": { ...STORY_PRESENT, reviewed_personal_data_status: "unknown" },
-        "AI processing denied": { ...STORY_PRESENT, reviewed_llm_processing_allowed: false },
-      };
-      const observed = {};
-      for (const [label, snapshot] of Object.entries(variants)) {
-        const entry = await countOnlyMeasure(`i-${label.replace(/\W+/g, "-")}`, "sheet_3", ROW_DEFINITION, snapshot);
-        const internal = await internalEligibility(entry.claimId);
-        const rule = (await findingReview(adminApi, entry.claimId)).body.data.ordinary_internal_rule;
-        modelOverride.text = ROW_TEXT;
-        const callsBefore = modelCalls.length;
-        const generated = await generate(adminApi, "evidence-summary", [entry.claimId], `i5-${label.replace(/\W+/g, "-")}`);
-        modelOverride.text = null;
-        assert.equal(internal.eligible, false, label);
-        assert.equal(rule.basis, null, label);
-        assert.equal(generated.status, 422, `${label}: ${J(generated.body)}`);
-        assert.equal(modelCalls.length, callsBefore, `${label}: the model is never called`);
-        observed[label] = { blockers: internal.blockerCodes, reasons: rule.reasons, generation: (generated.body.blockers || []).map((b) => b.blocking_reason).concat(generated.body.error?.code || []) };
-      }
-      // A stale source version: the eligibility, the generation and the earlier report all fail closed.
-      const entry = ids.i.dictionary;
-      await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [entry.source_version_id]);
-      try {
-        const rule = (await findingReview(adminApi, entry.claimId)).body.data?.ordinary_internal_rule;
-        const generated = await generate(adminApi, "evidence-summary", [entry.claimId], "i5-stale");
-        const [staleDraft] = await query(
-          `SELECT d.generated_content_draft_id::text FROM kai.generated_content_drafts d JOIN kai.generated_content_blocks b ON b.generated_content_draft_id = d.generated_content_draft_id
-             JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id WHERE c.claim_id = $1::uuid LIMIT 1`, [entry.claimId]);
-        const staleReport = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, staleDraft.generated_content_draft_id));
-        assert.ok(![200, 201].includes(generated.status), J(generated.body));
-        assert.ok([409, 422].includes(staleReport.status), `${staleReport.status}`);
-        if (rule) assert.equal(rule.applies, false);
-        observed.stale = { rule: rule ?? null, generation: generated.status, report: staleReport.status };
-      } finally {
-        await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [entry.source_version_id]);
-      }
-      results.i5 = observed;
-    });
-
-    await test("I6: a mixed draft citing an ineligible claim is not covered by its count-only claim; a later negative evidence decision withdraws the authority from the earlier report", async () => {
-      const entry = ids.i.row;
-      // A structural fact from the same story-present source, in the same Evidence Summary.
-      const extracted = await adminApi("POST", evidenceExtractionPath(ORG_X, entry.source_version_id), {});
-      assert.equal(extracted.status, 200, J(extracted.body));
-      const [structural] = await query(
-        "SELECT evidence_item_id::text FROM kai.evidence_items WHERE source_version_id = $1::uuid AND evidence_type = 'dictionary_field_presence_fact' ORDER BY created_at LIMIT 1", [entry.source_version_id]);
-      const claimed = await adminApi("POST", claimProposalPath(ORG_X, structural.evidence_item_id), {});
-      assert.ok([200, 201].includes(claimed.status), J(claimed.body));
-      const structuralClaimId = claimed.body.data.claim.claim_id;
-      const [{ statement: structuralStatement }] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [structuralClaimId]);
-      modelOverride.text = (claim) => (claim.claimId === entry.claimId ? ROW_TEXT : structuralStatement);
-      const mixed = await generate(adminApi, "evidence-summary", [entry.claimId, structuralClaimId].sort(), "i6-mixed");
-      modelOverride.text = null;
-      assert.ok([200, 201].includes(mixed.status), J(mixed.body));
-      const mixedReport = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, mixed.body.data.generatedContentDraftId));
-      assert.equal(mixedReport.status, 422, J(mixedReport.body).slice(0, 300));
-      const mixedReasons = (mixedReport.body.blockers || []).map((b) => b.blocking_reason);
-      assert.ok(mixedReasons.includes("story_testimonial_not_cleared") && mixedReasons.includes("cited_claims_not_currently_eligible"), J(mixedReasons));
-      // Before: the earlier count-only report is available.
-      const earlier = clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.i.rowDraftId);
-      assert.equal((await adminApi("GET", earlier)).status, 200);
-      // Get Kinder's reviewer records a negative evidence decision on the count.
-      const evidenceQueue = await queueOf("evidence_review", entry.evidenceItemId);
-      const negative = await gkApi("POST", evidenceReviewCompletePath(ORG_X, entry.evidenceItemId, evidenceQueue.review_queue_item_id),
-        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "not_supported" }));
-      assert.equal(negative.status, 200, J(negative.body));
-      const rule = (await findingReview(adminApi, entry.claimId)).body.data.ordinary_internal_rule;
-      assert.deepEqual([rule.applies, rule.basis], [false, null], "a negative decision defeats the count-only basis");
-      assert.equal((await internalEligibility(entry.claimId)).eligible, false);
-      const withdrawn = await adminApi("GET", earlier);
-      assert.equal(withdrawn.status, 422, J(withdrawn.body).slice(0, 300));
-      const withdrawnReasons = (withdrawn.body.blockers || []).map((b) => b.blocking_reason);
-      assert.ok(withdrawnReasons.includes("story_testimonial_not_cleared"), J(withdrawnReasons));
-      modelOverride.text = ROW_TEXT;
-      const regenerated = await generate(adminApi, "evidence-summary", [entry.claimId], "i6-after-negative");
-      modelOverride.text = null;
-      assert.equal(regenerated.status, 422, J(regenerated.body));
-      // The source category is still recorded as present.
-      assert.equal(await storyCategoryOf(entry.intake_sensitivity_profile_id), "present");
-      results.i6 = { mixed: [mixedReport.status, mixedReasons], afterNegativeDecision: { rule, earlierReport: withdrawn.status, reasons: withdrawnReasons, regeneration: regenerated.status } };
+      assert.deepEqual(outcomes[1], outcomes[0]); assert.deepEqual(outcomes[2], outcomes[0]);
+      results.i = { flags: ["absent", "present", "unknown"], identicalOutcomes: true };
     });
 
     // -----------------------------------------------------------------------
@@ -2461,202 +2198,8 @@ async function runXlsxAcceptance() {
          UNION ALL SELECT row_to_json(c)::text FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE e.source_version_id = $1::uuid
        ) t`, [sourceVersionId]))[0].digest;
 
-    await test("K1 (A, B, C, D): on one story-present version, Service_Events (sheet_3) and Data_Dictionary (sheet_5) each produce a server-composed count-only Evidence Summary with its own count, worksheet, evidence and claim; together they stay separate", async () => {
-      const fileId = await apiUpload(adminApi, countOnlyWorkbook("k-two-worksheets"), ids.batchId);
-      await dispatcher.whenIdle();
-      const promoted = await decideAndPromote(adminApi, fileId, STORY_PRESENT);
-      const sv = promoted.source_version_id;
-      const ADVERSARIAL_DEFINITION = Object.freeze({ ...SERVICE_DEFINITION, counted_unit: "distinct participant", unit_label: "verified distinct participants" });
-      const entries = {};
-      for (const [key, definition] of [["sheet_3", ROW_DEFINITION], ["sheet_5", SERVICE_DEFINITION], ["sheet_2", ADVERSARIAL_DEFINITION]]) {
-        const measured = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), definition);
-        assert.equal(measured.status, 200, J(measured.body));
-        const evidenceItemId = measured.body.data.evidenceItem.evidence_item_id;
-        const proposed = await adminApi("POST", claimProposalPath(ORG_X, evidenceItemId), {});
-        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
-        entries[key] = { evidenceItemId, claimId: proposed.body.data.claim.claim_id };
-      }
-      ids.k = { sv, entries, intakeSensitivityProfileId: promoted.intake_sensitivity_profile_id };
-      // The authoritative measurements, one per worksheet, on the one version.
-      const rows = await query(
-        `SELECT m.worksheet_key, m.evidence_item_id::text, m.measured_value::int, m.blank_record_count::int, m.duplicate_record_count::int, l.coordinates->>'sheet_key' AS locator_key
-           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
-           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id WHERE m.source_version_id = $1::uuid ORDER BY m.worksheet_key`, [sv]);
-      assert.deepEqual(rows.map((row) => [row.worksheet_key, row.locator_key, row.measured_value, row.blank_record_count, row.duplicate_record_count, row.evidence_item_id]), [
-        ["sheet_2", "sheet_2", 84, 0, 0, entries.sheet_2.evidenceItemId],
-        ["sheet_3", "sheet_3", 364, 0, 2, entries.sheet_3.evidenceItemId],
-        ["sheet_5", "sheet_5", 37, 0, 0, entries.sheet_5.evidenceItemId],
-      ]);
-      assert.equal(await storyCategoryOf(promoted.intake_sensitivity_profile_id), "present");
-      for (const key of ["sheet_3", "sheet_5", "sheet_2"]) {
-        const internal = await internalEligibility(entries[key].claimId);
-        assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], key);
-        assert.equal((await findingReview(adminApi, entries[key].claimId)).body.data.ordinary_internal_rule.basis, "count_only_story_testimonial_present", key);
-        assert.deepEqual(await decisionCounts(entries[key].claimId, entries[key].evidenceItemId), { evidence: 0, claim: 0, coverage: 0 }, `${key}: no fabricated approval`);
-      }
-      const approvalsBefore = await approvalState();
-      const lineageBefore = await lineageDigest(sv);
-      const callsBefore = modelCalls.length;
-      modelOverride.text = DICTIONARY_TEXT; // whatever a model would say is never asked for
-
-      const generateFor = async (keys, tag) => {
-        const generated = await generate(adminApi, "evidence-summary", keys.map((key) => entries[key].claimId).sort(), tag);
-        assert.ok([200, 201].includes(generated.status), `${tag}: ${J(generated.body)}`);
-        const draftId = generated.body.data.generatedContentDraftId;
-        const [draft] = await query("SELECT content_type, requested_audience, validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
-        assert.deepEqual([draft.content_type, draft.requested_audience], ["evidence_summary", "internal"]);
-        assert.ok(draft.validator_results.every((result) => result.severity === "pass"), J(draft.validator_results));
-        assert.deepEqual(draft.validator_results.map((result) => result.validator_key), ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-008", "VAL-GEN-010", "VAL-GEN-005"],
-          "the composed text passed the same validators, actually run");
-        const stored = await storedBlocksOf(draftId);
-        const expected = await Promise.all(keys.map(async (key) => [await composedFor(entries[key].evidenceItemId), entries[key].claimId, entries[key].evidenceItemId]));
-        assert.deepEqual(stored.map((block) => [block.text, block.claim_id, block.evidence_item_id]).sort(), expected.sort(), `${tag}: one composed block per claim, citing its own evidence`);
-        const report = await markdownOf(draftId);
-        assert.equal(report.status, 200, `${tag}: ${J(report.body).slice(0, 400)}`);
-        assert.doesNotMatch(report.body, SENTINEL_RE, `${tag}: no sentinel (cells, header, file name, definition text)`);
-        // The counted worksheet's own identity is allowed; no other worksheet, cell value or column name.
-        assert.doesNotMatch(report.body.replaceAll("Participant_Register (`sheet_2`)", ""), SOURCE_TEXT_RE, `${tag}: no cell value, column name or other worksheet`);
-        assert.doesNotMatch(report.body, /volume-of-activity|activity volume/, tag);
-        writeFileSync(join(WORKDIR, `xlsx-k-${tag}.md`), report.body);
-        return { draftId, report: report.body, stored };
-      };
-
-      // A: Service_Events alone.
-      const s3 = await generateFor(["sheet_3"], "k-sheet-3");
-      assert.match(s3.report, /\*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 exact-duplicate records\*\*; 0 blank rows were excluded\./);
-      assert.doesNotMatch(s3.report, affirmingCountOf(364), "no event, participant, completion or outcome count");
-      for (const other of [/\b37\b/, /sheet_5/, /Data_Dictionary/, /\b84\b/, /sheet_2/, new RegExp(entries.sheet_5.evidenceItemId), new RegExp(entries.sheet_5.claimId)]) {
-        assert.doesNotMatch(withoutTimestamps(s3.report), other, `sheet_3's report acquires nothing of another worksheet: ${other}`);
-      }
-      for (const id of [entries.sheet_3.claimId, entries.sheet_3.evidenceItemId, sv]) assert.ok(s3.report.includes(`\`${id}\``), id);
-      // B: the original 37-row defect.
-      const s5 = await generateFor(["sheet_5"], "k-sheet-5");
-      assert.match(s5.report, /\*\*37 nonblank data rows were counted in Data_Dictionary \(`sheet_5`\)\*\*; 0 blank rows were excluded\./);
-      assert.doesNotMatch(s5.report, affirmingCountOf(37), "37 service events is never established, in any section");
-      assert.doesNotMatch(s5.report, /In selected worksheet sheet_5 the promoted source records 37 service events|The promoted source records 37 service events/, "neither the I4 sentence nor the label-bearing claim statement is reproduced");
-      const section = (markdown, from, to) => markdown.slice(markdown.indexOf(`\n## ${from}\n`), markdown.indexOf(`\n## ${to}\n`));
-      for (const [from, to] of [["Key findings", "Reporting period"], ["What this evidence establishes", "What this evidence does not establish"], ["Analysis", "Generated narrative"],
-        ["Generated narrative", "Source and evidence traceability"], ["Conclusion", "References"]]) {
-        assert.doesNotMatch(section(s5.report, from, to), /(?<!`)service events?(?!`)/, `${from}: the label appears only quoted as the recorded definition`);
-      }
-      assert.match(s5.report.slice(s5.report.indexOf("\n## References\n")), /authoritative measurement 37 nonblank data rows in Data_Dictionary \(`sheet_5`\)/);
-      for (const other of [/\b364\b/, /sheet_3/, /Service_Events/, new RegExp(entries.sheet_3.evidenceItemId)]) assert.doesNotMatch(withoutTimestamps(s5.report), other, `sheet_5's report: ${other}`);
-      // D: an adversarial label stays quoted and attributed; its finding is the row count.
-      const s2 = await generateFor(["sheet_2"], "k-sheet-2");
-      assert.match(s2.report, /\*\*84 nonblank data rows were counted in Participant_Register \(`sheet_2`\)\*\*/);
-      assert.doesNotMatch(s2.report, affirmingCountOf(84));
-      for (const line of s2.report.split("\n").filter((entry) => /distinct participant/.test(entry))) {
-        assert.match(line, /`(?:verified )?distinct participants?`/, `only quoted as the recorded label: ${line}`);
-      }
-      // C: both worksheets in one Evidence Summary (the existing multi-claim contract), each citation separate.
-      const both = await generateFor(["sheet_3", "sheet_5"], "k-both-worksheets");
-      const findings = section(both.report, "Key findings", "Reporting period").split("\n").filter((line) => line.startsWith("- "));
-      assert.equal(findings.length, 2);
-      const finding3 = findings.find((line) => line.includes("sheet_3"));
-      const finding5 = findings.find((line) => line.includes("sheet_5"));
-      assert.match(finding3, /^- \*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 exact-duplicate records\*\*/);
-      assert.match(finding5, /^- \*\*37 nonblank data rows were counted in Data_Dictionary \(`sheet_5`\)\*\*/);
-      assert.doesNotMatch(finding3, /\b37\b|sheet_5/);
-      assert.doesNotMatch(finding5, /\b364\b|sheet_3|duplicate|2026-09/);
-      assert.doesNotMatch(withoutTimestamps(both.report), /\b401\b/, "the two counts are never combined");
-      for (const key of ["sheet_3", "sheet_5"]) {
-        const ref = both.report.split("\n").find((line) => line.startsWith("- [CIT-") && line.includes(entries[key].claimId));
-        assert.ok(ref.includes(entries[key].evidenceItemId) && ref.includes(key), `${key}: its own reference`);
-      }
-      modelOverride.text = null;
-      assert.equal(modelCalls.length, callsBefore, "the model was never called for a count-only Evidence Summary");
-      assert.equal(await lineageDigest(sv), lineageBefore, "no measurement, definition, evidence or claim row was rewritten");
-      assert.deepEqual(await approvalState(), approvalsBefore, "no approval, coverage acceptance, release decision or manifest");
-      assert.equal(await storyCategoryOf(promoted.intake_sensitivity_profile_id), "present");
-      ids.k.drafts = { sheet_3: s3.draftId, sheet_5: s5.draftId, sheet_2: s2.draftId, both: both.draftId };
-      results.k1 = { sourceVersionId: sv, sheet3: s3.stored[0].text, sheet5: s5.stored[0].text, drafts: ids.k.drafts, modelCalled: false };
-    });
-
-    // A count-only Evidence Summary stored by the pre-fix revision, which asked the
-    // model and accepted the I4 sentence ("... records 37 service events.").
-    const storePreComposedDraft = async (claimId, idempotencyKey) => {
-      const checkout = process.env.KAI_XLSX_ACCEPTANCE_PRE_COMPOSED_CHECKOUT;
-      assert.ok(checkout, "the runner supplies the pre-fix checkout");
-      const previous = {
-        service: await import(join(checkout, "Backend/kai/services/kaiGeneratedContentService.js")),
-        generator: await import(join(checkout, "Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js")),
-      };
-      const [admin] = await query("SELECT user_id::text FROM kai.users WHERE legacy_public_userdata_id = $1", [USERS.clientAdmin]);
-      modelOverride.text = DICTIONARY_TEXT;
-      const callsBefore = modelCalls.length;
-      const historical = await previous.service.createEvidenceSummaryDraft({
-        organizationId: ORG_X, engagementId: PROJECT_X, requestedAudience: "internal", claimIds: [claimId],
-        idempotencyKey, now: new Date().toISOString(),
-        actorContext: { actorType: "human", actorUserId: admin.user_id, kaiRoles: [], platformSuperuser: false,
-          organizationMemberships: [{ organization_id: ORG_X, membership_status: "active", role_name: "client_admin" }] },
-      }, {
-        env: process.env,
-        draftGenerator: previous.generator.createProductionEvidenceSummaryDraftGenerator(),
-        metadataOnlyAudit: { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } },
-      });
-      modelOverride.text = null;
-      assert.equal(historical.ok, true, `the previous revision accepted it: ${J(historical)}`);
-      assert.equal(modelCalls.length, callsBefore + 1, "the previous revision asked the model");
-      return historical.data.generatedContentDraftId;
-    };
-    // One draft row with its blocks and citations.
-    const draftDigest = async (draftId) => (await query(
-      `SELECT md5(row_to_json(d)::text || coalesce((SELECT string_agg(row_to_json(b)::text, '|' ORDER BY b.ordinal) FROM kai.generated_content_blocks b WHERE b.generated_content_draft_id = d.generated_content_draft_id), '')
-               || coalesce((SELECT string_agg(row_to_json(c)::text, '|' ORDER BY c.generated_content_citation_id) FROM kai.generated_content_citations c
-                            JOIN kai.generated_content_blocks b ON b.generated_content_block_id = c.generated_content_block_id WHERE b.generated_content_draft_id = d.generated_content_draft_id), '')) AS digest
-         FROM kai.generated_content_drafts d WHERE d.generated_content_draft_id = $1::uuid`, [draftId]))[0].digest;
-
-    await test("K2 (E): a count-only draft the previous revision stored with the I4 sentence is not delivered; it is kept unchanged, and a newly composed draft is available", async () => {
-      const entry = ids.k.entries.sheet_5;
-      const I4_TEXT = DICTIONARY_TEXT; // begins "In selected worksheet sheet_5 the promoted source records 37 service events."
-      assert.ok(I4_TEXT.startsWith("In selected worksheet sheet_5 the promoted source records 37 service events."));
-      const historicalId = await storePreComposedDraft(entry.claimId, "k2-previous-revision");
-      const [stored] = await storedBlocksOf(historicalId);
-      assert.deepEqual([stored.text, stored.evidence_item_id], [I4_TEXT, entry.evidenceItemId], "the previously accepted sentence is stored");
-      const before = await draftDigest(historicalId);
-      // The corrected direct Markdown read does not deliver it.
-      const refused = await markdownOf(historicalId);
-      assert.equal(refused.status, 422, J(refused.body).slice(0, 400));
-      const reasons = (refused.body.blockers || []).map((blocker) => blocker.blocking_reason);
-      assert.ok(reasons.includes("count_only_content_boundary_exceeded"), J(reasons));
-      assert.doesNotMatch(J(refused.body), /37 service events/, "the refusal carries no draft text");
-      assert.equal(await draftDigest(historicalId), before, "the historical draft, blocks and citations are kept unchanged");
-      // A newly composed draft for the same claim is available.
-      const fresh = await markdownOf(ids.k.drafts.sheet_5);
-      assert.equal(fresh.status, 200);
-      const regenerated = await generate(adminApi, "evidence-summary", [entry.claimId], "k2-after-historical");
-      assert.ok([200, 201].includes(regenerated.status), J(regenerated.body));
-      assert.equal((await markdownOf(regenerated.body.data.generatedContentDraftId)).status, 200);
-      results.k2 = { historicalDraft: historicalId, historicalRead: [refused.status, reasons], newDraftRead: 200, historicalUnchanged: true };
-    });
-
-    await test("K3 (F): the count-only finding stays restricted - Impact Narrative and funder refused, other roles and tenants refused, a negative review decision withdraws it - and the category stays present", async () => {
-      const entry = ids.k.entries.sheet_3;
-      const narrative = await generate(adminApi, "impact-narrative", [entry.claimId], "k3-narrative");
-      assert.deepEqual([narrative.status, narrative.body.blockers?.map((b) => b.blocking_reason)], [422, ["story_testimonial_count_only_operation_not_permitted"]]);
-      const funder = await gkAdminApi("POST", `${orgPath()}/generated-content-drafts/evidence-summary/funder`, { claim_ids: [entry.claimId], idempotency_key: "k3-funder", engagement_id: PROJECT_X });
-      assert.ok([403, 422].includes(funder.status), J(funder.body));
-      assert.equal((await internalEligibility(entry.claimId, "public")).eligible, false);
-      const path = clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.k.drafts.sheet_3);
-      for (const [label, status] of Object.entries({
-        contributor: (await contributorApi("GET", path)).status, reviewer: (await reviewerApi("GET", path)).status,
-        otherOrganizationAdmin: (await adminYApi("GET", path)).status, gkReviewerOnCustomerRoute: (await gkApi("GET", path)).status,
-        crossTenantPath: (await adminYApi("GET", clientInternalReportMarkdownPath(ORG_Y, PROJECT_Y, ids.k.drafts.sheet_3))).status,
-      })) assert.ok([403, 404].includes(status), `${label}: ${status}`);
-      // A negative evidence decision on sheet_5 withdraws its reports; sheet_3's report is unaffected.
-      const s5 = ids.k.entries.sheet_5;
-      const evidenceQueue = await queueOf("evidence_review", s5.evidenceItemId);
-      const negative = await gkApi("POST", evidenceReviewCompletePath(ORG_X, s5.evidenceItemId, evidenceQueue.review_queue_item_id),
-        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "not_supported" }));
-      assert.equal(negative.status, 200, J(negative.body));
-      const withdrawn = await markdownOf(ids.k.drafts.sheet_5);
-      assert.equal(withdrawn.status, 422, J(withdrawn.body).slice(0, 300));
-      assert.equal((await markdownOf(ids.k.drafts.both)).status, 422, "the two-worksheet draft cites the withdrawn claim");
-      assert.equal((await markdownOf(ids.k.drafts.sheet_3)).status, 200, "sheet_3's own report keeps its own authority");
-      assert.equal((await generate(adminApi, "evidence-summary", [s5.claimId], "k3-after-negative")).status, 422);
-      assert.equal(await storyCategoryOf(ids.k.intakeSensitivityProfileId), "present");
-      results.k3 = { impactNarrative: 422, funder: funder.status, sheet5AfterNegative: withdrawn.status, sheet3: 200 };
-    });
+    // The old K1-K3 source-restricted authority expectations were replaced
+    // by I's current matrix and kai-story-flag-assembled-independence.spec.js.
 
     // -----------------------------------------------------------------------
     // L: the assembled journey (owner prompt "KAI — Package 4", 2026-10-31).
@@ -2816,249 +2359,23 @@ async function runXlsxAcceptance() {
         evidence: { sheet_3: entries.sheet_3.evidenceItemId, sheet_5: entries.sheet_5.evidenceItemId }, switching: switching.length, audits };
     });
 
-    await test("L2 (5, 6, 8): both claims are internally eligible as counts only with stories present and no decision; the drafting UI generates the sheet_3, sheet_5 and two-worksheet Evidence Summaries without the model, each read whole through the direct Markdown route; a mixed draft asks the model for its other claim only", async () => {
-      const { sv, entries, intakeSensitivityProfileId } = ids.l;
-      const approvalsBefore = await approvalState();
-      // 5: current internal eligibility, each claim against its own measurement and evidence item.
-      const eligibility = {};
-      for (const key of ["sheet_3", "sheet_5"]) {
-        const { claimId, evidenceItemId } = entries[key];
-        const internal = await internalEligibility(claimId);
-        assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], `${key}: ${J(internal.blockerCodes)}`);
-        const view = (await findingReview(adminApi, claimId)).body.data;
-        assert.deepEqual([view.ordinary_internal_rule, view.review_requirement, view.internal_eligibility],
-          [{ applies: true, reasons: [], basis: "count_only_story_testimonial_present" }, null, { eligible: true, blocker_codes: [] }], key);
-        assert.deepEqual([view.measurement.worksheet_key, view.measurement.worksheet_name], [key, L_EXPECTED[key].name], `${key}: its own measurement`);
-        assert.deepEqual([view.source_permissions.categories.reviewed_story_testimonial_status, view.source_permissions.allowed_use_status, view.source_permissions.ai_processing_allowed],
-          ["present", "allowed", true]);
-        for (const category of ["reviewed_personal_data_status", "reviewed_minor_data_status", "reviewed_health_housing_justice_immigration_status",
-          "reviewed_indigenous_governance_status", "reviewed_small_cell_risk_status"]) assert.equal(view.source_permissions.categories[category], "absent", `${key}: ${category}`);
-        assert.ok(view.limitations.some((limitation) => limitation.code === "measurement.record_meaning_human_defined"), `${key}: the meaning stays unverified`);
-        assert.deepEqual(await decisionCounts(claimId, evidenceItemId), { evidence: 0, claim: 0, coverage: 0 }, `${key}: no fabricated review`);
-        for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(claimId, audience)).eligible, false, `${key}: ${audience}`);
-        const listed = { internal: await claimListedFor(claimId, "internal"), funder: await claimListedFor(claimId, "funder") };
-        assert.deepEqual(listed, { internal: true, funder: false }, key);
-        eligibility[key] = { eligible: true, basis: view.ordinary_internal_rule.basis, eligibleClaimsProjection: listed };
+    await test("L2: a mixed two-worksheet source selection keeps both findings and the informational note", async () => {
+      const { entries } = ids.l;
+      const claimIds = [entries.sheet_3.claimId, entries.sheet_5.claimId];
+      const { composeMeasurementDisclosure } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
+      modelOverride.text = claim => `${claim.claimStatement} ${composeMeasurementDisclosure(claim.limitationCodes)}`;
+      for (const type of ["evidence-summary", "impact-narrative"]) {
+        const result = await generate(adminApi, type, claimIds, `l-mixed-${type}`);
+        assert.ok([200, 201].includes(result.status), J(result.body));
+        assert.deepEqual([...new Set(result.body.data.blocks.flatMap(block => block.citations.map(c => c.claimId)))].sort(), [...claimIds].sort());
+        const report = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, result.body.data.generatedContentDraftId));
+        assert.equal(report.status, 200, J(report.body));
+        assert.match(report.body, /364 nonblank data rows/); assert.match(report.body, /37 nonblank data rows/);
+        assert.match(report.body, /This source may contain stories or testimonials/);
       }
-      const narrative = await generate(adminApi, "impact-narrative", [entries.sheet_3.claimId], "l2-narrative");
-      assert.deepEqual([narrative.status, narrative.body.blockers?.map((b) => b.blocking_reason)], [422, ["story_testimonial_count_only_operation_not_permitted"]]);
-
-      // 6: generate in the drafting UI, open the report, and read it through the direct Markdown route.
-      const generateInUi = async (keys, tag) => {
-        await openStudioTab("Data Sources");
-        for (const key of keys) {
-          await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${entries[key].claimId}"]`)), `${key} claim`);
-          await adminPage.clickIn(`[data-client-claim="${entries[key].claimId}"] input[type=checkbox]`, `use ${key} in an internal draft`);
-        }
-        modelOverride.text = DICTIONARY_TEXT; // whatever a model would say is never asked for
-        const callsBefore = modelCalls.length;
-        const mark = adminPage.mark();
-        await adminPage.clickButton("Generate internal evidence summary");
-        await adminPage.waitForText("Internal evidence summary created");
-        await adminPage.idle();
-        modelOverride.text = null;
-        assert.equal(modelCalls.length, callsBefore, `${tag}: the model is not called`);
-        const posts = adminPage.requestsSince(mark).filter((request) => request.method === "POST");
-        assert.deepEqual(posts.map((request) => pathOf(request)), [`${orgPath()}/generated-content-drafts/evidence-summary`], `${tag}: one generation request`);
-        assert.ok([200, 201].includes(posts[0].status), `${tag}: ${posts[0].status}`);
-        const [draft] = await query(
-          `SELECT d.generated_content_draft_id::text, d.content_type, d.requested_audience, d.validator_results, r.content_type AS run_content_type, r.requested_audience AS run_audience
-             FROM kai.generated_content_drafts d JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id AND r.organization_id = d.organization_id
-            WHERE d.organization_id = $1::uuid ORDER BY d.created_at DESC LIMIT 1`, [ORG_X]);
-        assert.deepEqual([draft.content_type, draft.requested_audience, draft.run_content_type, draft.run_audience], ["evidence_summary", "internal", "evidence_summary", "internal"]);
-        assert.deepEqual(draft.validator_results.map((result) => [result.validator_key, result.severity]),
-          [["VAL-GEN-001", "pass"], ["VAL-GEN-002", "pass"], ["VAL-GEN-003", "pass"], ["VAL-GEN-004", "pass"], ["VAL-GEN-008", "pass"], ["VAL-GEN-010", "pass"], ["VAL-GEN-005", "pass"]],
-          `${tag}: the validators ran and passed`);
-        const stored = await storedBlocksOf(draft.generated_content_draft_id);
-        const expected = await Promise.all(keys.map(async (key) => [await composedFor(entries[key].evidenceItemId), entries[key].claimId, entries[key].evidenceItemId]));
-        assert.deepEqual(stored.map((block) => [block.text, block.claim_id, block.evidence_item_id]).sort(), expected.sort(), `${tag}: one composed block per claim, citing its own evidence`);
-        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${draft.generated_content_draft_id}"]`)), `${tag}: the report action`);
-        await adminPage.clickIn(`[data-client-open-internal-report="${draft.generated_content_draft_id}"]`, "Open report");
-        await adminPage.waitFor(async () => ((await textOf(adminPage, "[data-client-internal-report-markdown]")) || "").startsWith("# Internal Evidence Summary"), `${tag}: the report`);
-        const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
-        const downloaded = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draft.generated_content_draft_id));
-        const direct = await markdownOf(draft.generated_content_draft_id);
-        assert.deepEqual([downloaded.status, direct.status], [200, 200], `${tag}: ${J(direct.body).slice(0, 300)}`);
-        assert.ok(downloaded.body === shown && direct.body === shown, `${tag}: the direct read is the report shown`);
-        writeFileSync(join(WORKDIR, `xlsx-l-${tag}.md`), shown);
-        return { draftId: draft.generated_content_draft_id, report: shown };
-      };
-
-      // Every section of a report: each cited worksheet's own count, worksheet, method, duplicates,
-      // limitations and lineage; nothing of an uncited worksheet; no unsupported conclusion anywhere.
-      const assertWholeReport = (report, keys, tag) => {
-        const bare = withoutTimestamps(report);
-        const sections = sectionsOf(report);
-        assert.deepEqual(Object.keys(sections), REPORT_SECTIONS, `${tag}: every section, in order`);
-        for (const key of keys) {
-          const { name, counted, duplicates, definition } = L_EXPECTED[key];
-          const { claimId, evidenceItemId } = entries[key];
-          const worksheet = `${name} (\`${key}\`)`;
-          assert.match(sections["Key findings"], new RegExp(`- \\*\\*${counted} nonblank data rows were counted in ${escapeRe(worksheet)}${duplicates ? `, including ${duplicates} exact-duplicate records` : ""}\\*\\*; 0 blank rows were excluded\\. `), `${tag} ${key}: the finding`);
-          assert.ok(sections["Key findings"].includes(`A person at the organization defined each row as one \`${definition.counted_unit}\`; KAI did not verify that meaning, so this is a count of rows, not an established count of \`${definition.unit_label}\`.`), `${tag} ${key}: the meaning is attributed and unverified`);
-          assert.ok(sections["Measurement definition and counting method"].includes(`Row count of ${worksheet}`), `${tag} ${key}: the method heading`);
-          assert.ok(sections["Measurement definition and counting method"].includes(`- **Selected worksheet:** ${worksheet}.`));
-          assert.ok(sections["Measurement definition and counting method"].includes(`${counted} data records after the header, minus 0 blank records excluded = **${counted}** counted.`), `${tag} ${key}: the arithmetic`);
-          assert.ok(sections["Duplicate records"].includes(duplicates
-            ? `The profiler reported ${duplicates} exact-duplicate records. They are included in the count of ${counted}, not removed or merged`
-            : "The profiler reported no exact-duplicate records."), `${tag} ${key}: duplicate treatment`);
-          assert.ok(sections["What this evidence establishes"].includes(`The promoted source version \`${sv}\` contains ${counted} nonblank data rows in ${worksheet}.`), `${tag} ${key}: establishes`);
-          assert.ok(sections["What this evidence does not establish"].includes(`That each counted row is one \`${definition.counted_unit}\``), `${tag} ${key}: not established`);
-          assert.ok(sections["Generated narrative"].includes(`${counted} nonblank data rows were counted in worksheet ${key}, with 0 blank rows excluded and ${duplicates} exact-duplicate rows included in the count.`), `${tag} ${key}: the composed block`);
-          assert.ok(sections["Source and evidence traceability"].split("\n").some((line) => line.includes(`\`${claimId}\``) && line.includes(`\`${evidenceItemId}\``) && line.includes(`\`${sv}\``) && line.includes("| yes |")), `${tag} ${key}: traceability`);
-          assert.ok(sections.Conclusion.includes(`${counted} nonblank data rows in ${worksheet}`), `${tag} ${key}: the conclusion`);
-          const reference = sections.References.split("\n").find((line) => line.includes(`Claim \`${claimId}\``));
-          assert.ok(reference && reference.includes(`evidence \`${evidenceItemId}\`: authoritative measurement ${counted} nonblank data rows in ${worksheet} (0 blank rows excluded, ${duplicates} exact-duplicate row${duplicates === 1 ? "" : "s"} included).`)
-            && reference.includes(`version \`${sv}\``), `${tag} ${key}: the reference: ${reference}`);
-          assert.doesNotMatch(bare, affirmingCountOf(counted), `${tag} ${key}: no event, participant, completion, service or outcome count`);
-          assert.doesNotMatch(report, new RegExp(`\\b${counted} ${escapeRe(definition.unit_label)}\\b`), `${tag} ${key}: the human label is never the count`);
-        }
-        for (const key of ["sheet_3", "sheet_5"].filter((entry) => !keys.includes(entry))) {
-          for (const other of [new RegExp(`\\b${L_EXPECTED[key].counted}\\b`), new RegExp(key), new RegExp(L_EXPECTED[key].name), new RegExp(entries[key].evidenceItemId), new RegExp(entries[key].claimId)]) {
-            assert.doesNotMatch(bare, other, `${tag}: nothing of the uncited ${key}: ${other}`);
-          }
-        }
-        // Each line citing one worksheet's claim carries nothing of the other worksheet.
-        const refKey = Object.fromEntries(sections.References.split("\n").filter((line) => line.startsWith("- [CIT-"))
-          .map((line) => [/\[(CIT-\d+)\]/.exec(line)[1], keys.find((key) => line.includes(entries[key].claimId))]));
-        assert.deepEqual(Object.values(refKey).sort(), [...keys].sort(), `${tag}: one reference per cited claim`);
-        for (const line of bare.split("\n")) {
-          const cited = [...new Set(line.match(/CIT-\d+/g) || [])];
-          if (cited.length !== 1) continue;
-          const other = otherSheet(refKey[cited[0]]);
-          assert.doesNotMatch(line, new RegExp(`\\b${L_EXPECTED[other].counted}\\b|${other}|${L_EXPECTED[other].name}|${entries[other].evidenceItemId}|${entries[other].claimId}`),
-            `${tag}: a line citing ${refKey[cited[0]]} names nothing of ${other}: ${line}`);
-        }
-        assert.doesNotMatch(bare, /\b401\b/, `${tag}: the counts are never added`);
-        assert.match(sections["Generated narrative"], /composed by KAI from the persisted measurement of each cited claim, not written by a language model/);
-        assert.match(sections["Measurement definition and counting method"], new RegExp(`\`${SELECTED_XLSX_METHOD}\`: every data row after the header row of the explicitly selected worksheet`));
-        assert.match(sections["Measurement definition and counting method"], /Definition, inclusion and exclusion text:\*\* not reproduced/);
-        for (const code of ["source.story_testimonial_present_count_only", "measurement.record_meaning_human_defined"]) assert.ok(sections["Data quality and limitations"].includes(`\`${code}\``), `${tag}: ${code}`);
-        assert.ok(sections["Authority for internal use"].includes("`VAL-GEN-010`"));
-        assert.match(sections["Authority for internal use"], /Currently eligible for internal use: yes; basis: a count-only use of a source recorded as containing stories or testimonials/);
-        assert.doesNotMatch(report, /Currently eligible for internal use: no|recorded review decisions/, `${tag}: no review decision is claimed`);
-        assert.doesNotMatch(report, /volume-of-activity|activity volume/, `${tag}: a row count is not an activity figure`);
-        assert.doesNotMatch(report, SENTINEL_RE, `${tag}: no sentinel from cells, headers, file name or definition text`);
-        assert.doesNotMatch(report, SOURCE_TEXT_RE, `${tag}: no cell value, column name or uncounted worksheet`);
-        for (const heading of ["Key findings", "What this evidence establishes", "Analysis", "Generated narrative", "Conclusion"]) {
-          const affirmed = sections[heading].replace(/not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact/, "");
-          assert.doesNotMatch(affirmed, /participant|people|unique|distinct|outcome|completion|(?<!not )verified|because of|caused|increase|impact/i, `${tag} ${heading}: no person, completion, outcome or causal claim`);
-          assert.doesNotMatch(affirmed, /(?<!`)service events?(?!`)/, `${tag} ${heading}: the label appears only quoted as the recorded definition`);
-        }
-      };
-
-      const callsBefore = modelCalls.length;
-      const s3 = await generateInUi(["sheet_3"], "sheet-3");
-      assertWholeReport(s3.report, ["sheet_3"], "sheet_3");
-      assert.match(s3.report, /\*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 exact-duplicate records\*\*; 0 blank rows were excluded\. The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\./);
-      const s5 = await generateInUi(["sheet_5"], "sheet-5");
-      assertWholeReport(s5.report, ["sheet_5"], "sheet_5");
-      assert.doesNotMatch(s5.report, /In selected worksheet sheet_5 the promoted source records 37 service events|The promoted source records 37 service events/, "neither the I4 sentence nor the label-bearing statement");
-      const both = await generateInUi(["sheet_3", "sheet_5"], "both-worksheets");
-      assertWholeReport(both.report, ["sheet_3", "sheet_5"], "both");
-      assert.equal(sectionsOf(both.report)["Key findings"].split("\n").filter((line) => line.startsWith("- ")).length, 2, "one finding per worksheet");
-      assert.equal(modelCalls.length, callsBefore, "zero model calls for the three count-only Evidence Summaries");
-      assert.deepEqual(await approvalState(), approvalsBefore, "no approval, follow-up, coverage acceptance, release decision or manifest");
-      const followupsBefore = approvalsBefore.client_followups;
-
-      // 8: a mixed draft. The count-only block is composed from its measurement; the model is asked for
-      // the other claim only, through the existing path and validators; the read is refused for that claim.
-      const extracted = await adminApi("POST", evidenceExtractionPath(ORG_X, sv), {});
-      assert.equal(extracted.status, 200, J(extracted.body));
-      const [structural] = await query(
-        "SELECT evidence_item_id::text FROM kai.evidence_items WHERE source_version_id = $1::uuid AND evidence_type = 'dictionary_field_presence_fact' ORDER BY created_at LIMIT 1", [sv]);
-      const claimed = await adminApi("POST", claimProposalPath(ORG_X, structural.evidence_item_id), {});
-      assert.ok([200, 201].includes(claimed.status), J(claimed.body));
-      const structuralClaimId = claimed.body.data.claim.claim_id;
-      const [{ statement: structuralStatement }] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [structuralClaimId]);
-      modelOverride.text = (claim) => (claim.claimId === structuralClaimId ? structuralStatement : DICTIONARY_TEXT);
-      const mixedCallsBefore = modelCalls.length;
-      const mixed = await generate(adminApi, "evidence-summary", [entries.sheet_3.claimId, structuralClaimId].sort(), "l2-mixed");
       modelOverride.text = null;
-      assert.ok([200, 201].includes(mixed.status), J(mixed.body));
-      assert.equal(modelCalls.length, mixedCallsBefore + 1, "one model request");
-      const asked = modelCalls[modelCalls.length - 1];
-      assert.deepEqual(asked.claims.map((claim) => claim.claimId), [structuralClaimId], "the model is asked for the non-count-only claim only");
-      assert.doesNotMatch(asked.serialized, new RegExp(`${entries.sheet_3.claimId}|${entries.sheet_3.evidenceItemId}|\\b364\\b|Service_Events`), "nothing of the count-only claim reaches the model");
-      assert.doesNotMatch(asked.serialized, SENTINEL_RE);
-      const [mixedDraft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [mixed.body.data.generatedContentDraftId]);
-      assert.ok(mixedDraft.validator_results.every((result) => result.severity === "pass"), J(mixedDraft.validator_results));
-      const mixedBlocks = await storedBlocksOf(mixed.body.data.generatedContentDraftId);
-      assert.deepEqual(mixedBlocks.map((block) => [block.claim_id, block.text]).sort(),
-        [[entries.sheet_3.claimId, await composedFor(entries.sheet_3.evidenceItemId)], [structuralClaimId, structuralStatement]].sort(), "composed count-only block; model-drafted other block");
-      const mixedRead = await markdownOf(mixed.body.data.generatedContentDraftId);
-      const mixedReasons = (mixedRead.body.blockers || []).map((blocker) => blocker.blocking_reason);
-      assert.equal(mixedRead.status, 422, J(mixedRead.body).slice(0, 300));
-      assert.ok(mixedReasons.includes("cited_claims_not_currently_eligible"), J(mixedReasons));
-
-      // The structural claim's proposal routes its own P2-04 gap follow-ups (existing behaviour); nothing else is recorded.
-      const approvalsAfter = await approvalState();
-      assert.deepEqual({ ...approvalsAfter, client_followups: followupsBefore }, approvalsBefore, "no approval, coverage acceptance, release decision or manifest");
-      const newFollowupClaims = await query(
-        "SELECT DISTINCT claim_id::text FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = ANY($2::uuid[])",
-        [ORG_X, [entries.sheet_3.claimId, entries.sheet_5.claimId, structuralClaimId]]);
-      assert.deepEqual(newFollowupClaims.map((row) => row.claim_id), approvalsAfter.client_followups > followupsBefore ? [structuralClaimId] : [],
-        "follow-ups only for the structural claim, none for the count-only claims");
-      assert.equal(await storyCategoryOf(intakeSensitivityProfileId), "present");
-      ids.l.drafts = { sheet_3: s3.draftId, sheet_5: s5.draftId, both: both.draftId };
-      ids.l.reports = { sheet_3: s3.report, sheet_5: s5.report, both: both.report };
-      results.l2 = { eligibility, drafts: ids.l.drafts, markdown: { sheet_3: 200, sheet_5: 200, both: 200 }, countOnlyModelCalls: 0,
-        mixed: { modelAskedFor: [structuralClaimId], read: [mixedRead.status, mixedReasons] } };
     });
 
-    await test("L3 (7): a pre-fix draft of the sheet_5 claim is refused and kept unchanged; a negative decision on sheet_5 withdraws the sheet_5 and two-worksheet reports, and the sheet_3 report keeps its own authority", async () => {
-      const { entries, drafts, reports, intakeSensitivityProfileId, sheet5Digest } = ids.l;
-      for (const [label, draftId] of Object.entries(drafts)) assert.equal((await markdownOf(draftId)).status, 200, `${label} before`);
-      // The historical unsafe draft: stored by the pre-fix revision with the I4 sentence.
-      const historicalId = await storePreComposedDraft(entries.sheet_5.claimId, "l3-previous-revision");
-      const [stored] = await storedBlocksOf(historicalId);
-      assert.deepEqual([stored.text, stored.claim_id, stored.evidence_item_id], [DICTIONARY_TEXT, entries.sheet_5.claimId, entries.sheet_5.evidenceItemId], "the previously accepted sentence is stored");
-      const historicalBefore = await draftDigest(historicalId);
-      const refused = await markdownOf(historicalId);
-      const refusedReasons = (refused.body.blockers || []).map((blocker) => blocker.blocking_reason);
-      assert.equal(refused.status, 422, J(refused.body).slice(0, 300));
-      assert.ok(refusedReasons.includes("count_only_content_boundary_exceeded"), J(refusedReasons));
-      assert.doesNotMatch(J(refused.body), /37 service events/, "the refusal carries no draft text");
-      assert.equal(await draftDigest(historicalId), historicalBefore, "kept unchanged, with its blocks and citations");
-      assert.equal((await markdownOf(drafts.sheet_5)).status, 200, "the composed sheet_5 report stays available");
-
-      // A negative evidence decision on sheet_5, through Get Kinder's existing review path.
-      const approvalsBefore = await approvalState();
-      const draftsBefore = Object.fromEntries(await Promise.all(Object.entries(drafts).map(async ([label, draftId]) => [label, await draftDigest(draftId)])));
-      const evidenceQueue = await queueOf("evidence_review", entries.sheet_5.evidenceItemId);
-      const negative = await gkApi("POST", evidenceReviewCompletePath(ORG_X, entries.sheet_5.evidenceItemId, evidenceQueue.review_queue_item_id),
-        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "not_supported" }));
-      assert.equal(negative.status, 200, J(negative.body));
-      const after = {};
-      for (const [label, draftId] of Object.entries(drafts)) {
-        const read = await markdownOf(draftId);
-        after[label] = [read.status, read.status === 200 ? null : (read.body.blockers || []).map((blocker) => blocker.blocking_reason)];
-        if (label === "sheet_3") assert.equal(read.body, reports.sheet_3, "the sheet_3 report is delivered exactly as before");
-      }
-      assert.deepEqual(after.sheet_3, [200, null], "sheet_3 keeps its own authority");
-      assert.equal(after.sheet_5[0], 422, J(after.sheet_5));
-      assert.equal(after.both[0], 422, `the two-worksheet report cites the withdrawn claim: ${J(after.both)}`);
-      assert.equal((await internalEligibility(entries.sheet_5.claimId)).eligible, false);
-      assert.equal((await internalEligibility(entries.sheet_3.claimId)).eligible, true);
-      assert.equal((await findingReview(adminApi, entries.sheet_3.claimId)).body.data.ordinary_internal_rule.basis, "count_only_story_testimonial_present");
-      assert.equal((await generate(adminApi, "evidence-summary", [entries.sheet_5.claimId], "l3-after-negative")).status, 422);
-      // Only the recorded decision is new: no approval, coverage, release or manifest; nothing deleted or rewritten.
-      const approvalsAfter = await approvalState();
-      assert.deepEqual(approvalsAfter, { ...approvalsBefore, evidence_decisions: approvalsBefore.evidence_decisions + 1 });
-      assert.deepEqual(await decisionCounts(entries.sheet_5.claimId, entries.sheet_5.evidenceItemId), { evidence: 1, claim: 0, coverage: 0 });
-      assert.deepEqual(await decisionCounts(entries.sheet_3.claimId, entries.sheet_3.evidenceItemId), { evidence: 0, claim: 0, coverage: 0 });
-      for (const [label, draftId] of Object.entries(drafts)) assert.equal(await draftDigest(draftId), draftsBefore[label], `${label}: withdrawn at read time, not modified`);
-      assert.equal(await draftDigest(historicalId), historicalBefore);
-      assert.equal(await sheet5Digest(entries.sheet_5.evidenceItemId), entries.sheet_5.digest, "the 37-row measurement, definition, evidence and claim are unchanged apart from the review projection");
-      const [projected] = await query("SELECT evidence_review_status FROM kai.evidence_items WHERE evidence_item_id = $1::uuid", [entries.sheet_5.evidenceItemId]);
-      assert.notEqual(projected.evidence_review_status, "unreviewed", J(projected));
-      assert.equal(await storyCategoryOf(intakeSensitivityProfileId), "present");
-      results.l3 = { historicalDraft: historicalId, historicalRead: [refused.status, refusedReasons], afterNegativeSheet5Decision: after, sheet5EvidenceReviewStatus: projected.evidence_review_status };
-    });
-
-    // M: the Measurement MVP controls in Count records, operated through the
-    // mounted application: keep a proposed paired outcome, state and correct
-    // its meaning, record a rate, reload, propose the claim, and be refused.
     await test("M: in Count records the administrator keeps a paired outcome, states and corrects its meaning, records a rate, reloads and proposes the claim; invalid and unauthorized actions are refused", async () => {
       // Synthetic learners L01-L14, each with a pre and a post observation of one instrument version.
       const pre = [2, 3, 1, 4, 2, 3, 3, 2, 1, 4, 2, 5, 3, 2];

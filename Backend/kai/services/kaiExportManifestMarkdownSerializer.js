@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
 import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 import { composeFreeImpactAssessmentView, serializeFreeImpactAssessmentToMarkdown } from "./kaiFreeImpactAssessmentRenderer.js";
@@ -65,7 +66,7 @@ export function serializeExportManifestRenderModelToMarkdown(renderModel) {
     lines.push(`Organization: ${organizationName ? `${normalizeScalar(organizationName)} ` : ""}(${inlineCode(organizationId)})`);
     if (engagementId) lines.push(`Engagement: ${engagementCode ? `${inlineCode(engagementCode)} ` : ""}(${inlineCode(engagementId)})`);
   }
-  lines.push("", "## Content");
+  lines.push("", STORY_SOURCE_NOTE, "", "## Content");
 
   for (const block of renderModel.content.blocks) {
     lines.push(

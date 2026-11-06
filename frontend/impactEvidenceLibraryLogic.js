@@ -220,7 +220,6 @@ export const CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS = Object.freeze([
   "minor_information_not_cleared",
   "sensitive_information_not_cleared",
   "indigenous_governance_not_cleared",
-  "story_testimonial_not_cleared",
   "small_cell_risk_not_cleared",
   "cited_claims_not_currently_eligible",
   "source_version_not_current",
@@ -235,9 +234,6 @@ export const CLIENT_INTERNAL_REPORT_REASONS = Object.freeze([
   // Owner prompt 2026-10-26: every cited claim is a structural fact (which
   // columns a source has), so the draft is not an impact report.
   "structural_facts_only",
-  // Owner prompt 2026-10-30: a count-only Evidence Summary of a story-present
-  // source whose persisted text goes beyond its counts (VAL-GEN-010).
-  "count_only_content_boundary_exceeded",
 ]);
 
 export function clientInternalReportMarkdownPath(organizationId, engagementId, generatedContentDraftId) {

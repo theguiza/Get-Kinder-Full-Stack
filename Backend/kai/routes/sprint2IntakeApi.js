@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE_CODE, STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
 import { attachKaiSprint2ActorContext } from "../middleware/kaiSprint2Authentication.js";
@@ -143,6 +144,7 @@ const EXACT_VERIFICATION_PHASE_PATTERN =
   /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|upload_url_storage_provider_not_gcs|upload_url_object_key_missing|upload_url_mime_type_missing|upload_url_lifecycle_repository_missing|upload_url_gcs_provider_missing|upload_url_gcs_provider_disabled|upload_url_gcs_provider_signed_url_capability_missing|upload_url_gcs_provider_max_upload_size_missing|upload_url_gcs_provider_unclassified_storage_not_configured|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_allowed_use_not_allowed|source_promotion_candidate_review_incomplete|source_promotion_successor_invalid|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02|source_promotion_predecessor_version_read_23514|source_promotion_predecessor_version_read_p0001|source_promotion_predecessor_version_read_22p02|source_promotion_successor_file_format_read_23514|source_promotion_successor_file_format_read_p0001|source_promotion_successor_file_format_read_22p02|source_promotion_predecessor_version_retire_23514|source_promotion_predecessor_version_retire_p0001|source_promotion_predecessor_version_retire_22p02)$/;
 
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
+  [STORY_SOURCE_NOTE_CODE]: STORY_SOURCE_NOTE,
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
   blocked_attempt_audit_failed: "Blocked-attempt audit failed without changing the validator response.",
   duplicate_in_batch: "A new intake version of a file already in this batch was created.",
@@ -509,6 +511,7 @@ function sendMarkdownAttachment(res, result) {
   if (markdown == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`);
   return res.send(markdown);
@@ -523,6 +526,7 @@ function sendInternalReportMarkdownAttachment(res, result) {
   const filename = result.data.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md";
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   return res.send(markdown);
@@ -534,6 +538,7 @@ function sendGrantResponsePacketMarkdownAttachment(res, result) {
   if (markdown == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME}"`);
   return res.send(markdown);
@@ -545,6 +550,7 @@ function sendGrantResponsePacketExportManifestMarkdownAttachment(res, result) {
   if (markdown == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader(
     "Content-Disposition",
@@ -559,6 +565,7 @@ function sendBoardReportingCandidateExportManifestMarkdownAttachment(res, result
   if (markdown == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader(
     "Content-Disposition",
@@ -573,6 +580,7 @@ function sendCsvAttachment(res, result) {
   if (csv == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_CSV_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME}"`);
   return res.send(csv);
@@ -584,6 +592,7 @@ function sendPdfAttachment(res, result) {
   if (pdf == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_PDF_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME}"`);
   return res.send(pdf);
@@ -595,6 +604,7 @@ function sendDocxAttachment(res, result) {
   if (docx == null) return sendKaiError(res, "system_error");
 
   res.status(200);
+  res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);
   res.setHeader("Content-Type", EXPORT_MANIFEST_DOCX_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_DOCX_ATTACHMENT_FILENAME}"`);
   return res.send(docx);

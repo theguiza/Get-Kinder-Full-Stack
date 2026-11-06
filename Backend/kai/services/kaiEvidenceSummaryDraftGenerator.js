@@ -4,7 +4,6 @@ import {
   GENERATOR_RESULT_REASON,
   GENERATOR_RESULT_REASONS,
 } from "../dictionary/postgresGeneratedContentRepository.js";
-import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { isMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
 import { isDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
@@ -70,16 +69,6 @@ const MEASUREMENT_INSTRUCTION = [
   "and name the coverage limitations; never call the records distinct or the period verified.",
 ].join(" ");
 
-// The generator-side counterpart of VAL-GEN-010, for a count from a source
-// recorded as containing stories or testimonials.
-const COUNT_ONLY_INSTRUCTION = [
-  `For a claim whose limitationCodes include ${COUNT_ONLY_LIMITATION_CODE}:`,
-  "its source is recorded as containing stories or testimonials, and only its record count may be used;",
-  "state the number as a count of rows in the named worksheet, whose meaning a person at the organization defined and KAI did not verify;",
-  "name the selected worksheet key when the claim gives one; use no quotation marks, no first person,",
-  "and no words about stories, testimonials, people, participants, clients, outcomes, completions or results unless the claim statement uses them.",
-].join(" ");
-
 // The generator-side counterpart of VAL-GEN-008 for a source-derived
 // measurement (paired outcome change, tabular count or rate).
 const DERIVED_MEASUREMENT_INSTRUCTION = [
@@ -92,10 +81,6 @@ const DERIVED_MEASUREMENT_INSTRUCTION = [
 
 function hasDerivedMeasurementClaims(claims) {
   return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.some(isDerivedLimitationCode));
-}
-
-function hasCountOnlyClaims(claims) {
-  return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.includes(COUNT_ONLY_LIMITATION_CODE));
 }
 
 function hasMeasurementLimitations(claims) {
@@ -174,7 +159,6 @@ export function createProductionEvidenceSummaryDraftGenerator({
         // P2-01M measured claims only, so every other request's prompt is
         // byte-for-byte unchanged.
         ...(hasMeasurementLimitations(generatorInput.claims) ? [MEASUREMENT_INSTRUCTION] : []),
-        ...(hasCountOnlyClaims(generatorInput.claims) ? [COUNT_ONLY_INSTRUCTION] : []),
         ...(hasDerivedMeasurementClaims(generatorInput.claims) ? [DERIVED_MEASUREMENT_INSTRUCTION] : []),
       ].join(" "),
       messages: [{

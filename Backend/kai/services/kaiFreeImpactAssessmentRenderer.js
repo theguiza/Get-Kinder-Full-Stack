@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { parseFreeImpactAssessment } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
@@ -99,7 +100,7 @@ export function serializeFreeImpactAssessmentToMarkdown(view, { contractLine }) 
   if (view.organizationName) lines.push(`**Organization:** ${text(view.organizationName)}  `);
   if (view.reportIdentity || view.engagementCode) lines.push(`**Project:** ${text(view.reportIdentity || view.engagementCode)}  `);
   if (view.reportingPeriod) lines.push(`**Reporting period:** ${view.reportingPeriod}  `);
-  lines.push(`**Status:** ${audienceSentence(view.audience)}`, "", `_${READING_NOTE}_`);
+  lines.push(`**Status:** ${audienceSentence(view.audience)}`, "", `_${READING_NOTE}_`, "", STORY_SOURCE_NOTE);
   for (const section of view.sections) {
     lines.push("", `## ${section.number}. ${section.title}`);
     section.blocks.forEach((block, index) => {
@@ -130,6 +131,7 @@ export function renderFreeImpactAssessmentPdf(doc, view, { contractLine }) {
   doc.text(audienceSentence(view.audience));
   doc.moveDown(0.3);
   doc.font("Helvetica-Oblique").text(READING_NOTE);
+  doc.text(STORY_SOURCE_NOTE);
   for (const section of view.sections) {
     doc.moveDown(0.8);
     doc.fontSize(14).font("Helvetica-Bold").text(`${section.number}. ${section.title}`);

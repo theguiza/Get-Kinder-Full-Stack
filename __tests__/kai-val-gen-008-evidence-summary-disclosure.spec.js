@@ -280,17 +280,17 @@ test("composition is deterministic and idempotent, and adds no numbers or releas
   assert.deepEqual(unmeasured.blocks, [block(FIELD.claim.claimStatement, FIELD)], "a block citing no measured claim is unchanged");
 });
 
-test("composition leaves the count-only composer's exact block untouched", () => {
+test("composition applies the same material disclosures to a historical count-only block", () => {
   const countOnlyCodes = [...M112.limitationCodes, COUNT_ONLY_LIMITATION_CODE].sort();
   const countOnly = { ...M112, claim: { ...M112.claim, limitationCodes: countOnlyCodes } };
   const text = composeCountOnlyFindingText(M112.measurementRow);
   const composed = compose([block(text, countOnly)], [countOnly]);
   assert.equal(composed.ok, true);
-  assert.equal(composed.blocks[0].text, text);
-  assert.equal(countOnlyBlockMatchesMeasurement(composed.blocks[0], M112.measurementRow), true);
+  assert.ok(composed.blocks[0].text.startsWith(text));
+  assert.match(composed.blocks[0].text, /Measurement disclosure for the cited count/);
   const validation = validate(composed.blocks, [countOnly]);
   assert.equal(validation.ok, true, JSON.stringify(validation.blockers));
-  assert.ok(validation.results.some((item) => item.validator_key === "VAL-GEN-010" && item.severity === "pass"));
+  assert.ok(!validation.results.some((item) => item.validator_key === "VAL-GEN-010"));
 });
 
 // --- Real repository orchestration (createGeneratedContentDraft) on a fake
@@ -440,7 +440,7 @@ test("orchestration: the ordinary 112-record Evidence Summary with truthful para
   assert.equal(state.measurementReads, 1, "the measured-claim branch read its measurement");
   const [draft] = state.drafts;
   const validators = Object.fromEntries(draft.validator_results.map((item) => [item.validator_key, item.severity]));
-  assert.deepEqual(validators, { "VAL-GEN-001": "pass", "VAL-GEN-002": "pass", "VAL-GEN-003": "pass", "VAL-GEN-004": "pass", "VAL-GEN-008": "pass", "VAL-GEN-005": "pass" });
+  assert.deepEqual(validators, { "VAL-GEN-001": "pass", "VAL-GEN-002": "pass", "VAL-GEN-003": "pass", "VAL-GEN-004": "pass", "VAL-GEN-008": "pass", "VAL-GEN-005": "pass", "INFO-SOURCE-STORY-001": "pass" });
   // What persisted is exactly what passed validation, and what is returned.
   const [persisted] = state.blocks;
   const expected = compose([block(PARAPHRASE_112, M112)], [M112]).blocks[0].text;
@@ -683,7 +683,7 @@ test("final acceptance: the 112-record count-and-worksheet-only draft persists w
   assertAcceptedWithDisclosure("final acceptance", observed, M112, modelText);
   const { result, state } = observed;
   assert.deepEqual(Object.fromEntries(state.drafts[0].validator_results.map((item) => [item.validator_key, item.severity])),
-    { "VAL-GEN-001": "pass", "VAL-GEN-002": "pass", "VAL-GEN-003": "pass", "VAL-GEN-004": "pass", "VAL-GEN-008": "pass", "VAL-GEN-005": "pass" });
+    { "VAL-GEN-001": "pass", "VAL-GEN-002": "pass", "VAL-GEN-003": "pass", "VAL-GEN-004": "pass", "VAL-GEN-008": "pass", "VAL-GEN-005": "pass", "INFO-SOURCE-STORY-001": "pass" });
 
   // Case B: exactly the disclosures of the authoritative codes, after the verbatim model text.
   const persisted = state.blocks[0].text;

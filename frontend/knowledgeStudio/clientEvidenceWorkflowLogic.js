@@ -449,10 +449,6 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
     return `${label} cannot be drafted from: part of its evidence lineage could not be found in this organization. `
       + "Nothing was created.";
   }
-  if (result?.body?.blockers?.[0]?.blocking_reason === "story_testimonial_count_only_operation_not_permitted") {
-    return "A selected measured finding comes from a source recorded as containing stories or testimonials. It is usable as a record "
-      + "count in an internal Evidence Summary only; other draft types need Get Kinder's review. Nothing was created.";
-  }
   if (result?.body?.blockers?.[0]?.blocking_reason === "assessment_no_eligible_evidence") {
     return "None of the selected claims is currently eligible for an assessment assertion. Their current conditions are shown under Claims for internal drafts. No assessment was created.";
   }
@@ -751,7 +747,6 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   minor_information_not_cleared: "A cited source is not recorded as free of information about minors.",
   sensitive_information_not_cleared: "A cited source is not recorded as free of health, housing, justice, or immigration information.",
   indigenous_governance_not_cleared: "A cited source is not recorded as free of Indigenous or governance-sensitive information.",
-  story_testimonial_not_cleared: "A cited source is not recorded as free of stories or testimonials.",
   small_cell_risk_not_cleared: "A cited source is not recorded as free of small-cell re-identification risk.",
   cited_claims_not_currently_eligible: "At least one cited claim is not currently eligible for internal use.",
   source_version_not_current: "A cited source version is recorded as non-current.",
@@ -766,7 +761,6 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
   audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
   validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
   structural_facts_only: "Every claim it cites is a structural fact (which columns a source has), so it documents source structure, not a programme result.",
-  count_only_content_boundary_exceeded: "It cites a count from a source recorded as containing stories or testimonials, and its text goes beyond that count.",
 });
 
 export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "

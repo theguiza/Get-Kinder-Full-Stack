@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
 
@@ -68,6 +69,7 @@ export function serializeExportManifestRenderModelToDocx(renderModel) {
     bodyParagraph(`Render model contract: ${normalizeScalar(renderModel.renderModelContractVersion)}`),
     bodyParagraph(`Content type: ${normalizeScalar(renderModel.exportCandidate.contentType)}`),
     bodyParagraph(`Requested audience: ${normalizeScalar(renderModel.exportCandidate.requestedAudience)}`),
+    bodyParagraph(STORY_SOURCE_NOTE),
     headingParagraph("Content"),
   ];
 

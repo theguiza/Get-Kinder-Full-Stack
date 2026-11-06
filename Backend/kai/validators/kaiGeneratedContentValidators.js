@@ -1,3 +1,4 @@
+import { LEGACY_STORY_LIMITATION_CODE, withoutLegacyStoryLimitations } from "../../../shared/kaiStorySourceInformation.js";
 import {
   MEASUREMENT_DISCLOSURE_RULES,
   MEASUREMENT_LIMITATION_CODES,
@@ -51,20 +52,10 @@ const VALIDATOR_KEYS = Object.freeze([
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
 const CAUSAL_PATTERN = /\b(causes?|caused|causing|because|due to|drives?|driven by|leads? to|led to|results? in|resulted in|attribut(?:e|ed|able) to|impact(?:s|ed)?|increases?|decreases?|reduces?|improves?|worsens?)\b/gi;
 
-/**
- * VAL-GEN-010: the output boundary of the count-only internal authority for
- * a story-present source (postgresOrdinaryInternalFactAuthority.js). Its
- * claims reach the model only as the composed record-count restatement, so
- * no story or testimonial text can be copied from the input; this checks
- * that a block citing such a claim adds none either. It is a closed lexical
- * boundary, in the manner of VAL-GEN-004: no quotation, no story, testimony
- * or first-person wording, no participant, outcome or completion assertion
- * that the cited statements do not themselves contain (the human-defined
- * unit label is part of the statement), and, for a selected-worksheet
- * count, the worksheet the rows were counted in. It does not interpret
- * meaning; it bounds what a count-only block may say.
- */
-export const COUNT_ONLY_LIMITATION_CODE = "source.story_testimonial_present_count_only";
+// Historical row-count composition helpers. They remain pure utilities for
+// older fixture text; no generation, report or release admission calls them.
+// The current VAL-GEN-010 below checks actual quotations for every source.
+export const COUNT_ONLY_LIMITATION_CODE = LEGACY_STORY_LIMITATION_CODE;
 const QUOTATION_PATTERN = /["\u201C\u201D\u201E\u00AB\u00BB]/;
 const FIRST_PERSON_PATTERN = /\bI\b|\b(?:me|my|mine|myself)\b/i;
 const STORY_PATTERN = /\b(stor(?:y|ies)|testimon(?:y|ies|ial|ials)|quot(?:e|es|ed|ing|ation|ations)|anecdot\w*|said|says|told|tells|recount\w*|shared|narrat\w*)\b/i;
@@ -91,18 +82,9 @@ export function countOnlyBlockViolations(text, citedStatements) {
 }
 
 /**
- * The count-only finding, composed by the server from the exact cited
- * measurement (owner prompt "KAI — Package 3", 2026-10-31). VAL-GEN-010 is
- * lexical: a word the cited statement uses, such as the human-defined unit
- * label, is not an added assertion, so model prose could state "37 service
- * events" for 37 rows of a data dictionary. Instead a count-only claim's
- * block is this text: the parser-established numbers, the worksheet key of
- * the measurement's own locator, and the reporting period as attested.
- * It never contains the human label, the definition text, a worksheet or
- * file name, or any other free text, and it depends only on immutable
- * measurement and definition values, so the same measurement always
- * composes the same text. It satisfies VAL-GEN-004, -008 and -010 on their
- * own terms; they still run on it.
+ * Truthful row-count model input, composed from the cited measurement for
+ * every source. Human labels and definition text do not establish what a
+ * counted row represents. The original claim remains the validation authority.
  */
 const CSV_COUNT_ONLY_METHOD = "p1_csv_profile_data_records_excluding_blank_v1";
 
@@ -177,7 +159,6 @@ export function composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, m
       .filter((citation) => claimById.get(citation.claimId)?.evidenceItemId === citation.evidenceItemId)
       .map((citation) => claimById.get(citation.claimId)))
       .filter((claim) => claim
-        && !(claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE)
         && (claim.limitationCodes || []).some(isMeasuredClaimCode));
     if (measured.length === 0) {
       composed.push(block);
@@ -368,6 +349,9 @@ export function validateGeneratedContentDraft({
   contentType = null,
   authoritativeReadiness = null,
 } = {}) {
+  generationClaims = (generationClaims || []).map((claim) => ({
+    ...claim, limitationCodes: withoutLegacyStoryLimitations(claim.limitationCodes),
+  }));
   const claimById = generationClaimsById(generationClaims || []);
   const citationSet = requestedCitationSet(generationClaims || []);
   const results = [];
@@ -428,7 +412,7 @@ export function validateGeneratedContentDraft({
   // present the period as verified or the records as distinct. Evaluated
   // only when a generation claim carries measurement limitation codes, so
   // every other draft's validator set is unchanged.
-  // In an Evidence Summary block that cites no count-only claim (owner prompt,
+  // In an Evidence Summary block (owner prompt,
   // 2026-11-01), a forbidden word counts only when asserted, not negated
   // ("not independently verified", "not unique"); the records are never
   // asserted to be distinct/unique unless a cited statement itself says so;
@@ -442,8 +426,7 @@ export function validateGeneratedContentDraft({
       const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
       const codes = new Set(cited.flatMap((claim) => (claim.limitationCodes || []).filter(isMeasuredClaimCode)));
       const text = block.text || "";
-      const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE
-        && !cited.some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE));
+      const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE;
       const contradicts = (pattern) => (evidenceSummaryRules ? affirmativeMatches(text, pattern).length > 0 : pattern.test(text));
       for (const rule of [...MEASUREMENT_DISCLOSURE_RULES, ...DERIVED_DISCLOSURE_RULES]) {
         const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
@@ -476,26 +459,28 @@ export function validateGeneratedContentDraft({
     );
   }
 
-  // VAL-GEN-010: evaluated only when a generation claim is used under the
-  // count-only basis, so every other draft's validator set is unchanged.
-  if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE))) {
-    const countOnlyViolations = [];
-    for (const block of blocks || []) {
-      const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
-      if (!cited.some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE))) continue;
-      for (const type of countOnlyBlockViolations(block.text, cited.map((claim) => claim.claimStatement || ""))) {
-        countOnlyViolations.push({ type, block_ordinal: block.ordinal });
-      }
+  // VAL-GEN-010 now checks attributed output quotations, for every source and
+  // content type. A source checkbox or historical limitation marker is never
+  // proof of a quotation, consent, or a reason to run a different validator.
+  const ungroundedQuotes = [];
+  let hasQuotation = false;
+  for (const block of blocks || []) {
+    const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)?.claimStatement || "");
+    const text = String(block.text || "");
+    for (const match of text.matchAll(/"([^"\n]+)"|“([^”\n]+)”/g)) {
+      // Typographic quotes and storytelling headings are presentation. A
+      // statement attributed to a speaker/source is independently factual.
+      const prefix = text.slice(Math.max(0, match.index - 120), match.index);
+      if (!/\b(?:said|says|told|reported|wrote|writes|stated|recounted)\b[^.!?\n]{0,60}$/i.test(prefix)) continue;
+      hasQuotation = true;
+      const quotation = match[1] ?? match[2];
+      if (!cited.some((statement) => statement.includes(quotation))) ungroundedQuotes.push(block.ordinal);
     }
-    results.push(
-      countOnlyViolations.length === 0
-        ? pass("VAL-GEN-010")
-        : blocker("VAL-GEN-010", "count_only_content_boundary_exceeded", {
-            violation_count: countOnlyViolations.length,
-            violation_classes: unique(countOnlyViolations.map((violation) => violation.type)).sort(),
-            block_ordinals: unique(countOnlyViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
-          }),
-    );
+  }
+  if (hasQuotation) {
+    results.push(ungroundedQuotes.length === 0
+      ? pass("VAL-GEN-010")
+      : blocker("VAL-GEN-010", "unsupported_quotation", { block_ordinals: unique(ungroundedQuotes) }));
   }
 
   // VAL-GEN-005 checks the draft's requested-audience authority only. It must

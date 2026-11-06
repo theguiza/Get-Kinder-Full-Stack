@@ -1,3 +1,4 @@
+import { STORY_SOURCE_NOTE_RESULT, storySourceWarnings } from "../../../shared/kaiStorySourceInformation.js";
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
@@ -9,7 +10,6 @@ import {
 } from "./postgresClaimTraceabilityRepository.js";
 import {
   composeCountOnlyFindingText,
-  composeCountOnlyAssessmentText,
   ASSESSMENT_SELECTION_NOTE,
   composeEvidenceSummaryMeasurementDisclosures,
   unsupportedAssertionEvidence,
@@ -32,13 +32,6 @@ import {
   derivedMeasurementArithmeticHolds,
   derivedMeasurementLimitationCodes,
 } from "../validators/kaiDerivedMeasurementValidators.js";
-import {
-  COUNT_ONLY_CONTENT_TYPE,
-  COUNT_ONLY_LIMITATION_CODE,
-  COUNT_ONLY_OPERATION_REASON,
-  ORDINARY_AUTHORITY_BASIS,
-  ordinaryInternalAuthorityOf,
-} from "./postgresOrdinaryInternalFactAuthority.js";
 import {
   validateExportManifestEligibility,
   __exportManifestEligibilityValidatorContract,
@@ -1375,7 +1368,7 @@ function toGeneratorInput({ requestedAudience, projections, contentType, authori
     requestedAudience,
     claims: projections.map((claim) => ({
       claimId: claim.claimId,
-      claimStatement: claim.claimStatement,
+      claimStatement: claim.modelClaimStatement ?? claim.claimStatement,
       claimType: claim.claimType,
       evidenceItemId: claim.evidenceItemId,
       sourceId: claim.sourceId,
@@ -1655,10 +1648,6 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       }
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
       const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
-      // The exact cited measurement of each claim used under the count-only
-      // basis in an internal Evidence Summary (claim -> its evidence item ->
-      // that item's measurement and worksheet locator), never the version's.
-      const countOnlyMeasurementByClaimId = new Map();
       const measuredValueByClaimId = new Map();
       for (const traceability of traceabilityResults) {
         if (assessment && traceability.eligible !== true) continue;
@@ -1684,32 +1673,16 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
             );
           }
-          // A story-present source's count is usable under the count-only
-          // basis for an internal Evidence Summary only: where eligibility
-          // rests on that basis, every other content type is refused before
-          // the model. Under it the claim carries the count-only code and
-          // only the closed server projection can cite it in an assessment.
-          const ordinaryAuthority = ordinaryInternalAuthorityOf(traceability);
-          const countOnly = ordinaryAuthority?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
-          if (countOnly && ordinaryAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
-            rollbackFailure(
-              "validation_blocker",
-              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
-            );
-          }
           const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
             { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
             tx,
           );
           if (!measurementRow) rollbackFailure("conflict_current_state_changed");
+          // A parser row count establishes rows, not the human label's meaning.
+          // Apply this factual projection for every source-presence value.
+          projection.modelClaimStatement = composeCountOnlyFindingText(measurementRow);
           measuredValueByClaimId.set(projection.claimId, measurementRow.measured_value);
           measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
-          if (countOnly && contentType === COUNT_ONLY_CONTENT_TYPE) {
-            measurementCodes.push(COUNT_ONLY_LIMITATION_CODE);
-            if (input.requestedAudience === "internal" && measurementRow.evidence_item_id === projection.evidenceItemId) {
-              countOnlyMeasurementByClaimId.set(projection.claimId, measurementRow);
-            }
-          }
         }
         // Measurement MVP: a derived measurement (paired outcome, tabular
         // count or rate) is generated from on the same terms: currently
@@ -1720,17 +1693,6 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
-            );
-          }
-          // A story-present source's numerical measurement is usable under
-          // its basis for an internal Evidence Summary (and so the Free
-          // Impact Assessment) only, exactly as the count-only basis.
-          const derivedAuthority = ordinaryInternalAuthorityOf(traceability);
-          if (derivedAuthority?.basis === ORDINARY_AUTHORITY_BASIS.NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT
-            && derivedAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
-            rollbackFailure(
-              "validation_blocker",
-              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
             );
           }
           const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
@@ -1752,12 +1714,9 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }
 
-      // A count-only claim's block is composed by the server from its own
-      // measurement and is never asked of the model; the model drafts only
-      // the other claims' blocks, and is not called when there are none.
-      // The combined result then passes the same contract, validators,
-      // persistence and audit as any generated draft.
-      const modelProjections = projections.filter((projection) => !countOnlyMeasurementByClaimId.has(projection.claimId));
+      // All selected findings follow the same generator path, irrespective of
+      // source story presence. Numerical support and disclosures still validate.
+      const modelProjections = projections;
       let generatorInput = modelProjections.length > 0
         ? toGeneratorInput({
             requestedAudience: input.requestedAudience,
@@ -1807,46 +1766,6 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
         generatorResult = { blocks: composed.blocks };
       }
-      if (countOnlyMeasurementByClaimId.size > 0) {
-        let modelBlocks = [];
-        if (generatorResult) {
-          const modelClassification = classifyGeneratorResult(generatorResult);
-          if (!modelClassification.ok) {
-            rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
-          }
-          if (generatorResult.blocks.some((block) => block.citations.some((citation) => countOnlyMeasurementByClaimId.has(citation.claimId)))) {
-            rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-010", "count_only_content_boundary_exceeded"));
-          }
-          modelBlocks = generatorResult.blocks;
-        }
-        const countOnlyBlocks = projections
-          .filter((projection) => countOnlyMeasurementByClaimId.has(projection.claimId))
-          .map((projection) => ({
-            text: composeCountOnlyFindingText(countOnlyMeasurementByClaimId.get(projection.claimId)),
-            citations: [{ claimId: projection.claimId, evidenceItemId: projection.evidenceItemId }],
-          }));
-        if (assessment) {
-          const findings = countOnlyBlocks.map((block) => ({ ...block,
-            text: composeCountOnlyAssessmentText(countOnlyMeasurementByClaimId.get(block.citations[0].claimId), "evidence_findings"),
-          }));
-          if (modelBlocks.length > 0) {
-            const nextSection = modelBlocks.findIndex((block) => !/^\[\[assessment:(?:executive_snapshot|evidence_findings)\]\]/.test(block.text));
-            modelBlocks.splice(nextSection, 0, ...findings);
-          } else {
-            const anchor = countOnlyBlocks[0];
-            modelBlocks = ["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]
-              .flatMap((key) => key === "evidence_findings" ? findings : [{
-                citations: anchor.citations,
-                text: composeCountOnlyAssessmentText(countOnlyMeasurementByClaimId.get(anchor.citations[0].claimId), key),
-              }]);
-          }
-          generatorResult = { blocks: modelBlocks.map((block, index) => ({ ...block, ordinal: index + 1 })) };
-        } else {
-          generatorResult = {
-            blocks: [...countOnlyBlocks, ...modelBlocks].map((block, index) => ({ ordinal: index + 1, text: block.text, citations: block.citations })),
-          };
-        }
-      }
       if (assessment && excludedClaims.length > 0) {
         const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
         gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
@@ -1894,6 +1813,10 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           },
         }] };
       }
+
+      // Persist an informational reminder separately from generated prose and
+      // citations. It has no severity/eligibility dependence on a source flag.
+      validation = { ...validation, results: [...validation.results, STORY_SOURCE_NOTE_RESULT] };
 
       // Post-generation revalidation remains a current-state/lineage
       // integrity check only: it must still fail closed if traceability
@@ -1968,7 +1891,7 @@ async function rereadAsResult(tx, input, requestFingerprint, replayed, contentTy
   const validation = validateExistingState(state, requestFingerprint, input.requestedAudience, contentType, input.engagementId);
   if (validation === "duplicate_conflict") return failure("duplicate_conflict");
   if (validation !== true) return failure("conflict_current_state_changed");
-  return success(toResult(state, replayed));
+  return { ...success(toResult(state, replayed)), warnings: storySourceWarnings() };
 }
 
 export async function evaluateGeneratedDraftReviewPacketInTransaction(

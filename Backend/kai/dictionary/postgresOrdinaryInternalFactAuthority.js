@@ -8,12 +8,10 @@ import {
   composeDerivedClaimStatementFromRow,
   validateDerivedMeasurementClaimBasis,
 } from "../validators/kaiDerivedMeasurementValidators.js";
-import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import {
   AmbiguousSensitivityDecisionLineageError,
   findCurrentSensitivityAllowedUseDecision,
 } from "./postgresSensitivityAllowedUseDecisionRepository.js";
-import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import {
   MEASUREMENT_DEFINITION_STATUS,
   MEASUREMENT_EVIDENCE_TYPE,
@@ -37,8 +35,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
  * - the claim is the 'finding' that restates exactly that measurement
  *   (composeMeasurementClaimStatement), so it adds no interpretation;
  * - the source version is current, and its current Phase-5 sensitivity
- *   decision is complete, permits the use and AI processing, and records each
- *   Operating Model section 7.2 category as 'absent'.
+ *   decision is complete, permits the use and AI processing, and clears the
+ *   independently governed sensitivity categories. Story presence is metadata.
  *
  * The authority is the human sensitivity decision and the human measurement
  * definition already recorded for the source, plus the deterministic count.
@@ -51,7 +49,6 @@ export const HIGH_RISK_SENSITIVITY_FIELDS = Object.freeze({
   reviewed_minor_data_status: "minor_information_not_cleared",
   reviewed_health_housing_justice_immigration_status: "sensitive_information_not_cleared",
   reviewed_indigenous_governance_status: "indigenous_governance_not_cleared",
-  reviewed_story_testimonial_status: "story_testimonial_not_cleared",
   reviewed_small_cell_risk_status: "small_cell_risk_not_cleared",
 });
 
@@ -64,52 +61,20 @@ export const ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS = Object.freeze([
   "requirement_alignment",
 ]);
 
-/**
- * Count-only internal authority for a story-present source (owner prompt
- * 2026-10-30, "Implement Safe Internal Count-Only Authority for
- * Story-Present Sources"). Operating Model section 7.2 keeps Get Kinder's
- * release review for public story/testimonial use; a deterministic record
- * count restated exactly from its measurement uses no story or testimonial
- * content. So a source whose current decision records stories/testimonials
- * 'present' - never 'unknown' - with every other category 'absent', the use
- * allowed and AI processing permitted, gives an otherwise ordinary measured
- * claim internal authority as a count only, while no current evidence or
- * claim decision on its lineage is negative. The recorded category is not
- * changed and story_testimonial_not_cleared still governs every other
- * operation; the operations that accept this basis are the internal
- * Evidence Summary's generation (story-free model input and VAL-GEN-010
- * output) and its internal Markdown, re-checked when it is read.
- */
+// Owner decision 2026-11-06: story presence is metadata, never authority.
+// Keep the established ordinary basis for every story-presence value.
 export const ORDINARY_AUTHORITY_BASIS = Object.freeze({
   ALL_CATEGORIES_ABSENT: "all_sensitive_categories_absent",
-  COUNT_ONLY_STORY_TESTIMONIAL_PRESENT: "count_only_story_testimonial_present",
-  // Owner prompt 2026-11-05 ("Fix the false story/testimonial blocker"),
-  // Operating Model v0.2 sections 7 and 11: a source-derived measurement
-  // (paired outcome, tabular count or rate) whose claim restates exactly its
-  // deterministic arithmetic uses no story or testimonial content, so a
-  // source recorded as also containing such content is no reason to refuse
-  // its ordinary internal drafting. The same source conditions as the
-  // count-only basis apply (story 'present', never 'unknown'; every other
-  // category 'absent'; use allowed; AI processing permitted; current), per
-  // contributing source, and no current evidence or claim decision on the
-  // lineage may be negative. Like the count-only basis it admits only the
-  // internal Evidence Summary (and so the Free Impact Assessment); the
-  // recorded category is unchanged, and the internal report and release
-  // checks of the drafted text keep their own story/testimonial review.
-  NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT: "numerical_measurement_story_testimonial_present",
 });
-export const COUNT_ONLY_CONTENT_TYPE = "evidence_summary";
-// Carried in the governed generator input beside the measurement codes
-// (defined with VAL-GEN-010, which keys on it).
-export { COUNT_ONLY_LIMITATION_CODE };
-export const COUNT_ONLY_OPERATION_REASON = "story_testimonial_count_only_operation_not_permitted";
+export const SOURCE_DISPLAY_SENSITIVITY_FIELDS = Object.freeze([
+  ...Object.keys(HIGH_RISK_SENSITIVITY_FIELDS).filter((key) => key !== "reviewed_small_cell_risk_status"),
+  "reviewed_story_testimonial_status",
+  "reviewed_small_cell_risk_status",
+]);
 // P2-06 attaches its ordinary basis to its result data under this key: not
 // enumerable, so every exact-key DTO contract, projection and JSON body is
 // unchanged. { basis, reliedOn } or absent (not the internal audience).
 export const ORDINARY_INTERNAL_AUTHORITY = Symbol("kai.ordinaryInternalAuthority");
-
-const POSITIVE_EVIDENCE_OUTCOMES = new Set(["supported", "supported_with_limitation"]);
-const POSITIVE_CLAIM_OUTCOMES = new Set(["approved", "approved_with_limitation"]);
 
 export function attachOrdinaryInternalAuthority(data, authority) {
   Object.defineProperty(data, ORDINARY_INTERNAL_AUTHORITY, { value: Object.freeze({ ...authority }), enumerable: false });
@@ -118,15 +83,6 @@ export function attachOrdinaryInternalAuthority(data, authority) {
 
 export function ordinaryInternalAuthorityOf(data) {
   return data?.[ORDINARY_INTERNAL_AUTHORITY] ?? null;
-}
-
-// Whether the source reasons leave only the recorded 'present' story
-// category: the one condition the count-only basis answers. Pure.
-export function isCountOnlyStoryTestimonialSource(source) {
-  return source?.getKinderReviewReasons?.length === 1
-    && source.getKinderReviewReasons[0] === HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status
-    && source.blockedReasons?.length === 0
-    && source.recorded?.categories?.reviewed_story_testimonial_status === "present";
 }
 
 export const ORDINARY_AUTHORITY_REASONS = Object.freeze([
@@ -162,7 +118,7 @@ export function recordedSourcePermissions(decision) {
   return {
     allowed_use_status: decision.reviewed_allowed_use_status ?? null,
     ai_processing_allowed: decision.reviewed_llm_processing_allowed === true,
-    categories: Object.fromEntries(Object.keys(HIGH_RISK_SENSITIVITY_FIELDS).map((field) => [field, decision[field] ?? null])),
+    categories: Object.fromEntries(SOURCE_DISPLAY_SENSITIVITY_FIELDS.map((field) => [field, decision[field] ?? null])),
   };
 }
 
@@ -208,22 +164,6 @@ function orderedReasons(reasons) {
   return ORDINARY_AUTHORITY_REASONS.filter((reason) => present.has(reason));
 }
 
-// A source that is ordinary on its own (no reason at all) or whose only
-// reason is its recorded 'present' story/testimonial category. Pure.
-function isOrdinaryOrStoryOnlySource(source) {
-  return (source?.getKinderReviewReasons?.length === 0 && source.blockedReasons?.length === 0)
-    || isCountOnlyStoryTestimonialSource(source);
-}
-
-// No current evidence or claim decision on this claim's lineage is negative
-// (absent decisions are answered by the ordinary authority itself).
-async function lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId, claimId }) {
-  const evidenceHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId });
-  const claimHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
-  return (!evidenceHead || POSITIVE_EVIDENCE_OUTCOMES.has(evidenceHead.decision_outcome))
-    && (!claimHead || POSITIVE_CLAIM_OUTCOMES.has(claimHead.decision_outcome));
-}
-
 /**
  * Whether this measured claim is ordinary internal factual information now.
  * claimRow is optional: without it only the evidence is classified (the
@@ -239,9 +179,8 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     // Measurement MVP: a source-derived measurement is ordinary on the same
     // terms - its arithmetic still matches its basis under its current
-    // interpretation, and the claim restates exactly that measurement. A
-    // story-present source is answered by the numerical-measurement basis
-    // below, never by the record-count-only basis.
+    // interpretation, and the claim restates exactly that measurement.
+    // Source story presence has no role in this decision.
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
     if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
       reasons.push("measurement_definition_not_confirmed");
@@ -256,28 +195,12 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
     // A cross-source measurement is ordinary only when every version it
     // combines is: the reference version's recorded categories count too.
-    const combined = [source];
     for (const linked of (derivedRow?.contributing_sources || []).filter((entry) => entry.source_role === "reference")) {
       const reference = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: linked.source_version_id });
       reasons.push(...reference.getKinderReviewReasons, ...reference.blockedReasons);
-      combined.push(reference);
     }
-    let ordered = orderedReasons(reasons);
-    let basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
-    // The only remaining reason is a recorded 'present' story/testimonial
-    // category, the claim (checked above) restates exactly the numerical
-    // measurement, every combined source is otherwise ordinary, and no
-    // recorded decision on the lineage is negative: the measurement uses no
-    // story content, so it is ordinary internal information as a number.
-    if (claimRow
-      && ordered.length === 1
-      && ordered[0] === HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status
-      && combined.every(isOrdinaryOrStoryOnlySource)
-      && combined.some(isCountOnlyStoryTestimonialSource)
-      && await lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id, claimId: claimRow.claim_id })) {
-      ordered = [];
-      basis = ORDINARY_AUTHORITY_BASIS.NUMERICAL_MEASUREMENT_STORY_TESTIMONIAL_PRESENT;
-    }
+    const ordered = orderedReasons(reasons);
+    const basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
     return {
       ordinary: ordered.length === 0,
       reasons: ordered,
@@ -307,17 +230,8 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
   }
-  let ordered = orderedReasons(reasons);
-  let basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
-  // Only a claim that restates the measurement (checked above) can be a
-  // count-only use, and only while no recorded decision on its lineage is
-  // negative.
-  if (claimRow && ordered.length === 1 && isCountOnlyStoryTestimonialSource(source)) {
-    if (await lineageHasNoNegativeDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id, claimId: claimRow.claim_id })) {
-      ordered = [];
-      basis = ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
-    }
-  }
+  const ordered = orderedReasons(reasons);
+  const basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
   return {
     ordinary: ordered.length === 0,
     reasons: ordered,

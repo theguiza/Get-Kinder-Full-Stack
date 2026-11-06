@@ -117,11 +117,11 @@ const REVIEWED = Object.freeze({
   reviewed_small_cell_risk_status: "absent",
 });
 
-test("ordinary rule source verdict: 'unknown' and 'present' both keep Get Kinder's review, and the recorded value says which", () => {
+test("ordinary rule source verdict: all story values leave review unchanged, and the recorded value says which", () => {
   assert.deepEqual(classifySourceDecision(REVIEWED), { getKinderReviewReasons: [], blockedReasons: [] });
-  for (const value of ["unknown", "present"]) {
+  for (const value of ["absent", "present", "unknown"]) {
     const decision = { ...REVIEWED, reviewed_story_testimonial_status: value };
-    assert.deepEqual(classifySourceDecision(decision), { getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] }, value);
+    assert.deepEqual(classifySourceDecision(decision), { getKinderReviewReasons: [], blockedReasons: [] }, value);
     assert.equal(recordedSourcePermissions(decision).categories.reviewed_story_testimonial_status, value);
   }
   assert.equal(recordedSourcePermissions(null), null);
@@ -144,14 +144,14 @@ function findingDto(overrides = {}) {
       measured_value: 37, unit_label: "service events", counted_unit: "service event", total_record_count: 37, blank_record_count: 0, duplicate_record_count: 0,
     },
     limitations: [],
-    evidence_review: { queue_status: "open", review_status: "needs_gk_review", decision_outcome: null, organization_may_decide: false, get_kinder_review_reasons: ["story_testimonial_not_cleared"] },
-    claim_review: { queue_status: "open", review_status: "needs_gk_review", decision_outcome: null, organization_may_decide: false, get_kinder_review_reasons: ["story_testimonial_not_cleared"] },
+    evidence_review: { queue_status: "open", review_status: "needs_gk_review", decision_outcome: null, organization_may_decide: false, get_kinder_review_reasons: ["minor_information_not_cleared"] },
+    claim_review: { queue_status: "open", review_status: "needs_gk_review", decision_outcome: null, organization_may_decide: false, get_kinder_review_reasons: ["minor_information_not_cleared"] },
     coverage_limitations: [],
     internal_eligibility: { eligible: false, blocker_codes: ["claim_review_unresolved", "evidence_review_unresolved"] },
-    ordinary_internal_rule: { applies: false, reasons: ["story_testimonial_not_cleared"] },
+    ordinary_internal_rule: { applies: false, reasons: ["minor_information_not_cleared"] },
     source_permissions: {
       is_current: true, sensitivity_review_complete: true, allowed_use_status: "allowed", ai_processing_allowed: true,
-      categories: Object.fromEntries(Object.keys(recordedSourcePermissions(REVIEWED).categories).map((key) => [key, key === "reviewed_story_testimonial_status" ? "unknown" : "absent"])),
+      categories: Object.fromEntries(Object.keys(recordedSourcePermissions(REVIEWED).categories).map((key) => [key, key === "reviewed_story_testimonial_status" ? "unknown" : key === "reviewed_minor_data_status" ? "present" : "absent"])),
     },
     review_requirement: { responsible_role: "gk_reviewer", outstanding: ["claim_review", "evidence_review"] },
     viewer: "organization_administrator",
@@ -162,11 +162,11 @@ function findingDto(overrides = {}) {
 test("review status text: the worksheet, the exact recorded condition, the responsible GK role and the outstanding steps; no approval for the organization", () => {
   const review = projectOrganizationFactualReview(findingDto());
   assert.equal(measurementWorksheetText(review.measurement), "Data_Dictionary (sheet_5)");
-  assert.deepEqual(ordinaryRuleConditions(review), ["Stories or testimonials: not determined (recorded as unknown)."]);
+  assert.deepEqual(ordinaryRuleConditions(review), ["Information about minors: recorded as present."]);
   const present = projectOrganizationFactualReview(findingDto({
     source_permissions: { ...findingDto().source_permissions, categories: { ...findingDto().source_permissions.categories, reviewed_story_testimonial_status: "present" } },
   }));
-  assert.deepEqual(ordinaryRuleConditions(present), ["Stories or testimonials: recorded as present."]);
+  assert.deepEqual(ordinaryRuleConditions(present), ["Information about minors: recorded as present."]);
   assert.equal(recordedCategoryText("reviewed_minor_data_status", "absent"), "Information about minors: recorded as absent");
   assert.equal(reviewRequirementText(review.reviewRequirement),
     "Get Kinder review required. Responsible: a Get Kinder reviewer (gk_reviewer). Outstanding: claim review; evidence review.");

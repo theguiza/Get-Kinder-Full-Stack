@@ -317,11 +317,11 @@ test("detail: a reviewed ordinary summary is the organization's internal report 
   assert.deepEqual(detail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null });
   assert.deepEqual(projectClientInternalDraft(detail.data).organizationRelease, detail.data.organizationRelease);
 
-  const held = harness({ evaluation: { getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [], organizationMayRelease: false } });
+  const held = harness({ evaluation: { getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [], organizationMayRelease: false } });
   const heldDetail = await read(held.dependencies);
-  assert.deepEqual(heldDetail.data.internalReport, { available: false, getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] });
+  assert.deepEqual(heldDetail.data.internalReport, { available: false, getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [] });
   assert.deepEqual(heldDetail.data.release, { state: "awaiting_get_kinder_release", releasedReportId: null });
-  assert.deepEqual(heldDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: ["story_testimonial_not_cleared"], blockedReasons: [], releasedBy: null });
+  assert.deepEqual(heldDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: ["minor_information_not_cleared"], blockedReasons: [], releasedBy: null });
 
   const flagOff = await read({ ...ordinary.dependencies, env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" } });
   assert.deepEqual([flagOff.data.release.state, flagOff.data.organizationRelease.actorMayRelease], ["release_status_unavailable", false]);

@@ -1,3 +1,4 @@
+import StorySourceInformation from "../StorySourceInformation.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
@@ -11,8 +12,6 @@ import {
   measuredClaimReviewRequest,
   measuredClaimReviewStepLabel,
   measurementWorksheetText,
-  COUNT_ONLY_RULE_TEXT,
-  NUMERICAL_ONLY_RULE_TEXT,
   ordinaryRuleConditions,
   organizationFactualReviewPath,
   projectOrganizationFactualReview,
@@ -155,14 +154,9 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
             <div className="mt-1" data-client-measured-claim-no-review-required="">
               No evidence, claim or limitation review is required for internal use: the count comes from the authorized source under your
               organization&apos;s recorded definition, and its limitations are carried into every report.
-              {review.ordinaryRule.countOnly ? (
-                <span data-client-measured-claim-count-only=""> The ordinary internal record-count rule {COUNT_ONLY_RULE_TEXT}</span>
-              ) : null}
-              {review.ordinaryRule.numericalOnly ? (
-                <span data-client-measured-claim-numerical-only=""> The ordinary internal rule {NUMERICAL_ONLY_RULE_TEXT}</span>
-              ) : null}
             </div>
           ) : null}
+          <StorySourceInformation />
           <div className="mt-1" data-client-measured-claim-review-decisions="">
             <div>Evidence review: {decisionStateText(review.evidenceReview)}</div>
             <div>Claim review: {decisionStateText(review.claimReview)}</div>
