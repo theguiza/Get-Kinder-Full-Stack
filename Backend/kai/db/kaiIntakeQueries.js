@@ -2,6 +2,7 @@ import pool from "./kaiDb.js";
 import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL, documentStatementsNoneFoundSql } from "../validators/kaiDocumentEvidenceValidators.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 import { MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION } from "../validators/kaiSourceMeasurementValidators.js";
+import { projectSourceScopeSql } from "./kaiProjectEvidenceScope.js";
 
 export async function findIntakeBatchByIdempotencyKey({ organizationId, idempotencyKey }, db = pool) {
   if (!organizationId || !idempotencyKey) return null;
@@ -1314,14 +1315,17 @@ const SOURCE_LIBRARY_LIMIT = 200;
  * created_by, storage locations, or any lineage/candidate identifier.
  * Capped at SOURCE_LIBRARY_LIMIT, newest first.
  */
-export async function listScopedSourcesForOrganization({ organizationId }, db = pool) {
+export async function listScopedSourcesForOrganization({ organizationId, engagementId = null }, db = pool) {
+  // A Project working view (kaiProjectEvidenceScope.js) is filtered before
+  // LIMIT; without an engagement this is the organization-wide read.
   const { rows } = await db.query(
-    `SELECT source_id, source_code, reviewed_source_type, created_at
-       FROM kai.sources
-      WHERE organization_id = $1
-      ORDER BY created_at DESC, source_id ASC
+    `SELECT s.source_id, s.source_code, s.reviewed_source_type, s.created_at
+       FROM kai.sources s
+      WHERE s.organization_id = $1
+        ${engagementId === null ? "" : `AND ${projectSourceScopeSql({ sourceAlias: "s", engagementParam: "$3" })}`}
+      ORDER BY s.created_at DESC, s.source_id ASC
       LIMIT $2`,
-    [organizationId, SOURCE_LIBRARY_LIMIT],
+    engagementId === null ? [organizationId, SOURCE_LIBRARY_LIMIT] : [organizationId, SOURCE_LIBRARY_LIMIT, engagementId],
   );
   return rows;
 }

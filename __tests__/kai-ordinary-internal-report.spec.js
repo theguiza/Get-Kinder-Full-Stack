@@ -183,7 +183,7 @@ test("internal report: only an active client_admin of the organization, for a dr
   }
 });
 
-test("availability: both internal report types qualify on an ordinary, eligible packet; a high-risk source keeps Get Kinder's review", async () => {
+test("availability: a provisional internal report is readable; review state and recorded sensitivity categories are information, not holds", async () => {
   assert.deepEqual([...INTERNAL_REPORT_CONTENT_TYPES], ["evidence_summary", "impact_narrative"]);
   // A transaction stand-in for the source classification: one current version with the given decision.
   const tx = (decision) => ({
@@ -199,12 +199,19 @@ test("availability: both internal report types qualify on an ordinary, eligible 
   });
   for (const contentType of ["evidence_summary", "impact_narrative"]) {
     const ordinary = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet(contentType) });
-    assert.deepEqual(ordinary, { available: true, getKinderReviewReasons: [], blockedReasons: [] }, contentType);
+    assert.deepEqual(ordinary, { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] }, contentType);
   }
+  // Owner direction 2026-11-06: incomplete review keeps the findings provisional.
   const ineligible = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet("evidence_summary", false) });
-  assert.deepEqual([ineligible.available, ineligible.blockedReasons], [false, ["cited_claims_not_currently_eligible"]]);
-  const sensitive = await evaluateInternalReportAvailabilityInTransaction(tx({ ...CLEARED, reviewed_minor_data_status: "present" }), { organizationId: ORG, packet: packet("evidence_summary") });
-  assert.deepEqual([sensitive.available, sensitive.getKinderReviewReasons], [false, ["minor_information_not_cleared"]]);
+  assert.deepEqual([ineligible.available, ineligible.blockedReasons, ineligible.informationReasons], [true, [], ["cited_claims_not_currently_eligible"]]);
+  // Minors plus small-cell risk: information (with the combined alert in the report), never a hold.
+  const sensitive = await evaluateInternalReportAvailabilityInTransaction(tx({ ...CLEARED, reviewed_minor_data_status: "present", reviewed_small_cell_risk_status: "present" }), { organizationId: ORG, packet: packet("evidence_summary") });
+  assert.deepEqual([sensitive.available, sensitive.getKinderReviewReasons, sensitive.informationReasons], [true, [], ["minor_information_not_cleared", "small_cell_risk_not_cleared"]]);
+  // A recorded prohibition and a missing permission decision still withhold it.
+  const prohibited = await evaluateInternalReportAvailabilityInTransaction(tx({ ...CLEARED, reviewed_llm_processing_allowed: false }), { organizationId: ORG, packet: packet("evidence_summary") });
+  assert.deepEqual([prohibited.available, prohibited.blockedReasons], [false, ["processing_permission_not_established"]]);
+  const undecided = await evaluateInternalReportAvailabilityInTransaction(tx(null), { organizationId: ORG, packet: packet("evidence_summary") });
+  assert.deepEqual([undecided.available, undecided.getKinderReviewReasons], [false, ["sensitivity_review_not_complete"]]);
   const other = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet("board_update") });
   assert.deepEqual([other.available, other.getKinderReviewReasons], [false, ["content_type_requires_get_kinder_review"]]);
 });
@@ -234,7 +241,10 @@ test("browser: the internal report projection fails closed, every reason has wor
     blocks: [{ ordinal: 1, text: "x", supportingClaimIds: [CLAIM] }],
     internalReport: { available: true, getKinderReviewReasons: [], blockedReasons: [] },
   };
-  assert.deepEqual(projectClientInternalDraft(dto).internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+  assert.deepEqual(projectClientInternalDraft(dto).internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] });
+  // Information codes are projected (unknown ones dropped) and never decide availability.
+  assert.deepEqual(projectClientInternalDraft({ ...dto, internalReport: { ...dto.internalReport, informationReasons: ["minor_information_not_cleared", "made_up"] } }).internalReport,
+    { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: ["minor_information_not_cleared"] });
   for (const malformed of [undefined, null, [], { available: true, getKinderReviewReasons: ["made_up"], blockedReasons: [] }]) {
     assert.equal(projectClientInternalDraft({ ...dto, internalReport: malformed }).internalReport.available, false);
   }

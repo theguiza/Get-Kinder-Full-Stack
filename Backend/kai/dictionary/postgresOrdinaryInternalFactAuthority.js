@@ -1,6 +1,9 @@
 import {
+  getScopedClaimById,
   getScopedDerivedMeasurementByEvidenceItemId,
+  getScopedEvidenceItemById,
   getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedSourceLocatorById,
   getScopedSourceVersionById,
 } from "../db/kaiIntakeQueries.js";
 import {
@@ -239,4 +242,57 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     measurementRow,
     sourcePermissions: source ? { is_current: source.isCurrent, recorded: source.recorded } : null,
   };
+}
+
+/**
+ * Provisional internal use (owner direction 2026-11-06, draft first): an
+ * internal provisional draft or evaluation does not wait for review, coverage
+ * acceptance or final-use eligibility. Two facts still exclude a claim from
+ * it, and neither is a new review: a recorded human review that found the
+ * claim or its evidence unsupported, and a measurement that no longer matches
+ * its own basis.
+ */
+const PROVISIONAL_REJECTED_STRENGTH = "reviewed_not_supported";
+
+// A P2-06 result (data) whose recorded review rejected the claim or its
+// evidence. Absent or unresolved review is not a rejection. Pure.
+export function traceabilityRecordsReviewRejection(data) {
+  return data?.claim?.claim_strength === PROVISIONAL_REJECTED_STRENGTH
+    || data?.evidence?.support_strength === PROVISIONAL_REJECTED_STRENGTH
+    || data?.claim_review_decision?.decision_outcome === "rejected"
+    || data?.evidence_review_decision?.decision_outcome === "not_supported";
+}
+
+const MEASUREMENT_INTEGRITY_REASONS = new Set([
+  "measurement_definition_not_confirmed",
+  "claim_not_measurement_restatement",
+]);
+
+// Factual integrity of the claim's measurement, independent of review: the
+// stored measurement still matches its basis (definition or interpretation
+// and arithmetic) and the claim restates exactly that measurement. Evidence
+// that is not a measurement has none to check. Read-only.
+export async function measuredFactIntegrityHoldsInTransaction(tx, { organizationId, claimId, evidenceItemId }) {
+  const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+  if (!evidenceItemRow) return false;
+  if (evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE && evidenceItemRow.evidence_type !== DERIVED_MEASUREMENT_EVIDENCE_TYPE) return true;
+  const locatorRow = await getScopedSourceLocatorById({ organizationId, sourceLocatorId: evidenceItemRow.source_locator_id }, tx);
+  const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId: evidenceItemRow.source_version_id }, tx);
+  const claimRow = await getScopedClaimById({ organizationId, claimId }, tx);
+  if (!locatorRow || !sourceVersionRow || !claimRow) return false;
+  const authority = await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
+    organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
+  });
+  return !authority.reasons.some((reason) => MEASUREMENT_INTEGRITY_REASONS.has(reason));
+}
+
+// Whether a P2-06 result admits its claim to INTERNAL provisional use now:
+// eligible, or (internal only) not rejected by a recorded review and with an
+// intact measurement. Funder and public use keep requiring eligibility.
+export async function admitsProvisionalInternalUseInTransaction(tx, { organizationId, requestedAudience, data }) {
+  if (data?.eligible === true) return true;
+  if (requestedAudience !== "internal" || traceabilityRecordsReviewRejection(data)) return false;
+  return measuredFactIntegrityHoldsInTransaction(tx, {
+    organizationId, claimId: data?.claim?.claim_id, evidenceItemId: data?.evidence?.evidence_item_id,
+  });
 }

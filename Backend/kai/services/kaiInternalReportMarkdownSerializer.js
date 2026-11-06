@@ -1,4 +1,5 @@
 import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
+import { PROVISIONAL_REPORT_STATUS, reportInformationNotes } from "../../../shared/kaiReportInformation.js";
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
@@ -168,8 +169,10 @@ function duplicateLines(model) {
 function limitationLines(model) {
   const lines = [];
   for (const fact of model.facts) {
-    if (fact.limitationCodes.length === 0) continue;
+    const provisional = fact.currentlyEligible !== true;
+    if (fact.limitationCodes.length === 0 && !provisional) continue;
     lines.push(`- ${refs(fact.citationRefs)}`);
+    if (provisional) lines.push("  - Review for final use is not complete; this finding is provisional and its open review items are listed under Authority for internal use.");
     for (const limitation of fact.limitationCodes) {
       const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeDerivedLimitationCode(limitation);
       lines.push(`  - ${description ? text(description) : "Recorded limitation."} (${code(limitation)})`);
@@ -273,8 +276,11 @@ function authorityLines(model) {
   for (const fact of model.facts) {
     const basis = fact.evidenceReviewOutcome || fact.claimReviewOutcome
       ? `recorded review decisions (evidence: ${fact.evidenceReviewOutcome ? code(fact.evidenceReviewOutcome) : "none"}; claim: ${fact.claimReviewOutcome ? code(fact.claimReviewOutcome) : "none"})`
-      : "an ordinary measured fact restated from its source; no further approval is required for internal use";
-    lines.push(`- ${refs(fact.citationRefs)} Currently eligible for internal use: ${fact.currentlyEligible ? "yes" : "no"}; basis: ${basis}.`);
+      : fact.currentlyEligible
+        ? "an ordinary measured fact restated from its source; no further approval is required for internal use"
+        : "the cited source evidence, as a provisional finding";
+    const open = !fact.currentlyEligible && (fact.blockerCodes || []).length > 0 ? `; open review items: ${fact.blockerCodes.map(code).join(", ")}` : "";
+    lines.push(`- ${refs(fact.citationRefs)} Review for final use complete: ${fact.currentlyEligible ? "yes" : "no (provisional finding)"}; basis: ${basis}${open}.`);
   }
   lines.push(`- **Automated validation of the generated text:** ${model.report.validatorKeys.length > 0 ? model.report.validatorKeys.map(code).join(", ") : "none recorded"} passed when the draft was generated; this report is re-checked against current eligibility each time it is opened.`);
   return lines;
@@ -334,6 +340,13 @@ function referenceLines(model) {
   });
 }
 
+// Recorded sensitivity categories and provisional findings, as information.
+function informationLines(model) {
+  const notes = reportInformationNotes(model.informationReasons);
+  if (notes.length === 0) return [];
+  return ["## Information", "", ...notes.map((note) => `- ${note.heightened ? "**" : ""}${text(note.message)}${note.heightened ? "**" : ""}`), ""];
+}
+
 function narrativeIntroduction() {
   return "The text below states findings from the cited claims and measurements, with their limitations. Automated checks cover citations, numbers, causal language and limitation disclosure.";
 }
@@ -348,8 +361,11 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     `Markdown contract: ${MARKDOWN_CONTRACT_VERSION}`,
     "",
+    `**Status:** ${PROVISIONAL_REPORT_STATUS}`,
+    "",
     STORY_SOURCE_NOTE,
     "",
+    ...informationLines(model),
     "## Context",
     "",
     ...contextLines(model),

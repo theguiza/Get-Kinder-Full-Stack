@@ -288,6 +288,6 @@ test("assessment count-only sections are closed server projections and cannot ca
 });
 
 
-test("an assessment without an eligible finding explains its refusal", () => {
-  assert.match(internalDraftFailureMessage({ body: { blockers: [{ blocking_reason: "assessment_no_eligible_evidence" }] } }), /None of the selected claims is currently eligible.*No assessment was created/);
+test("an assessment with no usable finding explains its refusal", () => {
+  assert.match(internalDraftFailureMessage({ body: { blockers: [{ blocking_reason: "assessment_no_eligible_evidence" }] } }), /None of the selected claims can be used in an assessment.*No assessment was created/);
 });

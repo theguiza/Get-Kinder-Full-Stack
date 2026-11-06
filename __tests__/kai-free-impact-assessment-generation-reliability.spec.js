@@ -121,7 +121,7 @@ test("root cause: with the 25/38 and 23/40 claims, server-composed blocks and di
 
 test("every fixed server-composed sentence and disclosure contains no digit and no VAL-GEN-004 causal term", () => {
   const strings = [ASSESSMENT_SELECTION_NOTE];
-  for (const entry of C.GAP_CATALOGUE) strings.push(entry.gap, entry.recommendation, entry.nextStep);
+  for (const entry of C.GAP_CATALOGUE) strings.push(...[entry.gap, entry.recommendation, entry.nextStep].filter((value) => value !== undefined));
   for (const key of ASSESSMENT_SECTIONS.map((s) => s.key)) {
     strings.push(composeCountOnlyAssessmentText({ measured_value: "N", blank_record_count: "N", duplicate_record_count: "N", calculation_method: "x", worksheet_key: "sheet_a" }, key).replace(/\bN\b/g, ""));
   }

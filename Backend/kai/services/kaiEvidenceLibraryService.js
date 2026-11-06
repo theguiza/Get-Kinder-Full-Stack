@@ -5,6 +5,7 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listOrganizationEvidenceItems as readOrganizationEvidenceItems } from "../db/kaiEvidenceLibraryReadModels.js";
 import { canRecordEvidenceReviewDecision } from "./kaiHumanReviewService.js";
+import { resolveProjectScope } from "./kaiProjectScope.js";
 
 /**
  * KAI Impact Library redesign, E1 correction: Knowledge Studio's Evidence
@@ -154,7 +155,11 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
   const organizationId = typeof input.organizationId === "string" ? input.organizationId.trim().toLowerCase() : "";
   const limit = normalizeLimit(input.limit);
   const afterEvidenceItemId = input.afterEvidenceItemId ?? null;
-  if (!canonicalUuid(organizationId) || !limit || (afterEvidenceItemId !== null && !canonicalUuid(afterEvidenceItemId))) {
+  // Optional Project working view (owner direction 2026-11-06); omitted, the
+  // organization-wide Evidence Library.
+  const engagementId = input.engagementId ?? null;
+  if (!canonicalUuid(organizationId) || !limit || (afterEvidenceItemId !== null && !canonicalUuid(afterEvidenceItemId))
+    || (engagementId !== null && !canonicalUuid(engagementId))) {
     return buildKaiError("validation_blocker");
   }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied");
@@ -189,8 +194,11 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
+  const projectScope = await resolveProjectScope({ organizationId, engagementId }, dependencies);
+  if (projectScope.error) return projectScope.error;
+
   const readItems = dependencies.listOrganizationEvidenceItems || readOrganizationEvidenceItems;
-  const rows = await readItems(organizationId, { limit, afterEvidenceItemId });
+  const rows = await readItems(organizationId, { limit, afterEvidenceItemId, ...projectScope.readOptions });
   if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
 
   // Server-derived P2-12 authority for this actor and organization: whether

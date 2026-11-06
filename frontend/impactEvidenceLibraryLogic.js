@@ -1,3 +1,4 @@
+import { REPORT_INFORMATION_TEXT } from "../shared/kaiReportInformation.js";
 export const LIBRARY_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
 export const BASE_PATH = "/api/kai/sprint2/intake";
 const ROUTE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -12,9 +13,14 @@ export function eligibleClaimsPath(organizationId, audience) {
 }
 
 // afterClaimId: the previous page's nextAfterClaimId (the server's cursor).
-export function claimLibraryCandidatesPath(organizationId, afterClaimId = null) {
+// engagementId (optional): a Project working view; omitted, the organization library.
+function withProjectScope(path, engagementId) {
+  return engagementId ? `${path}${path.includes("?") ? "&" : "?"}engagement_id=${encodeURIComponent(engagementId)}` : path;
+}
+
+export function claimLibraryCandidatesPath(organizationId, afterClaimId = null, engagementId = null) {
   const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/candidates?limit=25`;
-  return afterClaimId ? `${path}&after_claim_id=${encodeURIComponent(afterClaimId)}` : path;
+  return withProjectScope(afterClaimId ? `${path}&after_claim_id=${encodeURIComponent(afterClaimId)}` : path, engagementId);
 }
 
 // Client-safe Impact Home summary (aggregates only). Home and the Needs
@@ -244,12 +250,17 @@ export function clientInternalReportMarkdownPath(organizationId, engagementId, g
 function projectClientInternalReport(view) {
   const reasons = (value) => Array.isArray(value) && value.every((code) => CLIENT_INTERNAL_REPORT_REASONS.includes(code));
   if (!isPlainClientObject(view) || !reasons(view.getKinderReviewReasons) || !reasons(view.blockedReasons)) {
-    return { available: false, getKinderReviewReasons: [], blockedReasons: [] };
+    return { available: false, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] };
   }
   return {
     available: view.available === true,
     getKinderReviewReasons: [...view.getKinderReviewReasons],
     blockedReasons: [...view.blockedReasons],
+    // Information only (owner direction 2026-11-06): known codes are shown,
+    // anything else is ignored; never a condition of availability.
+    informationReasons: Array.isArray(view.informationReasons)
+      ? view.informationReasons.filter((code) => Object.hasOwn(REPORT_INFORMATION_TEXT, code))
+      : [],
   };
 }
 
@@ -485,9 +496,9 @@ export function projectClientImpactFacts(dto) {
 // directly from kai.evidence_items, never through kai.claims - an evidence
 // item can exist before any claim is proposed for it.
 // afterEvidenceItemId: the previous page's nextAfterEvidenceItemId.
-export function evidenceLibraryCandidatesPath(organizationId, afterEvidenceItemId = null) {
+export function evidenceLibraryCandidatesPath(organizationId, afterEvidenceItemId = null, engagementId = null) {
   const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/evidence-library/candidates?limit=25`;
-  return afterEvidenceItemId ? `${path}&after_evidence_item_id=${encodeURIComponent(afterEvidenceItemId)}` : path;
+  return withProjectScope(afterEvidenceItemId ? `${path}&after_evidence_item_id=${encodeURIComponent(afterEvidenceItemId)}` : path, engagementId);
 }
 
 export function projectEvidenceLibraryItems(dto) {
@@ -1598,8 +1609,8 @@ export function organizationReviewQueuePath(organizationId) {
 // KAI Data Sources completion package: organization-scoped browse read of
 // governed kai.sources + kai.source_versions rows, so a user can discover a
 // source_version_id instead of already knowing one.
-export function organizationSourcesPath(organizationId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/sources`;
+export function organizationSourcesPath(organizationId, engagementId = null) {
+  return withProjectScope(`${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/sources`, engagementId);
 }
 
 // Projects the Data Sources DTO into exactly what the section renders: each

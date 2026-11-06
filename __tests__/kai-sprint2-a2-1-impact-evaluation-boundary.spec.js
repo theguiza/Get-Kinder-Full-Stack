@@ -132,7 +132,7 @@ function goodResults() {
   ];
 }
 
-function fakeTx({ outcomeContext = outcomeContextRow(), framework = frameworkRow(), criteria = criteriaRows(), claims = [claimProjectionRow()] } = {}) {
+function fakeTx({ outcomeContext = outcomeContextRow(), framework = frameworkRow(), criteria = criteriaRows(), claims = [claimProjectionRow()], evidenceType = null } = {}) {
   const sqlLog = [];
   return {
     sqlLog,
@@ -160,6 +160,11 @@ function fakeTx({ outcomeContext = outcomeContextRow(), framework = frameworkRow
       if (/FROM kai\.claims c/.test(sql)) {
         const ids = new Set(params[1]);
         return { rows: claims.filter((claim) => ids.has(claim.claim_id)) };
+      }
+      // Provisional internal use reads the cited evidence item's type (a
+      // non-measurement statement has no measurement basis to re-check).
+      if (evidenceType && /FROM kai\.evidence_items/.test(sql)) {
+        return { rows: [{ evidence_item_id: EVIDENCE, organization_id: ORG, evidence_type: evidenceType }] };
       }
       return { rows: [] };
     },
@@ -249,15 +254,29 @@ test("A2.1 repository: unknown outcome context or retired/unknown framework vers
   assert.equal(retiredResult.error.code, "validation_blocker");
 });
 
-test("A2.1 repository: an ineligible or cross-tenant claim id fails the whole evaluation closed", async () => {
-  const { repository } = repositoryHarness({
-    evaluatorResult: (evalInput) => traceabilitySuccess({ claimId: evalInput.claimId, eligible: false }),
-  });
-  const result = await repository.evaluateImpactOutcomeContext(
-    { organizationId: ORG, impactOutcomeContextId: OUTCOME_CONTEXT, frameworkVersionId: FRAMEWORK_VERSION, requestedAudience: "internal", claimIds: [CLAIM] },
-    { generator: async () => ({ results: goodResults() }) },
-  );
-  assert.equal(result.error.code, "validation_blocker");
+test("A2.1 repository: funder/public evaluation needs current eligibility; an internal evaluation is provisional (owner direction 2026-11-06) and refuses only a recorded rejection, an unreadable claim or a cross-tenant claim", async () => {
+  const evaluation = (audience) => ({ organizationId: ORG, impactOutcomeContextId: OUTCOME_CONTEXT, frameworkVersionId: FRAMEWORK_VERSION, requestedAudience: audience, claimIds: [CLAIM] });
+  const generator = { generator: async () => ({ results: goodResults() }) };
+  const unreviewed = (evalInput) => traceabilitySuccess({ claimId: evalInput.claimId, requestedAudience: evalInput.requestedAudience, eligible: false });
+
+  const funder = repositoryHarness({ txOptions: { evidenceType: "source_document_statement" }, evaluatorResult: unreviewed });
+  assert.equal((await funder.repository.evaluateImpactOutcomeContext(evaluation("funder"), generator)).error.code, "validation_blocker");
+
+  const provisional = repositoryHarness({ txOptions: { evidenceType: "source_document_statement" }, evaluatorResult: unreviewed });
+  const provisionalResult = await provisional.repository.evaluateImpactOutcomeContext(evaluation("internal"), generator);
+  assert.equal(provisionalResult.ok, true, JSON.stringify(provisionalResult));
+
+  const rejected = repositoryHarness({ txOptions: { evidenceType: "source_document_statement" }, evaluatorResult: (evalInput) => {
+    const result = unreviewed(evalInput);
+    return { ...result, data: { ...result.data, claim: { ...result.data.claim, claim_strength: "reviewed_not_supported" } } };
+  } });
+  assert.equal((await rejected.repository.evaluateImpactOutcomeContext(evaluation("internal"), generator)).error.code, "validation_blocker");
+
+  const unreadable = repositoryHarness({ evaluatorResult: unreviewed });
+  assert.equal((await unreadable.repository.evaluateImpactOutcomeContext(evaluation("internal"), generator)).error.code, "validation_blocker", "evidence not readable in this organization");
+
+  const crossTenant = repositoryHarness({ evaluatorResult: () => ({ ok: false, data: null, error: { code: "not_found" } }) });
+  assert.equal((await crossTenant.repository.evaluateImpactOutcomeContext(evaluation("internal"), generator)).error.code, "validation_blocker");
 });
 
 test("A2.1 repository: AI output referencing an unknown criterion id or an unsupplied claim/evidence id is rejected", async () => {

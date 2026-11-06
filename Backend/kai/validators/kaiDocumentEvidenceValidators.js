@@ -421,6 +421,26 @@ export function describeDocumentLimitationCode(code) {
   return LIMITATION_DESCRIPTIONS[code] ?? null;
 }
 
+// Owner direction 2026-11-06: content prepared for an external (funder or
+// public) audience omits direct participant identifiers by default and keeps
+// the rest of the finding. This generalizes the demonstrated cases only - the
+// contact and identifier shapes extraction already recognizes, a personal
+// name attached to a participant role noun, and a name given with an age -
+// and makes no claim to detect every identifying combination. Source
+// records, evidence, citations and internal drafts are unchanged.
+const EXTERNAL_IDENTIFIER_REPLACEMENTS = Object.freeze([
+  [new RegExp(RESTRICTED_CONTENT_PATTERNS[0].source, "g"), "[contact detail omitted]"],
+  [new RegExp(RESTRICTED_CONTENT_PATTERNS[2].source, "g"), "[contact detail omitted]"],
+  [new RegExp(RESTRICTED_CONTENT_PATTERNS[3].source, "g"), "[identifier omitted]"],
+  [/\b([Pp]articipant|[Cc]lient|[Ss]tudent|[Rr]esident|[Yy]outh|[Mm]ember|[Pp]arent|[Cc]aregiver|[Cc]hild|[Mm]entee|[Tt]enant)\s+(?:named\s+)?\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)?\b/gu, "$1 [name omitted]"],
+  [/\b\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)?,\s*(?:aged?\s+)?\d{1,2}(?:\s*(?:years? old|yrs?))?,\s*/gu, "[name and age omitted] "],
+]);
+
+export function omitDirectIdentifiersForExternalUse(text) {
+  if (typeof text !== "string") return text;
+  return EXTERNAL_IDENTIFIER_REPLACEMENTS.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text);
+}
+
 /**
  * The candidate document-statement evidence of one governed document read.
  * Returns `{ candidates, exclusions, limited }`: each candidate has its

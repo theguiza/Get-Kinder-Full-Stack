@@ -319,7 +319,7 @@ test("detail: a reviewed ordinary summary is the organization's internal report 
 
   const held = harness({ evaluation: { getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [], organizationMayRelease: false } });
   const heldDetail = await read(held.dependencies);
-  assert.deepEqual(heldDetail.data.internalReport, { available: false, getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [] });
+  assert.deepEqual(heldDetail.data.internalReport, { available: false, getKinderReviewReasons: ["minor_information_not_cleared"], blockedReasons: [], informationReasons: [] });
   assert.deepEqual(heldDetail.data.release, { state: "awaiting_get_kinder_release", releasedReportId: null });
   assert.deepEqual(heldDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: ["minor_information_not_cleared"], blockedReasons: [], releasedBy: null });
 

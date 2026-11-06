@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { projectEvidenceScopeSql } from "./kaiProjectEvidenceScope.js";
 
 /**
  * Read-only Impact Evidence Library claim index.
@@ -12,12 +13,19 @@ import pool from "./kaiDb.js";
  */
 export async function listClaimLibraryReviewCandidates(
   organizationId,
-  { limit, afterClaimId = null },
+  { limit, afterClaimId = null, engagementId = null },
   db = pool,
 ) {
   const params = [organizationId, limit + 1];
-  const cursorClause = afterClaimId === null ? "" : "AND c.claim_id > $3::uuid";
-  if (afterClaimId !== null) params.push(afterClaimId);
+  const cursorClause = afterClaimId === null ? "" : `AND c.claim_id > $${params.push(afterClaimId)}::uuid`;
+  // Project working view (kaiProjectEvidenceScope.js): filtered before LIMIT.
+  // Omitted, this is the organization-wide library read.
+  const scopeClause = engagementId === null
+    ? ""
+    : `AND EXISTS (SELECT 1 FROM kai.evidence_items scope_e
+                    WHERE scope_e.organization_id = c.organization_id
+                      AND scope_e.evidence_item_id = c.evidence_item_id
+                      AND ${projectEvidenceScopeSql({ evidenceAlias: "scope_e", engagementParam: `$${params.push(engagementId)}` })})`;
 
   const { rows } = await db.query(
     `SELECT c.claim_id::text AS claim_id,
@@ -66,6 +74,7 @@ export async function listClaimLibraryReviewCandidates(
         AND sv.source_version_id = e.source_version_id
       WHERE c.organization_id = $1::uuid
         ${cursorClause}
+        ${scopeClause}
       GROUP BY c.claim_id, c.organization_id, c.evidence_item_id, c.claim_type,
                c.claim_status, c.claim_review_status, c.claim_strength, c.statement,
                e.statement, e.evidence_type, e.support_strength, e.evidence_review_status,

@@ -209,7 +209,7 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     // Owner decision 2026-10-25: personal information and ineligible claims
     // keep it from being the organization's internal report.
     internalReportAvailable: false,
-    internalReport: { available: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"] },
+    internalReport: { available: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"], informationReasons: [] },
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);

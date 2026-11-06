@@ -566,6 +566,7 @@ export async function getClientInternalDraft(input, dependencies = {}) {
     available: report.data.available === true,
     getKinderReviewReasons: [...report.data.getKinderReviewReasons],
     blockedReasons: [...report.data.blockedReasons],
+    informationReasons: [...(report.data.informationReasons || [])],
   };
   const release = await clientReleaseState({
     organizationId, generatedContentDraftId, reviewState, actorContext: input.actorContext,

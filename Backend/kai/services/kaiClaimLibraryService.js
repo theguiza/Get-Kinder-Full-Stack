@@ -4,6 +4,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listClaimLibraryReviewCandidates as readClaimLibraryReviewCandidates } from "../db/kaiClaimLibraryReadModels.js";
+import { resolveProjectScope } from "./kaiProjectScope.js";
 
 const CLAIM_LIBRARY_READ_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 // Owner decision 2026-10-18: an active organization administrator of this
@@ -164,7 +165,11 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
   const organizationId = typeof input.organizationId === "string" ? input.organizationId.trim().toLowerCase() : "";
   const limit = normalizeLimit(input.limit);
   const afterClaimId = input.afterClaimId ?? null;
-  if (!canonicalUuid(organizationId) || !limit || (afterClaimId !== null && !canonicalUuid(afterClaimId))) {
+  // Optional Project working view (owner direction 2026-11-06); omitted, the
+  // organization-wide library.
+  const engagementId = input.engagementId ?? null;
+  if (!canonicalUuid(organizationId) || !limit || (afterClaimId !== null && !canonicalUuid(afterClaimId))
+    || (engagementId !== null && !canonicalUuid(engagementId))) {
     return buildKaiError("validation_blocker");
   }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied");
@@ -199,8 +204,11 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
+  const projectScope = await resolveProjectScope({ organizationId, engagementId }, dependencies);
+  if (projectScope.error) return projectScope.error;
+
   const readCandidates = dependencies.listClaimLibraryReviewCandidates || readClaimLibraryReviewCandidates;
-  const rows = await readCandidates(organizationId, { limit, afterClaimId });
+  const rows = await readCandidates(organizationId, { limit, afterClaimId, ...projectScope.readOptions });
   if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
 
   const candidates = [];

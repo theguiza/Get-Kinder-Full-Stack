@@ -403,8 +403,13 @@ test("A2.2 repository: validation failure persists nothing -- no evaluation, res
   assert.equal(audit.publishedPayloads.length, 0);
 });
 
-test("A2.2 repository: an ineligible claim fails closed before any write, and an unusable/rejected audit rolls back after the write attempt", async () => {
-  const ineligible = repositoryHarness({ evaluatorResult: (evalInput) => traceabilitySuccess({ claimId: evalInput.claimId, eligible: false }) });
+test("A2.2 repository: a claim a recorded review rejected fails closed before any write, and an unusable/rejected audit rolls back after the write attempt", async () => {
+  // Owner direction 2026-11-06: unresolved review alone no longer refuses an
+  // internal evaluation; a recorded rejection still does.
+  const ineligible = repositoryHarness({ evaluatorResult: (evalInput) => {
+    const result = traceabilitySuccess({ claimId: evalInput.claimId, eligible: false });
+    return { ...result, data: { ...result.data, claim: { ...result.data.claim, claim_strength: "reviewed_not_supported" } } };
+  } });
   const ineligibleAudit = fakeMetadataOnlyAudit();
   const ineligibleResult = await ineligible.repository.createImpactEvaluationSnapshot(createInput(), {
     generator: async () => ({ results: goodResults() }),

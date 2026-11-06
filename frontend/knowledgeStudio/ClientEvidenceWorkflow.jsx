@@ -105,8 +105,11 @@ const projectInternalUse = (data) => {
   return facts ? { claimIds: new Set(facts.items.map((item) => item.claimId)), truncated: facts.truncated } : null;
 };
 
-function useOrganizationRead(organizationId, path, project, refreshToken, cursorKey = null) {
-  const [state, setState] = useState({ organizationId: "", status: "idle", items: [], complete: false, nextCursor: null });
+// scopeKey: the Project a read is scoped to ("" for the organization-wide
+// read). A different scope is a different read: its items are never shown
+// for another Project, and a response for the previous scope is discarded.
+function useOrganizationRead(organizationId, path, project, refreshToken, cursorKey = null, scopeKey = "") {
+  const [state, setState] = useState({ organizationId: "", scopeKey: "", status: "idle", items: [], complete: false, nextCursor: null });
   const keyRef = useRef("");
   // `cursorKey` null: one unpaged read, projected as a whole.
   const pagesFrom = useCallback(async (requestKey, cursor) => {
@@ -127,22 +130,22 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
   }, [organizationId, path, project, cursorKey]);
   useEffect(() => {
     if (!organizationId) return undefined;
-    const requestKey = `${organizationId}:${refreshToken}`;
+    const requestKey = `${organizationId}:${scopeKey}:${refreshToken}`;
     keyRef.current = requestKey;
     setState((current) => ({
-      organizationId, status: "loading", items: current.organizationId === organizationId ? current.items : [], complete: false, nextCursor: null,
+      organizationId, scopeKey, status: "loading", items: current.organizationId === organizationId && current.scopeKey === scopeKey ? current.items : [], complete: false, nextCursor: null,
     }));
     (async () => {
       const read = await pagesFrom(requestKey, null);
       if (read.status === "superseded") return;
       if (read.status === "error") {
-        setState({ organizationId, status: "error", items: [], complete: false, nextCursor: null, message: errorText(read.result) });
+        setState({ organizationId, scopeKey, status: "error", items: [], complete: false, nextCursor: null, message: errorText(read.result) });
         return;
       }
-      setState({ organizationId, status: "success", items: read.items, complete: read.complete, nextCursor: read.nextCursor, requestKey });
+      setState({ organizationId, scopeKey, status: "success", items: read.items, complete: read.complete, nextCursor: read.nextCursor, requestKey });
     })();
     return () => { keyRef.current = ""; };
-  }, [organizationId, refreshToken, pagesFrom]);
+  }, [organizationId, scopeKey, refreshToken, pagesFrom]);
   // Continues an incomplete read from its kept cursor, within the same
   // organization and refresh; a newer read discards the result.
   const loadMore = useCallback(async () => {
@@ -159,7 +162,7 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
       ...current, status: "success", items: current.items.concat(read.items), complete: read.complete, nextCursor: read.nextCursor, message: "",
     }));
   }, [state, pagesFrom]);
-  const visible = state.organizationId === organizationId ? state : { organizationId, status: "loading", items: [], complete: false, nextCursor: null };
+  const visible = state.organizationId === organizationId && state.scopeKey === scopeKey ? state : { organizationId, scopeKey, status: "loading", items: [], complete: false, nextCursor: null };
   // "loading_more" keeps the loaded items on screen.
   return { ...visible, status: visible.status === "loading_more" ? "success" : visible.status, loadingMore: visible.status === "loading_more", loadMore };
 }
@@ -226,9 +229,22 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
 export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh, canUploadNewIntakeVersion, onContinueXlsxInFiles }) {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
-  const sources = useOrganizationRead(organizationId, organizationSourcesPath, projectOrganizationSources, refreshToken);
-  const evidence = useOrganizationRead(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken, EVIDENCE_CURSOR);
-  const claims = useOrganizationRead(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken, CLAIM_CURSOR);
+  // Owner direction 2026-11-06: with a Project selected, Sources, Evidence and
+  // Claims are that Project's working view (its own files plus evidence
+  // explicitly reused in its drafts), filtered on the server before paging.
+  // With no Project, they remain the organization-wide library.
+  // "Include evidence from other Projects" reads the organization library so
+  // a claim can be reused in this Project's draft (a view choice, never an
+  // approval); drafting still belongs to the selected Project.
+  const [includeOrganizationLibrary, setIncludeOrganizationLibrary] = useState(false);
+  useEffect(() => { setIncludeOrganizationLibrary(false); }, [organizationId, engagementId]);
+  const scope = isRouteUuid(engagementId) && !includeOrganizationLibrary ? engagementId : "";
+  const scopedSourcesPath = useCallback((org) => organizationSourcesPath(org, scope || null), [scope]);
+  const scopedEvidencePath = useCallback((org, after) => evidenceLibraryCandidatesPath(org, after, scope || null), [scope]);
+  const scopedClaimsPath = useCallback((org, after) => claimLibraryCandidatesPath(org, after, scope || null), [scope]);
+  const sources = useOrganizationRead(organizationId, scopedSourcesPath, projectOrganizationSources, refreshToken, null, scope);
+  const evidence = useOrganizationRead(organizationId, scopedEvidencePath, projectEvidenceLibraryItems, refreshToken, EVIDENCE_CURSOR, scope);
+  const claims = useOrganizationRead(organizationId, scopedClaimsPath, projectCandidateClaims, refreshToken, CLAIM_CURSOR, scope);
   // Authoritative internal usability of each claim (P2-08 / P2-06, internal audience).
   const internalUse = useOrganizationRead(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken);
   const internalUseIndex = internalUse.status === "success" ? internalUse.items : null;
@@ -483,7 +499,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     const version = await currentVersionForFile(intakeFileId);
     if (!version.ok) return version;
     const read = await readLibraryPages({
-      fetchPage: (after) => getJson(evidenceLibraryCandidatesPath(organizationId, after)),
+      fetchPage: (after) => getJson(scopedEvidencePath(organizationId, after)),
       project: projectEvidenceLibraryItems,
       cursorKey: EVIDENCE_CURSOR,
       maxPages: CLAIM_PROPOSAL_EVIDENCE_PAGES,
@@ -732,6 +748,15 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
 
       <div className="admin-card mb-3">
         <h5 className="mb-2">Data Sources</h5>
+        {isRouteUuid(engagementId) ? (
+          <div className="form-check small mb-2">
+            <input className="form-check-input" type="checkbox" id="client-include-organization-library" data-client-include-organization-library=""
+              checked={includeOrganizationLibrary} onChange={(event) => setIncludeOrganizationLibrary(event.target.checked)} />
+            <label className="form-check-label" htmlFor="client-include-organization-library">
+              Include evidence from other Projects (organization library). Evidence you use in this Project&rsquo;s drafts then appears in this Project.
+            </label>
+          </div>
+        ) : null}
         <div className="small text-muted mb-2">
           Sources appear here once an uploaded file has been reviewed and promoted. Extract evidence from a source version
           to see what it supports, or count its records under your own definition of what one record represents.

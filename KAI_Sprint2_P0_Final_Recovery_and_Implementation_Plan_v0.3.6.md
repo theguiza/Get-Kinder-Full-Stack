@@ -47058,3 +47058,150 @@ Operating Model §7 permits authorized normal processing/drafts without per-step
 **Remaining NOT_CONFIRMED:** deployed behavior/live endpoint, actual production historical record contents, PostgreSQL transaction/lock/constraint behavior and connected DB-backed browser acceptance. The named original architecture/backend-contract documents were not separately available locally. Synthetic service/adapter/HTTP/readback and flag-independence acceptance pass; this does not claim deployed closure. No deployment, push, cloud/DB mutation, schema/feature change, secret or real-client-data handling occurred.
 
 **Status:** SOURCE_STORY_FLAG_OPERATIONAL_INDEPENDENCE_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; INFORMATION_ONLY_NOTE_PERSISTS_AND_REPLAYS; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED. Package ends with a coherent local commit. Stop here; deployment remains separately authorized.
+
+
+## Impact-evidence-first, draft-first workflow simplification (2026-11-06)
+
+**Owner authorization / package boundary (USER_CONFIRMED):** owner task "KAI — Implement impact-evidence workflow simplification". It authorizes local implementation, synthetic fixtures and tests, this ExecPlan record and local commits. It does not authorize production access, deployment, push, migration or schema change, feature-flag, tenant or environment change, secret or real-client data, or a Current State update. The owner explicitly adopts Operating Model v0.2 §§7 and 11 for draft-first behaviour. Product Architecture Phase 9/11/13 "review-gated / eligible-only" wording is not read as claim-by-claim approval before permitted provisional analysis. No canonical or archived contract document was edited.
+
+**Preflight (TOOL_VERIFIED):** clean `main` at `594411bb6f2cb13e7f1144acaeaa33d06bf2053e`. Root AGENTS.md read; this plan read. Every listed anchor and its consumers were inspected before editing. Completed story-flag independence and VAL-GEN-004 work is preserved, not reopened.
+
+**Demonstrated gates and corrections (TOOL_VERIFIED repository):**
+
+**A. Provisional admission and impact intelligence**
+
+1. `postgresGeneratedContentRepository.js` `createGeneratedContentDraft`:
+   - **Before.**
+     - Record-count and derived measured claims needed P2-06 `eligible=true` for every audience. Otherwise the request was refused with `VAL-GEN-MEASURED-P2-01M-001` / `measured_claim_not_currently_eligible`, a whole-request 422.
+     - The Free Impact Assessment dropped every claim that was not eligible. It refused (`assessment_no_eligible_evidence`) when none was left, and rolled back if an asserted claim lost eligibility.
+     - A `reviewed_not_supported` claim refused the whole assessment.
+   - **Now, for internal audience only.**
+     - A measured claim is admitted when it is eligible, or when both of these hold:
+       - no recorded review rejected it (claim or evidence strength `reviewed_not_supported`, claim decision `rejected`, or evidence decision `not_supported`);
+       - its measurement still matches its own basis (`measurement_definition_not_confirmed` / `claim_not_measurement_restatement` from the shared ordinary rule).
+     - Open review, coverage and flags travel as limitation codes.
+     - The assessment leaves out only rejected or non-intact claims and keeps the rest. Its selection note is reworded. Post-generation it rolls back only for a rejection that appeared meanwhile.
+     - Other generators keep refusing a terminally rejected claim.
+   - **Unchanged.**
+     - Funder and public generation still require eligibility before and after the provider call (`funder_use_not_currently_eligible`).
+     - Also unchanged: AI-processing and allowed-use prohibitions (checked before the provider), P2-06 lineage/currentness/identity revalidation, derived currentness and arithmetic, VAL-GEN-001…010, disclosures and persistence.
+2. `postgresOrdinaryInternalFactAuthority.js` adds shared pure/read-only helpers:
+   - `traceabilityRecordsReviewRejection`;
+   - `measuredFactIntegrityHoldsInTransaction`;
+   - `admitsProvisionalInternalUseInTransaction`.
+
+   The ordinary-authority rule and P2-06 (`postgresClaimTraceabilityRepository.js`) are not changed. Final-use eligibility is not weakened.
+3. `postgresImpactEvaluationRepository.js` (A2.1 read and A2.2 snapshot):
+   - **Before.** Internal evaluation needed every claim eligible; one unreviewed claim gave a whole-evaluation 422.
+   - **Now.** It uses `admitsProvisionalInternalUseInTransaction`. Funder and public are unchanged.
+4. `kaiFreeImpactAssessmentComposition.js`:
+   - **Informational gap.** An informational `provisional_findings` gap is grounded on claims whose limitation codes say only that review or acceptance has not happened. It is shown among the gaps and is never one of the three proposals.
+   - **Approval-request wording removed.** These composed texts are gone: "submit it for Get Kinder's story review", "Read this internal draft with Get Kinder", "Review the evidence gaps / limited evidence with Get Kinder" and "work through them with Get Kinder".
+   - **Kept.** Final review/release wording for funder or public use is kept, including the funder-alignment proposal.
+5. `kaiFreeImpactAssessmentDraftGenerator.js` prompt now asks the model to:
+   - interpret meaningful patterns with qualified wording ("suggests", "is consistent with", "may indicate");
+   - say what would confirm them;
+   - use unreviewed findings as provisional.
+
+   VAL-GEN-004 is unchanged, and no threshold was added.
+6. `postgresOrganizationInternalReviewRepository.js` `evaluateInternalReportAvailabilityInTransaction` (viewing/downloading the provisional internal report):
+   - **Before.** `cited_claims_not_currently_eligible` and any non-absent personal, minor, sensitive, Indigenous or small-cell category withheld the report.
+   - **Now.** These are returned as `informationReasons`.
+   - **Still withheld for:** no recorded permission decision (`sensitivity_review_not_complete`), `processing_permission_not_established`, a superseded source, structure-only drafts and failed validators.
+   - **Unchanged.** Organization factual review and release (`evaluateOrganizationInternalReviewInTransaction`, `evaluateOrganizationInternalReleaseInTransaction`), GK review, export review, limitation snapshot, candidate, `export_authority_granted` and the manifest.
+
+**B. Project scoping and evidence reuse**
+
+7. New `db/kaiProjectEvidenceScope.js` defines the Project working view. Evidence belongs to it when either:
+   - its own source version descends from a file uploaded to the Project (`intake_files.engagement_id`), or
+   - a draft generated for the Project cites it (`generation_runs.engagement_id`), which is authorized reuse.
+
+   It is implemented as correlated EXISTS in the WHERE clause, so filtering happens before LIMIT, there is no join duplication, and the claim GROUP BY is unchanged. No association is written and no schema changes.
+8. Consumers of the scope:
+   - **Read models** take an optional engagement: `listOrganizationEvidenceItems`, `listClaimLibraryReviewCandidates` and `listScopedSourcesForOrganization`.
+   - **Services** take an optional `engagementId` through new `services/kaiProjectScope.js`. The engagement must exist in the organization and pass the tenant validator; otherwise the result is `not_found` / `tenant_boundary_violation`.
+   - **Routes** accept an optional `engagement_id` query parameter on `evidence-library/candidates`, `claim-library/candidates` and `sources`. A malformed value returns 422.
+   - **Without an engagement**, read-model arguments and SQL are byte-for-byte unchanged (organization library, GK cockpit).
+9. `ClientEvidenceWorkflow.jsx`:
+   - With a Project selected, the Data Sources Sources, Evidence and Claims reads are the Project working view, and stale responses for another Project are discarded.
+   - An "Include evidence from other Projects (organization library)" checkbox (a view choice, not an approval) keeps cross-Project reuse possible.
+   - Drafts stay bound to the selected Project. "Use for impact" claim proposal reads the same scope.
+
+**C. Output presentation and safeguards**
+
+10. New `shared/kaiReportInformation.js`:
+    - fixed information texts;
+    - a combined heightened minors + small-cell alert;
+    - the provisional status line.
+
+    The Markdown report shows the status, an Information section, per-finding "Review for final use complete: yes/no (provisional finding)" with open review items, and provisional limitation lines. The client DTO and frontend projection carry `informationReasons` (unknown codes dropped). New `frontend/ReportInformation.js` renders them as plain, muted information with no control.
+11. `clientEvidenceWorkflowLogic.js`:
+    - Open review items on a measured claim no longer make it "not usable" for an internal draft; a non-current source still does.
+    - Refusal messages now describe rejection or non-matching measurement.
+12. External privacy: `omitDirectIdentifiersForExternalUse` (in `kaiDocumentEvidenceValidators.js`) generalizes demonstrated cases only:
+    - email and telephone shapes and national-identifier-shaped numbers (the shapes extraction already recognizes);
+    - a capitalized name after a participant role noun;
+    - a name given with an age.
+
+    For funder and public generation, the generalized claim text is what the model receives and the validators check. Other findings, numbers, locators and citations are kept. Stored claims, evidence, sources and internal drafts are unchanged. This does not detect every identifying combination.
+
+**Synthetic acceptance (TOOL_VERIFIED; only SQL storage and the model provider are synthetic; production P2-06, admission, validators, composition, persistence, packet, availability, report repository, client service and Markdown serializer run):**
+
+- New `kai-impact-evidence-draft-first.spec.js`, 7/7 pass:
+  - **(1) Qualitative.** An unreviewed document statement drafts an internal narrative; its review state travels as a limitation; the report is available and provisional.
+  - **(2)+(7) Measured, minors and small cells.** Unreviewed counts (37) and a paired outcome (25 of 38, 65.79%) from minors + small-cell sources draft with exact values and citations, no GK reason, and the heightened alert.
+  - **(3)+(4) End-to-end ordinary NPO assessment.** Inputs: activity records, participant feedback, and an outcome with 24 of 62 participants excluded. The assessment contains:
+    - activity findings, the qualitative observation and a qualified interpretation;
+    - the follow-up-subset limitation, the provisional-findings gap and three proposals;
+    - citations and provenance for every finding;
+    - no approval or story-review request.
+
+    Content was verified line by line from the serialized Markdown.
+  - **(5) Mixed evidence.** A rejected claim is left out of the assessment and never sent to the model, and the rest is kept; a narrative still refuses it.
+  - **(8) Permissions.** An AI prohibition stops generation before the provider; deterministic P2-06 still reads.
+  - **(9) Integrity.** A claim whose number no longer matches its measurement is refused for a narrative and left out of an assessment.
+  - **(12) Draft versus release.** A readable provisional draft is not organization-releasable (`factual_review_not_complete`, `cited_claims_not_currently_eligible`), not released, and funder generation is still refused before the provider.
+- New `kai-project-scope-and-external-privacy.spec.js`, 6/6 pass:
+  - **(10) Project scope.**
+    - SQL shape: EXISTS in WHERE before LIMIT, correct parameter numbering with a cursor, and an unchanged organization read.
+    - Two Projects: own evidence plus authorized reuse, no duplicates, no unrelated evidence; refused for a foreign or cross-tenant engagement.
+    - Claims and Sources take the same scope.
+    - HTTP: `engagement_id` forwarded when present; a malformed value returns 422 without reaching a service.
+    - Browser wiring: the organization-library toggle; drafts bound to the Project.
+  - **(11) External privacy.** Generalization cases; a funder draft through the real repository never sends or persists the participant name, while the internal draft and the stored claim keep it.
+- Fixture `fixtures/kai-story-evidence-memory.js` gains a `document` kind plus sensitivity and review overrides, backward compatible.
+- **(6)** Story-flag independence: the existing assembled spec passes unchanged.
+- **(13)** Regression: see below.
+
+**Obsolete expectations updated (each checked to assert a removed drafting restriction, not a permission, security, provenance or release protection):**
+
+- `kai-ordinary-internal-report` (availability holds), `kai-customer-measured-report-selection` (`claimDraftAdmitted`, refusal text, UI wiring for scoped reads), `kai-free-impact-assessment` (refusal text) and `kai-free-impact-assessment-generation-reliability` (the informational gap has no recommendation).
+- `kai-organization-internal-review`, `kai-organization-internal-release` and `kai-source-to-impact-client-workflow` (DTO gains `informationReasons`).
+- `kai-sprint2-a2-1` and `kai-sprint2-a2-2`. The internal-ineligible case now passed only because the stub had no evidence row; it is replaced with explicit cases for funder ineligible, internal rejected, internal unreadable and cross-tenant (all refused) and internal unreviewed (admitted).
+
+**Verification (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command; no database, provider or network call):**
+
+- Focused regression set, 80 files, **1134/1134 pass**. It covers:
+  - the new specs;
+  - assessment and reliability;
+  - ordinary report, org review and release;
+  - story-flag and count-only;
+  - small-cell;
+  - A2.1/A2.2/A2.3;
+  - customer selection and source-to-impact;
+  - every non-integration spec matching allowed-use, ai-processing, document-statement, api-contract, p2-06, p2-10, export and val-gen-008.
+
+  Log: `/tmp/kai-ief-focused-final.log`.
+- Full `npm test`: **6136 tests, 6011 pass, 0 fail, 125 skipped** (database-dependent runners). Log: `/tmp/kai-ief-full3.log`.
+- `npm run build` succeeds and regenerates `public/js/bundles/entry.js`. Log: `/tmp/kai-ief-build2.log`.
+- `git diff --check` is clean. The complete diff was inspected.
+
+**Remaining genuine conflicts and limits (stated, not resolved by editing documents):**
+
+1. Operating Model v0.2 §11 / §7.2 still requires all 7.2 categories absent for the organization's own factual review and release. This package keeps that for release (the final-use boundary). A flagged provisional report is readable, but releasing it is still Get Kinder's.
+2. Public-audience generation remains unreachable (VAL-GEN-005 reads the schema-pinned `public_use_allowed`), so external privacy is proven on the funder path; the public path is NOT_CONFIRMED.
+3. The internal report serializer's existing "Conclusion" paragraph summarizes only record-count facts and ignores document and derived findings. It was not refactored in this package.
+4. The VAL-GEN-008 model-disclosure rule for non-Evidence-Summary drafts still refuses model text that omits a measured limitation. It was kept as factual integrity.
+5. Real SQL execution of the Project scope predicate, the connected DB-backed browser workflow, and deployed/production behaviour are NOT_CONFIRMED (no database authorized). Real-model prose is NOT_CONFIRMED (stubbed provider).
+
+**Status:** IMPACT_EVIDENCE_DRAFT_FIRST_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; PROJECT_SCOPE_IMPLEMENTED_SQL_EXECUTION_NOT_CONFIRMED; PRODUCTION_NOT_DEPLOYED_NOT_CONFIRMED. Package ends with a coherent local commit. Stop here; push and deployment remain separately authorized.

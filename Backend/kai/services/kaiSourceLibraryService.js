@@ -3,6 +3,8 @@ import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceV
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
+import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
+import { resolveProjectScope } from "./kaiProjectScope.js";
 import {
   listScopedSourcesForOrganization,
   listScopedSourceVersionsForSourceIds,
@@ -43,8 +45,11 @@ function isMappedHumanActor(actorContext) {
 }
 
 function isListOrganizationSourcesInput(value) {
-  const allowedKeys = new Set(["organizationId", "actorContext"]);
+  const allowedKeys = new Set(["organizationId", "actorContext", "engagementId"]);
   if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  // Optional Project working view (owner direction 2026-11-06).
+  if (value.engagementId !== undefined && value.engagementId !== null
+    && !(typeof value.engagementId === "string" && KAI_SPRINT2_P0_PATTERNS.uuid.test(value.engagementId) && value.engagementId === value.engagementId.toLowerCase())) return false;
   return isNonEmptyString(value.organizationId) && isPlainObject(value.actorContext);
 }
 
@@ -124,7 +129,10 @@ export async function listOrganizationSources(input, dependencies = {}) {
   const listSources = dependencies.listScopedSourcesForOrganization || listScopedSourcesForOrganization;
   const listVersions = dependencies.listScopedSourceVersionsForSourceIds || listScopedSourceVersionsForSourceIds;
 
-  const sourceRows = await listSources({ organizationId: input.organizationId });
+  const projectScope = await resolveProjectScope({ organizationId: input.organizationId, engagementId: input.engagementId ?? null }, dependencies);
+  if (projectScope.error) return projectScope.error;
+
+  const sourceRows = await listSources({ organizationId: input.organizationId, ...projectScope.readOptions });
   const sourceIds = sourceRows.map((row) => row.source_id);
   const versionRows = await listVersions({ organizationId: input.organizationId, sourceIds });
 

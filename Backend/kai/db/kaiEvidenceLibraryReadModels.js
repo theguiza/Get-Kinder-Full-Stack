@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { projectEvidenceScopeSql } from "./kaiProjectEvidenceScope.js";
 
 /**
  * Read-only organization-scoped Evidence Library index (KAI Impact Library
@@ -34,12 +35,16 @@ import pool from "./kaiDb.js";
  */
 export async function listOrganizationEvidenceItems(
   organizationId,
-  { limit, afterEvidenceItemId = null },
+  { limit, afterEvidenceItemId = null, engagementId = null },
   db = pool,
 ) {
   const params = [organizationId, limit + 1];
-  const cursorClause = afterEvidenceItemId === null ? "" : "AND ei.evidence_item_id > $3::uuid";
-  if (afterEvidenceItemId !== null) params.push(afterEvidenceItemId);
+  const cursorClause = afterEvidenceItemId === null ? "" : `AND ei.evidence_item_id > $${params.push(afterEvidenceItemId)}::uuid`;
+  // Project working view (kaiProjectEvidenceScope.js): filtered before LIMIT.
+  // Omitted, this is the organization-wide library read.
+  const scopeClause = engagementId === null
+    ? ""
+    : `AND ${projectEvidenceScopeSql({ evidenceAlias: "ei", engagementParam: `$${params.push(engagementId)}` })}`;
 
   const { rows } = await db.query(
     `SELECT ei.evidence_item_id::text AS evidence_item_id,
@@ -74,6 +79,7 @@ export async function listOrganizationEvidenceItems(
        ) head ON true
       WHERE ei.organization_id = $1::uuid
         ${cursorClause}
+        ${scopeClause}
       ORDER BY ei.evidence_item_id ASC
       LIMIT $2::int`,
     params,

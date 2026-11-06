@@ -105,7 +105,7 @@ export function composeCountOnlyFindingText(measurementRow) {
 
 // Closed server projections for the assessment. No free-text definition,
 // source content or model prose enters a count-only block.
-export const ASSESSMENT_SELECTION_NOTE = "Selection note: selected evidence with unresolved limitations was excluded from assertions. Its current-use explanation is shown in Knowledge Studio.";
+export const ASSESSMENT_SELECTION_NOTE = "Selection note: selected evidence that a recorded review found unsupported, or a measurement that no longer matches its source, was left out of the assertions. The reason is shown in Knowledge Studio.";
 const COUNT_ONLY_ASSESSMENT_PREFIXES = Object.freeze({
   executive_snapshot: "This assessment is limited to the cited row count. ",
   evidence_findings: "",

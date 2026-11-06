@@ -3566,8 +3566,16 @@ router.get(
   },
 );
 
+// Optional Project working-view scope for the organization library reads
+// (owner direction 2026-11-06): undefined when absent, false when malformed.
+function optionalProjectEngagementId(req = {}) {
+  if (req.query?.engagement_id === undefined) return undefined;
+  const candidate = normalizedUuid(req.query.engagement_id);
+  return KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate) ? candidate : false;
+}
+
 function claimLibraryIndexQuery(req = {}) {
-  const allowedKeys = new Set(["limit", "after_claim_id"]);
+  const allowedKeys = new Set(["limit", "after_claim_id", "engagement_id"]);
   const keys = Object.keys(req.query || {});
   if (!keys.every((key) => allowedKeys.has(key))) return null;
 
@@ -3585,7 +3593,9 @@ function claimLibraryIndexQuery(req = {}) {
     afterClaimId = candidate;
   }
 
-  return { limit, afterClaimId };
+  const engagementId = optionalProjectEngagementId(req);
+  if (engagementId === false) return null;
+  return { limit, afterClaimId, ...(engagementId ? { engagementId } : {}) };
 }
 
 /**
@@ -3614,6 +3624,7 @@ router.get(
         organizationId: identifiers.organizationId,
         limit: query.limit,
         afterClaimId: query.afterClaimId,
+        ...(query.engagementId ? { engagementId: query.engagementId } : {}),
         actorContext: sprint2MappedActorContext(req),
       });
     });
@@ -3935,7 +3946,7 @@ async function getEvidenceLibraryService() {
 }
 
 function evidenceLibraryIndexQuery(req = {}) {
-  const allowedKeys = new Set(["limit", "after_evidence_item_id"]);
+  const allowedKeys = new Set(["limit", "after_evidence_item_id", "engagement_id"]);
   const keys = Object.keys(req.query || {});
   if (!keys.every((key) => allowedKeys.has(key))) return null;
 
@@ -3953,7 +3964,9 @@ function evidenceLibraryIndexQuery(req = {}) {
     afterEvidenceItemId = candidate;
   }
 
-  return { limit, afterEvidenceItemId };
+  const engagementId = optionalProjectEngagementId(req);
+  if (engagementId === false) return null;
+  return { limit, afterEvidenceItemId, ...(engagementId ? { engagementId } : {}) };
 }
 
 /**
@@ -3984,6 +3997,7 @@ router.get(
         organizationId: identifiers.organizationId,
         limit: query.limit,
         afterEvidenceItemId: query.afterEvidenceItemId,
+        ...(query.engagementId ? { engagementId: query.engagementId } : {}),
         actorContext: sprint2MappedActorContext(req),
       });
     });
@@ -6493,10 +6507,17 @@ router.get("/admin/organizations/:organizationId/sources", sprint2ActorContextMi
       blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
     });
   }
+  const engagementId = optionalProjectEngagementId(req);
+  if (engagementId === false) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "engagement_id")],
+    });
+  }
   return invokeService(res, async () => {
     const service = await getSourceLibraryService();
     return service.listOrganizationSources({
       organizationId,
+      ...(engagementId ? { engagementId } : {}),
       actorContext: sprint2MappedActorContext(req),
     });
   });

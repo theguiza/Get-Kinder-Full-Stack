@@ -114,6 +114,18 @@ export function isFreeImpactAssessmentBlocks(blocks) {
 
 const STORY_PATTERN = /\b(?:stor(?:y|ies)|quotes?|quotations?|testimon\w*|permission|consent)\b/i;
 
+// P2-06 limitation codes that mean only that a review or acceptance has not
+// happened yet (never that a review found the claim unsupported).
+const PROVISIONAL_REVIEW_CODES = Object.freeze([
+  "claim_not_approved_for_requested_audience",
+  "claim_review_unresolved",
+  "evidence_review_unresolved",
+  "support_strength_unassessed",
+  "coverage_dimension_unresolved",
+  "client_followup_unresolved",
+  "potential_conflict_review_unresolved",
+]);
+
 const GAP_CATALOGUE = Object.freeze([
   Object.freeze({
     key: "recorded_duration_incomplete",
@@ -145,7 +157,7 @@ const GAP_CATALOGUE = Object.freeze([
     story: true,
     documentPattern: STORY_PATTERN,
     gap: "No consented participant story or quotation is among the cited evidence, so the assessment cannot show a participant's own account.",
-    recommendation: "Invite a small number of participants to share a short account of their experience, record their written permission with it, and submit it for Get Kinder's story review before it is used.",
+    recommendation: "Invite a small number of participants to share a short account of their experience, and record their written permission with it before it is used.",
     nextStep: "decide who will ask for consented participant accounts and how permission will be recorded",
   }),
   Object.freeze({
@@ -169,6 +181,15 @@ const GAP_CATALOGUE = Object.freeze([
     gap: "The document statements are source-reported: they are quoted exactly from the organization's documents and were not independently verified.",
     recommendation: "Corroborate the most important source-reported statements with records the organization already keeps (for example, referral or attendance records) before relying on them beyond internal planning.",
     nextStep: "pick the source-reported statements that matter most and the records that could corroborate them",
+  }),
+  // Owner direction 2026-11-06 (draft first): review state is information.
+  // A cited claim without a completed review is a provisional finding; it is
+  // stated as such and never turned into a request or recommendation.
+  Object.freeze({
+    key: "provisional_findings",
+    informational: true,
+    reviewCodes: PROVISIONAL_REVIEW_CODES,
+    gap: "Some cited findings have not yet had a review for final use. They are presented as provisional interpretations for internal planning and drafting, and the applicable review comes before any funder or public use.",
   }),
 ]);
 
@@ -206,6 +227,12 @@ export function detectAssessmentGaps(claims) {
   const measured = list.filter(isMeasuredClaim);
   const gaps = [];
   for (const entry of GAP_CATALOGUE) {
+    if (entry.reviewCodes) {
+      const pending = list.filter((claim) => (claim.limitationCodes || []).some((code) => entry.reviewCodes.includes(code)));
+      if (pending.length === 0) continue;
+      gaps.push({ key: entry.key, entry, documentGrounding: pending.filter(isDocumentClaim), measuredGrounding: pending.filter((claim) => !isDocumentClaim(claim)) });
+      continue;
+    }
     const documentGrounding = entry.documents
       ? documents
       : entry.documentPattern
@@ -316,7 +343,7 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
     bySection.get("impact_stories").push({
       text: withAssessmentSection("impact_stories",
         "Participant story evidence: none is available. No consented participant story or quotation is among the cited evidence, so this section gives only a source-backed account of the programme. "
-        + "A participant story would need the participant's recorded permission and Get Kinder's story review before it could be used."),
+        + "A participant story would need the participant's recorded permission before it could be used."),
       citations: story ? gapCitations(story) : fallback.map((citation) => ({ ...citation })),
     });
   }
@@ -337,7 +364,7 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
     });
   }
 
-  const chosen = gaps.filter((gap) => !gap.entry.story || gap.documentGrounding.length > 0).slice(0, RECOMMENDATION_COUNT);
+  const chosen = gaps.filter((gap) => !gap.entry.informational && (!gap.entry.story || gap.documentGrounding.length > 0)).slice(0, RECOMMENDATION_COUNT);
   const fallbackCitations = modelBlocks[0].citations.map((citation) => ({ ...citation }));
   if (documented.length === 0) {
     bySection.get("gaps_opportunities").push({
@@ -347,7 +374,7 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   }
   if (chosen.length === 0) {
     bySection.get("recommended_improvements").push({
-      text: withAssessmentSection("recommended_improvements", "The cited evidence does not support a specific improvement proposal. No recommendations have been invented to fill this section. Review the evidence gaps with Get Kinder before proposing changes."),
+      text: withAssessmentSection("recommended_improvements", "The cited evidence does not support a specific improvement proposal. No recommendations have been invented to fill this section. Identify what further evidence would show where a change is needed."),
       citations: fallbackCitations,
     });
   }
@@ -365,11 +392,11 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   }
 
   const nextSteps = [
-    "Read this internal draft with Get Kinder. Complete the applicable review and release before final use; none of its findings is cleared for funder or public use.",
+    "Use this provisional internal draft for planning and drafting now. Complete the applicable review and release before final use; none of its findings is cleared for funder or public use.",
     chosen.length > 0
       ? `Decide which proposed change to try first, then ${chosen.map((gap) => gap.entry.nextStep).join("; ")}.`
-      : "Review the limited evidence with Get Kinder and identify what further evidence would be needed before proposing changes.",
-    "Keep the limitations named in this assessment with any figure you reuse, and work through them with Get Kinder before external use.",
+      : "Identify what further evidence would be needed before proposing changes.",
+    "Keep the limitations named in this assessment with any figure you reuse, and address them before external use.",
     ...(storyEvidenceCited(claims) ? [] : ["If a future assessment should include a participant story, collect it with the participant's recorded permission first."]),
   ];
   const nextCitations = [];

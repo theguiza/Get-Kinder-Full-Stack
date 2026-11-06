@@ -17,6 +17,8 @@ import {
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { measuredFactIntegrityHoldsInTransaction, traceabilityRecordsReviewRejection } from "./postgresOrdinaryInternalFactAuthority.js";
+import { omitDirectIdentifiersForExternalUse } from "../validators/kaiDocumentEvidenceValidators.js";
 import {
   FREE_IMPACT_ASSESSMENT_COMPOSITION,
   MAX_MODEL_ASSESSMENT_BLOCKS,
@@ -200,12 +202,21 @@ const FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY = "VAL-GEN-ASSESSMENT-001";
 // (postgresClaimTraceabilityRepository.js line 770) and must not be used to
 // detect this instead.
 const CLAIM_STRENGTH_VALIDATOR_KEY = "VAL-GEN-CLAIM-STRENGTH-P0-001";
-// P2-01M (Plan A Prompt 6): a measured claim states a count, so unlike the
-// Package 14-05 internal admission of ineligible field-presence claims, it
-// reaches the generator only while its fresh P2-06 evaluation is eligible
-// (GK-reviewed, current lineage, every coverage dimension clear or accepted).
+// P2-01M (Plan A Prompt 6): a measured claim states a count. Funder and public
+// drafts admit it only while its fresh P2-06 evaluation is eligible. Owner
+// direction 2026-11-06: an internal provisional draft admits it while the
+// measurement is intact and no recorded review rejected it; unresolved review,
+// coverage and sensitivity flags travel with it as limitations.
 const MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY = "VAL-GEN-MEASURED-P2-01M-001";
 const TERMINAL_REJECTED_CLAIM_STRENGTH = "reviewed_not_supported";
+
+// Shared provisional-use rules (postgresOrdinaryInternalFactAuthority.js).
+const recordedReviewRejects = traceabilityRecordsReviewRejection;
+function provisionalMeasuredFactIntact(tx, organizationId, traceability) {
+  return measuredFactIntegrityHoldsInTransaction(tx, {
+    organizationId, claimId: traceability.claim.claim_id, evidenceItemId: traceability.evidence.evidence_item_id,
+  });
+}
 
 // P14-09-FUND-GEN-RESULT-001: closed, metadata-only subreason vocabulary for
 // the single VAL-GEN-RESULT-P0-001 / generator_result_contract_invalid
@@ -1595,8 +1606,10 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // text and rejecting it only afterward. This is strictly narrower than
       // (and must not be conflated with) the merely unresolved/unassessed
       // `eligible=false` case Package 14-05 still admits for INTERNAL above.
+      // A Free Impact Assessment instead leaves such a claim out (below) and
+      // continues with the rest of the selected evidence.
       for (const traceability of traceabilityResults) {
-        if (traceability.claim?.claim_strength === TERMINAL_REJECTED_CLAIM_STRENGTH) {
+        if (!assessment && traceability.claim?.claim_strength === TERMINAL_REJECTED_CLAIM_STRENGTH) {
           rollbackFailure(
             "claim_reviewed_not_supported",
             stageBlocker(CLAIM_STRENGTH_VALIDATOR_KEY, "claim_terminally_not_supported"),
@@ -1637,20 +1650,33 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
 
       let projections = await loadGenerationProjection(tx, input, funderAuthorityByClaimId);
       if (!projections) rollbackFailure("conflict_current_state_changed");
-      // An assessment states eligible findings only. Keep an explicit selection
-      // note in the saved content; excluded claim text never enters the model
-      // or acquires a release citation. Other generators retain their contract.
-      const excludedClaims = assessment ? traceabilityResults.filter((item) => item.eligible !== true) : [];
+      // Owner direction 2026-11-06 (draft first): an INTERNAL provisional
+      // draft does not wait for review, coverage acceptance or final-use
+      // eligibility. Current eligibility stays a limitation carried with the
+      // claim; funder and public generation keep requiring it. An assessment
+      // leaves out only a claim a recorded review rejected, or a measurement
+      // that no longer matches its own basis, and keeps every other selected
+      // claim, with a selection note in the saved content. Left-out claim text
+      // never enters the model or acquires a citation.
+      const provisionalInternal = input.requestedAudience === "internal";
+      const excludedClaims = [];
       if (assessment) {
+        for (const traceability of traceabilityResults) {
+          if (recordedReviewRejects(traceability)
+            || (traceability.eligible !== true && !(await provisionalMeasuredFactIntact(tx, input.organizationId, traceability)))) {
+            excludedClaims.push(traceability);
+          }
+        }
         const excludedIds = new Set(excludedClaims.map((item) => item.claim.claim_id));
         projections = projections.filter((item) => !excludedIds.has(item.claimId));
         if (projections.length === 0) rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, "assessment_no_eligible_evidence"));
       }
+      const excludedClaimIds = new Set(excludedClaims.map((item) => item.claim.claim_id));
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
       const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
       const measuredValueByClaimId = new Map();
       for (const traceability of traceabilityResults) {
-        if (assessment && traceability.eligible !== true) continue;
+        if (excludedClaimIds.has(traceability.claim.claim_id)) continue;
         const projection = projectionByClaim.get(traceability.claim.claim_id);
         if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
           rollbackFailure("conflict_current_state_changed");
@@ -1666,8 +1692,17 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // clear - accepted or not), which blockerCodes alone lose once the
         // claim is eligible. Field-presence claims keep exactly blockerCodes.
         let measurementCodes = [];
+        // A measured claim reaches a non-internal draft only while currently
+        // eligible. An internal provisional draft needs the measurement to
+        // be intact (it still matches its own basis) and no recorded review
+        // rejection; review, coverage and flags remain carried limitations.
+        const measuredAdmitted = async () => traceability.eligible === true || (
+          provisionalInternal
+          && !recordedReviewRejects(traceability)
+          && await provisionalMeasuredFactIntact(tx, input.organizationId, traceability)
+        );
         if (projection.evidenceType === MEASUREMENT_EVIDENCE_TYPE) {
-          if (traceability.eligible !== true) {
+          if (!(await measuredAdmitted())) {
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
@@ -1689,7 +1724,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // eligible, its material limitations carried beside the claim, and
         // its measured value attributed for the server disclosure.
         if (projection.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
-          if (traceability.eligible !== true) {
+          if (!(await measuredAdmitted())) {
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
@@ -1712,6 +1747,17 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
         }
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
+      }
+
+      // Owner direction 2026-11-06: external (funder/public) content omits
+      // direct participant identifiers by default. The generalized claim text
+      // is what the model sees and what the validators check, so the draft
+      // keeps every other finding, number and citation. Internal drafts and
+      // the stored claim, evidence and source records are unchanged.
+      if (input.requestedAudience !== "internal") {
+        for (const projection of projections) {
+          projection.claimStatement = omitDirectIdentifiersForExternalUse(projection.claimStatement);
+        }
       }
 
       // All selected findings follow the same generator path, irrespective of
@@ -1839,12 +1885,14 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // P14-09: for FUNDER only, this same post-generation revalidation
         // pass must also fail closed (rolling back everything generated
         // above, before any persistence) if current funder eligibility was
-        // lost between the pre-generation check and now. Assessments also
-        // require their asserted findings to remain eligible.
+        // lost between the pre-generation check and now. An internal
+        // provisional draft (assessments included) requires the same claim
+        // and evidence identity, not final-use eligibility; a review that
+        // rejected an asserted claim meanwhile still rolls the draft back.
         if (input.requestedAudience === "funder" && result.data?.eligible !== true) {
           rollbackFailure("funder_use_not_currently_eligible");
         }
-        if (assessment && result.data?.eligible !== true) {
+        if (assessment && recordedReviewRejects(result.data)) {
           rollbackFailure("conflict_current_state_changed");
         }
       }

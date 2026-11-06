@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import * as Derived from "../../Backend/kai/validators/kaiDerivedMeasurementValidators.js";
 import * as M from "../../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import * as Doc from "../../Backend/kai/validators/kaiDocumentEvidenceValidators.js";
 import { __claimTraceabilityRepositoryTestables } from "../../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
 import { __claimGapFollowupRepositoryTestables } from "../../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js";
 
 // Synthetic SQL adapter using the existing P2-06 semantic-parity fixture's
 // rows and the real pure P2-04 gap computation. No database or network access.
-export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", offset = 0, evidenceHead = null } = {}) {
+// kind: "derived" | "count" | "document" (a located source-reported statement).
+// sensitivity overrides the recorded categories; claimStrength / supportStrength
+// / claimHead / evidenceHead set a recorded review on the lineage.
+export function makeStoryEvidenceFixture({
+  kind = "derived", flag = "absent", offset = 0, evidenceHead = null, claimHead = null,
+  sensitivity = {}, excerpt = null, claimStrength = "unassessed", supportStrength = "unassessed",
+} = {}) {
   const identity = value => value.slice(0, 24) + (BigInt("0x" + value.slice(24)) + BigInt(offset)).toString(16).padStart(12, "0");
   const ORG = "00000000-0000-4000-8000-000000000001";
   const CLAIM_ID = identity("00000000-0000-4000-8000-000000000101");
@@ -110,7 +117,7 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
    * authoritative input that differs between the matching and mismatched cases
    * below.
    */
-  function buildFakeTx({ qualityFindingRows, smallCellState = null, derived = null, record = null }) {
+  function buildFakeTx({ qualityFindingRows, smallCellState = null, derived = null, record = null, document = null }) {
     const claimRow = {
       claim_id: CLAIM_ID,
       organization_id: ORG,
@@ -248,6 +255,29 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
       safe_summary: "Claim gap requires review for dimension: small_cell_risk." });
     const followupRows = persistedFollowupRows();
     const followupQueueRows = persistedFollowupQueueRows();
+    if (document) {
+      const coordinates = Doc.documentLocatorCoordinates({ locator: { unit: "text_lines", line_start: 3, line_end: 3 }, sentenceStart: 1, sentenceEnd: 1, excerpt: document.excerpt });
+      Object.assign(evidenceItemRow, {
+        evidence_type: Doc.DOCUMENT_EVIDENCE_TYPE, data_class: Doc.DOCUMENT_EVIDENCE_DATA_CLASS,
+        statement: Doc.composeDocumentEvidenceStatement({ excerpt: document.excerpt, coordinates }),
+      });
+      Object.assign(locatorRow, { locator_type: Doc.DOCUMENT_EVIDENCE_LOCATOR_TYPE, coordinates });
+      Object.assign(claimRow, { claim_type: "finding", statement: Doc.composeDocumentClaimStatement({ excerpt: document.excerpt, coordinates }), claim_strength: document.claimStrength });
+      evidenceItemRow.support_strength = document.supportStrength;
+      for (const row of [evidenceReviewQueueItemRow, claimReviewQueueItemRow]) Object.assign(row, { queue_status: "open", review_status: "needs_gk_review" });
+      const { buildExpectedGapPlans } = __claimGapFollowupRepositoryTestables;
+      const base = __claimTraceabilityRepositoryTestables.computeDimensions({
+        dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys: evidenceFieldKeyRows.map((row) => row.profile_field_key),
+      });
+      const plans = buildExpectedGapPlans(Doc.applyDocumentStatementCoverageDimensions(base));
+      gapRows.length = 0;
+      plans.forEach((plan, index) => gapRows.push({
+        gap_log_item_id: identity(`00000000-0000-4000-8000-0000000031${String(index).padStart(2, "0")}`), organization_id: ORG, claim_id: CLAIM_ID,
+        evidence_item_id: EVIDENCE_ITEM_ID, source_version_id: SOURCE_VERSION_ID, ...plan, created_by_type: "system", created_at: new Date("2026-11-02T00:00:00.000Z"),
+      }));
+      followupRows.length = 0;
+      followupQueueRows.length = 0;
+    }
     if (derived || record) {
       const row = derived?.row || record.row;
       // A paired-outcome measurement claim with no review decision recorded:
@@ -260,8 +290,8 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
         locator_type: record ? M.MEASUREMENT_LOCATOR_TYPE : Derived.DERIVED_MEASUREMENT_LOCATOR_TYPE,
         coordinates: record ? M.MEASUREMENT_LOCATOR_COORDINATES : Derived.derivedMeasurementLocatorCoordinates({ sheetKey: row.worksheet_key, fieldKeys: row.field_keys }),
       });
-      Object.assign(claimRow, { claim_type: "finding", statement: record ? M.composeMeasurementClaimStatement({ measurementRow: row, definitionRow: row }) : Derived.composeDerivedClaimStatementFromRow(row), claim_strength: "unassessed" });
-      evidenceItemRow.support_strength = "unassessed";
+      Object.assign(claimRow, { claim_type: "finding", statement: record ? M.composeMeasurementClaimStatement({ measurementRow: row, definitionRow: row }) : Derived.composeDerivedClaimStatementFromRow(row), claim_strength: (derived || record).claimStrength ?? "unassessed" });
+      evidenceItemRow.support_strength = (derived || record).supportStrength ?? "unassessed";
       for (const row of [evidenceReviewQueueItemRow, claimReviewQueueItemRow]) Object.assign(row, { queue_status: "open", review_status: "needs_gk_review" });
       // The claim's P2-04 preparation, persisted from the same pure helpers P2-04 uses.
       const { buildExpectedGapPlans, buildExpectedFollowupDimensionKeys } = __claimGapFollowupRepositoryTestables;
@@ -290,7 +320,7 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
         if (sql.startsWith("SET TRANSACTION ISOLATION LEVEL")) return { rows: [] };
         if (record && sql.includes("FROM kai.evidence_measurements")) return { rows: [record.row] };
         if (derived && sql.includes("FROM kai.evidence_derived_measurements")) return { rows: [derived.row] };
-        if ((derived || record) && sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [(derived || record).head] };
+        if ((derived || record || document) && sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [(derived || record || document).head] };
         if (sql.includes("FROM kai.gap_log_items")) return { rows: gapRows };
         if (sql.includes("FROM kai.client_followup_items")) return { rows: followupRows };
         if (sql.includes("kai.review_queue_items") && sql.includes("queue_type = 'client_followup'")) {
@@ -322,8 +352,8 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
         if (sql.includes("FROM kai.source_versions")) return { rows: [sourceVersionRow] };
         if (sql.includes("FROM kai.sources")) return { rows: [sourceRow] };
         if (sql.includes("FROM kai.claims")) return { rows: [claimRow] };
-        if ((derived || record) && sql.includes("FROM kai.evidence_review_decisions")) return { rows: (derived || record).evidenceHead ? [(derived || record).evidenceHead] : [] };
-        if ((derived || record) && sql.includes("FROM kai.claim_review_decisions")) return { rows: [] };
+        if ((derived || record || document) && sql.includes("FROM kai.evidence_review_decisions")) return { rows: (derived || record || document).evidenceHead ? [(derived || record || document).evidenceHead] : [] };
+        if ((derived || record || document) && sql.includes("FROM kai.claim_review_decisions")) return { rows: (derived || record || document).claimHead ? [(derived || record || document).claimHead] : [] };
         if (sql.includes("FROM kai.evidence_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "supported", decided_by_role: "gk_reviewer" }] : [] };
         if (sql.includes("FROM kai.claim_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "approved", approved_audiences: ["internal"], decided_by_role: "gk_reviewer" }] : [] };
 
@@ -336,7 +366,7 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
   const head = { organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_outcome: "reviewed",
     reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true,
     reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent", reviewed_health_housing_justice_immigration_status: "absent",
-    reviewed_indigenous_governance_status: "absent", reviewed_story_testimonial_status: flag, reviewed_small_cell_risk_status: "absent" };
+    reviewed_indigenous_governance_status: "absent", reviewed_story_testimonial_status: flag, reviewed_small_cell_risk_status: "absent", ...sensitivity };
   const row = kind === "count" ? {
     organization_id: ORG, evidence_item_id: EVIDENCE_ITEM_ID, source_version_id: SOURCE_VERSION_ID, definition_source_version_id: SOURCE_VERSION_ID,
     source_measurement_definition_id: identity("00000000-0000-4000-8000-000000004001"),
@@ -355,7 +385,11 @@ export function makeStoryEvidenceFixture({ kind = "derived", flag = "absent", of
     exclusions: { participants: [{ reason: "no_baseline_observation", participant_count: 24 }], rows: [] },
     profile_canonical_sha256: SHA, interpretation_id: null, current_interpretation_id: null, contributing_sources: [],
   };
-  const tx = buildFakeTx({ qualityFindingRows: [], [kind === "count" ? "record" : "derived"]: { row, head, evidenceHead } });
+  const lineageKey = kind === "count" ? "record" : kind === "document" ? "document" : "derived";
+  const tx = buildFakeTx({ qualityFindingRows: [], [lineageKey]: {
+    row: kind === "document" ? null : row, head, evidenceHead, claimHead, claimStrength, supportStrength,
+    excerpt: excerpt || "Participants told staff the weekly sessions helped them feel more confident about finding work.",
+  } });
   return { tx, row, head, organizationId: ORG, claimId: CLAIM_ID, evidenceItemId: EVIDENCE_ITEM_ID, sourceId: SOURCE_ID,
     sourceVersionId: SOURCE_VERSION_ID, profileId: PROFILE_ID, ...tx.fixture };
 }

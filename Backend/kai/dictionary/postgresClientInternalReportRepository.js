@@ -242,6 +242,9 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
               available: availability.getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
               getKinderReviewReasons: availability.getKinderReviewReasons,
               blockedReasons,
+              // Information only (recorded sensitivity categories, provisional
+              // findings); never a condition of availability.
+              informationReasons: [...(availability.informationReasons || [])],
               report: {
                 generatedContentDraftId,
                 generationRunId: draftRow.generation_run_id,

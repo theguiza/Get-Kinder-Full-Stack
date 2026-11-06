@@ -1,4 +1,5 @@
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
+import { admitsProvisionalInternalUseInTransaction } from "./postgresOrdinaryInternalFactAuthority.js";
 import { readEffectiveAiProcessingProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import { validateImpactEvaluationResults } from "../validators/kaiImpactEvaluationValidators.js";
@@ -474,17 +475,21 @@ export function createPostgresImpactEvaluationRepository({ runInTransaction, eva
           const criteria = await loadCriteria(tx, { frameworkVersionId });
           if (criteria.length === 0) return failure("validation_blocker");
 
-          // Every requested claim must be a fresh, tenant-valid, currently
-          // eligible (for requestedAudience) governed claim -- an unknown,
-          // cross-tenant, or currently-ineligible claim id fails the whole
-          // evaluation closed rather than being silently dropped.
+          // Every requested claim must be a fresh, tenant-valid governed claim
+          // -- an unknown or cross-tenant claim id fails the whole evaluation
+          // closed rather than being silently dropped. Funder and public
+          // evaluations require current eligibility. Owner direction
+          // 2026-11-06: an INTERNAL evaluation is provisional analysis and
+          // needs no prior review or coverage acceptance; a claim a recorded
+          // review rejected, or a measurement that no longer matches its basis,
+          // is still refused.
           for (const claimId of claimIds) {
             const traceability = await evaluate(tx, { organizationId, claimId, requestedAudience });
             if (
               !traceability.ok
               || traceability.data?.claim?.claim_id !== claimId
               || traceability.data?.requestedAudience !== requestedAudience
-              || traceability.data?.eligible !== true
+              || !(await admitsProvisionalInternalUseInTransaction(tx, { organizationId, requestedAudience, data: traceability.data }))
             ) {
               return failure("validation_blocker");
             }
@@ -572,17 +577,18 @@ export function createPostgresImpactEvaluationRepository({ runInTransaction, eva
           const criteria = await loadCriteria(tx, { frameworkVersionId });
           if (criteria.length === 0) return failure("validation_blocker");
 
-          // Same fail-closed eligibility revalidation as A2.1's read path --
-          // this is a read (evaluateClaimTraceabilityInTransaction never
-          // writes kai.claims/kai.evidence_items), never an approval, and
-          // never an audience-eligibility mutation.
+          // Same fail-closed admission as A2.1's read path (internal:
+          // provisional use, owner direction 2026-11-06) -- this is a read
+          // (evaluateClaimTraceabilityInTransaction never writes
+          // kai.claims/kai.evidence_items), never an approval, and never an
+          // audience-eligibility mutation.
           for (const claimId of claimIds) {
             const traceability = await evaluate(tx, { organizationId, claimId, requestedAudience });
             if (
               !traceability.ok
               || traceability.data?.claim?.claim_id !== claimId
               || traceability.data?.requestedAudience !== requestedAudience
-              || traceability.data?.eligible !== true
+              || !(await admitsProvisionalInternalUseInTransaction(tx, { organizationId, requestedAudience, data: traceability.data }))
             ) {
               return failure("validation_blocker");
             }

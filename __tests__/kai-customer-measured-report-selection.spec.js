@@ -211,10 +211,10 @@ test("the claims diagnosed one by one: substantive claims impact-facts does not 
   assert.deepEqual(claimsToDiagnose({ claims, impactFacts: null }), [MEASURED.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId], "a failed impact-facts read is resolved per claim");
 });
 
-test("generation admits a measured claim only while it is usable: a determinate P2-06 'not usable' blocks readiness; a missing P2-04 state or an unknown answer leaves it to the server", () => {
+test("draft first: open review items on a measured claim do not hold back an internal provisional draft; a non-current source version does", () => {
   const RESTRICTED = claim(8, "source_record_count_measurement");
   const blockedDiagnosis = { status: "not_usable", blockerCodes: ["claim_review_unresolved"], conflictReason: null };
-  assert.equal(claimDraftAdmitted(RESTRICTED, blockedDiagnosis), false);
+  assert.equal(claimDraftAdmitted(RESTRICTED, blockedDiagnosis), true, "unresolved review is a provisional limitation");
   assert.equal(claimDraftAdmitted(RESTRICTED, { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" }), false);
   assert.equal(claimDraftAdmitted(RESTRICTED, { status: "not_usable", blockerCodes: [], conflictReason: "gap_dimension_requires_missing_p204_state" }), true,
     "generation records the P2-04 state itself");
@@ -228,7 +228,7 @@ test("generation admits a measured claim only while it is usable: a determinate 
   assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.measured_claim_not_usable, /deselect it to draft from the others/);
   const refusal = internalDraftFailureMessage({ statusCode: 422, body: { ok: false, error: { code: "validation_blocker" },
     blockers: [{ validator_key: "VAL-GEN-MEASURED-P2-01M-001", blocking_reason: "measured_claim_not_currently_eligible" }] } });
-  assert.match(refusal, /^A selected measured finding is not usable in internal reports now, so no draft was created\./);
+  assert.match(refusal, /^A selected measured finding cannot be drafted from now: a recorded review found it unsupported, or its measurement no longer matches its source\./);
   assert.doesNotMatch(refusal, /Request failed KAI validation|Get Kinder/);
 });
 
@@ -345,9 +345,9 @@ test("server: a draft citing only structural facts is not an available internal 
     blocks: [{ citations: evidenceItemIds.map((evidenceItemId) => ({ sourceVersionId: VERSION, evidenceItemId })) }],
   });
   const structuralOnly = await evaluateInternalReportAvailabilityInTransaction(tx, { organizationId: ORG_ID, packet: packet(STRUCTURAL) });
-  assert.deepEqual(structuralOnly, { available: false, getKinderReviewReasons: [], blockedReasons: [STRUCTURAL_FACTS_ONLY_REASON] });
+  assert.deepEqual(structuralOnly, { available: false, getKinderReviewReasons: [], blockedReasons: [STRUCTURAL_FACTS_ONLY_REASON], informationReasons: [] });
   const mixed = await evaluateInternalReportAvailabilityInTransaction(tx, { organizationId: ORG_ID, packet: packet(STRUCTURAL, MEASURED_EVIDENCE) });
-  assert.deepEqual(mixed, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+  assert.deepEqual(mixed, { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] });
   const measuredOnly = await evaluateInternalReportAvailabilityInTransaction(tx, { organizationId: ORG_ID, packet: packet(MEASURED_EVIDENCE) });
   assert.deepEqual(measuredOnly.available, true);
   // An evidence item this organization does not hold is not assumed structural (the packet's own checks govern it).
@@ -358,8 +358,11 @@ test("server: a draft citing only structural facts is not an available internal 
 
 test("UI wiring: library reads keep completeness and continue from the cursor; per-claim diagnosis; the generated draft opens by id; drafts page with nextCursor", () => {
   const workflow = readFileSync(new URL("../frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", import.meta.url), "utf8");
-  assert.match(workflow, /useOrganizationRead\(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken, CLAIM_CURSOR\)/);
-  assert.match(workflow, /useOrganizationRead\(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken, EVIDENCE_CURSOR\)/);
+  // Owner direction 2026-11-06: the Data Sources reads are the selected Project's working view.
+  assert.match(workflow, /useOrganizationRead\(organizationId, scopedClaimsPath, projectCandidateClaims, refreshToken, CLAIM_CURSOR, scope\)/);
+  assert.match(workflow, /useOrganizationRead\(organizationId, scopedEvidencePath, projectEvidenceLibraryItems, refreshToken, EVIDENCE_CURSOR, scope\)/);
+  assert.match(workflow, /useOrganizationRead\(organizationId, scopedSourcesPath, projectOrganizationSources, refreshToken, null, scope\)/);
+  assert.match(workflow, /claimLibraryCandidatesPath\(org, after, scope \|\| null\)/);
   assert.match(workflow, /useOrganizationRead\(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken\)/);
   assert.match(workflow, /claims: claims\.status === "success" \? claims\.items : undefined, claimsComplete: claims\.complete/);
   assert.match(workflow, /getJson\(claimTraceabilityPath\(organizationId, claimId, "internal"\)\)/);

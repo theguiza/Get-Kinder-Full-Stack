@@ -1,4 +1,5 @@
 import StorySourceInformation from "../StorySourceInformation.js";
+import ReportInformation from "../ReportInformation.js";
 import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -209,6 +210,7 @@ export default function ClientInternalDrafts({
             </span>
           </div>
           <StorySourceInformation />
+          {draft.internalReport.available ? <ReportInformation reasons={draft.internalReport.informationReasons} /> : null}
           {structuralOnly ? (
             <div className="alert alert-secondary py-2 small mb-2" data-client-internal-draft-metadata-only="">{STRUCTURAL_ONLY_DRAFT_MESSAGE}</div>
           ) : null}

@@ -291,7 +291,7 @@ test("detail: an ordinary unreviewed summary is the organization's internal repo
   assert.equal(detail.ok, true, JSON.stringify(detail));
   assert.equal(detail.data.reviewState, "awaiting_organization_review", "the review lifecycle itself is reported unchanged");
   // Owner decision 2026-10-25: no factual approval is required for internal use.
-  assert.deepEqual(detail.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+  assert.deepEqual(detail.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] });
   assert.equal(detail.data.internalReportAvailable, true);
   assert.deepEqual(detail.data.limitations, ["internal_use_only", "not_approved_for_external_use"]);
   assert.deepEqual(detail.data.release, { state: "awaiting_organization_review", releasedReportId: null });

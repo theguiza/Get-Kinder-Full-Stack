@@ -114,15 +114,13 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
   return { ready: true, reason: null };
 }
 
-// Generation drafts from a measured claim only while it is currently eligible
-// for the audience (VAL-GEN-MEASURED-P2-01M-001); a claim's own determinate
-// P2-06 evaluation says in advance that it is not. A missing P2-04 state is
-// not determinate: generation records it itself before evaluating.
+// Owner direction 2026-11-06 (draft first): an internal provisional draft
+// does not wait for review, coverage acceptance or final-use eligibility, so
+// a measured claim's open review items no longer hold it back here. Its
+// source version must be current; the server still refuses a measurement
+// that no longer matches its basis or a claim a recorded review rejected.
 export function claimDraftAdmitted(claim, diagnosis) {
-  if (claimSourceVersionUnavailable(claim, diagnosis)) return false;
-  if (claimKind(claim) !== "measurement" || diagnosis?.status !== "not_usable") return true;
-  return diagnosis.blockerCodes.includes("p204_evaluation_required")
-    || (diagnosis.blockerCodes.length === 0 && diagnosis.conflictReason === "gap_dimension_requires_missing_p204_state");
+  return !claimSourceVersionUnavailable(claim, diagnosis);
 }
 
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
@@ -450,11 +448,11 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
       + "Nothing was created.";
   }
   if (result?.body?.blockers?.[0]?.blocking_reason === "assessment_no_eligible_evidence") {
-    return "None of the selected claims is currently eligible for an assessment assertion. Their current conditions are shown under Claims for internal drafts. No assessment was created.";
+    return "None of the selected claims can be used in an assessment: a recorded review found them unsupported, or their measurement no longer matches its source. Their conditions are shown under Claims for internal drafts. No assessment was created.";
   }
   if (result?.body?.blockers?.[0]?.blocking_reason === "measured_claim_not_currently_eligible") {
-    return "A selected measured finding is not usable in internal reports now, so no draft was created. Its current condition is shown "
-      + "on the claim under Claims for internal drafts. Nothing was created.";
+    return "A selected measured finding cannot be drafted from now: a recorded review found it unsupported, or its measurement no longer matches its source. "
+      + "Its condition is shown on the claim under Claims for internal drafts. Nothing was created.";
   }
   if (result?.body?.error?.code === "claim_reviewed_not_supported") {
     return "A selected claim was found not supported by Get Kinder review and cannot be used in a draft. Nothing was created.";

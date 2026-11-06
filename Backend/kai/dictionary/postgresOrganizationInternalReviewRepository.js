@@ -133,17 +133,35 @@ async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
   return rows.length === evidenceItemIds.length && rows.every((row) => row.evidence_type === STRUCTURAL_EVIDENCE_TYPE);
 }
 
+// Owner direction 2026-11-06 (draft first): reading the organization's own
+// provisional internal report is not an approval. Recorded sensitivity
+// categories (personal, minors, sensitive, Indigenous/governance, small-cell)
+// are information shown with the report, and cited claims that have not yet
+// completed review stay provisional findings with their limitations. A source
+// with no recorded permission, a use or AI prohibition, a superseded source
+// and a structure-only draft still withhold it. The organization's factual
+// review and release (evaluateOrganizationInternalReviewInTransaction /
+// evaluateOrganizationInternalReleaseInTransaction) are unchanged.
+const SENSITIVITY_INFORMATION_REASONS = new Set(Object.values(HIGH_RISK_SENSITIVITY_FIELDS));
+const PROVISIONAL_REPORT_INFORMATION_REASONS = new Set(["cited_claims_not_currently_eligible"]);
+
 export async function evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }) {
   const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
   const getKinderReviewReasons = evaluation.getKinderReviewReasons
-    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType));
+    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType))
+    .filter((reason) => !SENSITIVITY_INFORMATION_REASONS.has(reason));
   const blockedReasons = [
-    ...evaluation.blockedReasons,
+    ...evaluation.blockedReasons.filter((reason) => !PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason)),
     ...(await citesOnlyStructuralFacts(tx, { organizationId, packet }) ? [STRUCTURAL_FACTS_ONLY_REASON] : []),
+  ];
+  const informationReasons = [
+    ...evaluation.getKinderReviewReasons.filter((reason) => SENSITIVITY_INFORMATION_REASONS.has(reason)),
+    ...evaluation.blockedReasons.filter((reason) => PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason)),
   ];
   return {
     getKinderReviewReasons,
     blockedReasons,
+    informationReasons,
     available: getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
   };
 }
