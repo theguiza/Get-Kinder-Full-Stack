@@ -78,8 +78,10 @@ import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
 import ClientSourceMeasurementPanel from "./ClientSourceMeasurementPanel.jsx";
 import ClientMeasuredClaimReviewPanel from "./ClientMeasuredClaimReviewPanel.jsx";
-import { CategoryHeading, FindingMeta, ImpactView, StatementText, ViewPane } from "./KnowledgeStudioViews.jsx";
-import { FINDING_CATEGORIES, buildFindings, findingCount, projectFindingsState, shortStatement } from "./knowledgeStudioViewsLogic.js";
+import { CategoryHeading, Disclosure, FindingMeta, FindingText, ImpactView, ViewPane } from "./KnowledgeStudioViews.jsx";
+import {
+  FINDING_CATEGORIES, buildFindings, claimRestatesFinding, findingCount, findingDisplay, projectFindingsState, shortStatement,
+} from "./knowledgeStudioViewsLogic.js";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -699,15 +701,24 @@ export default function ClientEvidenceWorkflow({
       ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
     const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
     const claimText = claim.claimStatement || claim.evidenceStatement || "";
+    const notUsable = splitNotUsableMessage(claimNotUsableMessage(diagnosis));
     return (
       <div key={claim.claimId} className="border-top mt-2 pt-2 small" data-client-claim={claim.claimId}
         data-client-claim-kind={kind} data-client-claim-internal-use={use}>
-        {claimText && claimText !== findingStatement ? <div className="text-break">Claim: {claimText}</div> : null}
+        {/* Internal use is determined by KAI's existing checks (P2-06), not by a
+            person; the wording says so and adds no approval language. */}
         {kind !== "structural" && use === "usable" ? (
-          <div className="text-success" data-client-claim-usable="">Usable in internal reports now. No further review is needed for internal use.</div>
+          <div className="text-success" data-client-claim-usable="">Usable in internal reports now (determined by KAI&rsquo;s checks)</div>
         ) : null}
         {kind !== "structural" && use === "not_usable" ? (
-          <div data-client-claim-not-usable="">{claimNotUsableMessage(diagnosis)}</div>
+          <>
+            <div data-client-claim-not-usable="">{notUsable.head}</div>
+            {notUsable.detail ? (
+              <Disclosure name="claim-not-usable-reason" label="Why" openLabel="Hide why">
+                <div className="text-muted" data-client-claim-not-usable-reason="">{notUsable.detail}</div>
+              </Disclosure>
+            ) : null}
+          </>
         ) : null}
         {kind !== "structural" && use === "unknown" ? (
           <div className="text-muted" data-client-claim-use-unknown="">
@@ -741,6 +752,13 @@ export default function ClientEvidenceWorkflow({
             </button>
           ) : null}
         </div>
+        {/* The claim is its own object; its wording is shown again only when it
+            says something other than the finding above. */}
+        {claimText && !claimRestatesFinding(claimText, findingStatement) ? (
+          <Disclosure name="claim-wording" label="Claim wording" openLabel="Hide claim wording">
+            <div className="text-break" data-client-claim-wording="">Claim: {claimText}</div>
+          </Disclosure>
+        ) : null}
         {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
         {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
         {access.recordSourceMeasurement && recoveryVersion ? (
@@ -763,9 +781,10 @@ export default function ClientEvidenceWorkflow({
   const renderFinding = (finding) => (
     <li key={finding.key} className={`list-group-item small${focusedEvidenceItemId === finding.evidenceItemId ? " border-primary" : ""}`}
       data-client-finding={finding.evidenceItemId} {...(finding.evidence ? { "data-client-evidence": finding.evidenceItemId } : {})}>
-      <StatementText text={finding.statement} max={260} />
+      <FindingText statement={finding.statement} max={260} />
       <FindingMeta finding={finding} />
-      {finding.claims.length > 0 ? <div className="text-muted mt-1">Claim proposed</div> : null}
+      {/* The finding's proposal status, once; each claim's own status follows. */}
+      {finding.claims.length > 0 ? <div className="text-muted mt-1" data-client-finding-claimed="">Claim proposed</div> : null}
       {finding.evidence && finding.claims.length === 0 ? (
         access.proposeClaim ? (
           <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending)}
@@ -848,7 +867,8 @@ export default function ClientEvidenceWorkflow({
 
   const sourcesView = (
     <>
-      {access.reviewSensitivity || access.promoteSource ? (
+      {(access.reviewSensitivity || access.promoteSource)
+        && !(engagementId && pipelineReady && preparationFiles.length === 0 && !openPreparation) ? (
         <div className="admin-card mb-3" data-client-source-preparation="">
           <h5 className="mb-1">Files that need a step</h5>
           <div className="small text-muted mb-2">
@@ -931,8 +951,8 @@ export default function ClientEvidenceWorkflow({
       <div className="admin-card mb-3" data-client-data-sources="">
         <h5 className="mb-1">Data Sources</h5>
         <div className="small text-muted mb-2">
-          {scope ? "Sources for this Project." : "Your organization's sources."} A file appears here once it has been reviewed and
-          promoted. Extract evidence to see what a source supports, or count its records under your own definition of what one record represents.
+          {scope ? "Sources for this Project." : "Your organization's sources."} Extract evidence to see what a source supports, or
+          count its records under your own definition of what one record represents.
         </div>
         {sources.status === "loading" && sources.items.length === 0 ? <div className="text-muted small">Loading sources...</div> : null}
         {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
@@ -945,11 +965,7 @@ export default function ClientEvidenceWorkflow({
             {sources.items.map((source) => {
               const currentVersion = source.sourceVersions.find((version) => version.isCurrent);
               const title = currentVersion?.safeFilename || source.sourceVersions.find((version) => version.safeFilename)?.safeFilename || "Source";
-              return (
-                <li key={source.sourceId} className="list-group-item" data-client-source={source.sourceId}>
-                  <div className="fw-semibold small">{title}</div>
-                  <div className="small text-muted">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</div>
-                  {source.sourceVersions.map((version) => (
+              const renderVersion = (version) => (
                     <div key={version.sourceVersionId} className="d-flex flex-wrap align-items-center gap-2 mt-1 small" data-client-source-version={version.sourceVersionId}>
                       <span className={version.isCurrent ? "" : "text-muted"}>
                         {version.isCurrent ? "Current version" : "Earlier version"}
@@ -1001,7 +1017,23 @@ export default function ClientEvidenceWorkflow({
                         </div>
                       ) : null}
                     </div>
-                  ))}
+              );
+              return (
+                <li key={source.sourceId} className="list-group-item" data-client-source={source.sourceId}>
+                  <div className="d-flex flex-wrap align-items-baseline gap-2">
+                    <span className="fw-semibold small">{title}</span>
+                    <span className="small text-muted">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</span>
+                  </div>
+                  {/* One row per file: the current version and its actions; earlier
+                      versions (each with its own existing actions) under Version history. */}
+                  {source.sourceVersions.filter((version) => version.isCurrent).map(renderVersion)}
+                  {source.sourceVersions.some((version) => !version.isCurrent) ? (
+                    <Disclosure name="source-version-history"
+                      label={`Version history (${source.sourceVersions.filter((version) => !version.isCurrent).length} earlier)`}
+                      openLabel="Hide version history">
+                      {source.sourceVersions.filter((version) => !version.isCurrent).map(renderVersion)}
+                    </Disclosure>
+                  ) : null}
                   <TechnicalDetails label="Technical details">
                     <div>Source code: {source.sourceCode}</div>
                     {source.sourceVersions.map((version) => (
@@ -1021,9 +1053,12 @@ export default function ClientEvidenceWorkflow({
         <div className="admin-card mb-3" data-client-processing-permissions="">
           <h5 className="mb-1">Processing permissions</h5>
           <div className="small text-muted mb-2">
-            Only needed to correct a recorded decision, for example AI processing recorded as not permitted by mistake. A new review
-            supersedes the current one, which stays in the file&rsquo;s history, and runs no processing.
+            Only needed to correct a recorded decision, for example AI processing recorded as not permitted by mistake. A correction
+            supersedes the current decision, which stays in the file&rsquo;s history, and runs no processing.
           </div>
+          <Disclosure name="processing-permissions" label="Correct processing permissions" openLabel="Hide processing permissions"
+            buttonClassName="btn btn-sm btn-outline-secondary" defaultOpen={false}>
+          <div className="mt-2">
           {!engagementId ? <div className="text-muted small">Select a Project to see its files.</div> : null}
           {engagementId && pipeline?.status === "error" ? (
             <div className="alert alert-warning py-2 small">This Project&rsquo;s file status could not be loaded.</div>
@@ -1062,6 +1097,8 @@ export default function ClientEvidenceWorkflow({
               onDecisionRecorded={permissionsRecorded}
             />
           ) : null}
+          </div>
+          </Disclosure>
         </div>
       ) : null}
     </>
@@ -1083,7 +1120,9 @@ export default function ClientEvidenceWorkflow({
             <ul className="small mb-2" data-client-draft-selected-claims="">
               {selectedClaimIds.map((claimId) => {
                 const claim = claimById.get(claimId);
-                return <li key={claimId}>{shortStatement(claim?.claimStatement || claim?.evidenceStatement || "Selected finding", 140).text}</li>;
+                const display = findingDisplay(claim?.claimStatement || claim?.evidenceStatement || "");
+                const label = [display.headline, display.summary].filter(Boolean).join(": ") || (display.neutral ? "Recorded measurement" : "Selected finding");
+                return <li key={claimId}>{shortStatement(label, 140).text}</li>;
               })}
             </ul>
           ) : null}
@@ -1203,4 +1242,14 @@ function LibraryCompleteness({ read, noun }) {
       ) : null}
     </div>
   );
+}
+
+// "Not usable in internal reports now: <reasons>." -> the status, then the
+// reasons on request (the message itself is unchanged).
+function splitNotUsableMessage(message) {
+  const text = String(message || "");
+  const index = text.indexOf(": ");
+  if (index < 0) return { head: text, detail: "" };
+  const detail = text.slice(index + 2);
+  return { head: `${text.slice(0, index)}.`, detail: `${detail.charAt(0).toUpperCase()}${detail.slice(1)}` };
 }

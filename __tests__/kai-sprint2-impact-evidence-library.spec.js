@@ -1767,7 +1767,8 @@ test("Package 14-04: the historical eligible-claims-failure setClaims([]) cleari
   // human-facing Impact Evidence Library UI or logic.
   const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
   assert.doesNotMatch(uiSource + logicSource, /Available to KAI/i);
-  assert.match(uiSource, /internally available \(governed\)/);
+  // The availability label names its basis: KAI's checks (2026-11-07 wording).
+  assert.match(uiSource, /Internal use \(KAI&rsquo;s checks\): \{claim\.governedAvailable \? "available" : "not in the current result"\}/);
 });
 
 // 14-04 lifecycle closure: two concrete defects (organization change can

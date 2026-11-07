@@ -10,6 +10,7 @@ import {
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
 import { requestSecurityCheckRetry } from "./securityCheckRetry.js";
+import { Disclosure } from "./KnowledgeStudioViews.jsx";
 
 const STATUS_BADGE = Object.freeze({
   complete: "text-bg-success",
@@ -29,7 +30,22 @@ const STATUS_BADGE = Object.freeze({
  * useClientEvidencePipeline). Its one request: for a file whose security
  * check could not run, an actor with intake contribution may re-attempt it
  * through the existing upload confirmation (the server authorizes it again).
+ *
+ * Each file is one compact row with one primary status - its current stage
+ * and that stage's status, or "Processing complete" - and its next action;
+ * the per-stage list is "Processing detail", on request (display only; the
+ * stages and their statuses are unchanged).
  */
+function primaryStage(file) {
+  return file.currentStage ? file.stages.find((stage) => stage.key === file.currentStage) || null : null;
+}
+
+function primaryStatusText(file) {
+  if (!file.currentStage) return "Processing complete";
+  const current = primaryStage(file);
+  return `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}`;
+}
+
 export default function ClientEvidencePipelineStatus({ organizationId, request, canReviewFollowups = false, canContribute = false, onRefresh }) {
   const { status, data } = request;
   const [retrying, setRetrying] = useState(null);
@@ -52,8 +68,7 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
         ) : null}
       </div>
       <div className="small text-muted mb-2">
-        Where each file uploaded to this project is in the review process. Evidence can be used only after Get Kinder
-        has reviewed it.
+        Where each file uploaded to this Project is, and what happens next. Open &ldquo;Processing detail&rdquo; for every step.
       </div>
       {status === PIPELINE_REQUEST_STATUS.NOT_STARTED ? (
         <div className="text-muted small">Select a project to see the status of its files.</div>
@@ -69,19 +84,26 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
         <ul className="list-group">
           {data.files.map((file) => (
             <li key={file.intakeFileId} className="list-group-item" data-pipeline-file={file.intakeFileId}>
-              <div className="fw-semibold small mb-1">{file.safeFilename}</div>
-              <table className="table table-sm small mb-2">
-                <tbody>
-                  {file.stages.map((stage) => (
-                    <tr key={stage.key}>
-                      <td>{PIPELINE_STAGE_LABELS[stage.key]}</td>
-                      <td className="text-end">
-                        <span className={`badge ${STATUS_BADGE[stage.status]}`}>{stageStatusLabel(stage)}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span className="fw-semibold small">{file.safeFilename}</span>
+                <span className={`badge ${STATUS_BADGE[primaryStage(file)?.status] || "text-bg-success"}`} data-pipeline-file-primary-status="">
+                  {primaryStatusText(file)}
+                </span>
+              </div>
+              <Disclosure name="processing-detail" label="Processing detail" openLabel="Hide processing detail">
+                <table className="table table-sm small mb-2 mt-1">
+                  <tbody>
+                    {file.stages.map((stage) => (
+                      <tr key={stage.key}>
+                        <td>{PIPELINE_STAGE_LABELS[stage.key]}</td>
+                        <td className="text-end">
+                          <span className={`badge ${STATUS_BADGE[stage.status]}`}>{stageStatusLabel(stage)}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Disclosure>
               {file.currentStatus === "failed" && file.failureCategory ? (
                 <div className="alert alert-danger py-1 small mb-1">
                   {PIPELINE_STAGE_LABELS[file.currentStage]} failed: {PIPELINE_FAILURE_MESSAGES[file.failureCategory]}
@@ -117,7 +139,7 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
               ) : null}
               {file.reviewedImpactFactCount > 0 ? (
                 <div className="small text-muted mt-1">
-                  Reviewed evidence from this file: {file.reviewedImpactFactCount}
+                  Usable Impact Facts from this file: {file.reviewedImpactFactCount}
                 </div>
               ) : null}
             </li>

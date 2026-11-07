@@ -353,7 +353,18 @@ async function runBrowserAcceptance() {
   // expectReread: false where the view stayed mounted (the client Studio keeps
   // an opened view mounted, so returning to it shows the same batch without
   // reading it again).
+  // Client Knowledge Studio Sources (2026-11-07) keeps batch management and
+  // the batch id under "Batches and upload details"; open it as a person would
+  // (a real click on its toggle). The GK studio keeps the full intake layout,
+  // so there is nothing to open there.
+  const openIntakeDetails = (page) => page.evaluate(`(() => {
+    const toggle = document.querySelector('[data-knowledge-studio-view="sources"]:not([hidden]) [data-knowledge-studio-disclosure="intake-details"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+    return true;
+  })()`);
+
   async function assertAlphaReconstructed(page, label, sinceMark, { expectReread = true } = {}) {
+    await openIntakeDetails(page);
     await page.waitForText(NAMES.alphaOne);
     await page.waitForText(NAMES.alphaTwo);
     await page.idle();
@@ -438,6 +449,7 @@ async function runBrowserAcceptance() {
       await page.selectProject(PROJECT.beta);
       await page.waitForText(NAMES.beta);
       await page.idle();
+      await openIntakeDetails(page);
       let since = page.requestsSince(mark);
       logIntake(`${label} case 4 (Alpha -> Beta)`, since);
       assert.ok(since.some(isBatchList), `${label}: Beta batch list read`);

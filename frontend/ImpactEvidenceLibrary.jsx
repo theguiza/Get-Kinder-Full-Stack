@@ -168,10 +168,14 @@ import { engagementsPath } from "./kaiWebIntakeLogic.js";
 import KaiWebIntake from "./KaiWebIntake.jsx";
 import KnowledgeStudioGapDetail from "./knowledgeStudio/KnowledgeStudioGapDetail.jsx";
 import ImpactLibraryKai from "./ImpactLibraryKai.jsx";
-import { CategoryHeading, ImpactView, KnowledgeStudioNav, ProjectHeading, StatementText } from "./knowledgeStudio/KnowledgeStudioViews.jsx";
+import {
+  CategoryHeading, Disclosure, FindingText, ImpactView, KnowledgeStudioNav, ProjectHeading, knowledgeStudioTabId,
+} from "./knowledgeStudio/KnowledgeStudioViews.jsx";
 import {
   DEFAULT_KNOWLEDGE_STUDIO_VIEW,
   FINDING_CATEGORIES,
+  audienceGateRows,
+  traceabilityChain,
   buildFindings,
   findingTypeLabel,
   projectFindingsState,
@@ -221,6 +225,8 @@ export default function ImpactEvidenceLibrary({
   onOrganizationIdChange,
   engagementId: parentEngagementId,
   onEngagementIdChange,
+  // The shell's readable name of the shared organization (display only).
+  organizationName = "",
   // Package G2: when supplied, wires Gap Detail's "Add to Plan" action to
   // the real, authorized Improvement Practice create path Improvement Plan
   // itself uses (frontend/ImpactLibraryApp.jsx). A caller that does not
@@ -230,6 +236,8 @@ export default function ImpactEvidenceLibrary({
 } = {}) {
   const [organizations, setOrganizations] = useState([]);
   const [localOrganizationId, setLocalOrganizationId] = useState("");
+  // The shell supplies the one authoritative organization and Project.
+  const sharedContext = parentOrganizationId !== undefined && parentEngagementId !== undefined;
   const organizationId = parentOrganizationId !== undefined ? parentOrganizationId : localOrganizationId;
   // The admin dashboard also mounts this component without the Library shell.
   // Resolve its operation capabilities from the same server endpoint; never
@@ -3080,15 +3088,29 @@ export default function ImpactEvidenceLibrary({
   return (
     <section data-knowledge-studio-kind="gk">
       <ProjectHeading
-        projectName={projectName || (engagementId ? engagementId : "")}
+        projectName={projectName}
         engagementId={engagementId}
         subtitle={engagementId ? "Get Kinder Knowledge Studio" : "Get Kinder Knowledge Studio: no Project selected, so reads cover the whole organization."}
       />
 
-      <KnowledgeStudioNav view={knowledgeStudioTab} onSelect={setKnowledgeStudioTab} />
+      <KnowledgeStudioNav view={knowledgeStudioTab} onSelect={setKnowledgeStudioTab} idPrefix="ks-gk" singlePanelId="ks-gk-panel" />
+      {/* One tab panel that always shows the selected view. */}
+      <div role="tabpanel" id="ks-gk-panel" aria-labelledby={knowledgeStudioTabId("ks-gk", knowledgeStudioTab)}>
       {parentOrganizationId === undefined || parentEngagementId === undefined || knowledgeStudioTab === "evidence" || knowledgeStudioTab === "drafts" ? (
       <div className="admin-card mb-3">
         <div className="row g-3 align-items-end">
+          {sharedContext ? (
+            // The shell's header owns the organization and Project (Package C0):
+            // shown here as readable context, never as an empty selector.
+            <div className="col-12 col-lg-9" data-gk-shared-context="">
+              <div className="small text-muted">Organization</div>
+              <div className="small fw-semibold">{organizationName || "Selected in the page header"}</div>
+              <div className="small text-muted mt-1">Project</div>
+              <div className="small fw-semibold">{engagementId ? (projectName || "Selected Project") : "No Project selected (reads cover the whole organization)"}</div>
+              <div className="form-text">Change the organization or Project at the top of the page.</div>
+            </div>
+          ) : (
+          <>
           <div className="col-12 col-lg-5">
             <label className="form-label small fw-semibold">Organization</label>
             {loadingOrganizations ? (
@@ -3104,7 +3126,7 @@ export default function ImpactEvidenceLibrary({
               >
                 {organizations.length > 1 ? <option value="">Select an organization</option> : null}
                 {organizations.map((item) => (
-                  <option key={item.organization_id} value={item.organization_id}>{item.organization_id}</option>
+                  <option key={item.organization_id} value={item.organization_id}>{item.name || item.organization_name || item.organization_id}</option>
                 ))}
               </select>
             )}
@@ -3126,11 +3148,13 @@ export default function ImpactEvidenceLibrary({
               >
                 {engagements.length > 1 ? <option value="">Select an engagement</option> : null}
                 {engagements.map((item) => (
-                  <option key={item.engagement_id} value={item.engagement_id}>{item.engagement_id}</option>
+                  <option key={item.engagement_id} value={item.engagement_id}>{item.engagement_code || item.engagement_id}</option>
                 ))}
               </select>
             )}
           </div>
+          </>
+          )}
           <div className="col-12 col-lg-4">
             <label className="form-label small fw-semibold">Audience</label>
             <select className="form-select form-select-sm" value={audience} onChange={(event) => setAudience(event.target.value)}>
@@ -3587,7 +3611,9 @@ export default function ImpactEvidenceLibrary({
                 const linkedClaim = claims.find((claim) => claim.evidenceItemId === item.evidenceItemId);
                 return (
                   <li key={item.evidenceItemId} className="list-group-item" data-evidence-item-id={item.evidenceItemId}>
-                    <StatementText className="fw-semibold small" text={item.statement || "Evidence statement not yet available"} />
+                    <div className="small">
+                      {item.statement ? <FindingText statement={item.statement} /> : <div className="fw-semibold">Evidence statement not yet available</div>}
+                    </div>
                     <div className="d-flex flex-wrap gap-2 mt-1">
                       <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent)}</span>
                       {gkSourceVersions.get(item.sourceVersionId)?.fileName ? (
@@ -3798,7 +3824,7 @@ export default function ImpactEvidenceLibrary({
                     <div className="small mt-1">Get Kinder claim review required</div>
                   ) : null}
                   <div className="small mt-1">
-                    Governed internal availability: {claim.governedAvailable ? "internally available (governed)" : "not in current governed result"}
+                    Internal use (KAI&rsquo;s checks): {claim.governedAvailable ? "available" : "not in the current result"}
                   </div>
                   <div className="small mt-1">
                     {audience} audience eligibility:{" "}
@@ -4900,12 +4926,27 @@ export default function ImpactEvidenceLibrary({
                     onRecorded={() => loadTraceability(selectedClaimId)}
                   />
                 ) : null}
-                <ValueRow label="Governed internal availability" value="internally available (governed)" />
+                {/* Readable traceability (presentation only); the raw read is under Technical details. */}
+                <div className="border rounded p-2 mb-2 small" data-gk-traceability-summary="">
+                  <div className="fw-semibold mb-1">How this claim traces to its source</div>
+                  {traceabilityChain(traceability, {
+                    sourceFileName: gkSourceVersions.get(traceability.sourceVersion?.source_version_id)?.fileName || "",
+                  }).map((row) => (
+                    <div key={row.key} className="mb-1" data-gk-traceability-row={row.key}>
+                      <span className="text-muted">{row.label}: </span><span className="text-break">{row.text}</span>
+                    </div>
+                  ))}
+                  <div className="text-muted mt-1">
+                    Eligibility below is determined by KAI&rsquo;s checks. A person&rsquo;s review is shown only where a review decision is recorded.
+                  </div>
+                </div>
                 <ValueRow
-                  label={`${traceability.requestedAudience || audience} audience eligibility`}
+                  label={`${traceability.requestedAudience || audience} audience eligibility (KAI's checks)`}
                   value={traceability.eligible ? "eligible" : "not currently eligible"}
                 />
-                <ValueRow label="Allowed audience" value={JSON.stringify(traceability.audienceGates)} />
+                {audienceGateRows(traceability.audienceGates).map((row) => (
+                  <ValueRow key={row.key} label={row.label} value={row.value} />
+                ))}
                 <ValueRow label="Evidence item" value={traceability.evidence?.evidence_item_id} />
                 <ValueRow label="Evidence sensitivity" value={traceability.evidence?.sensitivity_level || "unknown"} />
                 <ValueRow label="Source" value={traceability.source?.source_id} />
@@ -5062,6 +5103,11 @@ export default function ImpactEvidenceLibrary({
                     value={`${item.workflow_status || "none"} / ${item.review_status || "none"}`}
                   />
                 ))}
+                <Disclosure name="gk-traceability-raw" label="Technical details (raw traceability)" openLabel="Hide technical details" className="mt-3">
+                  <pre className="small border rounded p-2 mt-1 mb-0 text-break" style={{ whiteSpace: "pre-wrap" }} data-gk-traceability-raw="">
+                    {JSON.stringify(traceability, null, 2)}
+                  </pre>
+                </Disclosure>
               </>
             ) : null}
           </div>
@@ -5408,6 +5454,8 @@ export default function ImpactEvidenceLibrary({
           </>
           ) : null}
         </div>
+      </div>
+
       </div>
 
       {organizationId ? (

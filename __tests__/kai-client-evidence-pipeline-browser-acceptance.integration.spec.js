@@ -241,8 +241,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     assert.ok(ok, "project selector present");
   };
   // Text of the Files tab's per-file pipeline entry.
-  const pipelineFileText = (intakeFileId) => evaluate(`(() => {
+  const pipelineFileText = (intakeFileId) => evaluate(`(async () => {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+    // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+    const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+      toggle.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return el ? el.innerText : null;
   })()`);
   const linkHrefs = () => evaluate(`[...document.querySelectorAll("a")].filter((a) => a.offsetParent !== null).map((a) => [a.innerText.trim(), a.getAttribute("href")])`);
@@ -720,8 +726,8 @@ async function runBrowserAcceptance() {
       await page.waitForText("1 file needs your sensitivity & allowed-use review in Data Sources before it can become a source.");
       await pipelineRead(page, PROJECT.alpha, mark, "case 2");
       const body = await page.text();
-      assert.ok(body.includes("No reviewed evidence for this project yet. Here is where its files are:"));
-      assert.ok(!body.includes("No reviewed evidence yet for this organization."), "org-wide zero message not shown for a Project");
+      assert.ok(body.includes("No usable Impact Facts for this Project yet. Here is where its files are:"));
+      assert.ok(!body.includes("No usable Impact Facts yet for this organization."), "org-wide zero message not shown for a Project");
       assert.ok(!body.includes("0 shown"));
       assertClientBoundary(page, "case 2", body);
       // Gamma: no files -> "Upload data in Files".
@@ -757,7 +763,7 @@ async function runBrowserAcceptance() {
         await page.clickTab("Evidence");
         await page.waitForText("evidence status could not be loaded. This does not mean the project has no evidence.");
         const body = await page.text();
-        assert.ok(!body.includes("0 shown") && !body.includes("No reviewed evidence"), "a failed read is not zero evidence");
+        assert.ok(!body.includes("0 shown") && !body.includes("No usable Impact Facts"), "a failed read is not zero evidence");
       } finally {
         await page.interceptPipeline(null);
       }
@@ -904,9 +910,9 @@ async function runBrowserAcceptance() {
       await page.waitForText(eligibleStatement);
       await pipelineRead(page, PROJECT.alpha, mark, "case 5");
       let body = await page.text();
-      console.log(`[evidence-pipeline-browser] case 5 Evidence (client_admin):\n${body.slice(body.indexOf("Reviewed evidence"), body.indexOf("Reviewed evidence") + 900)}`);
+      console.log(`[evidence-pipeline-browser] case 5 Evidence (client_admin):\n${body.slice(body.indexOf("Usable Impact Fidence"), body.indexOf("Usable Impact Fidence") + 900)}`);
       assert.ok(body.includes("1 shown"));
-      assert.ok(body.includes("Reviewed for internal use"));
+      assert.ok(body.includes("Usable internally"));
       assert.ok(body.includes("1 file need an answer from a client reviewer in your organization before evidence can be used."));
       assertClientBoundary(page, "case 5 client_admin", body);
       await page.clickTab("Reviews");
@@ -923,7 +929,7 @@ async function runBrowserAcceptance() {
       const entry = await reviewer.pipelineFileText(FILE.alpha);
       assert.match(entry, /Impact Fact review\s+Waiting for your organization/);
       assert.match(entry, /Next action: Answer the follow-up questions Get Kinder sent about this file's evidence\./);
-      assert.match(entry, /Reviewed evidence from this file: 1/);
+      assert.match(entry, /Usable Impact Facts from this file: 1/);
       await reviewer.clickTab("Reviews");
       await reviewer.waitForText("Your action is needed");
       body = await reviewer.text();

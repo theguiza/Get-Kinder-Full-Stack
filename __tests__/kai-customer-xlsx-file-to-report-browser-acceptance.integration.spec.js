@@ -834,7 +834,12 @@ async function runXlsxAcceptance() {
     await test("A1: the administrator uploads a new one-worksheet workbook in Files; the current P1 worker commits the worksheet record-count basis from its bytes", async () => {
       await openStudioTab("Files");
       await adminPage.waitForText("Upload the selected file");
-      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.text()), "the Project's batch is selected");
+      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.evaluate(`(() => {
+        // The batch id is under "Batches and upload details" in the client studio (2026-11-07): open it as a person would.
+        const toggle = document.querySelector('[data-knowledge-studio-view="sources"]:not([hidden]) [data-knowledge-studio-disclosure="intake-details"] > button');
+        if (toggle && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+        return document.body.innerText;
+      })()`)), "the Project's batch is selected");
       await adminPage.chooseFile(ORDINARY.path);
       const mark = adminPage.mark();
       await adminPage.clickButton("Upload the selected file");
@@ -943,7 +948,12 @@ async function runXlsxAcceptance() {
 
     await test("B3: in Files the customer selects the same workbook, KAI recognizes it, and 'Upload again as a new intake version' creates a linked intake version the current worker profiles", async () => {
       await adminPage.waitForText("Upload the selected file");
-      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.text()), "the Project's batch is selected");
+      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.evaluate(`(() => {
+        // The batch id is under "Batches and upload details" in the client studio (2026-11-07): open it as a person would.
+        const toggle = document.querySelector('[data-knowledge-studio-view="sources"]:not([hidden]) [data-knowledge-studio-disclosure="intake-details"] > button');
+        if (toggle && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+        return document.body.innerText;
+      })()`)), "the Project's batch is selected");
       await adminPage.chooseFile(LEGACY.path);
       await adminPage.clickButton("Upload the selected file");
       await adminPage.waitForText("This file has already been added.");

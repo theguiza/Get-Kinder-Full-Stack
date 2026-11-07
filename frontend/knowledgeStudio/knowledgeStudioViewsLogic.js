@@ -206,3 +206,125 @@ export function shortStatement(text, max = 220) {
 export function nextVisitedViews(visited, view) {
   return visited.includes(view) ? visited : [...visited, view];
 }
+
+// ---------------------------------------------------------------------------
+// Readable presentation of a recorded statement (owner task 2026-11-07,
+// "Finish the MVP UI"). Display only: every part returned is a verbatim
+// fragment of the recorded statement, re-ordered so the result leads and the
+// technical location (column keys, worksheet keys, linked register ids) sits
+// in detail. Nothing is calculated, summarized or interpreted; a statement
+// whose shape is not recognized is shown as recorded, or - when it names
+// technical keys that cannot be separated from its result - with neutral
+// wording and the full statement one click away.
+
+const TECHNICAL_TEXT_RE = /\bfield_\d+\b|\bsheet_\d+\b|\(column [A-Z]{1,3}\)|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const RECORD_COUNT_RE = /^Source version record count: (\d+) (.+?) (for the reporting period \S+ to \S+|with no reporting period defined),(?: from selected worksheet (\S+?),)? counting each (.+?) after the header row as one (.+?); (\d+ blank records?) excluded; (\d+ exact-duplicate records?) included\.$/s;
+const INTERPRETATION_RE = /^(.+?) \((meaning stated by the organization(?:; [^)]*)?)\): (.+)$/s;
+const PAIRED_BODY_RE = /^numeric outcome (\S+ \(column [A-Z]{1,3}\)), (in selected worksheet \S+|in the CSV data records), baseline to follow-up, no reporting period: (.+)$/s;
+
+export function hasTechnicalText(text) {
+  return TECHNICAL_TEXT_RE.test(String(text || ""));
+}
+
+const capitalize = (text) => (text ? `${text[0].toUpperCase()}${text.slice(1)}` : text);
+
+/**
+ * { headline, summary, note, location, full, neutral } for one recorded
+ * statement. `headline` is the organization's recorded indicator label or the
+ * counted value with its unit, when the statement states one; `summary` the
+ * recorded result; `note` the recorded basis of its meaning; `location` the
+ * recorded column/worksheet wording; `full` the statement exactly as recorded;
+ * `neutral` true when the result cannot be shown without technical keys.
+ */
+export function findingDisplay(statement) {
+  const full = String(statement || "").trim();
+  const plain = { headline: "", summary: full, note: "", location: "", full, neutral: false };
+  if (!full) return plain;
+  const count = RECORD_COUNT_RE.exec(full);
+  if (count) {
+    const [, value, unit, period, sheet, noun, counted, blank, duplicates] = count;
+    return {
+      headline: `${value} ${unit}`,
+      summary: `${capitalize(period)}; counting each ${noun} after the header row as one ${counted}; ${blank} excluded; ${duplicates} included.`,
+      note: "",
+      location: sheet ? `From selected worksheet ${sheet}` : "",
+      full,
+      neutral: false,
+    };
+  }
+  const body = full.replace(/^Derived measurement:\s*/, "");
+  if (body === full && !INTERPRETATION_RE.test(full)) {
+    return hasTechnicalText(full) ? { ...plain, summary: "", neutral: true } : plain;
+  }
+  const interpreted = INTERPRETATION_RE.exec(body);
+  const label = interpreted ? interpreted[1] : "";
+  const note = interpreted ? capitalize(interpreted[2]) : "";
+  const result = interpreted ? interpreted[3] : body;
+  const paired = PAIRED_BODY_RE.exec(result);
+  if (paired) {
+    return {
+      headline: label, summary: `Baseline to follow-up: ${paired[3]}`, note,
+      location: `Numeric outcome ${paired[1]}, ${paired[2]}`, full, neutral: false,
+    };
+  }
+  if (hasTechnicalText(result)) return { headline: label, summary: "", note, location: "", full, neutral: true };
+  return { headline: label, summary: capitalize(result), note, location: "", full, neutral: false };
+}
+
+// Whether a claim restates its evidence (the same words apart from the
+// recorded prefix, case and punctuation): such a claim's wording is not shown
+// again; a materially different wording stays available on request.
+const comparable = (text) => String(text || "")
+  .replace(/^(Derived measurement|Source version record count):\s*/i, "")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "");
+export function claimRestatesFinding(claimText, findingStatement) {
+  return comparable(claimText) === comparable(findingStatement);
+}
+
+// Keyboard movement within the four-tab list (WAI-ARIA tabs pattern).
+export function tabKeyTarget(key, current, keys = KNOWLEDGE_STUDIO_VIEWS.map(([value]) => value)) {
+  const index = keys.indexOf(current);
+  if (index < 0) return null;
+  if (key === "ArrowRight") return keys[(index + 1) % keys.length];
+  if (key === "ArrowLeft") return keys[(index - 1 + keys.length) % keys.length];
+  if (key === "Home") return keys[0];
+  if (key === "End") return keys[keys.length - 1];
+  return null;
+}
+
+/**
+ * The claim -> evidence -> source chain of one claim's traceability read
+ * (projectTraceability), as readable rows. Presentation only: every value is
+ * a field of that read (or the file name of its source version from the
+ * loaded Sources read); no relationship is looked up or inferred, and the raw
+ * read stays available in technical details.
+ */
+const AUDIENCE_GATE_LABELS = Object.freeze({
+  internal_only: "Internal use only",
+  funder_use_allowed: "Funder use allowed",
+  public_use_allowed: "Public use allowed",
+  export_ready: "Ready for export",
+});
+export function audienceGateRows(gates) {
+  if (!gates || typeof gates !== "object") return [];
+  return Object.entries(AUDIENCE_GATE_LABELS)
+    .filter(([key]) => key in gates)
+    .map(([key, label]) => ({ key, label, value: gates[key] === true ? "Yes" : gates[key] === false ? "No" : "Not recorded" }));
+}
+export function traceabilityChain(traceability, { sourceFileName = "" } = {}) {
+  if (!traceability) return [];
+  const rows = [];
+  const claimText = traceability.claim?.statement;
+  const evidenceText = traceability.evidence?.statement;
+  const restates = Boolean(claimText && evidenceText && claimRestatesFinding(claimText, evidenceText));
+  if (claimText) rows.push({ key: "claim", label: restates ? "Claim (restates its evidence)" : "Claim", text: claimText });
+  if (evidenceText && !restates) rows.push({ key: "evidence", label: "Evidence", text: evidenceText });
+  const current = traceability.sourceVersion?.is_current;
+  const versionText = current === true ? "current version" : current === false ? "earlier version (not current)" : "";
+  const sourceName = sourceFileName || traceability.source?.source_code || "";
+  if (sourceName || versionText) {
+    rows.push({ key: "source", label: "Source", text: [sourceName || "Source", versionText].filter(Boolean).join(", ") });
+  }
+  return rows;
+}

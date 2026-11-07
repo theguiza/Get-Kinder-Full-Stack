@@ -17,7 +17,13 @@ import {
   nextVisitedViews,
   projectFindingsState,
   shortStatement,
+  audienceGateRows,
+  claimRestatesFinding,
+  findingDisplay,
+  tabKeyTarget,
+  traceabilityChain,
 } from "../frontend/knowledgeStudio/knowledgeStudioViewsLogic.js";
+import { composeMeasurementEvidenceStatement } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
 import { projectEvidenceLibraryItems } from "../frontend/impactEvidenceLibraryLogic.js";
 import { listOrganizationEvidenceItems } from "../Backend/kai/db/kaiEvidenceLibraryReadModels.js";
 import { listOrganizationEvidenceLibrary } from "../Backend/kai/services/kaiEvidenceLibraryService.js";
@@ -407,4 +413,120 @@ test("GK: Evidence, Claims, Sources and Drafts reads pass the selected Project; 
   assert.match(gk, /if \(audience !== "internal" \|\| !engagementId\) return;/);
   assert.match(gk, /canSelectClaimForInternalGeneration\(claim, audience\)/);
   assert.match(gk, /canSelectClaimForFunderGeneration\(claim, audience\)/);
+});
+
+
+// ---------------------------------------------------------------------------
+// MVP UI completion (owner task 2026-11-07): readable recorded statements,
+// claim/finding repetition, accessible tabs, traceability presentation.
+
+const PAIRED_STATEMENT = "Derived measurement: Confidence self-rating (meaning stated by the organization; values self-reported): numeric outcome field_4 (column D), "
+  + "in selected worksheet sheet_1, baseline to follow-up, no reporting period: 4 of 6 comparable participant pairs (66.67%) have a numerically higher follow-up value, "
+  + "1 the same, 1 lower; the organization states higher is better. Pairs need the same participant (no instrument version recorded); 0 of 6 participants excluded as not comparable.";
+
+test("readable statement: a paired measurement leads with the organization's recorded label and result; column and worksheet keys move to the recorded detail", () => {
+  const display = findingDisplay(PAIRED_STATEMENT);
+  assert.equal(display.headline, "Confidence self-rating");
+  assert.match(display.summary, /^Baseline to follow-up: 4 of 6 comparable participant pairs \(66\.67%\) have a numerically higher follow-up value, 1 the same, 1 lower;/);
+  assert.doesNotMatch(`${display.headline} ${display.summary} ${display.note}`, /field_\d|sheet_\d|column D/);
+  assert.equal(display.note, "Meaning stated by the organization; values self-reported");
+  assert.equal(display.location, "Numeric outcome field_4 (column D), in selected worksheet sheet_1");
+  assert.equal(display.full, PAIRED_STATEMENT, "the recorded statement is kept exactly");
+  // Every shown fragment is verbatim recorded text (nothing calculated or added).
+  for (const part of [display.headline, display.summary.replace(/^Baseline to follow-up: /, ""), "meaning stated by the organization; values self-reported"]) {
+    assert.ok(PAIRED_STATEMENT.includes(part), part);
+  }
+});
+
+test("readable statement: a record count leads with its counted value and unit, from the real composer; an unrecognized technical statement is neutral; prose is unchanged", () => {
+  const recorded = composeMeasurementEvidenceStatement({
+    measurement: { measuredValue: 5, calculationMethod: "csv", blankRecordCount: 0, duplicateRecordCount: 1 },
+    definition: { unitLabel: "programme sessions", countedUnit: "programme session", periodStart: "2026-01-01", periodEnd: "2026-06-30" },
+  });
+  const count = findingDisplay(recorded);
+  assert.equal(count.headline, "5 programme sessions");
+  assert.match(count.summary, /^For the reporting period 2026-01-01 to 2026-06-30; counting each .* as one programme session; 0 blank records excluded; 1 exact-duplicate record included\.$/);
+  assert.equal(count.full, recorded);
+  const technical = findingDisplay("Derived measurement: 3 records in selected worksheet sheet_1 have field_3 = Yes, across all dates.");
+  assert.equal(technical.neutral, true);
+  assert.equal(technical.summary, "");
+  assert.equal(technical.headline, "", "no label is invented");
+  const prose = findingDisplay("Participants reported feeling safer at sessions.");
+  assert.deepEqual([prose.headline, prose.summary, prose.neutral], ["", "Participants reported feeling safer at sessions.", false]);
+});
+
+test("claim wording: a claim that restates its finding is not repeated; materially different wording is kept available", () => {
+  assert.equal(claimRestatesFinding("Confidence self-rating (meaning stated by the organization): 4 of 6.", "Derived measurement: Confidence self-rating (meaning stated by the organization): 4 of 6"), true);
+  assert.equal(claimRestatesFinding("The promoted source records 5 programme sessions with no reporting period defined (record count: one programme session per CSV data record).",
+    "Source version record count: 5 programme sessions with no reporting period defined, counting each CSV data record after the header row as one programme session."), false);
+});
+
+test("tabs: arrow keys, Home and End move within the four views; other keys do nothing", () => {
+  assert.equal(tabKeyTarget("ArrowRight", "impact"), "evidence");
+  assert.equal(tabKeyTarget("ArrowRight", "drafts"), "impact");
+  assert.equal(tabKeyTarget("ArrowLeft", "impact"), "drafts");
+  assert.equal(tabKeyTarget("Home", "sources"), "impact");
+  assert.equal(tabKeyTarget("End", "evidence"), "drafts");
+  assert.equal(tabKeyTarget("Enter", "evidence"), null);
+  assert.equal(tabKeyTarget("ArrowRight", "unknown"), null);
+});
+
+test("rendered tabs: one tab stop, aria-controls to a tabpanel labelled by its tab; GK uses one shared panel; the row does not wrap", async () => {
+  const { KnowledgeStudioNav, ViewPane } = await loadComponent("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  const nav = renderToStaticMarkup(React.createElement(KnowledgeStudioNav, { view: "evidence", onSelect: () => {} }));
+  assert.equal((nav.match(/tabindex="0"/g) || []).length, 1);
+  assert.equal((nav.match(/tabindex="-1"/g) || []).length, 3);
+  assert.match(nav, /id="knowledge-studio-tab-evidence" aria-selected="true" aria-controls="knowledge-studio-panel-evidence" tabindex="0"/);
+  assert.match(nav, /flex-nowrap/);
+  assert.match(nav, /aria-label="Knowledge Studio views"/);
+  const pane = renderToStaticMarkup(React.createElement(ViewPane, { name: "evidence", active: false, mounted: true }, "x"));
+  assert.match(pane, /hidden="" role="tabpanel" id="knowledge-studio-panel-evidence" aria-labelledby="knowledge-studio-tab-evidence"/);
+  const gk = renderToStaticMarkup(React.createElement(KnowledgeStudioNav, { view: "sources", onSelect: () => {}, idPrefix: "ks-gk", singlePanelId: "ks-gk-panel" }));
+  assert.equal((gk.match(/aria-controls="ks-gk-panel"/g) || []).length, 1, "only the selected tab controls the shared panel");
+});
+
+test("rendered finding text: readable first, the recorded statement kept mounted behind a disclosure", async () => {
+  const { FindingText } = await loadComponent("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  const markup = renderToStaticMarkup(React.createElement(FindingText, { statement: PAIRED_STATEMENT }));
+  const visible = markup.replace(/<div id="ks-disclosure-[^"]*" hidden=""[\s\S]*$/, "");
+  assert.match(visible, /Confidence self-rating/);
+  assert.doesNotMatch(visible, /field_4|sheet_1/);
+  assert.match(markup, /aria-expanded="false"/);
+  assert.match(markup, /hidden="" data-knowledge-studio-reveal="recorded-statement-[^"]+"/);
+  assert.ok(markup.includes("numeric outcome field_4 (column D)"), "the recorded statement is available in detail");
+});
+
+test("traceability presentation: the claim -> evidence -> source chain and audience gates as readable rows, from the read's own fields only", () => {
+  const rows = traceabilityChain({
+    claim: { statement: "The promoted source records 5 programme sessions." },
+    evidence: { statement: "Source version record count: 5 programme sessions." },
+    source: { source_id: id(7), source_code: "SRC-7" },
+    sourceVersion: { source_version_id: id(8), is_current: false },
+  }, { sourceFileName: "sessions.csv" });
+  assert.deepEqual(rows.map((row) => [row.label, row.text]), [
+    ["Claim", "The promoted source records 5 programme sessions."],
+    ["Evidence", "Source version record count: 5 programme sessions."],
+    ["Source", "sessions.csv, earlier version (not current)"],
+  ]);
+  const same = traceabilityChain({ claim: { statement: "A: b." }, evidence: { statement: "Derived measurement: A: b" }, source: { source_code: "SRC" }, sourceVersion: { is_current: true } });
+  assert.deepEqual(same.map((row) => row.label), ["Claim (restates its evidence)", "Source"]);
+  assert.equal(same[1].text, "SRC, current version");
+  assert.deepEqual(traceabilityChain(null), []);
+  assert.deepEqual(audienceGateRows({ internal_only: true, funder_use_allowed: false, public_use_allowed: null, export_ready: false }).map((row) => `${row.label}: ${row.value}`), [
+    "Internal use only: Yes", "Funder use allowed: No", "Public use allowed: Not recorded", "Ready for export: No",
+  ]);
+});
+
+test("wording: system-determined internal use is not presented as a human review; no approval language added; no new request in the changed views", () => {
+  const workflow = readFileSync("frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", "utf8");
+  const studio = readFileSync("frontend/knowledgeStudio/ClientKnowledgeStudio.jsx", "utf8");
+  const views = readFileSync("frontend/knowledgeStudio/KnowledgeStudioViews.jsx", "utf8");
+  assert.match(workflow, /Usable in internal reports now \(determined by KAI&rsquo;s checks\)/);
+  assert.doesNotMatch(workflow, /No further review is needed for internal use/);
+  assert.doesNotMatch(studio, /Reviewed for internal use/);
+  assert.match(studio, /Usable internally/);
+  assert.doesNotMatch(views, /getJson|postJson|fetch\(/, "shared views make no request");
+  const kai = readFileSync("frontend/ImpactLibraryKai.jsx", "utf8");
+  assert.match(kai, /<label className="form-label small fw-semibold mb-1" htmlFor=\{inputId\}>/);
+  assert.match(kai, /id=\{inputId\}\s+aria-describedby=\{scopeId\}/);
 });

@@ -225,8 +225,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     })()`);
     assert.ok(ok, "project selector present");
   };
-  const pipelineFileText = (intakeFileId) => evaluate(`(() => {
+  const pipelineFileText = (intakeFileId) => evaluate(`(async () => {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+    // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+    const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+      toggle.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return el ? el.innerText : null;
   })()`);
   return {
@@ -749,7 +755,7 @@ async function runBrowserAcceptance() {
       ]) {
         assert.ok(!body.includes(forbidden), `client never sees ${forbidden}`);
       }
-      assert.ok(!body.includes("Reviewed for internal use"), "a proposal is not an Impact Fact");
+      assert.ok(!body.includes("Usable internally"), "a proposal is not an Impact Fact");
       assert.equal(clientPage.requests().filter((r) => r.method === "POST").length, 0);
       assertClientBoundary(clientPage, "client", body);
       assert.deepEqual(clientPage.exceptions, []);

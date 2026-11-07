@@ -655,8 +655,10 @@ test("frontend source: Sources shows the status card; Evidence uses the Project 
   // Four-view refactor (owner direction 2026-11-06): the former Files and
   // Reviews tabs are the Sources view.
   assert.match(studioSource, /const fileStatusSection = organizationId \? \(\s*<ClientEvidencePipelineStatus\s+request=\{pipeline\}/);
-  assert.match(studioSource, /<ViewPane \{\.\.\.pane\("sources"\)\}>\{sourcesAfter\}<\/ViewPane>/);
-  assert.match(studioSource, /sourcesAfter=\{sourcesAfter\}/);
+  // Adding files comes first in Sources (2026-11-07), then the files' status.
+  assert.match(studioSource, /<ViewPane \{\.\.\.pane\("sources"\)\}>\{sourcesBefore\}\{sourcesAfter\}<\/ViewPane>/);
+  assert.match(studioSource, /const sourcesBefore = uploadSection;/);
+  assert.match(studioSource, /sourcesBefore=\{sourcesBefore\}\s+sourcesAfter=\{sourcesAfter\}/);
   assert.match(studioSource, /<ViewPane \{\.\.\.pane\("evidence"\)\}>\s*\{engagementId \? \(\s*<ProjectEvidence\s+view=\{evidenceTabView\(pipeline\)\}/);
   assert.match(studioSource, /const reviews = engagementId \? reviewsTabView\(pipeline\) : null;/);
   assert.match(studioSource, /<ProjectReviews\s+view=\{reviews\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(reviewAccess, Boolean\(capabilities\)\)\}\s+canReviewSensitivity=\{canReviewSensitivity\}/);

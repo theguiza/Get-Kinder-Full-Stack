@@ -1157,7 +1157,9 @@ async function runBrowserAcceptance() {
         assert.match(await textOf(adminPage, row), /Usable in internal reports now/);
         const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
         assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
-        assert.match(await textOf(adminPage, riskRow), /Not usable in internal reports now: .*the ordinary record-count rule does not cover it/);
+        // The status is shown; its reasons are under "Why" (2026-11-07), unchanged.
+        assert.equal((await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)).trim(), "Not usable in internal reports now.");
+        assert.match(await adminPage.evaluate(`document.querySelector('${riskRow} [data-client-claim-not-usable-reason]').textContent`), /the ordinary record-count rule does not cover it/);
       } finally {
         await adminPage.stopIntercepting();
       }

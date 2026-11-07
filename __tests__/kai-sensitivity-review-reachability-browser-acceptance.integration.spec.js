@@ -261,8 +261,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       })()`);
       assert.ok(ok, "project selector present");
     },
-    pipelineFileText: (intakeFileId) => evaluate(`(() => {
+    pipelineFileText: (intakeFileId) => evaluate(`(async () => {
       const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+      // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+      const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+      if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+        toggle.click();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       return el ? el.innerText : null;
     })()`),
     // A same-origin request from this actor's real session (cookie), for the

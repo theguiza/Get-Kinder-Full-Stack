@@ -24,7 +24,7 @@ test("1: exactly four views, Impact by default, driven by one piece of state", (
   assert.match(viewsLogicSource, /export const KNOWLEDGE_STUDIO_VIEWS = Object\.freeze\(\[\s*\["impact", "Impact"\],\s*\["evidence", "Evidence"\],\s*\["sources", "Sources"\],\s*\["drafts", "Drafts"\],\s*\]\);/);
   assert.match(viewsLogicSource, /export const DEFAULT_KNOWLEDGE_STUDIO_VIEW = "impact";/);
   assert.match(libSource, /const \[knowledgeStudioTab, setKnowledgeStudioTab\] = useState\(DEFAULT_KNOWLEDGE_STUDIO_VIEW\);/);
-  assert.match(libSource, /<KnowledgeStudioNav view=\{knowledgeStudioTab\} onSelect=\{setKnowledgeStudioTab\} \/>/);
+  assert.match(libSource, /<KnowledgeStudioNav view=\{knowledgeStudioTab\} onSelect=\{setKnowledgeStudioTab\} idPrefix="ks-gk" singlePanelId="ks-gk-panel" \/>/);
   for (const old of ["files", "processing", "gaps", "reviews"]) {
     assert.doesNotMatch(libSource, new RegExp(`knowledgeStudioTab === "${old}"`), `no ${old} tab remains`);
   }
@@ -47,7 +47,7 @@ test("3: Sources gates the existing real sensitivity/allowed-use review states (
 test("4 (E1 correction): Evidence is enumerated from the evidence-native read model so unclaimed evidence is included; Claims is part of the Evidence view", () => {
   assert.match(libSource, /\{knowledgeStudioTab === "evidence" \? \(\s*<div className="admin-card">\s*<div className="d-flex justify-content-between align-items-center mb-2">\s*<h5 className="mb-0">Evidence<\/h5>/);
   assert.match(libSource, /evidenceLibraryCandidatesPath,\s*\n\s*projectEvidenceLibraryItems,/);
-  assert.match(libSource, /item\.statement \|\| "Evidence statement not yet available"/);
+  assert.match(libSource, /\{item\.statement \? <FindingText statement=\{item\.statement\} \/> : <div className="fw-semibold">Evidence statement not yet available<\/div>\}/);
   assert.match(libSource, /item\.supportStrength/);
   assert.match(libSource, /item\.evidenceReviewStatus/);
   assert.match(libSource, /No claim proposed yet/);

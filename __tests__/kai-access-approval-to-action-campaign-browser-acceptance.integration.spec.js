@@ -1842,8 +1842,8 @@ async function runBrowserAcceptance() {
       await openClientTab(memberAPage, "Evidence");
       for (const line of evidenceReasonLines(pipeline)) await memberAPage.waitForText(line);
       const evidenceText = await memberAPage.text();
-      assert.ok(evidenceText.includes("No reviewed evidence for this project yet."));
-      assert.ok(!evidenceText.includes("Reviewed for internal use"), "nothing pending is presented as reviewed");
+      assert.ok(evidenceText.includes("No usable Impact Facts for this Project yet."));
+      assert.ok(!evidenceText.includes("Usable internally"), "nothing pending is presented as reviewed");
 
       // The GK operator rejects the pending candidate in the GK Studio.
       const candidate = await candidateFor(profiles.mixed);
@@ -1911,7 +1911,7 @@ async function runBrowserAcceptance() {
       assert.ok(!facts.data.items.some((fact) => fact.claimId === claim.claim_id), "the unreviewed claim is not an Impact Fact");
       await openClientTab(memberAPage, "Evidence");
       for (const line of evidenceReasonLines(pipeline)) await memberAPage.waitForText(line);
-      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"));
+      assert.ok(!(await memberAPage.text()).includes("Usable internally"));
       results.P3_C = { evidence: target.evidence_item_id, claim: claim.claim_id, pantryPending: currentStageOf(pantry).count };
     });
 
@@ -2010,7 +2010,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual([blockedFile.currentStage, blockedFile.currentStatus, blockedFile.reason], expectedBlocked);
       await openClientTab(memberAPage, "Evidence");
       await memberAPage.waitForText(pipelineLogic.pipelineReasonMessage(expectedBlocked[2], 1));
-      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"), "the blocked claim is not shown as usable");
+      assert.ok(!(await memberAPage.text()).includes("Usable internally"), "the blocked claim is not shown as usable");
       const internalBefore = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claims/${claimId}/traceability?requested_audience=internal`);
       assert.equal(internalBefore.data.eligible, false);
       assert.ok(internalBefore.data.blockerCodes.includes("coverage_dimension_unresolved"));
@@ -2037,7 +2037,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual([...fact.limitationDimensionKeys].sort(), expectedLimitations);
       const [claimRow] = await query("SELECT statement FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG_A, claimId]);
       assert.equal(fact.statement, claimRow.statement);
-      await memberAPage.waitForText("Reviewed for internal use");
+      await memberAPage.waitForText("Usable internally");
       const text = await memberAPage.text();
       assert.ok(text.includes(claimRow.statement));
       for (const key of expectedLimitations) assert.ok(text.includes(`Known limitation: ${key.replace(/_/g, " ")}`), key);
@@ -2085,12 +2085,12 @@ async function runBrowserAcceptance() {
       const a2 = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A2));
       assert.deepEqual(a2.data.files.map((file) => file.intakeFileId), [FILES.projectTwo]);
       assert.deepEqual(a2.data.reviewedImpactFacts, []);
-      await memberAPage.waitForText("No reviewed evidence for this project yet.");
-      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"), "Project A's fact is not attributed to Project A2");
+      await memberAPage.waitForText("No usable Impact Facts for this Project yet.");
+      assert.ok(!(await memberAPage.text()).includes("Usable internally"), "Project A's fact is not attributed to Project A2");
 
       await memberAPage.goto("/impact-library");
       await openClientProject(memberAPage, PROJECT_A, "Evidence");
-      await memberAPage.waitForText("Reviewed for internal use");
+      await memberAPage.waitForText("Usable internally");
       await memberAPage.clickTab("Reviews");
       await memberAPage.idle();
       assert.ok(!(await memberAPage.text()).includes(NAMES.projectTwo));

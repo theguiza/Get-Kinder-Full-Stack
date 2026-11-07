@@ -225,8 +225,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     })()`);
     assert.ok(ok, "project selector present");
   };
-  const pipelineFileText = (intakeFileId) => evaluate(`(() => {
+  const pipelineFileText = (intakeFileId) => evaluate(`(async () => {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+    // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+    const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+      toggle.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return el ? el.innerText : null;
   })()`);
   return {
@@ -654,12 +660,12 @@ async function runBrowserAcceptance() {
       await clientPage.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
       const body = await clientPage.text();
       assert.ok(!body.includes("Get Kinder has not yet created evidence"), "no longer waiting for extraction");
-      assert.ok(!body.includes("Reviewed for internal use") && !body.includes("1 shown"), "no reviewed Impact Fact");
+      assert.ok(!body.includes("Usable internally") && !body.includes("1 shown"), "no reviewed Impact Fact");
       // Four-view refactor: this client is the organization administrator, who may
       // read its evidence list (owner decision 2026-10-18; formerly in Data Sources,
       // now in Evidence). The reviewed-evidence card holds no unreviewed statement.
       const reviewedCard = await clientPage.evaluate(`(() => {
-        const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Reviewed evidence");
+        const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Usable Impact Facts");
         return h ? h.closest(".admin-card").innerText : "";
       })()`);
       assert.ok(reviewedCard.includes("waiting for Get Kinder evidence review"), "the reviewed-evidence card explains the state");

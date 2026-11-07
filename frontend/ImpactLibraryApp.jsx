@@ -913,6 +913,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         engagementId={selectedEngagementId}
         onEngagementIdChange={setSelectedEngagementId}
         projectName={selectedProjectName}
+        organizationName={organizationName}
         workflowOperations={accessCapabilities.data?.workflowOperations}
         onAddImprovementPractice={createImprovementPractice}
       />

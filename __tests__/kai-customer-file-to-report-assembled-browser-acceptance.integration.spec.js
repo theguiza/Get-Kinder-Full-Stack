@@ -221,8 +221,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     await browser.send("DOM.setFileInputFiles", { nodeId, files: [path] }, sessionId);
   };
   // Text of the Files tab's per-file processing entry.
-  const pipelineFileText = (intakeFileId) => evaluate(`(() => {
+  const pipelineFileText = (intakeFileId) => evaluate(`(async () => {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+    // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+    const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+      toggle.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return el ? el.innerText : null;
   })()`);
   return {
@@ -1027,7 +1033,12 @@ async function runAssembledAcceptance() {
     await test("C boundary: a second uploaded file whose administrator decision is 'not_allowed' records the decision but never becomes a source", async () => {
       await openStudioTab("Files");
       await adminPage.waitForText("Upload the selected file");
-      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.text()), "batch reselected");
+      await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.evaluate(`(() => {
+        // The batch id is under "Batches and upload details" in the client studio (2026-11-07): open it as a person would.
+        const toggle = document.querySelector('[data-knowledge-studio-view="sources"]:not([hidden]) [data-knowledge-studio-disclosure="intake-details"] > button');
+        if (toggle && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+        return document.body.innerText;
+      })()`)), "batch reselected");
       const scheduledBefore = dispatcher.stats().scheduled;
       await uploadThroughFiles(PARTNER);
       const [{ intake_file_id: partnerId }] = await fileByName(PARTNER.name);

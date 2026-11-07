@@ -725,8 +725,14 @@ async function runBrowserAcceptance() {
       assert.equal(findings.impactSections.projectB, null, "Project B evidence is absent from Project A");
       assert.equal(findings.impactSections.pairedFirst, null, "the superseded first statement of the same measurement is not an Impact finding");
       assert.ok(!/dictionary_field_presence_fact|source_derived_measurement|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/.test(impact), "no raw types or ids on Impact");
-      // The recorded paired statement itself names the redacted column (field_N, column, worksheet): reported, not changed here.
-      findings.impactShowsRecordedFieldKeys = /field_\d/.test(impact);
+      // Readable measurements (2026-11-07): the recorded label and result lead; the
+      // recorded column/worksheet keys are kept in the statement's detail only.
+      findings.impactShowsRecordedFieldKeys = /field_\d|sheet_\d/.test(impact);
+      assert.equal(findings.impactShowsRecordedFieldKeys, false, "no field_N or sheet_N keys on the Impact screen");
+      assert.match(await textOf(adminPage, `[data-impact-finding="${ids.pairedEvidenceId}"] [data-finding-headline]`), /Confidence self-rating/, "the organization's recorded label leads");
+      assert.match(await textOf(adminPage, `[data-impact-finding="${ids.pairedEvidenceId}"]`), /4 of 6 comparable participant pairs/, "the recorded result is shown");
+      assert.ok(await adminPage.evaluate(`document.querySelector('[data-impact-finding="${ids.pairedEvidenceId}"] [data-finding-recorded-statement]').textContent.includes(${JSON.stringify(findings.pairedStatement)})`),
+        "the recorded statement is kept, unchanged, in detail");
       assert.match(impact, /Reach and service delivery[\s\S]*No linked reach measurement is recorded for this Project\./, "reach states honestly that none exists");
       const shownPaired = await textOf(adminPage, `[data-impact-finding="${ids.pairedEvidenceId}"]`);
       console.log(`[impact-paired-card] ${JSON.stringify(shownPaired)} stored=${JSON.stringify(findings.pairedStatement)}`);
@@ -736,6 +742,10 @@ async function runBrowserAcceptance() {
       const evidence = await dumpView(adminPage, "client evidence A");
       assert.equal(await visible(adminPage, `[data-client-claim="${ids.structuralClaimId}"]`), false, "the structural claim is not on the initial Evidence screen");
       assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}/.test(evidence), "no ids on the initial Evidence screen");
+      assert.ok(!/field_\d|sheet_\d/.test(evidence), "no column or worksheet keys on the initial Evidence screen");
+      assert.ok(!/No further review is needed/.test(evidence), "no repeated approval line");
+      assert.ok(!/\nClaim: /.test(evidence), "claim wording that restates or rephrases the finding is not repeated on the initial screen");
+      assert.ok(!/Reviewed for internal use/.test(evidence), "rule-based internal use is not presented as a human review");
       findings.evidenceInitialLength = evidence.length;
     });
 
@@ -938,6 +948,50 @@ async function runBrowserAcceptance() {
       findings.enterActivates = (await activeView(adminPage))[0] === "Drafts";
       console.log(`[keyboard] ${JSON.stringify({ arrow: findings.arrowKeyMoves, semantics: findings.tabSemantics, enter: findings.enterActivates })}`);
       assert.equal(findings.enterActivates, true, "a focused tab activates with Enter");
+      assert.equal(findings.arrowKeyMoves, "evidence", "ArrowRight moves focus to the next tab");
+      assert.equal(findings.tabSemantics.role, "tab");
+      assert.equal(findings.tabSemantics.controls, "knowledge-studio-panel-impact", "each tab names its panel");
+      assert.ok(findings.tabSemantics.panelsWithRole >= 1, "views are tab panels");
+      assert.ok(await adminPage.evaluate(`(() => { const p = document.getElementById("knowledge-studio-panel-drafts"); return Boolean(p && p.getAttribute("role") === "tabpanel" && p.getAttribute("aria-labelledby") === "knowledge-studio-tab-drafts"); })()`),
+        "the Drafts panel is labelled by its tab");
+      assert.deepEqual(await adminPage.evaluate(`[...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.getAttribute("tabindex"))`), ["-1", "-1", "-1", "0"], "only the selected tab is a Tab stop");
+      // Ask KAI's input has its own accessible name.
+      findings.askKaiLabel = await adminPage.evaluate(`(() => { const input = document.querySelector("[data-knowledge-studio-ask-kai] input"); return input && input.labels && input.labels[0] ? input.labels[0].textContent.trim() : null; })()`);
+      assert.match(findings.askKaiLabel || "", /whole organization library/, "Ask KAI input is labelled with its organization-wide scope");
+    });
+
+    await test("Sources and GK context: upload first, one primary status per file, detail on request; GK shows the shell's Project, not an empty selector; traceability readable", { timeout: 240000 }, async () => {
+      await openStudio(adminPage, PROJECT_A);
+      await adminPage.tab("Sources");
+      await adminPage.waitFor(() => visible(adminPage, "[data-pipeline-file-primary-status]"), "file rows");
+      const order = await adminPage.evaluate(`(() => { const top = (sel) => { const el = document.querySelector('[data-knowledge-studio-view="sources"] ' + sel); return el ? el.getBoundingClientRect().top : null; };
+        return { upload: top("[data-intake-studio-heading]"), sources: top("[data-client-data-sources]"), status: top("[data-pipeline-file]") }; })()`);
+      console.log(`[sources-order] ${JSON.stringify(order)}`);
+      assert.ok(order.upload !== null && order.upload < order.sources && order.sources < order.status, "Add files first, then the sources, then file status");
+      assert.ok(await visible(adminPage, '[data-knowledge-studio-view="sources"] input[type=file]'), "the upload input is visible without opening anything");
+      const sources = await dumpView(adminPage, "client sources A");
+      assert.ok(!/Batch id: |[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}/.test(sources), "no batch or other ids on the initial Sources screen");
+      // The pipeline list re-renders while its read refreshes; read it once it is settled.
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll("[data-pipeline-file]").length`)) >= 3, "all of Project A's files listed");
+      await adminPage.idle();
+      const primaries = await adminPage.evaluate(`[...document.querySelectorAll("[data-pipeline-file]")].map((li) => li.querySelectorAll("[data-pipeline-file-primary-status]").length)`);
+      assert.ok(primaries.length >= 3 && primaries.every((n) => n === 1), `one primary status per file: ${JSON.stringify(primaries)}`);
+      assert.equal((sources.match(/Security check/g) || []).length, 0, "per-stage lists are on request");
+      // Detail is still there on request.
+      await adminPage.click('[data-pipeline-file] [data-knowledge-studio-disclosure="processing-detail"] button', null, "Processing detail");
+      assert.match(await textOf(adminPage, "[data-pipeline-file]"), /Security check/);
+      await adminPage.click('[data-knowledge-studio-disclosure="processing-permissions"] button', null, "Correct processing permissions");
+      await adminPage.waitFor(() => visible(adminPage, "[data-client-review-processing-permissions]"), "permission correction reachable");
+      await adminPage.click('[data-knowledge-studio-disclosure="intake-details"] button', null, "Batches and upload details");
+      await adminPage.waitForText("Batch id: ");
+      // GK in the shell: readable shared context on Evidence; no misleading empty-selector text.
+      await openStudio(gkPage, PROJECT_A);
+      await gkPage.tab("Evidence");
+      await gkPage.idle();
+      const gkEvidence = await dumpView(gkPage, "gk evidence context");
+      assert.ok(!/No KAI organization is available|No engagement is available/.test(gkEvidence), "no misleading 'not available' text");
+      assert.match(await textOf(gkPage, "[data-gk-shared-context]"), new RegExp(PROJECT_NAMES[PROJECT_A]), "the shell's Project is named");
+      assert.ok(!/field_\d|sheet_\d/.test(await textOf(gkPage, "[data-evidence-category], .list-group") || ""), "GK evidence leads with readable text");
     });
 
     await test("Visual capture and layout: client and GK, four views, desktop and mobile", { timeout: 240000 }, async () => {
@@ -952,6 +1006,10 @@ async function runBrowserAcceptance() {
             await new Promise((r) => setTimeout(r, 400));
             await page.screenshot(`${kind}-${size}-${view.toLowerCase()}`);
             audits[`${kind}-${size}-${view}`] = await layoutAudit(page);
+            audits[`${kind}-${size}-${view}`].tabs = await page.evaluate(`(() => { const tabs = [...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.getBoundingClientRect());
+              const nav = document.querySelector("[data-knowledge-studio-nav]");
+              return { rows: new Set(tabs.map((r) => Math.round(r.top))).size, allInView: tabs.every((r) => r.left >= 0 && r.right <= document.documentElement.clientWidth + 1),
+                navScrolls: nav ? nav.scrollWidth - nav.clientWidth : null }; })()`);
           }
         }
         await page.viewport(DESKTOP);
@@ -959,6 +1017,9 @@ async function runBrowserAcceptance() {
       console.log(`[layout] ${JSON.stringify(audits)}`);
       for (const [name, audit] of Object.entries(audits)) {
         assert.ok(audit.overflowX <= 1, `${name}: no horizontal page overflow (${audit.overflowX}px)`);
+        assert.equal(audit.tabs.rows, 1, `${name}: the four tabs stay on one row`);
+        assert.equal(audit.tabs.allInView, true, `${name}: all four tabs are fully in view`);
+        assert.ok(audit.tabs.navScrolls <= 1, `${name}: the tab row fits without scrolling (${audit.tabs.navScrolls}px)`);
       }
       for (const page of [adminPage, gkPage]) assert.deepEqual(page.exceptions, [], "no uncaught page exception");
       console.log(`[findings] ${JSON.stringify(findings)}`);

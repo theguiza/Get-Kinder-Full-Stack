@@ -28,6 +28,7 @@ import {
 } from "./kaiWebIntakeLogic.js";
 import { pipelineFileStatusText } from "./knowledgeStudio/clientEvidencePipelineLogic.js";
 import useClientEvidencePipeline from "./knowledgeStudio/useClientEvidencePipeline.js";
+import { Disclosure } from "./knowledgeStudio/KnowledgeStudioViews.jsx";
 
 function ValueRow({ label, value }) {
   return (
@@ -51,6 +52,10 @@ export default function KaiWebIntake({
   engagementId: parentEngagementId = "",
   onEngagementIdChange,
   embedded = false,
+  // Knowledge Studio Sources (owner task 2026-11-07): the upload action first,
+  // batch management and intake identifiers in "Batches and upload details".
+  // Presentation only; every control and request is unchanged.
+  studioLayout = false,
   // Server-derived intake contribution capability (the P0
   // create_intake_batch/create_intake_file policies, reported by the
   // organization access-capabilities read). When false, the batch-create and
@@ -612,22 +617,7 @@ export default function KaiWebIntake({
     if (outcome.status === INTAKE_READ_STATUS.ERROR) setMessage(outcome.error);
   }, [organizationId, intakeBatchId]);
 
-  return (
-    <section>
-      {embedded ? (
-        <h2 className="h4 mb-3">KAI Web Intake</h2>
-      ) : (
-        <h1 className="admin-title mb-3">KAI Web Intake</h1>
-      )}
-      {continuationSource?.safeFilename ? (
-        <div className="alert alert-info py-2 small" data-xlsx-continuation-source={continuationSource.sourceVersionId || ""}>
-          <div className="fw-semibold">Prepare this workbook for counting</div>
-          <div>Source version: {continuationSource.sourceVersionId}. Historical profile for {continuationSource.safeFilename} is unchanged.</div>
-          <div>Select the same workbook below and upload it. When KAI recognizes the existing file, choose “Upload again as a new intake version”. KAI will quarantine, check and profile the new version. You must then record its sensitivity and allowed-use decision and promote it before Count records is available.</div>
-        </div>
-      ) : null}
-      {message ? <div className="alert alert-warning py-2">{message}</div> : null}
-
+  const batchCard = (
       <div className="admin-card mb-3">
         <h5 className="mb-2">1. Batch</h5>
         <div className="row g-2 align-items-end mb-2">
@@ -756,10 +746,11 @@ export default function KaiWebIntake({
           </ul>
         ) : null}
       </div>
-
-      {canContribute ? (
+  );
+  const uploadCard = (
+      canContribute ? (
       <div className="admin-card mb-3">
-        <h5 className="mb-2">2. Upload file</h5>
+        <h5 className="mb-2">{studioLayout ? "Upload a file" : "2. Upload file"}</h5>
         <input
           type="file"
           className="form-control form-control-sm mb-2"
@@ -798,14 +789,20 @@ export default function KaiWebIntake({
             </div>
           </div>
         ) : null}
-        {intakeFileId ? <div className="small mt-2">Intake file id: {intakeFileId}</div> : null}
+        {intakeFileId && !studioLayout ? <div className="small mt-2">Intake file id: {intakeFileId}</div> : null}
+        {studioLayout && intakeBatchId ? (
+          <div className="small text-muted mt-2" data-intake-selected-batch="">
+            Files are added to batch {batches.find((item) => item.intake_batch_id === intakeBatchId)?.batch_code || "selected below"}.
+          </div>
+        ) : null}
       </div>
       ) : (
       <div className="admin-card mb-3 small text-muted">
         Uploading files is not available for your role in this organization. You can still view existing batches and files.
       </div>
-      )}
-
+      )
+  );
+  const statusRow = (
       <div className="row g-3">
         <div className="col-12 col-lg-6">
           <div className="admin-card">
@@ -872,6 +869,47 @@ export default function KaiWebIntake({
           </div>
         </div>
       </div>
+  );
+
+  return (
+    <section>
+      {studioLayout ? <h2 className="h5 mb-2" data-intake-studio-heading="">Add files</h2> : embedded ? (
+        <h2 className="h4 mb-3">KAI Web Intake</h2>
+      ) : (
+        <h1 className="admin-title mb-3">KAI Web Intake</h1>
+      )}
+      {continuationSource?.safeFilename ? (
+        <div className="alert alert-info py-2 small" data-xlsx-continuation-source={continuationSource.sourceVersionId || ""}>
+          <div className="fw-semibold">Prepare this workbook for counting</div>
+          <div>Source version: {continuationSource.sourceVersionId}. Historical profile for {continuationSource.safeFilename} is unchanged.</div>
+          <div>Select the same workbook below and upload it. When KAI recognizes the existing file, choose “Upload again as a new intake version”. KAI will quarantine, check and profile the new version. You must then record its sensitivity and allowed-use decision and promote it before Count records is available.</div>
+        </div>
+      ) : null}
+      {message ? <div className="alert alert-warning py-2">{message}</div> : null}
+
+      {studioLayout ? (
+        <>
+          {/* Knowledge Studio Sources: the upload first; batch management, ids and
+              per-file intake detail on request. Everything stays mounted, so a
+              selection or an upload in progress survives closing the details. A
+              Project with no batch selected shows the batch controls directly. */}
+          {uploadCard}
+          {!intakeBatchId ? batchCard : null}
+          <Disclosure name="intake-details" label="Batches and upload details" openLabel="Hide batches and upload details" className="mb-3">
+            <div className="mt-2">
+              {intakeBatchId ? batchCard : null}
+              {intakeFileId ? <div className="small text-muted mb-2">Intake file id: {intakeFileId}</div> : null}
+              {statusRow}
+            </div>
+          </Disclosure>
+        </>
+      ) : (
+        <>
+          {batchCard}
+          {uploadCard}
+          {statusRow}
+        </>
+      )}
     </section>
   );
 }

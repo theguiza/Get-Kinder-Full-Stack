@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 
 import {
   FINDING_CATEGORY_DESCRIPTIONS,
   FINDING_CATEGORY_LABELS,
   IMPACT_SECTION_LIMIT,
   KNOWLEDGE_STUDIO_VIEWS,
+  findingDisplay,
   shortStatement,
+  tabKeyTarget,
 } from "./knowledgeStudioViewsLogic.js";
 
 /**
@@ -13,16 +15,38 @@ import {
  * Kinder). Display only: no reads, no writes, no authorization decisions.
  */
 
-export function KnowledgeStudioNav({ view, onSelect, badges = {} }) {
+export const knowledgeStudioTabId = (idPrefix, key) => `${idPrefix}-tab-${key}`;
+export const knowledgeStudioPanelId = (idPrefix, key) => `${idPrefix}-panel-${key}`;
+
+/**
+ * The four tabs (WAI-ARIA tabs pattern): the selected tab is the one Tab stop;
+ * Arrow Left/Right, Home and End move to and open another tab; Enter/Space on
+ * a focused tab open it. Each tab names the panel it controls: one panel per
+ * view (`singlePanelId` absent, ViewPane), or one shared panel that always
+ * shows the selected view (`singlePanelId`, Get Kinder). On a narrow screen
+ * the row stays on one line and scrolls instead of wrapping.
+ */
+export function KnowledgeStudioNav({ view, onSelect, badges = {}, idPrefix = "knowledge-studio", singlePanelId = "" }) {
+  const onKeyDown = (event) => {
+    const target = tabKeyTarget(event.key, view);
+    if (!target) return;
+    event.preventDefault();
+    onSelect(target);
+    globalThis.document?.getElementById(knowledgeStudioTabId(idPrefix, target))?.focus();
+  };
   return (
-    <ul className="nav nav-tabs mb-3" role="tablist" data-knowledge-studio-nav="">
+    <ul className="nav nav-tabs mb-3 flex-nowrap knowledge-studio-nav" role="tablist" aria-label="Knowledge Studio views"
+      data-knowledge-studio-nav="" style={{ overflowX: "auto", overflowY: "hidden" }} onKeyDown={onKeyDown}>
       {KNOWLEDGE_STUDIO_VIEWS.map(([key, label]) => (
         <li className="nav-item" key={key} role="presentation">
           <button
             type="button"
             role="tab"
+            id={knowledgeStudioTabId(idPrefix, key)}
             aria-selected={view === key}
-            className={`nav-link${view === key ? " active" : ""}`}
+            aria-controls={singlePanelId ? (view === key ? singlePanelId : undefined) : knowledgeStudioPanelId(idPrefix, key)}
+            tabIndex={view === key ? 0 : -1}
+            className={`nav-link text-nowrap px-2 px-sm-3${view === key ? " active" : ""}`}
             data-knowledge-studio-tab={key}
             onClick={() => onSelect(key)}
           >
@@ -36,12 +60,68 @@ export function KnowledgeStudioNav({ view, onSelect, badges = {} }) {
 }
 
 // A view mounted once opened and kept mounted while hidden, so open panels,
-// forms and in-progress feedback survive switching views.
-export function ViewPane({ name, active, mounted, children }) {
+// forms and in-progress feedback survive switching views. It is the tab panel
+// of its tab.
+export function ViewPane({ name, active, mounted, children, idPrefix = "knowledge-studio" }) {
   if (!mounted) return null;
   return (
-    <div hidden={!active} data-knowledge-studio-view={name} data-knowledge-studio-view-active={active ? "true" : "false"}>
+    <div hidden={!active} role="tabpanel" id={knowledgeStudioPanelId(idPrefix, name)} aria-labelledby={knowledgeStudioTabId(idPrefix, name)}
+      data-knowledge-studio-view={name} data-knowledge-studio-view-active={active ? "true" : "false"}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Detail on request. The content stays mounted while closed (hidden), so a
+ * form, an open panel or an in-progress action inside it survives closing it.
+ * `name` is a stable label for the reveal attributes used by the browser
+ * acceptance harness; a per-instance suffix keeps each toggle unique.
+ */
+export function Disclosure({ name, label, openLabel, children, defaultOpen = false, className = "mt-1", buttonClassName = "btn btn-link btn-sm p-0 text-muted", bodyClassName = "" }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const instance = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const revealKey = `${name}-${instance}`;
+  return (
+    <div className={className} data-knowledge-studio-disclosure={name}>
+      <button type="button" className={buttonClassName} aria-expanded={open} aria-controls={`ks-disclosure-${revealKey}`}
+        data-knowledge-studio-reveal-toggle={revealKey} onClick={() => setOpen((value) => !value)}>
+        {open ? (openLabel || `Hide ${label.charAt(0).toLowerCase()}${label.slice(1)}`) : label}
+      </button>
+      <div id={`ks-disclosure-${revealKey}`} hidden={!open} data-knowledge-studio-reveal={revealKey} className={bodyClassName}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A recorded statement, readable first: the recorded label or counted value,
+ * then the recorded result; the recorded column/worksheet wording and the
+ * statement exactly as recorded on request (findingDisplay).
+ */
+export function FindingText({ statement, max = 240, headlineClassName = "fw-semibold" }) {
+  const display = findingDisplay(statement);
+  if (!display.full) return <div className="text-muted">Statement not available</div>;
+  const reformatted = display.headline || display.neutral || display.location || display.summary !== display.full;
+  return (
+    <div data-finding-text="">
+      {display.headline ? <div className={headlineClassName} data-finding-headline="">{display.headline}</div> : null}
+      {display.summary ? (
+        <StatementText text={display.summary} max={max} className={display.headline ? "" : headlineClassName} />
+      ) : null}
+      {display.neutral ? (
+        <div className="text-muted" data-finding-neutral="">Recorded measurement. Its full statement names the columns and sources it uses.</div>
+      ) : null}
+      {display.note ? <div className="text-muted small" data-finding-note="">{display.note}</div> : null}
+      {reformatted ? (
+        <Disclosure name="recorded-statement" label="Full recorded statement" openLabel="Hide recorded statement">
+          <div className="small text-muted border rounded p-2 mt-1 text-break" data-finding-recorded-statement="">
+            {display.location ? <div className="mb-1">{display.location}</div> : null}
+            <div>{display.full}</div>
+          </div>
+        </Disclosure>
+      ) : null}
     </div>
   );
 }
@@ -85,7 +165,7 @@ export function FindingMeta({ finding }) {
 function ImpactFindingCard({ finding, status, onOpen }) {
   return (
     <li className="list-group-item" data-impact-finding={finding.evidenceItemId} data-impact-finding-category={finding.category}>
-      <StatementText text={finding.statement} max={240} className="fw-semibold small" />
+      <div className="small"><FindingText statement={finding.statement} max={240} /></div>
       <FindingMeta finding={finding} />
       {status ? <div className="small mt-1" data-impact-finding-status="">{status}</div> : null}
       {onOpen ? (

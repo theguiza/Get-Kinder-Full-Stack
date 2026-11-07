@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { postJson } from "./kaiWebIntakeLogic.js";
 
 const IMPACT_LIBRARY_KAI_PATH = "/api/kai/impact-library/message";
@@ -13,6 +13,8 @@ const IMPACT_LIBRARY_KAI_PATH = "/api/kai/impact-library/message";
 // context, but KAI's governed retrieval reads the organization's whole
 // library, so its answers are never presented as Project-only findings.
 export default function ImpactLibraryKai({ organizationId, engagementId, title = "Ask KAI" }) {
+  const inputId = `impact-library-kai-input-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const scopeId = `${inputId}-scope`;
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -61,7 +63,7 @@ export default function ImpactLibraryKai({ organizationId, engagementId, title =
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h5 className="mb-0">{title}</h5>
       </div>
-      <div className="small text-muted mb-2" data-impact-library-kai-scope="organization">
+      <div className="small text-muted mb-2" id={scopeId} data-impact-library-kai-scope="organization">
         KAI answers from your organization&rsquo;s whole evidence library, not only the selected Project. Its answers are not
         Project findings; check them against the Evidence view.
       </div>
@@ -82,8 +84,13 @@ export default function ImpactLibraryKai({ organizationId, engagementId, title =
             )}
           </div>
           {error ? <div className="alert alert-warning py-2 small">{error}</div> : null}
+          <label className="form-label small fw-semibold mb-1" htmlFor={inputId}>
+            Your question for KAI (answered from the whole organization library)
+          </label>
           <div className="d-flex gap-2">
             <input
+              id={inputId}
+              aria-describedby={scopeId}
               className="form-control form-control-sm"
               value={input}
               onChange={(event) => setInput(event.target.value)}

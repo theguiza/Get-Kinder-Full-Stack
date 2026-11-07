@@ -23,7 +23,7 @@ import {
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
 import { clientFollowupReviewHref } from "../impactEvidenceLibraryLogic.js";
-import { AttentionList, KnowledgeStudioNav, ProjectHeading, ViewPane } from "./KnowledgeStudioViews.jsx";
+import { AttentionList, FindingText, KnowledgeStudioNav, ProjectHeading, ViewPane } from "./KnowledgeStudioViews.jsx";
 import { DEFAULT_KNOWLEDGE_STUDIO_VIEW, nextVisitedViews } from "./knowledgeStudioViewsLogic.js";
 
 // Four-view Knowledge Studio (owner direction 2026-11-06): Impact | Evidence
@@ -44,10 +44,14 @@ function ReviewedFactList({ facts }) {
     <ul className="list-group">
       {facts.map((fact) => (
         <li key={fact.claimId} className="list-group-item">
-          <div className="fw-semibold small">{fact.statement || "Statement not yet available"}</div>
+          <div className="small">
+            {fact.statement ? <FindingText statement={fact.statement} /> : <div className="fw-semibold">Statement not yet available</div>}
+          </div>
           <div className="d-flex flex-wrap gap-2 mt-1">
             {fact.claimType ? <span className="badge text-bg-light border">{fact.claimType}</span> : null}
-            <span className="badge text-bg-success">Reviewed for internal use</span>
+            {/* The impact-facts read is KAI's internal-use determination (P2-08 /
+                P2-06); it does not say a person reviewed the finding. */}
+            <span className="badge text-bg-success">Usable internally</span>
             {fact.limitationDimensionKeys.map((key) => (
               <span key={key} className="badge text-bg-light border">Known limitation: {dimensionLabel(key)}</span>
             ))}
@@ -221,6 +225,7 @@ export default function ClientKnowledgeStudio({
       onIntakeBatchIdChange={setFilesIntakeBatchId}
       continuationSource={filesContinuation}
       embedded
+      studioLayout
       canContribute={canContribute}
       processingStatus={pipeline}
       onProcessingStatusRefresh={refreshPipeline}
@@ -258,10 +263,11 @@ export default function ClientKnowledgeStudio({
       ) : null}
     </div>
   );
+  // Sources: adding files first, then the files and their status.
+  const sourcesBefore = uploadSection;
   const sourcesAfter = (
     <>
       {fileStatusSection}
-      {uploadSection}
       {reviewStatusSection}
     </>
   );
@@ -319,6 +325,7 @@ export default function ClientKnowledgeStudio({
           projectName={projectName}
           extraAttention={extraAttention}
           evidenceAfter={projectEvidenceSection}
+          sourcesBefore={sourcesBefore}
           sourcesAfter={sourcesAfter}
           draftsAfter={draftsAfter}
         />
@@ -343,16 +350,16 @@ export default function ClientKnowledgeStudio({
             ) : (
               <div className="admin-card">
                 <div className="d-flex justify-content-between align-items-center mb-2">
-                  <h5 className="mb-0">Reviewed evidence</h5>
+                  <h5 className="mb-0">Usable Impact Facts</h5>
                   {factsStatus === "success" ? <span className="text-muted small">{factItems.length} shown</span> : null}
                 </div>
                 <div className="small text-muted mb-2">
-                  Reviewed evidence for your whole organization. Select a Project to see its own evidence and file status.
+                  Impact Facts KAI&rsquo;s checks find usable internally, across your whole organization. Select a Project to see its own evidence and file status.
                 </div>
-                {factsStatus === "loading" ? <div className="text-muted small">Loading reviewed evidence...</div> : null}
-                {factsStatus === "error" ? <div className="alert alert-warning py-2 small">Reviewed evidence could not be loaded.</div> : null}
+                {factsStatus === "loading" ? <div className="text-muted small">Loading Impact Facts...</div> : null}
+                {factsStatus === "error" ? <div className="alert alert-warning py-2 small">Impact Facts could not be loaded.</div> : null}
                 {factsStatus === "success" && factItems.length === 0 ? (
-                  <div className="text-muted small">No reviewed evidence yet for this organization.</div>
+                  <div className="text-muted small">No usable Impact Facts yet for this organization.</div>
                 ) : null}
                 {factsStatus === "success" && factItems.length > 0 ? <ReviewedFactList facts={factItems} /> : null}
                 {typeof onViewImpactLibrary === "function" && factsStatus === "success" && factItems.length > 0 ? (
@@ -363,7 +370,7 @@ export default function ClientKnowledgeStudio({
               </div>
             )}
           </ViewPane>
-          <ViewPane {...pane("sources")}>{sourcesAfter}</ViewPane>
+          <ViewPane {...pane("sources")}>{sourcesBefore}{sourcesAfter}</ViewPane>
           <ViewPane {...pane("drafts")}>{draftsAfter}</ViewPane>
         </>
       )}
@@ -394,12 +401,12 @@ function ReviewedImpact({ engagementId, view, attention, onOpenTab }) {
         </div>
       ) : null}
       {view?.kind === "explained_empty" ? (
-        <div className="admin-card small" data-impact-state="empty">No reviewed findings for this Project yet.</div>
+        <div className="admin-card small" data-impact-state="empty">No usable findings for this Project yet.</div>
       ) : null}
       {view?.kind === "facts" ? (
         <div className="admin-card mb-3" data-impact-section="reviewed">
-          <h5 className="mb-1">Reviewed findings</h5>
-          <div className="small text-muted mb-2">Findings from this Project&rsquo;s files that are reviewed for internal use, with their known limitations.</div>
+          <h5 className="mb-1">Usable findings</h5>
+          <div className="small text-muted mb-2">Findings from this Project&rsquo;s files that KAI&rsquo;s checks find usable internally, with their known limitations.</div>
           <ReviewedFactList facts={view.facts} />
         </div>
       ) : null}
@@ -422,12 +429,12 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   return (
     <div className="admin-card">
       <div className="d-flex justify-content-between align-items-center mb-2">
-        <h5 className="mb-0">Reviewed evidence</h5>
+        <h5 className="mb-0">Usable Impact Facts</h5>
         {view.kind === "facts" ? <span className="text-muted small">{view.facts.length} shown</span> : null}
       </div>
       <div className="small text-muted mb-2">
-        Evidence appears here once it has been reviewed and supports an Impact Fact your organization can use
-        internally. Information that is still being processed or reviewed is not shown, but its status is.
+        Impact Facts from this Project&rsquo;s files that KAI&rsquo;s checks find usable internally. Files still being processed are
+        not shown here, but their status is.
       </div>
       {view.kind === "loading" ? <div className="text-muted small">Loading this project&rsquo;s evidence status...</div> : null}
       {view.kind === "error" ? (
@@ -445,7 +452,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
       ) : null}
       {view.kind === "explained_empty" ? (
         <div className="small">
-          <div className="fw-semibold mb-1">No reviewed evidence for this project yet. Here is where its files are:</div>
+          <div className="fw-semibold mb-1">No usable Impact Facts for this Project yet. Here is where its files are:</div>
           <PipelineReasonList reasons={view.upstream} />
         </div>
       ) : null}

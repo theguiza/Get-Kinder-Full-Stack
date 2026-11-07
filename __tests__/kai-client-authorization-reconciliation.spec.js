@@ -1052,7 +1052,9 @@ test("frontend: evidence-library/candidates has exactly one caller, inside the G
 test("frontend: KaiWebIntake offers batch/upload writes only with contribution capability (default unchanged)", () => {
   assert.match(intakeSource, /canContribute = true,/);
   assert.match(intakeSource, /\{canContribute \? \(\s*<button type="button" className="btn btn-sm btn-primary" onClick=\{createBatch\}/);
-  assert.match(intakeSource, /\{canContribute \? \(\s*<div className="admin-card mb-3">\s*<h5 className="mb-2">2\. Upload file<\/h5>/);
+  // Since the Knowledge Studio layout (2026-11-07) the upload card is one
+  // element placed first in Sources and second elsewhere; still contribution-gated.
+  assert.match(intakeSource, /const uploadCard = \(\s*canContribute \? \(\s*<div className="admin-card mb-3">\s*<h5 className="mb-2">\{studioLayout \? "Upload a file" : "2\. Upload file"\}<\/h5>/);
   assert.match(readFileSync("frontend/adminDashboard.jsx", "utf8"), /<KaiWebIntake \/>/);
 });
 

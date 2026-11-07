@@ -226,8 +226,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     })()`);
     assert.ok(ok, "project selector present");
   };
-  const pipelineFileText = (intakeFileId) => evaluate(`(() => {
+  const pipelineFileText = (intakeFileId) => evaluate(`(async () => {
     const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
+    // The per-stage list is "Processing detail" (2026-11-07): open it as a person would.
+    const toggle = el && el.querySelector('[data-knowledge-studio-disclosure="processing-detail"] > button');
+    if (toggle && toggle.getAttribute("aria-expanded") !== "true") {
+      toggle.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return el ? el.innerText : null;
   })()`);
   return {
@@ -655,7 +661,7 @@ async function runBrowserAcceptance() {
       const item = await evidenceItemText(gkPage, first.statement);
       assert.match(item, /reviewed_supported/);
       assert.match(item, /Current decision\s*supported/);
-      assert.ok(!(await gkPage.text()).includes("Reviewed for internal use"), "no Impact Fact");
+      assert.ok(!(await gkPage.text()).includes("Usable internally"), "no Impact Fact");
       assert.ok(await clickInEvidenceItem(gkPage, first.statement, "Close"));
       assert.equal(await clickInEvidenceItem(gkPage, first.statement, "Review evidence"), false, "a terminally reviewed item is no longer offered for review");
       assert.deepEqual(gkPage.exceptions, []);
@@ -679,7 +685,7 @@ async function runBrowserAcceptance() {
     // Sources, now in Evidence). The reviewed-evidence card - what a client
     // sees as reviewed - still holds no unreviewed statement or id.
     const reviewedEvidenceCard = () => clientPage.evaluate(`(() => {
-      const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Reviewed evidence");
+      const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Usable Impact Facts");
       return h ? h.closest(".admin-card").innerText : "";
     })()`);
     function assertNoClientLeak(label, body, card = body) {
@@ -725,7 +731,7 @@ async function runBrowserAcceptance() {
       console.log(`[p2-12-no-claim-browser] not_supported item:\n${item}`);
       assert.match(item, /reviewed_not_supported/);
       assert.match(item, /Current decision\s*not_supported/);
-      assert.doesNotMatch(item, /reviewed_supported|Eligible|eligible|Reviewed for internal use/, "never shown as supported or eligible");
+      assert.doesNotMatch(item, /reviewed_supported|Eligible|eligible|Usable internally/, "never shown as supported or eligible");
       assert.deepEqual(gkPage.exceptions, []);
       results.case5_not_supported = "PASS";
     });
@@ -739,7 +745,7 @@ async function runBrowserAcceptance() {
       await clientPage.clickTab("Evidence");
       await clientPage.waitForText("Evidence from 1 file has been reviewed. Get Kinder has not yet completed the Impact Fact review.");
       const body = await clientPage.text();
-      assert.ok(!body.includes("Reviewed for internal use") && !body.includes("1 shown"), "no reviewed Impact Fact");
+      assert.ok(!body.includes("Usable internally") && !body.includes("1 shown"), "no reviewed Impact Fact");
       assertNoClientLeak("client all reviewed", body, await reviewedEvidenceCard());
       assert.equal((await governedCounts()).claims, 1, "only the supported item has a (proposed) claim");
       assert.equal((await governedCounts()).claim_decisions, 0);
