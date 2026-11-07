@@ -133,12 +133,12 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
     + "A count of rows is not a count of unique participants or a programme outcome. Structural facts about a file's columns are not "
     + "impact findings.",
   claims_not_all_loaded: "Not every claim of your organization is loaded yet, and none of the loaded ones is a measured finding. "
-    + "Use \"Load more claims\" below to find your measured findings.",
-  no_claims_selected: "Select at least one claim below to draft from.",
-  no_measured_claim_selected: "Select at least one measured finding below: a report needs a measured result, not only structural facts.",
+    + "Use \"Load more claims\" in Evidence to find your measured findings.",
+  no_claims_selected: "Select at least one claim in Evidence to draft from.",
+  no_measured_claim_selected: "Select at least one measured finding in Evidence: a report needs a measured result, not only structural facts.",
   too_many_claims: "Select at most 20 claims for one draft.",
   measured_claim_not_usable: "A selected measured finding is not usable in internal reports now, and a draft is generated from a measured finding "
-    + "only while it is usable. Its condition is shown on the claim below; deselect it to draft from the others.",
+    + "only while it is usable. Its condition is shown on the claim in Evidence; deselect it to draft from the others.",
 });
 
 export function claimSelectabilityMessage(reason) {

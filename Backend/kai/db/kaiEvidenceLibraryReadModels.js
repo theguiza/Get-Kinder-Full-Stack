@@ -99,12 +99,30 @@ const DERIVED_MEASUREMENT_EVIDENCE_TYPE = "source_derived_measurement";
  * the page holds derived-measurement evidence (which is written only through
  * kai.evidence_derived_measurements, so an organization without derived
  * measurements never reads those tables). Every other row gets null.
+ *
+ * It also returns whether the evidence item states the measurement under the
+ * measurement's current interpretation (the one no later interpretation
+ * supersedes; an uninterpreted measurement's current interpretation is none),
+ * the same rule kaiIntakeQueries and derivedEvidenceIsCurrent apply. Evidence
+ * stated under a superseded interpretation (including the measurement's first,
+ * uninterpreted statement once a meaning is recorded) is not presented as a
+ * finding. Display only: eligibility stays with the validators.
  */
 async function withDerivedMeasurementFamilies(organizationId, rows, db) {
   const derivedIds = rows.filter((row) => row.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id);
-  if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null }));
+  if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null, measurement_evidence_current: null }));
   const { rows: families } = await db.query(
-    `SELECT edm.evidence_item_id::text AS evidence_item_id, dm.measurement_family
+    `SELECT edm.evidence_item_id::text AS evidence_item_id, dm.measurement_family,
+            COALESCE(edm.interpretation_id::text, '') = COALESCE((
+              SELECT c.interpretation_id::text
+                FROM kai.source_derived_measurement_interpretations c
+               WHERE c.organization_id = dm.organization_id
+                 AND c.source_derived_measurement_id = dm.source_derived_measurement_id
+                 AND NOT EXISTS (
+                   SELECT 1 FROM kai.source_derived_measurement_interpretations n
+                    WHERE n.organization_id = c.organization_id
+                      AND n.source_derived_measurement_id = c.source_derived_measurement_id
+                      AND n.supersedes_interpretation_id = c.interpretation_id)), '') AS measurement_evidence_current
        FROM kai.evidence_derived_measurements edm
        JOIN kai.source_derived_measurements dm
          ON dm.organization_id = edm.organization_id
@@ -113,6 +131,13 @@ async function withDerivedMeasurementFamilies(organizationId, rows, db) {
         AND edm.evidence_item_id = ANY($2::uuid[])`,
     [organizationId, derivedIds],
   );
-  const familyById = new Map(families.map((row) => [row.evidence_item_id, row.measurement_family]));
-  return rows.map((row) => ({ ...row, measurement_family: familyById.get(row.evidence_item_id) ?? null }));
+  const familyById = new Map(families.map((row) => [row.evidence_item_id, row]));
+  return rows.map((row) => {
+    const family = familyById.get(row.evidence_item_id);
+    return {
+      ...row,
+      measurement_family: family?.measurement_family ?? null,
+      measurement_evidence_current: typeof family?.measurement_evidence_current === "boolean" ? family.measurement_evidence_current : null,
+    };
+  });
 }

@@ -126,6 +126,7 @@ function responseEvidenceItem(row, organizationId, { includeWriteCoordinates = f
     || !isOptionalBoolean(row.public_use_allowed ?? null)
     || !isOptionalBoolean(row.funder_use_allowed ?? null)
     || !isOptionalMachineToken(row.measurement_family ?? null)
+    || !isOptionalBoolean(row.measurement_evidence_current ?? null)
   ) {
     return null;
   }
@@ -147,6 +148,9 @@ function responseEvidenceItem(row, organizationId, { includeWriteCoordinates = f
     // The recorded derived-measurement family (paired_outcome_change,
     // cross_source_reach, ...) or null: a display classification only.
     measurementFamily: row.measurement_family ?? null,
+    // Whether a derived-measurement evidence item states its measurement
+    // under the current interpretation (null for other evidence): display only.
+    measurementEvidenceCurrent: row.measurement_evidence_current ?? null,
     evidenceReview,
   };
 }

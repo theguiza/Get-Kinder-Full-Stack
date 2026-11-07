@@ -831,7 +831,7 @@ export default function ClientEvidenceWorkflow({
             data-knowledge-studio-reveal-toggle="technical-evidence" onClick={() => setShowTechnical((value) => !value)}>
             {showTechnical ? "Hide supporting source detail" : `Show supporting source detail (${findings.technical.length})`}
           </button>
-          <div className="small text-muted mt-1">Which columns each source has. Kept for checking a source; not offered as impact findings.</div>
+          <div className="small text-muted mt-1">Which columns each source has, and earlier statements of a measurement whose meaning has since been recorded. Kept for checking a source; not offered as impact findings.</div>
           {/* Kept mounted while hidden, so an open action's state survives hiding the list. */}
           <ul className="list-group mt-2" hidden={!showTechnical} data-knowledge-studio-reveal="technical-evidence">{findings.technical.map(renderFinding)}</ul>
         </div>

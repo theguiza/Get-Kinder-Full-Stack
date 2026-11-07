@@ -17,7 +17,11 @@
  *   derived measurement whose family is not known) -> other measurements;
  * - document statements and any other evidence type -> other findings;
  * - dictionary field-presence facts (which columns a source has) ->
- *   technical detail, kept available but never shown as a finding.
+ *   technical detail, kept available but never shown as a finding;
+ * - a derived measurement's evidence stated under a superseded interpretation
+ *   (measurementEvidenceCurrent === false, e.g. its first statement before the
+ *   organization recorded what it means) -> technical detail too: the
+ *   measurement's current statement is the finding, never both.
  */
 
 export const KNOWLEDGE_STUDIO_VIEWS = Object.freeze([
@@ -54,12 +58,13 @@ export const FINDING_CATEGORY_DESCRIPTIONS = Object.freeze({
   reach: "People, participation and services, counted under each measurement's own recorded definition.",
   measurements: "Counts and rates from your sources. Each counts what its own definition says, which is not necessarily people.",
   findings: "Statements found in your documents and other evidence.",
-  technical: "Which columns each source has. Useful for checking a source, not a finding about impact.",
+  technical: "Which columns each source has, and earlier statements of a measurement whose meaning has since been recorded. Useful for checking a source, not a finding about impact.",
 });
 
-export function findingCategory(evidenceType, measurementFamily) {
+export function findingCategory(evidenceType, measurementFamily, measurementEvidenceCurrent = null) {
   if (evidenceType === EVIDENCE_TYPES.structural) return "technical";
   if (evidenceType === EVIDENCE_TYPES.derived) {
+    if (measurementEvidenceCurrent === false) return "technical";
     if (measurementFamily === MEASUREMENT_FAMILIES.pairedOutcome) return "outcomes";
     if (measurementFamily === MEASUREMENT_FAMILIES.crossSourceReach) return "reach";
     return "measurements";
@@ -68,8 +73,9 @@ export function findingCategory(evidenceType, measurementFamily) {
   return "findings";
 }
 
-export function findingTypeLabel(evidenceType, measurementFamily) {
+export function findingTypeLabel(evidenceType, measurementFamily, measurementEvidenceCurrent = null) {
   if (evidenceType === EVIDENCE_TYPES.structural) return "Column in a source";
+  if (evidenceType === EVIDENCE_TYPES.derived && measurementEvidenceCurrent === false) return "Earlier statement of a measurement (meaning since recorded)";
   if (evidenceType === EVIDENCE_TYPES.document) return "From a document";
   if (evidenceType === EVIDENCE_TYPES.recordCount) return "Record count";
   if (evidenceType === EVIDENCE_TYPES.derived) {
@@ -126,8 +132,8 @@ export function buildFindings({ evidenceItems = [], claims = [], sources = [] } 
       claims: claimsByEvidence.get(item.evidenceItemId) || [],
       statement: item.statement || "",
       evidenceType: item.evidenceType || null,
-      category: findingCategory(item.evidenceType, item.measurementFamily),
-      typeLabel: findingTypeLabel(item.evidenceType, item.measurementFamily),
+      category: findingCategory(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent),
+      typeLabel: findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent),
       sourceVersionId: item.sourceVersionId || null,
       sourceFileName: version?.fileName || "",
       sourceIsCurrent: version ? version.isCurrent : null,

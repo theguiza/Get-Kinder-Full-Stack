@@ -149,6 +149,53 @@ test("the evidence read adds the derived-measurement family with one tenant-scop
   assert.deepEqual(derivedRows.map((row) => row.measurement_family), ["paired_outcome_change", null]);
 });
 
+// Final local acceptance (2026-11-07): a paired measurement recorded and then
+// given its meaning has two evidence items - the first, uninterpreted
+// statement and the current one. Impact showed both as outcome findings, and
+// offered the first for drafts although P2-03 refuses it
+// (derived_measurement_claim_basis_invalid).
+test("derived evidence stated under a superseded interpretation is supporting detail, never an Impact finding; the read uses the current-interpretation rule", async () => {
+  const derived = fakeDb(
+    [{ evidence_item_id: id(1), evidence_type: "source_derived_measurement" }, { evidence_item_id: id(2), evidence_type: "source_derived_measurement" },
+      { evidence_item_id: id(3), evidence_type: "source_document_statement" }],
+    [{ evidence_item_id: id(1), measurement_family: "paired_outcome_change", measurement_evidence_current: false },
+      { evidence_item_id: id(2), measurement_family: "paired_outcome_change", measurement_evidence_current: true }],
+  );
+  const rows = await listOrganizationEvidenceItems(ORG, { limit: 25 }, derived);
+  assert.deepEqual(rows.map((row) => row.measurement_evidence_current), [false, true, null]);
+  const sql = derived.queries[1].sql;
+  assert.match(sql, /COALESCE\(edm\.interpretation_id::text, ''\) = COALESCE\(\(/, "uninterpreted evidence is current only while the measurement has no interpretation");
+  assert.match(sql, /NOT EXISTS \(\s*SELECT 1 FROM kai\.source_derived_measurement_interpretations n[\s\S]*n\.organization_id = c\.organization_id[\s\S]*n\.supersedes_interpretation_id = c\.interpretation_id/, "current = the interpretation nothing supersedes, tenant-scoped");
+  assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE)\b/i);
+  const plain = fakeDb([{ evidence_item_id: id(3), evidence_type: "source_document_statement" }], []);
+  assert.equal((await listOrganizationEvidenceItems(ORG, { limit: 25 }, plain))[0].measurement_evidence_current, null);
+
+  const actorContext = { actorType: "human", actorUserId: "user-1", globalRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] };
+  const row = (current) => ({ evidence_item_id: id(1), organization_id: ORG, evidence_type: "source_derived_measurement", statement: "s", measurement_family: "paired_outcome_change", measurement_evidence_current: current });
+  const read = (current) => listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, actorContext },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, listOrganizationEvidenceItems: async () => [row(current)] });
+  assert.equal((await read(false)).data.items[0].measurementEvidenceCurrent, false);
+  assert.equal((await read(undefined)).data.items[0].measurementEvidenceCurrent, null);
+  assert.equal((await read("no")).ok, false, "a malformed flag fails closed");
+  assert.equal(projectEvidenceLibraryItems({ items: [{ evidenceItemId: id(1), measurementEvidenceCurrent: false }] })[0].measurementEvidenceCurrent, false);
+  assert.equal(projectEvidenceLibraryItems({ items: [{ evidenceItemId: id(1), measurementEvidenceCurrent: "false" }] })[0].measurementEvidenceCurrent, null);
+
+  const grouped = buildFindings({ evidenceItems: [
+    evidence(1, { evidenceType: "source_derived_measurement", measurementFamily: "paired_outcome_change", measurementEvidenceCurrent: false, statement: "4 of 6 higher (first statement)" }),
+    evidence(2, { evidenceType: "source_derived_measurement", measurementFamily: "paired_outcome_change", measurementEvidenceCurrent: true, statement: "Confidence: 4 of 6 higher" }),
+    evidence(3, { evidenceType: "source_derived_measurement", measurementFamily: "cross_source_reach", statement: "No flag: still reach" }),
+  ], sources });
+  assert.deepEqual(grouped.outcomes.map((entry) => entry.evidenceItemId), [id(2)], "only the current statement is an outcome finding");
+  assert.deepEqual(grouped.technical.map((entry) => entry.evidenceItemId), [id(1)]);
+  assert.equal(grouped.technical[0].typeLabel, "Earlier statement of a measurement (meaning since recorded)");
+  assert.deepEqual(grouped.reach.map((entry) => entry.evidenceItemId), [id(3)], "a missing flag never hides a finding");
+  assert.equal(findingCategory("source_derived_measurement", "cross_source_reach", false), "technical");
+  assert.equal(findingTypeLabel("source_derived_measurement", "paired_outcome_change", null), "Baseline and follow-up measurement");
+  const state = projectFindingsState({ engagementId: PROJECT, reads: [{ status: "success", complete: true }],
+    grouped: buildFindings({ evidenceItems: [evidence(1, { evidenceType: "source_derived_measurement", measurementFamily: "paired_outcome_change", measurementEvidenceCurrent: false })] }) });
+  assert.equal(state.kind, "empty", "a superseded statement alone is not a result");
+});
+
 test("the Evidence Library DTO carries measurementFamily, fails closed on a malformed one, and the client projection keeps it", async () => {
   const actorContext = { actorType: "human", actorUserId: "user-1", globalRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] };
   const row = (family) => ({ evidence_item_id: id(1), organization_id: ORG, evidence_type: "source_derived_measurement", statement: "s", measurement_family: family });

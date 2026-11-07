@@ -3589,7 +3589,7 @@ export default function ImpactEvidenceLibrary({
                   <li key={item.evidenceItemId} className="list-group-item" data-evidence-item-id={item.evidenceItemId}>
                     <StatementText className="fw-semibold small" text={item.statement || "Evidence statement not yet available"} />
                     <div className="d-flex flex-wrap gap-2 mt-1">
-                      <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily)}</span>
+                      <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent)}</span>
                       {gkSourceVersions.get(item.sourceVersionId)?.fileName ? (
                         <span className="small text-muted">Source: {gkSourceVersions.get(item.sourceVersionId).fileName}</span>
                       ) : null}

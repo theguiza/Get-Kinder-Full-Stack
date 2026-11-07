@@ -517,6 +517,8 @@ export function projectEvidenceLibraryItems(dto) {
     sensitivityLevel: item.sensitivityLevel ?? null,
     // The recorded derived-measurement family, or null (display grouping only).
     measurementFamily: typeof item.measurementFamily === "string" ? item.measurementFamily : null,
+    // false only for derived-measurement evidence stated under a superseded interpretation.
+    measurementEvidenceCurrent: typeof item.measurementEvidenceCurrent === "boolean" ? item.measurementEvidenceCurrent : null,
     evidenceReview: projectEvidenceLibraryReview(item.evidenceReview),
   })).filter((item) => isRouteUuid(item.evidenceItemId));
 }
