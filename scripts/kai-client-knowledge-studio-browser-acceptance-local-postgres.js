@@ -130,6 +130,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-internal-factual-review-browser-acceptance.integration.spec.js",
   "__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js",
+  "__tests__/kai-knowledge-studio-four-view-direct-browser-acceptance.integration.spec.js",
 ]);
 // Specs that also need the generated-draft export path (review start audit,
 // export review, limitation snapshot, candidate, final-release authority,
@@ -140,6 +141,7 @@ const EXPORT_PATH_SPECS = new Set([
   "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-internal-factual-review-browser-acceptance.integration.spec.js",
   "__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js",
+  "__tests__/kai-knowledge-studio-four-view-direct-browser-acceptance.integration.spec.js",
 ]);
 const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_p3_05_export_review_request",
@@ -310,7 +312,8 @@ try {
   if (EXPORT_PATH_SPECS.has(acceptanceSpec)) {
     for (const migration of EXPORT_PATH_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
   }
-  if (acceptanceSpec === "__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js") {
+  if (acceptanceSpec === "__tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js"
+    || acceptanceSpec === "__tests__/kai-knowledge-studio-four-view-direct-browser-acceptance.integration.spec.js") {
     psqlFile("migrations/kai_sprint2_document_statement_evidence.sql");
   }
   if (MEASUREMENT_SCHEMA_SPECS.has(acceptanceSpec)) {
