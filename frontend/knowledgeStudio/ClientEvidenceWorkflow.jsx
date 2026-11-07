@@ -80,7 +80,7 @@ import ClientSourceMeasurementPanel from "./ClientSourceMeasurementPanel.jsx";
 import ClientMeasuredClaimReviewPanel from "./ClientMeasuredClaimReviewPanel.jsx";
 import { CategoryHeading, Disclosure, FindingMeta, FindingText, ImpactView, ViewPane } from "./KnowledgeStudioViews.jsx";
 import {
-  FINDING_CATEGORIES, buildFindings, claimRestatesFinding, findingCount, findingDisplay, projectFindingsState, shortStatement,
+  FINDING_CATEGORIES, buildFindings, claimRestatesFinding, findingCount, findingDisplay, projectFindingsState, projectIsConfirmedEmpty, shortStatement,
 } from "./knowledgeStudioViewsLogic.js";
 
 const DRAFT_LABELS = Object.freeze({
@@ -120,7 +120,11 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
       const result = await getJson(path(organizationId, null));
       if (keyRef.current !== requestKey) return { status: "superseded" };
       if (result.statusCode !== 200 || !result.body?.ok) return { status: "error", result };
-      return { status: "success", items: project(result.body.data), complete: true, nextCursor: null };
+      // The Sources projection tolerates a missing array for its normal
+      // display. Such a response cannot prove an empty Project.
+      const complete = project !== projectOrganizationSources
+        || (Array.isArray(result.body.data?.sources) && result.body.data.truncated !== true);
+      return { status: "success", items: project(result.body.data), complete, nextCursor: null };
     }
     return readLibraryPages({
       fetchPage: (after) => getJson(path(organizationId, after)),
@@ -1185,6 +1189,11 @@ export default function ClientEvidenceWorkflow({
       ) : null}
       <ViewPane name="impact" active={view === "impact"} mounted={visitedViews.includes("impact")}>
         <ImpactView projectName={projectName} engagementId={engagementId} state={findingsState} grouped={findings}
+          projectEmpty={canUploadNewIntakeVersion && projectIsConfirmedEmpty({ engagementId, scope, pipeline, sources, evidence, claims })}
+          onOpenSources={() => {
+            onSelectView?.("sources");
+            globalThis.document?.getElementById("knowledge-studio-tab-sources")?.focus();
+          }}
           attention={attention} statusFor={findingStatus} onOpenFinding={openFinding}
           onOpenEvidence={() => onSelectView?.("evidence")}
           onLoadMore={!evidence.complete ? evidence.loadMore : (!claims.complete ? claims.loadMore : null)}

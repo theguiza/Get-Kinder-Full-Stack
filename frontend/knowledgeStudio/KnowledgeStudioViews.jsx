@@ -211,7 +211,7 @@ function ImpactSection({ category, title, entries, state, statusFor, onOpenFindi
  */
 export function ImpactView({
   projectName, engagementId, state, grouped, attention = [], statusFor, onOpenFinding, onOpenEvidence,
-  onLoadMore, loadingMore = false, intro, children,
+  onLoadMore, loadingMore = false, intro, children, projectEmpty = false, onOpenSources,
 }) {
   return (
     <div data-knowledge-studio-impact="" data-knowledge-studio-impact-project={engagementId || ""} title={projectName || undefined}>
@@ -228,7 +228,13 @@ export function ImpactView({
           This Project&rsquo;s evidence could not be loaded, so nothing can be summarized right now. This does not mean the Project has no evidence. {state.message}
         </div>
       ) : null}
-      {state.kind === "empty" ? (
+      {state.kind === "empty" && projectEmpty && onOpenSources ? (
+        <div className="admin-card mb-3 border border-primary" data-impact-empty-project="">
+          <h3 className="h5">Start building your impact picture</h3>
+          <p>Add your existing reports, spreadsheets and other files so KAI can begin organizing your impact evidence.</p>
+          <button type="button" className="btn btn-primary" onClick={onOpenSources}>Add files</button>
+        </div>
+      ) : state.kind === "empty" ? (
         <div className="admin-card small" data-impact-state="empty">
           No findings or measurements are recorded for this Project yet. Add files in Sources and use them for impact to see results here.
         </div>

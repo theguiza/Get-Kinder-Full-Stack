@@ -16,6 +16,7 @@ import {
   findingTypeLabel,
   nextVisitedViews,
   projectFindingsState,
+  projectIsConfirmedEmpty,
   shortStatement,
   audienceGateRows,
   claimRestatesFinding,
@@ -60,8 +61,8 @@ const sources = [{ sourceId: id(800), sourceVersions: [{ sourceVersionId: id(900
 // Classification and grouping
 // ---------------------------------------------------------------------------
 
-test("exactly four views, Impact first and the default", () => {
-  assert.deepEqual(KNOWLEDGE_STUDIO_VIEWS.map(([key]) => key), ["impact", "evidence", "sources", "drafts"]);
+test("exactly four views, Sources first with Impact the default", () => {
+  assert.deepEqual(KNOWLEDGE_STUDIO_VIEWS.map(([key]) => key), ["sources", "impact", "evidence", "drafts"]);
   assert.equal(DEFAULT_KNOWLEDGE_STUDIO_VIEW, "impact");
   assert.deepEqual(nextVisitedViews(["impact"], "drafts"), ["impact", "drafts"]);
   assert.deepEqual(nextVisitedViews(["impact", "drafts"], "drafts"), ["impact", "drafts"]);
@@ -296,6 +297,47 @@ test("rendered Impact: partial, failed, empty and no-Project states say so and n
   assert.doesNotMatch(none, /What needs attention/);
 });
 
+test("empty Project prompt requires complete Project uploads, sources, evidence and claims, never just no findings", () => {
+  const read = { status: "success", complete: true, items: [] };
+  const data = { engagementId: PROJECT, files: [], reviewedImpactFacts: [], truncated: false, reviewedImpactFactsTruncated: false };
+  const input = { engagementId: PROJECT, scope: PROJECT, pipeline: { status: "success_empty", data }, sources: read, evidence: read, claims: read };
+  assert.equal(projectIsConfirmedEmpty(input), true);
+  for (const status of ["loading", "not_started", "error", "success_with_data"]) {
+    assert.equal(projectIsConfirmedEmpty({ ...input, pipeline: { status, data } }), false, status);
+  }
+  for (const change of [{ truncated: true }, { reviewedImpactFactsTruncated: true }, { files: [{}] },
+    { reviewedImpactFacts: [{}] }, { engagementId: ORG }, { files: null }, { truncated: undefined }]) {
+    assert.equal(projectIsConfirmedEmpty({ ...input, pipeline: { status: "success_empty", data: { ...data, ...change } } }), false, JSON.stringify(change));
+  }
+  for (const key of ["sources", "evidence", "claims"]) {
+    for (const change of [{ status: "loading" }, { status: "error" }, { complete: false }, { items: [{}] },
+      { loadingMore: true }, { message: "Read failed" }, { items: null }]) {
+      assert.equal(projectIsConfirmedEmpty({ ...input, [key]: { ...read, ...change } }), false, `${key}: ${JSON.stringify(change)}`);
+    }
+    assert.equal(projectIsConfirmedEmpty({ ...input, [key]: undefined }), false);
+  }
+  assert.equal(projectIsConfirmedEmpty({ ...input, engagementId: "" }), false);
+  assert.equal(projectIsConfirmedEmpty({ ...input, scope: "" }), false, "organization-library expansion cannot establish Project emptiness");
+  assert.equal(projectIsConfirmedEmpty({ ...input, pipeline: undefined }), false, "GK without upload data keeps neutral Impact");
+});
+
+test("rendered Impact offers the exact empty-Project CTA only after confirmation; uncertain states stay neutral", async () => {
+  const { ImpactView } = await loadComponent("frontend/knowledgeStudio/KnowledgeStudioViews.jsx");
+  const render = (kind, projectEmpty) => renderToStaticMarkup(React.createElement(ImpactView, {
+    engagementId: PROJECT, state: { kind, complete: true }, grouped: buildFindings({}),
+    projectEmpty, onOpenSources: () => {},
+  }));
+  const empty = render("empty", true);
+  assert.match(empty, /Start building your impact picture/);
+  assert.match(empty, /Add your existing reports, spreadsheets and other files so KAI can begin organizing your impact evidence\./);
+  assert.match(empty, />Add files<\/button>/);
+  for (const kind of ["loading", "error", "incomplete_empty", "ready", "no_project"]) {
+    assert.doesNotMatch(render(kind, true), /data-impact-empty-project|Start building your impact picture/);
+  }
+  assert.doesNotMatch(render("empty", false), /data-impact-empty-project/);
+  assert.match(render("empty", false), /No findings or measurements are recorded/);
+});
+
 const adminCapabilities = {
   internalKnowledgeWorkspace: false,
   intakeContribution: true,
@@ -309,7 +351,7 @@ test("rendered client Knowledge Studio: the Project name leads, four tabs, Impac
       organizationId: ORG, engagementId: PROJECT, projectName: "Harbourline Project", capabilities, facts: { status: "success", items: [] },
     }));
     const tabs = [...markup.matchAll(/data-knowledge-studio-tab="([a-z]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(tabs, ["impact", "evidence", "sources", "drafts"]);
+    assert.deepEqual(tabs, ["sources", "impact", "evidence", "drafts"]);
     assert.match(markup, /aria-selected="true"[^>]*data-knowledge-studio-tab="impact"/);
     assert.match(markup, /<h1 class="admin-title mb-0">Harbourline Project<\/h1>/);
     const views = [...markup.matchAll(/data-knowledge-studio-view="([a-z]+)"/g)].map((match) => match[1]);
@@ -337,7 +379,7 @@ test("rendered GK Knowledge Studio: four tabs with Impact open; Claims, Traceabi
     projectName: "Harbourline Project", workflowOperations: { generateDrafts: true, readGeneratedDrafts: true, extractEvidence: true },
   }));
   const tabs = [...markup.matchAll(/data-knowledge-studio-tab="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ["impact", "evidence", "sources", "drafts"]);
+  assert.deepEqual(tabs, ["sources", "impact", "evidence", "drafts"]);
   assert.match(markup, /aria-selected="true"[^>]*data-knowledge-studio-tab="impact"/);
   assert.match(markup, /What this Project tells us about our impact/);
   for (const heading of ["Claims", "Traceability", "Generated Drafts", "Grant Response Packet", "Board Reporting", "KAI Baseline Readiness", "Data Sources", "Review Queue", "Gaps and Risks"]) {
@@ -463,9 +505,9 @@ test("claim wording: a claim that restates its finding is not repeated; material
 
 test("tabs: arrow keys, Home and End move within the four views; other keys do nothing", () => {
   assert.equal(tabKeyTarget("ArrowRight", "impact"), "evidence");
-  assert.equal(tabKeyTarget("ArrowRight", "drafts"), "impact");
-  assert.equal(tabKeyTarget("ArrowLeft", "impact"), "drafts");
-  assert.equal(tabKeyTarget("Home", "sources"), "impact");
+  assert.equal(tabKeyTarget("ArrowRight", "drafts"), "sources");
+  assert.equal(tabKeyTarget("ArrowLeft", "impact"), "sources");
+  assert.equal(tabKeyTarget("Home", "evidence"), "sources");
   assert.equal(tabKeyTarget("End", "evidence"), "drafts");
   assert.equal(tabKeyTarget("Enter", "evidence"), null);
   assert.equal(tabKeyTarget("ArrowRight", "unknown"), null);

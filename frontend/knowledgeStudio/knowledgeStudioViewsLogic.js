@@ -25,12 +25,28 @@
  */
 
 export const KNOWLEDGE_STUDIO_VIEWS = Object.freeze([
+  ["sources", "Sources"],
   ["impact", "Impact"],
   ["evidence", "Evidence"],
-  ["sources", "Sources"],
   ["drafts", "Drafts"],
 ]);
 export const DEFAULT_KNOWLEDGE_STUDIO_VIEW = "impact";
+
+// No findings alone does not establish an empty Project. The existing client
+// administrator reads cover uploads (including unpromoted files), sources,
+// evidence and claims (including reuse). Other surfaces without all these
+// reads keep their neutral Impact state. Never add a read just for this CTA.
+export function projectIsConfirmedEmpty({ engagementId, scope, pipeline, sources, evidence, claims }) {
+  const data = pipeline?.data;
+  return Boolean(engagementId && scope === engagementId
+    && pipeline?.status === "success_empty" && data?.engagementId === engagementId
+    && data.truncated === false && data.reviewedImpactFactsTruncated === false
+    && Array.isArray(data.files) && data.files.length === 0
+    && Array.isArray(data.reviewedImpactFacts) && data.reviewedImpactFacts.length === 0
+    && [sources, evidence, claims].every((read) => read?.status === "success"
+      && read.complete === true && !read.loadingMore && !read.message
+      && Array.isArray(read.items) && read.items.length === 0));
+}
 
 export const EVIDENCE_TYPES = Object.freeze({
   structural: "dictionary_field_presence_fact",

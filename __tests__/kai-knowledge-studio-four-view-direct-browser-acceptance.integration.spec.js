@@ -16,7 +16,7 @@ import { syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSynthet
  * Unlike the legacy specs, this one uses no former-tab aliases and no harness
  * that reveals hidden controls: every step clicks a visible, enabled,
  * unobstructed control with a real mouse event (or a real key press), using
- * the four tab labels Impact | Evidence | Sources | Drafts.
+ * the four tab labels Sources | Impact | Evidence | Drafts (Impact default).
  *
  * The page is the real views/impact-library.ejs (site header, Bootstrap 5.3.5
  * from its CDN with its SRI hash, fonts, inline styles) rendered with harness
@@ -144,8 +144,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   const handlePaused = async (params) => {
     const { requestId } = params;
     try {
-      if (interceptor) await interceptor({ url: params.request.url });
-      await browser.send("Fetch.continueRequest", { requestId }, sessionId);
+      const override = interceptor ? await interceptor({ url: params.request.url }) : null;
+      if (override) {
+        await browser.send("Fetch.fulfillRequest", {
+          requestId, responseCode: override.status,
+          responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+          body: Buffer.from(JSON.stringify(override.body)).toString("base64"),
+        }, sessionId);
+      } else await browser.send("Fetch.continueRequest", { requestId }, sessionId);
     } catch (error) {
       exceptions.push(`interception: ${error.message}`);
     }
@@ -335,7 +341,9 @@ async function runBrowserAcceptance() {
   const ORG = "0e000000-0000-4000-8000-0000000000a1";
   const PROJECT_A = "7e000000-0000-4000-8000-0000000000a1";
   const PROJECT_B = "7e000000-0000-4000-8000-0000000000b1";
-  const BATCH = { [PROJECT_A]: "12000000-0000-4000-8000-0000000000a1", [PROJECT_B]: "12000000-0000-4000-8000-0000000000b1" };
+  const PROJECT_EMPTY = "7e000000-0000-4000-8000-0000000000c1";
+  const PROJECT_FILES = "7e000000-0000-4000-8000-0000000000d1";
+  const BATCH = { [PROJECT_FILES]: "12000000-0000-4000-8000-0000000000d1", [PROJECT_A]: "12000000-0000-4000-8000-0000000000a1", [PROJECT_B]: "12000000-0000-4000-8000-0000000000b1" };
   const FILES = Object.freeze({
     sessions: "22000000-0000-4000-8000-0000000000a1",
     outcomes: "22000000-0000-4000-8000-0000000000a2",
@@ -360,19 +368,21 @@ async function runBrowserAcceptance() {
   ];
   const OUTCOMES_XLSX = syntheticXlsxWorkbook({ sheets: [{ name: "Ratings", rows: [["record_ref", "client_code", "timepoint", "confidence_rating"], ...OUTCOME_ROWS] }] });
   const NOTES_TEXT = "Participants said the mentoring sessions were a regular, welcoming part of their week during the autumn term.";
-  const PROJECT_NAMES = { [PROJECT_A]: "Riverside Mentoring 2026", [PROJECT_B]: "Workshop Pilot 2026" };
+  const PROJECT_NAMES = { [PROJECT_A]: "Riverside Mentoring 2026", [PROJECT_B]: "Workshop Pilot 2026", [PROJECT_EMPTY]: "New Project", [PROJECT_FILES]: "Files without findings" };
 
   log("imports done");
   // --- organization, Projects, GK binding, users ---------------------------
   await query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS logo_url text");
   await query("ALTER TABLE kai.intake_files ADD COLUMN IF NOT EXISTS file_extension text, ADD COLUMN IF NOT EXISTS storage_provider text, ADD COLUMN IF NOT EXISTS storage_object_key text");
   await query("INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ($1::uuid, 'Riverside Community Society', 'riverside-community')", [ORG]);
-  for (const engagementId of [PROJECT_A, PROJECT_B]) {
+  for (const engagementId of [PROJECT_A, PROJECT_B, PROJECT_FILES]) {
     await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, $3, '{}'::jsonb)",
       [engagementId, ORG, PROJECT_NAMES[engagementId]]);
     await query(`INSERT INTO kai.intake_batches (intake_batch_id, organization_id, engagement_id, batch_code, processing_status, review_status)
                  VALUES ($1::uuid, $2::uuid, $3::uuid, 'intake', 'received', 'not_reviewed')`, [BATCH[engagementId], ORG, engagementId]);
   }
+  await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, $3, '{}'::jsonb)",
+    [PROJECT_EMPTY, ORG, PROJECT_NAMES[PROJECT_EMPTY]]);
   for (const legacyId of Object.values(USERS)) await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [legacyId]);
   const [gkOrganization] = await query("INSERT INTO public.organizations (name, status) VALUES ('Riverside Community Society', 'approved') RETURNING id");
   await query("INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status) VALUES ($1, $2::uuid, 'active')", [gkOrganization.id, ORG]);
@@ -565,6 +575,9 @@ async function runBrowserAcceptance() {
       ids.notesVersion = await promote(notes.sensitivityProfileId, gkPage);
       const workshops = await seedProfiledFile({ fileId: FILES.workshops, engagementId: PROJECT_B, text: WORKSHOPS_CSV, filename: "workshop-log-oct.csv" });
       ids.workshopsVersion = await promote(workshops.sensitivityProfileId, gkPage);
+      // An uploaded, unpromoted file with no findings is still existing content.
+      await seedProfiledFile({ fileId: "22000000-0000-4000-8000-0000000000d1", engagementId: PROJECT_FILES,
+        text: WORKSHOPS_CSV.replace("2026-10-01", "2026-11-01"), filename: "not-yet-used.csv" });
 
       // Structural (field-presence) evidence of the session log, as Use for impact extracts it, with one structural claim.
       log("all promoted");
@@ -642,6 +655,87 @@ async function runBrowserAcceptance() {
       ids.bEvidenceId = bMeasurement.evidence_item_id;
       ids.bClaimId = bClaim.body.data.claim.claim_id;
       console.log(`[fixture] ${JSON.stringify({ ids, findings })}`);
+    });
+
+    await test("Sources first, Impact default: a confirmed empty Project offers Add files on desktop/mobile; content and uncertain GK reads keep neutral Impact", { timeout: 240000 }, async () => {
+      for (const metrics of [DESKTOP, MOBILE]) {
+        await adminPage.viewport(metrics);
+        await openStudio(adminPage, PROJECT_EMPTY);
+        assert.deepEqual(await adminPage.evaluate(`[...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.innerText.trim())`),
+          ["Sources", "Impact", "Evidence", "Drafts"]);
+        assert.deepEqual(await activeView(adminPage), ["Impact"]);
+        await adminPage.waitForText("Start building your impact picture");
+        assert.ok((await adminPage.text()).includes("Add your existing reports, spreadsheets and other files so KAI can begin organizing your impact evidence."));
+        const mark = adminPage.mark();
+        await adminPage.click("button", "Add files");
+        await adminPage.idle();
+        assert.deepEqual(await activeView(adminPage), ["Sources"]);
+        assert.equal(await visible(adminPage, '[data-knowledge-studio-view="sources"] input[type="file"]'), true, "the existing upload entry is visible");
+        assert.equal(await adminPage.evaluate(`document.activeElement?.dataset.knowledgeStudioTab`), "sources", "CTA moves focus out of the hidden Impact pane");
+        assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "navigation writes nothing");
+        await adminPage.tab("Impact");
+        await adminPage.idle();
+        assert.equal(await visible(adminPage, "[data-impact-empty-project]"), true);
+        assert.ok((await layoutAudit(adminPage)).overflowX <= 1);
+      }
+      await adminPage.viewport(DESKTOP);
+      for (const project of [PROJECT_A, PROJECT_FILES]) {
+        await openStudio(adminPage, project);
+        assert.deepEqual(await activeView(adminPage), ["Impact"]);
+        assert.equal(await visible(adminPage, "[data-impact-empty-project]"), false, "existing content is never a new Project");
+      }
+      for (const project of [PROJECT_A, PROJECT_EMPTY]) {
+        await openStudio(gkPage, project);
+        assert.deepEqual(await gkPage.evaluate(`[...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.innerText.trim())`),
+          ["Sources", "Impact", "Evidence", "Drafts"]);
+        assert.deepEqual(await activeView(gkPage), ["Impact"]);
+        assert.equal(await visible(gkPage, "[data-impact-empty-project]"), false, "GK lacks an authoritative upload read, so retains neutral Impact");
+      }
+    });
+
+    await test("empty-Project prompt is suppressed for partial/error/loading or malformed reads and late responses after a Project switch", { timeout: 240000 }, async () => {
+      const pipelinePattern = `*/engagements/${PROJECT_EMPTY}/client-evidence-pipeline*`;
+      for (const override of [
+        { status: 503, body: { ok: false, error: { code: "system_error" } } },
+        ...["truncated", "reviewedImpactFactsTruncated"].map((flag) => ({ status: 200, body: { ok: true, data: {
+          engagementId: PROJECT_EMPTY, files: [], reviewedImpactFacts: [], truncated: false, reviewedImpactFactsTruncated: false,
+          [flag]: true, summary: { reasons: [] },
+        } } })),
+      ]) {
+        try {
+          await adminPage.holdResponses([{ urlPattern: pipelinePattern, requestStage: "Response" }], async () => override);
+          await openStudio(adminPage, PROJECT_EMPTY);
+          assert.equal(await visible(adminPage, "[data-impact-empty-project]"), false, JSON.stringify(override));
+          assert.deepEqual(await activeView(adminPage), ["Impact"]);
+        } finally { await adminPage.releaseHolds(); }
+      }
+      try {
+        await adminPage.holdResponses([{ urlPattern: `*/sources?engagement_id=${PROJECT_EMPTY}*`, requestStage: "Response" }],
+          async () => ({ status: 200, body: { ok: true, data: {} } }));
+        await openStudio(adminPage, PROJECT_EMPTY);
+        assert.equal(await visible(adminPage, "[data-impact-empty-project]"), false, "a missing Sources array is not an empty library");
+      } finally { await adminPage.releaseHolds(); }
+      await openStudio(adminPage, PROJECT_EMPTY);
+      assert.equal(await visible(adminPage, "[data-impact-empty-project]"), true, "complete reads restore the prompt");
+      await adminPage.tab("Drafts");
+      await adminPage.idle();
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      let intercepted = false;
+      try {
+        await adminPage.holdResponses([{ urlPattern: pipelinePattern, requestStage: "Response" }], async () => {
+          intercepted = true;
+          await held;
+        });
+        await adminPage.tab("Impact");
+        await adminPage.waitFor(async () => intercepted, "the held pipeline response");
+        assert.equal(await visible(adminPage, "[data-impact-empty-project]"), false, "loading is not empty");
+        await adminPage.selectProject(PROJECT_A);
+        await adminPage.waitForText(PROJECT_NAMES[PROJECT_A]);
+        release();
+        await adminPage.idle();
+        assert.equal(await visible(adminPage, "[data-impact-empty-project]"), false, "a late empty read cannot repopulate the next Project");
+      } finally { release(); await adminPage.releaseHolds(); }
     });
 
     await test("styles: the real page loads Bootstrap 5.3.5 (SRI verified by the browser) and the site styles", { timeout: 240000 }, async () => {
@@ -955,6 +1049,19 @@ async function runBrowserAcceptance() {
       assert.ok(await adminPage.evaluate(`(() => { const p = document.getElementById("knowledge-studio-panel-drafts"); return Boolean(p && p.getAttribute("role") === "tabpanel" && p.getAttribute("aria-labelledby") === "knowledge-studio-tab-drafts"); })()`),
         "the Drafts panel is labelled by its tab");
       assert.deepEqual(await adminPage.evaluate(`[...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.getAttribute("tabindex"))`), ["-1", "-1", "-1", "0"], "only the selected tab is a Tab stop");
+      for (const page of [adminPage, gkPage]) {
+        await page.tab("Impact");
+        await page.key("Home", "Home", 36);
+        assert.deepEqual(await activeView(page), ["Sources"], "Home opens the first tab");
+        await page.key("ArrowLeft", "ArrowLeft", 37);
+        assert.deepEqual(await activeView(page), ["Drafts"], "Left wraps to Drafts");
+        await page.key("ArrowRight", "ArrowRight", 39);
+        assert.deepEqual(await activeView(page), ["Sources"], "Right wraps to Sources");
+        await page.key("ArrowRight", "ArrowRight", 39);
+        assert.deepEqual(await activeView(page), ["Impact"]);
+        await page.key("End", "End", 35);
+        assert.deepEqual(await activeView(page), ["Drafts"]);
+      }
       // Ask KAI's input has its own accessible name.
       findings.askKaiLabel = await adminPage.evaluate(`(() => { const input = document.querySelector("[data-knowledge-studio-ask-kai] input"); return input && input.labels && input.labels[0] ? input.labels[0].textContent.trim() : null; })()`);
       assert.match(findings.askKaiLabel || "", /whole organization library/, "Ask KAI input is labelled with its organization-wide scope");
@@ -1000,7 +1107,10 @@ async function runBrowserAcceptance() {
         for (const [metrics, size] of [[DESKTOP, "desktop"], [MOBILE, "mobile"]]) {
           await page.viewport(metrics);
           await openStudio(page, PROJECT_A);
-          for (const view of ["Impact", "Evidence", "Sources", "Drafts"]) {
+          assert.deepEqual(await activeView(page), ["Impact"], `${kind}/${size}: Impact stays the default`);
+          assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("[data-knowledge-studio-tab]")].map((el) => el.innerText.trim())`),
+            ["Sources", "Impact", "Evidence", "Drafts"]);
+          for (const view of ["Sources", "Impact", "Evidence", "Drafts"]) {
             await page.tab(view);
             await page.idle();
             await new Promise((r) => setTimeout(r, 400));
