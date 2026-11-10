@@ -88,6 +88,9 @@ export function claimInternalDraftSelectability(claim, diagnosis) {
   if (claimSourceVersionUnavailable(claim, diagnosis)) return { selectable: false, reason: "source_version_not_current" };
   if (claim.claimStrength === TERMINAL_NOT_SUPPORTED) return { selectable: false, reason: "reviewed_not_supported" };
   if (claimKind(claim) === "structural") return { selectable: false, reason: "structural_fact" };
+  // Owner Package 3: the server's own refusal for this operation; the reason
+  // is shown on the claim (claimUsePresentation).
+  if (claimDraftAdmission(claim, diagnosis) === "refused") return { selectable: false, reason: "provisional_draft_refused" };
   return { selectable: true, reason: null };
 }
 
@@ -115,12 +118,25 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
 }
 
 // Owner direction 2026-11-06 (draft first): an internal provisional draft
-// does not wait for review, coverage acceptance or final-use eligibility, so
-// a measured claim's open review items no longer hold it back here. Its
-// source version must be current; the server still refuses a measurement
-// that no longer matches its basis or a claim a recorded review rejected.
+// does not wait for review, coverage acceptance or final-use eligibility.
+// Owner Package 3: whether a claim may be used in a NEW internal draft is the
+// server's operation-specific answer (the diagnostic's
+// provisional_internal_draft, evaluated by the same rules generation
+// applies), never inferred here from source currentness or from the strict
+// P2-06 result: "admitted", "refused" (with the server's reasons) or
+// "unknown" (not read, or the read failed). A non-current source version, or
+// a 409 the server explains, is a refusal.
+export function claimDraftAdmission(claim, diagnosis) {
+  if (claimSourceVersionUnavailable(claim, diagnosis)) return "refused";
+  if (diagnosis?.conflictReason) return "refused";
+  const provisional = diagnosis?.provisional;
+  if (provisional?.status === "admitted" || provisional?.status === "refused") return provisional.status;
+  return "unknown";
+}
+
+// True only when the server admitted the claim to a new internal draft.
 export function claimDraftAdmitted(claim, diagnosis) {
-  return !claimSourceVersionUnavailable(claim, diagnosis);
+  return claimDraftAdmission(claim, diagnosis) === "admitted";
 }
 
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
@@ -137,8 +153,8 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   no_claims_selected: "Select at least one claim in Evidence to draft from.",
   no_measured_claim_selected: "Select at least one measured finding in Evidence: a report needs a measured result, not only structural facts.",
   too_many_claims: "Select at most 20 claims for one draft.",
-  measured_claim_not_usable: "A selected measured finding is not usable in internal reports now, and a draft is generated from a measured finding "
-    + "only while it is usable. Its condition is shown on the claim in Evidence; deselect it to draft from the others.",
+  measured_claim_not_usable: "KAI's checks do not allow a selected claim in a new internal draft now. Its condition is shown on the claim in Evidence; "
+    + "deselect it to draft from the others.",
 });
 
 export function claimSelectabilityMessage(reason) {
@@ -148,6 +164,8 @@ export function claimSelectabilityMessage(reason) {
     return "Structural fact: it says a source has this column, not a measured result, so it is not offered as an impact finding.";
   }
   if (reason === "invalid_claim") return "This claim cannot be selected.";
+  // The server's reason is shown on the claim itself (claimUsePresentation).
+  if (reason === "provisional_draft_refused") return "";
   return "";
 }
 
@@ -178,31 +196,52 @@ export function claimInternalUse(claimId, impactFacts, diagnostics = null) {
 // One claim's client-safe internal traceability diagnostic (owner
 // authorization 2026-10-24), as an internal-use answer and the server's own
 // blocker codes. Any other outcome establishes nothing ("unknown").
+//
+// `status`/`blockerCodes` are the STRICT internal answer (final internal use).
+// `provisional` (owner Package 3) is the server's separate answer for a new
+// internal provisional draft: { status: "admitted" | "refused" | "unknown",
+// blockerCodes, sourceRole }. A response without it is "unknown", never
+// admitted; an unexplained code makes the whole answer unknown.
+const UNKNOWN_PROVISIONAL = Object.freeze({ status: "unknown", blockerCodes: [], sourceRole: null });
+function provisionalOf(view) {
+  if (!view || typeof view.admitted !== "boolean" || !Array.isArray(view.blocker_codes)) return UNKNOWN_PROVISIONAL;
+  if (!view.blocker_codes.every((code) => Object.hasOwn(PROVISIONAL_DRAFT_BLOCKER_MESSAGES, code))) return UNKNOWN_PROVISIONAL;
+  if (view.admitted !== (view.blocker_codes.length === 0)) return UNKNOWN_PROVISIONAL;
+  return {
+    status: view.admitted ? "admitted" : "refused",
+    blockerCodes: [...view.blocker_codes],
+    sourceRole: view.source_role === "primary" || view.source_role === "reference" ? view.source_role : null,
+  };
+}
+
 export function claimUseDiagnosis(result) {
   const data = result?.body?.data;
   if (result?.statusCode === 200 && result.body?.ok === true && data?.traceability_passed === true) {
     const blockerCodes = Array.isArray(data.blocker_codes) ? data.blocker_codes.filter((code) => Object.hasOwn(CLAIM_USE_BLOCKER_MESSAGES, code)) : [];
-    return { status: data.eligible === true ? "usable" : "not_usable", blockerCodes, conflictReason: null };
+    return { status: data.eligible === true ? "usable" : "not_usable", blockerCodes, conflictReason: null, provisional: provisionalOf(data.provisional_internal_draft) };
   }
   const reason = data?.traceability_conflict_reason;
   if (result?.statusCode === 409 && result.body?.error?.code === "conflict_current_state_changed"
     && Object.hasOwn(TRACEABILITY_CONFLICT_EXPLANATIONS, reason)) {
-    return { status: "not_usable", blockerCodes: [], conflictReason: reason };
+    return { status: "not_usable", blockerCodes: [], conflictReason: reason, provisional: { status: "refused", blockerCodes: [], sourceRole: null } };
   }
-  return { status: "unknown", blockerCodes: [], conflictReason: null };
+  return { status: "unknown", blockerCodes: [], conflictReason: null, provisional: UNKNOWN_PROVISIONAL };
 }
 
 // The claims whose internal use is diagnosed one by one: every substantive
-// (non-structural) loaded claim the impact-facts read does not establish as
-// usable, plus any selected claim, up to `limit`.
+// (non-structural) loaded claim, plus any selected claim, up to `limit`.
+// Claims the impact-facts read does not establish as usable come first (they
+// need the strict reason too). Owner Package 3: a claim the impact-facts read
+// shows as usable is still diagnosed, because strict eligibility does not
+// establish that the claim may be sent to the model for a new draft.
 export function claimsToDiagnose({ claims, impactFacts, diagnostics, selectedClaimIds = [], limit = 25 }) {
   const known = diagnostics instanceof Map ? diagnostics : new Map();
   const wanted = (Array.isArray(claims) ? claims : [])
     .filter((claim) => isRouteUuid(claim?.claimId) && !known.has(claim.claimId) && !claimSourceVersionUnavailable(claim))
-    .filter((claim) => (claimKind(claim) !== "structural" || selectedClaimIds.includes(claim.claimId))
-      && claimInternalUse(claim.claimId, impactFacts) !== "usable")
-    .map((claim) => claim.claimId);
-  return wanted.slice(0, Math.max(0, limit));
+    .filter((claim) => claimKind(claim) !== "structural" || selectedClaimIds.includes(claim.claimId));
+  const notShownUsable = wanted.filter((claim) => claimInternalUse(claim.claimId, impactFacts) !== "usable");
+  const shownUsable = wanted.filter((claim) => claimInternalUse(claim.claimId, impactFacts) === "usable");
+  return [...notShownUsable, ...shownUsable].map((claim) => claim.claimId).slice(0, Math.max(0, limit));
 }
 
 // What a P2-06 blocker means to the organization administrator.
@@ -223,50 +262,138 @@ export const CLAIM_USE_BLOCKER_MESSAGES = Object.freeze({
     + "or use a measurement that applies those conditions",
 });
 
+// Owner Package 3: why the server refuses a claim for a new internal draft
+// (postgresProvisionalInternalDraftAdmission.js), each with the action that
+// can change it. `role` is the refusing contributing version's role.
+const SOURCE_ROLE_TEXT = Object.freeze({
+  reference: "the linked participant register's",
+  primary: "its source's",
+});
+export const PROVISIONAL_DRAFT_BLOCKER_MESSAGES = Object.freeze({
+  allowed_use_not_allowed: (role) => `${SOURCE_ROLE_TEXT[role] || "its source's"} recorded allowed use does not permit this use`
+    + `${role === "reference" ? " (a permitted service log does not override the register's decision)" : ""}; only a new sensitivity and `
+    + "allowed-use decision for that source, under Processing permissions in Sources, can change this",
+  ai_processing_not_permitted: (role) => `${SOURCE_ROLE_TEXT[role] || "its source's"} recorded processing permissions do not allow AI processing`
+    + `${role === "reference" ? " (a permitted service log does not override the register's decision)" : ""}; only a new decision that permits `
+    + "AI processing for that source, under Processing permissions in Sources, can change this. Other processing of the source is unaffected",
+  sensitivity_decision_lineage_ambiguous: () => "its source's sensitivity decision history has no single current decision; Get Kinder must resolve it",
+  claim_lineage_missing: () => "part of its evidence lineage could not be read in this organization",
+  claim_reviewed_not_supported: () => "a recorded review found it or its evidence not supported; that decision stands and is not overridden by drafting",
+  measured_claim_integrity_not_established: () => CLAIM_USE_BLOCKER_MESSAGES.measured_claim_integrity_not_established,
+  derived_measurement_not_current: () => "its measurement no longer matches its current meaning or sources; record the measurement again on the current sources",
+});
+
 const REVIEW_BLOCKERS = new Set(["claim_review_unresolved", "evidence_review_unresolved"]);
+// The review blockers worded for a finding the ordinary record-count rule
+// does not describe (a cross-source measurement or a document statement).
+const NON_RECORD_COUNT_REVIEW_MESSAGES = Object.freeze({
+  claim_review_unresolved: "its claim has no completed review",
+  evidence_review_unresolved: "its evidence has no completed review",
+});
+function blockerMessage(code, kind) {
+  return kind !== "measurement" && Object.hasOwn(NON_RECORD_COUNT_REVIEW_MESSAGES, code) ? NON_RECORD_COUNT_REVIEW_MESSAGES[code] : CLAIM_USE_BLOCKER_MESSAGES[code];
+}
 export const ORDINARY_RULE_NOTE = "The ordinary rule covers a record count you defined with Count records and the claim proposed from it, "
   + "from a current source whose recorded permissions allow internal use and AI processing with no sensitive category recorded. "
   + "Check the source under Processing permissions if one of those is wrong; claims outside the rule are reviewed by Get Kinder.";
 
 // The one line shown on a claim that is not usable now, from its diagnosis.
-export function claimNotUsableMessage(diagnosis) {
+// The ordinary record-count rule note (Count records, Processing
+// permissions) is added only to a record-count finding, the only kind it
+// describes (owner Package 3: never to a document statement or a
+// cross-source measurement).
+export function claimNotUsableMessage(diagnosis, { kind = "measurement" } = {}) {
   if (diagnosis?.conflictReason) return `Not usable in internal reports now: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.conflictReason]}.`;
   const codes = Array.isArray(diagnosis?.blockerCodes) ? diagnosis.blockerCodes : [];
   if (codes.length === 0) return "Not usable in internal reports now.";
-  const reasons = codes.map((code) => CLAIM_USE_BLOCKER_MESSAGES[code]).join("; ");
-  return `Not usable in internal reports now: ${reasons}.${codes.some((code) => REVIEW_BLOCKERS.has(code)) ? ` ${ORDINARY_RULE_NOTE}` : ""}`;
+  const reasons = codes.map((code) => blockerMessage(code, kind)).join("; ");
+  const note = kind === "measurement" && codes.some((code) => REVIEW_BLOCKERS.has(code)) ? ` ${ORDINARY_RULE_NOTE}` : "";
+  return `Not usable in internal reports now: ${reasons}.${note}`;
+}
+
+// Why the server refuses a claim for a new internal draft, and what can
+// change it. Package 3.
+export function provisionalDraftRefusalMessage(diagnosis) {
+  if (diagnosis?.conflictReason) {
+    return `Not usable in a new internal draft: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.conflictReason]}.`;
+  }
+  const provisional = diagnosis?.provisional;
+  const codes = Array.isArray(provisional?.blockerCodes) ? provisional.blockerCodes.filter((code) => Object.hasOwn(PROVISIONAL_DRAFT_BLOCKER_MESSAGES, code)) : [];
+  if (codes.length === 0) return "Not usable in a new internal draft.";
+  return `Not usable in a new internal draft: ${codes.map((code) => PROVISIONAL_DRAFT_BLOCKER_MESSAGES[code](provisional.sourceRole)).join("; ")}.`;
+}
+
+export const PROVISIONAL_DRAFT_ADMITTED_MESSAGE = "Usable in a provisional internal draft now (determined by KAI\u2019s checks; this is not a review or an approval).";
+export const FINAL_USE_OPEN_PREFIX = "Not yet established for final internal use (factual review and release), and never for funder or public use from this draft: ";
+
+/**
+ * What one claim row says about its use, from the strict internal answer
+ * (`strictUse`: "usable" | "not_usable" | "unknown") and the server's
+ * provisional draft admission (claimDraftAdmission). Pure; Package 3.
+ * Returns { draft, strict, lines } where each line is
+ * { key, text, detail? }:
+ * - "usable": strictly usable and admitted (or admission not yet read);
+ * - "provisional": admitted to a new internal draft while final use is open
+ *   (detail: the strict conditions, with no unrelated permission advice);
+ * - "refused": the server refuses the claim for a new draft, and why;
+ * - "unknown": neither answer is confirmed here.
+ */
+export function claimUsePresentation({ claim, strictUse, diagnosis }) {
+  const kind = claimKind(claim);
+  const draft = claimDraftAdmission(claim, diagnosis);
+  if (kind === "structural") return { draft, strict: strictUse, lines: [] };
+  if (draft === "refused") {
+    return { draft, strict: strictUse, lines: [{ key: "refused", text: provisionalDraftRefusalMessage(diagnosis) }] };
+  }
+  if (strictUse === "usable") {
+    return { draft, strict: strictUse, lines: [{ key: "usable", text: "Usable in internal reports now (determined by KAI\u2019s checks)" }] };
+  }
+  if (draft === "admitted") {
+    const open = strictUse === "not_usable" && Array.isArray(diagnosis?.blockerCodes) && diagnosis.blockerCodes.length > 0
+      ? `${FINAL_USE_OPEN_PREFIX}${diagnosis.blockerCodes.map((code) => blockerMessage(code, kind)).join("; ")}.`
+        + (kind === "measurement" && diagnosis.blockerCodes.some((code) => REVIEW_BLOCKERS.has(code)) ? ` ${ORDINARY_RULE_NOTE}` : "")
+      : null;
+    return { draft, strict: strictUse, lines: [{ key: "provisional", text: PROVISIONAL_DRAFT_ADMITTED_MESSAGE, ...(open ? { detail: open } : {}) }] };
+  }
+  return { draft, strict: strictUse, lines: [{ key: "unknown", text: CLAIM_USE_UNKNOWN_MESSAGE }] };
 }
 
 export const CLAIM_USE_UNKNOWN_MESSAGE = "Its current internal use is not confirmed here. A draft is still checked when it is generated and opened.";
 
-// Whether a draft from the selection would be immediately usable as an
-// internal report. Preparing the draft is still allowed: generation keeps
-// its own rules, and the saved draft says whether it is usable.
-export function selectionReportUsability(selectedClaimIds, useOf, kindOf = () => "other") {
+// What a draft from the selection will be, from the server's per-claim
+// answers (owner Package 3). `useOf` is the strict internal answer and
+// `draftOf` the provisional draft admission ("admitted" | "refused" |
+// "unknown"; claimDraftAdmission). A claim the server refuses makes the
+// request refused; an admitted claim whose final use is still open makes the
+// draft provisional (it is still generated, with its limitations, and
+// approves nothing); an unconfirmed one is checked when the draft is
+// generated.
+export function selectionReportUsability(selectedClaimIds, useOf, kindOf = () => "other", draftOf = () => "unknown") {
   const selected = Array.isArray(selectedClaimIds) ? selectedClaimIds : [];
-  const notUsable = selected.filter((claimId) => useOf(claimId) === "not_usable");
-  const unknown = selected.filter((claimId) => useOf(claimId) === "unknown");
+  const refused = selected.filter((claimId) => draftOf(claimId) === "refused");
+  const provisional = selected.filter((claimId) => draftOf(claimId) === "admitted" && useOf(claimId) !== "usable");
+  const unknown = selected.filter((claimId) => draftOf(claimId) === "unknown");
   return {
-    immediatelyUsable: notUsable.length === 0 && unknown.length === 0,
-    notUsable,
+    immediatelyUsable: refused.length === 0 && provisional.length === 0 && unknown.length === 0,
+    refused,
+    provisional,
     unknown,
-    notUsableMeasured: notUsable.filter((claimId) => kindOf(claimId) === "measurement"),
+    refusedMeasured: refused.filter((claimId) => kindOf(claimId) === "measurement"),
   };
 }
 
-export function selectionReportUsabilityMessage({ notUsable, unknown, notUsableMeasured = [] }) {
+export function selectionReportUsabilityMessage({ refused = [], provisional = [], unknown = [] }) {
   const parts = [];
-  const notUsableOther = notUsable.filter((claimId) => !notUsableMeasured.includes(claimId));
-  if (notUsableMeasured.length > 0) {
-    parts.push(`${notUsableMeasured.length} selected measured finding(s) are not usable in internal reports now. A draft is generated from a `
-      + "measured finding only while it is usable, so this request will be refused unless that has changed. The condition is shown on the claim.");
+  if (refused.length > 0) {
+    parts.push(`${refused.length} selected claim(s) cannot be used in a new internal draft now, so this request will be refused. `
+      + "The condition and what can change it are shown on each claim; deselect them to draft from the others.");
   }
-  if (notUsableOther.length > 0) {
-    parts.push(`${notUsableOther.length} selected claim(s) are not usable in internal reports now, so a draft from this selection will be prepared but `
-      + "will not be immediately usable as an internal report. The reason is shown on each claim.");
+  if (provisional.length > 0) {
+    parts.push(`${provisional.length} selected finding(s) are provisional: KAI's checks admit them to an internal draft, but they are not yet `
+      + "established for final internal use (factual review and release). The draft states them with their limitations; generating it approves "
+      + "nothing and grants no funder or public use.");
   }
-  if (unknown.length > 0) parts.push(`${unknown.length} selected claim(s) have an internal use that is not confirmed here; the saved draft will say whether it is usable.`);
-  if (notUsable.length > 0) parts.push("For a report you can open and download now, select only claims marked \"Usable in internal reports now\".");
+  if (unknown.length > 0) parts.push(`${unknown.length} selected claim(s) are not confirmed for an internal draft here; KAI checks them when the draft is generated, and the saved draft says whether it is usable.`);
   return parts.join(" ");
 }
 
@@ -388,6 +515,13 @@ export function isInternalDraftTraceabilityRefusal(result) {
 const TRACEABILITY_CONFLICT_EXPLANATIONS = Object.freeze({
   gap_dimension_requires_missing_p204_state: "its coverage gap follow-ups have not been generated yet",
   source_version_not_current: "the source version its evidence comes from is recorded as non-current",
+  // Owner Package 3: the cross-source measurement reasons the server already allowlists.
+  derived_measurement_contributing_source_not_current: "a source version it was calculated from (for example the linked participant register) "
+    + "has since been replaced, so this is a historical result; link the current versions again under Count records in Sources",
+  derived_measurement_contributing_source_not_permitted: "the linked participant register's recorded allowed use no longer permits this use; "
+    + "only a new decision for that register, under Processing permissions in Sources, can change this",
+  derived_measurement_interpretation_superseded: "its stated meaning has since been corrected, so it is kept as a historical statement",
+  derived_measurement_category_label_withheld: "a category label it states is now withheld by the source's current screening",
   gap_followup_queue_mismatch: "its recorded gap follow-ups no longer match its current evidence",
   claim_evidence_link_mismatch: "its link to its evidence is not consistent",
   conflict_queue_count_mismatch: "its potential-conflict review records are not consistent",
@@ -459,6 +593,13 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
   }
   if (result?.body?.error?.code === "claim_reviewed_not_supported") {
     return "A selected claim was found not supported by Get Kinder review and cannot be used in a draft. Nothing was created.";
+  }
+  // Owner Package 3: a recorded processing decision refused the request
+  // before any model call; say which contributing source and what can change it.
+  const permission = (result?.body?.blockers || []).find((blocker) => ["ai_processing_not_permitted", "allowed_use_not_allowed"].includes(blocker?.blocking_reason));
+  if (permission) {
+    const role = permission.evidence?.source_role === "reference" || permission.evidence?.source_role === "primary" ? permission.evidence.source_role : null;
+    return `No draft was created and nothing was sent to the AI model: ${PROVISIONAL_DRAFT_BLOCKER_MESSAGES[permission.blocking_reason](role)}.`;
   }
   return errorText(result);
 }

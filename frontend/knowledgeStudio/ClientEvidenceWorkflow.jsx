@@ -32,11 +32,12 @@ import {
   USE_FOR_IMPACT_MESSAGES,
   claimIdsByEvidenceItem,
   claimInternalDraftSelectability,
-  claimDraftAdmitted,
+  claimDraftAdmission,
   claimInternalUse,
   claimKind,
   claimNotUsableMessage,
   claimUseDiagnosis,
+  claimUsePresentation,
   claimsToDiagnose,
   claimNeedsGapPreparation,
   claimProposalResultMessage,
@@ -329,6 +330,9 @@ export default function ClientEvidenceWorkflow({
   }, [access.readClaimTraceabilityDiagnostics, claims.status, claims.items, internalUse.status, selectedClaimIds, diagnoseClaims]);
   const useOfClaim = (claimId) => claimSourceVersionUnavailable(claims.items.find((claim) => claim.claimId === claimId), claimDiagnostics.get(claimId))
     ? "not_usable" : claimInternalUse(claimId, internalUseIndex, claimDiagnostics);
+  // Owner Package 3: the server's provisional internal draft admission for
+  // each claim ("admitted" | "refused" | "unknown"), never inferred here.
+  const draftOfClaim = (claimId) => claimDraftAdmission(claims.items.find((claim) => claim.claimId === claimId), claimDiagnostics.get(claimId));
   useEffect(() => {
     if (claims.status === "success") setSelectedClaimIds((current) => retainSelectableClaimIds(current, claims.items, claimDiagnostics));
   }, [claims.status, claims.items, claimDiagnostics]);
@@ -369,8 +373,10 @@ export default function ClientEvidenceWorkflow({
     setDraftKeys({});
     setSelectedClaimIds((current) => (current.includes(claimId) ? current.filter((id) => id !== claimId) : [...current, claimId]));
   };
+  // Only an explicit server refusal holds the request back; an unconfirmed
+  // claim is checked by the server when the draft is generated.
   const unadmittedClaimIds = claims.items
-    .filter((claim) => !claimDraftAdmitted(claim, claimDiagnostics.get(claim.claimId)))
+    .filter((claim) => claimDraftAdmission(claim, claimDiagnostics.get(claim.claimId)) === "refused")
     .map((claim) => claim.claimId);
   const unavailableSourceClaimIds = claims.items.filter((claim) => claimSourceVersionUnavailable(claim, claimDiagnostics.get(claim.claimId))).map((claim) => claim.claimId);
   const readiness = internalDraftReadiness({
@@ -382,7 +388,7 @@ export default function ClientEvidenceWorkflow({
     claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unavailableSourceClaimIds,
   });
   const kindOfClaim = (claimId) => claimKind(claims.items.find((claim) => claim.claimId === claimId));
-  const selectionUse = selectionReportUsability(selectedClaimIds, useOfClaim, kindOfClaim);
+  const selectionUse = selectionReportUsability(selectedClaimIds, useOfClaim, kindOfClaim, draftOfClaim);
   const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
   // Read-only: one client-safe internal traceability GET per selected claim.
   const explainDraftFailure = async (result, claimIds) => {
@@ -635,9 +641,9 @@ export default function ClientEvidenceWorkflow({
   const claimStatusText = (claim) => {
     if (selectedClaimIds.includes(claim.claimId)) return "Selected for a draft";
     if (claimKind(claim) === "structural") return "";
-    const use = useOfClaim(claim.claimId);
-    if (use === "usable") return "Usable in internal drafts";
-    if (use === "not_usable") return "Not usable in drafts right now";
+    const draft = draftOfClaim(claim.claimId);
+    if (draft === "refused") return "Not usable in new drafts right now";
+    if (draft === "admitted") return useOfClaim(claim.claimId) === "usable" ? "Usable in internal drafts" : "Usable in provisional internal drafts";
     return "";
   };
   const findingStatus = (finding) => {
@@ -650,7 +656,7 @@ export default function ClientEvidenceWorkflow({
   };
   const loadedFindings = FINDING_CATEGORIES.filter((category) => category !== "technical").flatMap((category) => findings[category]);
   const unclaimedCount = loadedFindings.filter((finding) => finding.evidence && finding.claims.length === 0).length;
-  const notUsableCount = claims.items.filter((claim) => claimKind(claim) !== "structural" && useOfClaim(claim.claimId) === "not_usable").length;
+  const notUsableCount = claims.items.filter((claim) => claimKind(claim) !== "structural" && draftOfClaim(claim.claimId) === "refused").length;
   const attention = [];
   if (engagementId && pipeline?.status === "error") {
     attention.push({ key: "pipeline_error", text: "This Project's file status could not be loaded, so files waiting for a step may not be listed." });
@@ -705,26 +711,41 @@ export default function ClientEvidenceWorkflow({
       ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
     const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
     const claimText = claim.claimStatement || claim.evidenceStatement || "";
-    const notUsable = splitNotUsableMessage(claimNotUsableMessage(diagnosis));
+    // Owner Package 3: the strict internal answer (final use) and the
+    // server's provisional draft admission are shown as what each is, so a
+    // claim is never called unusable while it is offered for a draft.
+    const presentation = claimUsePresentation({ claim, strictUse: use, diagnosis });
+    const line = presentation.lines[0] || null;
+    const refused = line?.key === "refused" ? splitNotUsableMessage(line.text) : null;
     return (
       <div key={claim.claimId} className="border-top mt-2 pt-2 small" data-client-claim={claim.claimId}
-        data-client-claim-kind={kind} data-client-claim-internal-use={use}>
+        data-client-claim-kind={kind} data-client-claim-internal-use={use} data-client-claim-provisional-draft={presentation.draft}>
         {/* Internal use is determined by KAI's existing checks (P2-06), not by a
             person; the wording says so and adds no approval language. */}
-        {kind !== "structural" && use === "usable" ? (
+        {line?.key === "usable" ? (
           <div className="text-success" data-client-claim-usable="">Usable in internal reports now (determined by KAI&rsquo;s checks)</div>
         ) : null}
-        {kind !== "structural" && use === "not_usable" ? (
+        {line?.key === "provisional" ? (
           <>
-            <div data-client-claim-not-usable="">{notUsable.head}</div>
-            {notUsable.detail ? (
-              <Disclosure name="claim-not-usable-reason" label="Why" openLabel="Hide why">
-                <div className="text-muted" data-client-claim-not-usable-reason="">{notUsable.detail}</div>
+            <div className="text-success" data-client-claim-provisional-admitted="">{line.text}</div>
+            {line.detail ? (
+              <Disclosure name="claim-final-use-open" label="Before final use" openLabel="Hide">
+                <div className="text-muted" data-client-claim-final-use-open="">{line.detail}</div>
               </Disclosure>
             ) : null}
           </>
         ) : null}
-        {kind !== "structural" && use === "unknown" ? (
+        {refused ? (
+          <>
+            <div data-client-claim-not-usable="">{refused.head}</div>
+            {refused.detail ? (
+              <Disclosure name="claim-not-usable-reason" label="Why" openLabel="Hide why">
+                <div className="text-muted" data-client-claim-not-usable-reason="">{refused.detail}</div>
+              </Disclosure>
+            ) : null}
+          </>
+        ) : null}
+        {line?.key === "unknown" ? (
           <div className="text-muted" data-client-claim-use-unknown="">
             {CLAIM_USE_UNKNOWN_MESSAGE}
             {access.readClaimTraceabilityDiagnostics && !diagnosedOnceRef.current.has(claim.claimId) ? (
@@ -1133,7 +1154,7 @@ export default function ClientEvidenceWorkflow({
           {assessmentReadiness.ready ? <div className="small text-muted mb-2">The assessment checks each selected finding and explains any it cannot use as an assertion.</div> : null}
           {!readiness.ready ? <div className="small mb-2" data-client-draft-readiness={readiness.reason}>{INTERNAL_DRAFT_READINESS_MESSAGES[readiness.reason]}</div> : null}
           {readiness.ready && !selectionUse.immediatelyUsable ? (
-            <div className="small mb-2" data-client-draft-selection-usability={selectionUse.notUsable.length > 0 ? "not_usable" : "unknown"}>
+            <div className="small mb-2" data-client-draft-selection-usability={selectionUse.refused.length > 0 ? "refused" : selectionUse.provisional.length > 0 ? "provisional" : "unknown"}>
               {selectionReportUsabilityMessage(selectionUse)}
             </div>
           ) : null}

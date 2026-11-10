@@ -1157,9 +1157,15 @@ async function runBrowserAcceptance() {
         assert.match(await textOf(adminPage, row), /Usable in internal reports now/);
         const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
         assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
-        // The status is shown; its reasons are under "Why" (2026-11-07), unchanged.
-        assert.equal((await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)).trim(), "Not usable in internal reports now.");
-        assert.match(await adminPage.evaluate(`document.querySelector('${riskRow} [data-client-claim-not-usable-reason]').textContent`), /the ordinary record-count rule does not cover it/);
+        // Owner Package 3: the strict answer stays "not usable" for final use,
+        // while the server's provisional internal draft admission (draft first,
+        // 2026-11-06) admits this unrejected, intact count. The row says so and
+        // keeps the strict conditions under "Before final use"; it no longer
+        // calls the claim unusable while offering it for a draft.
+        await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-provisional-draft")) === "admitted", "the server's provisional admission");
+        assert.match(await textOf(adminPage, `${riskRow} [data-client-claim-provisional-admitted]`), /^Usable in a provisional internal draft now/);
+        assert.equal(await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`), null);
+        assert.match(await adminPage.evaluate(`document.querySelector('${riskRow} [data-client-claim-final-use-open]').textContent`), /the ordinary record-count rule does not cover it/);
       } finally {
         await adminPage.stopIntercepting();
       }

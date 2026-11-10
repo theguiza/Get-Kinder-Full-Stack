@@ -18,8 +18,11 @@ import {
   INTERNAL_DRAFT_READINESS_MESSAGES,
   INTERNAL_REPORT_REASON_MESSAGES,
   STRUCTURAL_ONLY_DRAFT_MESSAGE,
+  claimDraftAdmission,
   claimDraftAdmitted,
   claimInternalDraftSelectability,
+  claimUsePresentation,
+  provisionalDraftRefusalMessage,
   claimInternalUse,
   claimKind,
   claimNotUsableMessage,
@@ -175,16 +178,17 @@ test("internal usability comes from the authoritative impact-facts read; a faile
 test("a claim omitted from a truncated impact-facts read is resolved by its own P2-06 diagnostic, which is preferred when determinate", () => {
   const truncated = { claimIds: new Set(), truncated: true };
   const usable = claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: { traceability_passed: true, eligible: true, blocker_codes: [] } } });
-  assert.deepEqual(usable, { status: "usable", blockerCodes: [], conflictReason: null });
+  const UNKNOWN_DRAFT = { status: "unknown", blockerCodes: [], sourceRole: null };
+  assert.deepEqual(usable, { status: "usable", blockerCodes: [], conflictReason: null, provisional: UNKNOWN_DRAFT });
   assert.equal(claimInternalUse(MEASURED.claimId, truncated, new Map([[MEASURED.claimId, usable]])), "usable");
   const blocked = claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: {
     traceability_passed: true, eligible: false, blocker_codes: ["evidence_review_unresolved", "claim_review_unresolved", "Not A Code"],
   } } });
-  assert.deepEqual(blocked, { status: "not_usable", blockerCodes: ["evidence_review_unresolved", "claim_review_unresolved"], conflictReason: null });
+  assert.deepEqual(blocked, { status: "not_usable", blockerCodes: ["evidence_review_unresolved", "claim_review_unresolved"], conflictReason: null, provisional: UNKNOWN_DRAFT });
   assert.equal(claimInternalUse(MEASURED.claimId, { claimIds: new Set([MEASURED.claimId]), truncated: false }, new Map([[MEASURED.claimId, blocked]])), "not_usable",
     "the claim's own fresher evaluation wins");
   const stale = claimUseDiagnosis({ statusCode: 409, body: { ok: false, error: { code: "conflict_current_state_changed" }, data: { traceability_conflict_reason: "source_version_not_current" } } });
-  assert.deepEqual(stale, { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" });
+  assert.deepEqual(stale, { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current", provisional: { status: "refused", blockerCodes: [], sourceRole: null } });
   for (const result of [{ statusCode: 500, body: null }, { statusCode: 403, body: { ok: false } }, { statusCode: 409, body: { ok: false, error: { code: "conflict_current_state_changed" }, data: { traceability_conflict_reason: "made_up" } } }]) {
     const unknown = claimUseDiagnosis(result);
     assert.equal(unknown.status, "unknown");
@@ -193,6 +197,8 @@ test("a claim omitted from a truncated impact-facts read is resolved by its own 
   // The actual condition is named; review wording appears only for a review blocker, with the ordinary rule beside it.
   assert.match(claimNotUsableMessage(blocked), /^Not usable in internal reports now: the ordinary record-count rule does not cover it/);
   assert.match(claimNotUsableMessage(blocked), /Processing permissions/);
+  // Package 3: the record-count rule note (Count records, Processing permissions) is only for a record-count finding.
+  for (const kind of ["other", "structural"]) assert.doesNotMatch(claimNotUsableMessage(blocked, { kind }), /Processing permissions|Count records/, kind);
   assert.match(claimNotUsableMessage(stale), /recorded as non-current/);
   const followup = { status: "not_usable", blockerCodes: ["client_followup_unresolved"], conflictReason: null };
   assert.match(claimNotUsableMessage(followup), /follow-up question about it is unanswered\.$/);
@@ -203,51 +209,109 @@ test("the claims diagnosed one by one: substantive claims impact-facts does not 
   const OTHER_MEASURED = claim(6, "source_record_count_measurement");
   const facts = { claimIds: new Set([MEASURED.claimId]), truncated: true };
   const claims = [MEASURED, FIELD_2, UNKNOWN, OTHER_MEASURED];
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts }), [UNKNOWN.claimId, OTHER_MEASURED.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, selectedClaimIds: [FIELD_2.claimId] }), [FIELD_2.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, diagnostics: new Map([[UNKNOWN.claimId, { status: "usable" }]]) }), [OTHER_MEASURED.claimId]);
+  // Package 3: a claim impact-facts shows as usable is diagnosed too (last), because strict
+  // eligibility does not establish that it may be sent to the model for a new draft.
+  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts }), [UNKNOWN.claimId, OTHER_MEASURED.claimId, MEASURED.claimId]);
+  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, selectedClaimIds: [FIELD_2.claimId] }), [FIELD_2.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId, MEASURED.claimId]);
+  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, diagnostics: new Map([[UNKNOWN.claimId, { status: "usable" }]]) }), [OTHER_MEASURED.claimId, MEASURED.claimId]);
   assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, limit: 1 }), [UNKNOWN.claimId]);
   assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, limit: -3 }), [], "a spent budget diagnoses nothing");
   assert.deepEqual(claimsToDiagnose({ claims, impactFacts: null }), [MEASURED.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId], "a failed impact-facts read is resolved per claim");
 });
 
-test("draft first: open review items on a measured claim do not hold back an internal provisional draft; a non-current source version does", () => {
+test("Package 3: a claim's use in a new internal draft is the server's provisional admission, never inferred from currentness or strict P2-06", () => {
   const RESTRICTED = claim(8, "source_record_count_measurement");
-  const blockedDiagnosis = { status: "not_usable", blockerCodes: ["claim_review_unresolved"], conflictReason: null };
-  assert.equal(claimDraftAdmitted(RESTRICTED, blockedDiagnosis), true, "unresolved review is a provisional limitation");
-  assert.equal(claimDraftAdmitted(RESTRICTED, { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" }), false);
-  assert.equal(claimDraftAdmitted(RESTRICTED, { status: "not_usable", blockerCodes: [], conflictReason: "gap_dimension_requires_missing_p204_state" }), true,
-    "generation records the P2-04 state itself");
-  assert.equal(claimDraftAdmitted(RESTRICTED, { status: "unknown", blockerCodes: [], conflictReason: null }), true);
-  assert.equal(claimDraftAdmitted(RESTRICTED, undefined), true);
-  assert.equal(claimDraftAdmitted(UNKNOWN, blockedDiagnosis), true, "only measured claims carry the generation eligibility rule");
+  const ok = (data) => claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: { traceability_passed: true, ...data } } });
+  // Strict P2-06 says not usable (open review), the server admits it provisionally.
+  const provisional = ok({ eligible: false, blocker_codes: ["claim_review_unresolved"], provisional_internal_draft: { admitted: true, blocker_codes: [], source_role: null } });
+  assert.equal(claimDraftAdmission(RESTRICTED, provisional), "admitted");
+  assert.equal(claimDraftAdmitted(RESTRICTED, provisional), true, "unresolved review is a provisional limitation");
+  // The same strict answer with no admission read is unknown, never admitted (the defect repaired).
+  const strictOnly = ok({ eligible: false, blocker_codes: ["claim_review_unresolved"] });
+  assert.equal(claimDraftAdmission(RESTRICTED, strictOnly), "unknown");
+  assert.equal(claimDraftAdmitted(RESTRICTED, strictOnly), false);
+  for (const absent of [undefined, null, { status: "unknown", blockerCodes: [], conflictReason: null }]) {
+    assert.equal(claimDraftAdmission(RESTRICTED, absent), "unknown");
+    assert.equal(claimDraftAdmitted(RESTRICTED, absent), false, "a missing answer establishes nothing");
+  }
+  // Refusals: the server's own codes; a 409 the server explains; a non-current version.
+  const roster = ok({ eligible: false, blocker_codes: [], provisional_internal_draft: { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "reference" } });
+  assert.equal(claimDraftAdmission(RESTRICTED, roster), "refused");
+  assert.match(provisionalDraftRefusalMessage(roster), /^Not usable in a new internal draft: the linked participant register's recorded processing permissions do not allow AI processing \(a permitted service log does not override the register's decision\); only a new decision that permits AI processing for that source, under Processing permissions in Sources, can change this/);
+  const primary = ok({ eligible: false, blocker_codes: [], provisional_internal_draft: { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "primary" } });
+  assert.match(provisionalDraftRefusalMessage(primary), /its source's recorded processing permissions/);
+  assert.doesNotMatch(provisionalDraftRefusalMessage(primary), /participant register/);
+  const rejected = ok({ eligible: false, blocker_codes: ["claim_review_unresolved"], provisional_internal_draft: { admitted: false, blocker_codes: ["claim_reviewed_not_supported"], source_role: null } });
+  assert.match(provisionalDraftRefusalMessage(rejected), /recorded review found it or its evidence not supported; that decision stands/);
+  const staleRoster = claimUseDiagnosis({ statusCode: 409, body: { ok: false, error: { code: "conflict_current_state_changed" }, data: { traceability_conflict_reason: "derived_measurement_contributing_source_not_current" } } });
+  assert.equal(claimDraftAdmission(RESTRICTED, staleRoster), "refused");
+  assert.match(provisionalDraftRefusalMessage(staleRoster), /has since been replaced, so this is a historical result/);
+  assert.equal(claimDraftAdmission(RESTRICTED, { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" }), "refused");
+  // A malformed or unexplained admission is unknown.
+  for (const view of [{ admitted: true, blocker_codes: ["ai_processing_not_permitted"] }, { admitted: false, blocker_codes: [] }, { admitted: false, blocker_codes: ["made_up"] }]) {
+    assert.equal(claimDraftAdmission(RESTRICTED, ok({ eligible: false, blocker_codes: [], provisional_internal_draft: view })), "unknown", JSON.stringify(view));
+  }
+  // Selection: a refused claim cannot be selected; an admitted or unknown one can (the server still checks).
+  assert.deepEqual(claimInternalDraftSelectability(RESTRICTED, roster), { selectable: false, reason: "provisional_draft_refused" });
+  assert.equal(claimInternalDraftSelectability(RESTRICTED, provisional).selectable, true);
+  assert.equal(claimInternalDraftSelectability(RESTRICTED, strictOnly).selectable, true);
+  assert.deepEqual(retainSelectableClaimIds([RESTRICTED.claimId], [RESTRICTED], new Map([[RESTRICTED.claimId, roster]])), []);
   const base = { canGenerate: true, engagementId: ENGAGEMENT, claims: [MEASURED, RESTRICTED] };
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [MEASURED.claimId, RESTRICTED.claimId], unadmittedClaimIds: [RESTRICTED.claimId] }),
     { ready: false, reason: "measured_claim_not_usable" });
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [MEASURED.claimId], unadmittedClaimIds: [RESTRICTED.claimId] }), { ready: true, reason: null });
   assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.measured_claim_not_usable, /deselect it to draft from the others/);
+  assert.doesNotMatch(INTERNAL_DRAFT_READINESS_MESSAGES.measured_claim_not_usable, /not usable in internal reports/);
   const refusal = internalDraftFailureMessage({ statusCode: 422, body: { ok: false, error: { code: "validation_blocker" },
     blockers: [{ validator_key: "VAL-GEN-MEASURED-P2-01M-001", blocking_reason: "measured_claim_not_currently_eligible" }] } });
   assert.match(refusal, /^A selected measured finding cannot be drafted from now: a recorded review found it unsupported, or its measurement no longer matches its source\./);
   assert.doesNotMatch(refusal, /Request failed KAI validation|Get Kinder/);
+  const permissionRefusal = internalDraftFailureMessage({ statusCode: 422, body: { ok: false, error: { code: "validation_blocker" },
+    blockers: [{ validator_key: "VAL-KAI-B1A-02-004", blocking_reason: "ai_processing_not_permitted", evidence: { source_role: "reference" } }] } });
+  assert.match(permissionRefusal, /^No draft was created and nothing was sent to the AI model: the linked participant register's recorded processing permissions/);
 });
 
-test("mixed selection: a draft can be prepared, and the customer is told it will not be immediately usable, and why", () => {
+test("Package 3: one claim row never says 'not usable' while offering the claim for a draft; strict open items are shown as what they are", () => {
+  const CROSS = claim(9, "source_derived_measurement");
+  const ok = (data) => claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: { traceability_passed: true, ...data } } });
+  const provisional = ok({ eligible: false, blocker_codes: ["evidence_review_unresolved", "claim_review_unresolved"],
+    provisional_internal_draft: { admitted: true, blocker_codes: [], source_role: null } });
+  const shown = claimUsePresentation({ claim: CROSS, strictUse: "not_usable", diagnosis: provisional });
+  assert.equal(shown.draft, "admitted");
+  assert.deepEqual(shown.lines.map((line) => line.key), ["provisional"]);
+  assert.match(shown.lines[0].text, /^Usable in a provisional internal draft now \(determined by KAI.s checks; this is not a review or an approval\)\.$/);
+  assert.match(shown.lines[0].detail, /^Not yet established for final internal use \(factual review and release\), and never for funder or public use from this draft: /);
+  assert.doesNotMatch(JSON.stringify(shown), /Not usable|Processing permissions|Count records|record-count rule/, "no contradiction and no irrelevant permission or record-count advice on a cross-source finding");
+  assert.match(shown.lines[0].detail, /its evidence has no completed review; its claim has no completed review\.$/);
+  const DOC = claim(10, "source_document_statement");
+  assert.doesNotMatch(JSON.stringify(claimUsePresentation({ claim: DOC, strictUse: "not_usable", diagnosis: provisional })), /Processing permissions/);
+  // A record count keeps the ordinary-rule note beside its strict conditions only.
+  assert.match(claimUsePresentation({ claim: MEASURED, strictUse: "not_usable", diagnosis: provisional }).lines[0].detail, /Processing permissions/);
+  const refused = ok({ eligible: false, blocker_codes: [], provisional_internal_draft: { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "reference" } });
+  assert.deepEqual(claimUsePresentation({ claim: CROSS, strictUse: "usable", diagnosis: refused }).lines.map((line) => line.key), ["refused"],
+    "strict eligibility never hides a processing refusal for new generation");
+  assert.deepEqual(claimUsePresentation({ claim: CROSS, strictUse: "not_usable", diagnosis: ok({ eligible: false, blocker_codes: ["claim_review_unresolved"] }) }).lines.map((line) => line.key),
+    ["unknown"], "an unread admission is unknown, not success");
+  assert.deepEqual(claimUsePresentation({ claim: FIELD_2, strictUse: "not_usable", diagnosis: refused }).lines, []);
+});
+
+test("Package 3 mixed selection: refused, provisional and unconfirmed claims are told apart", () => {
   const OTHER = claim(7, "source_record_count_measurement");
   const use = (claimId) => ({ [MEASURED.claimId]: "usable", [OTHER.claimId]: "not_usable", [UNKNOWN.claimId]: "unknown" })[claimId];
-  assert.deepEqual(selectionReportUsability([MEASURED.claimId], use), { immediatelyUsable: true, notUsable: [], unknown: [], notUsableMeasured: [] });
-  const mixed = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use);
-  assert.deepEqual(mixed, { immediatelyUsable: false, notUsable: [OTHER.claimId], unknown: [], notUsableMeasured: [] });
-  assert.match(selectionReportUsabilityMessage(mixed), /will be prepared but will not be immediately usable as an internal report/);
-  assert.match(selectionReportUsabilityMessage(mixed), /select only claims marked "Usable in internal reports now"/);
-  // A measured finding that is not usable is refused by generation (VAL-GEN-MEASURED-P2-01M-001), never promised a draft.
-  const measuredMixed = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use, (claimId) => (claimId === OTHER.claimId ? "measurement" : "other"));
-  assert.deepEqual(measuredMixed.notUsableMeasured, [OTHER.claimId]);
-  assert.match(selectionReportUsabilityMessage(measuredMixed), /this request will be refused unless that has changed/);
-  assert.doesNotMatch(selectionReportUsabilityMessage(measuredMixed), /will be prepared/);
-  const unsure = selectionReportUsability([MEASURED.claimId, UNKNOWN.claimId], use);
-  assert.match(selectionReportUsabilityMessage(unsure), /not confirmed here; the saved draft will say whether it is usable/);
-  assert.doesNotMatch(selectionReportUsabilityMessage(unsure), /will not be immediately usable/);
+  const draft = (claimId) => ({ [MEASURED.claimId]: "admitted", [OTHER.claimId]: "admitted", [UNKNOWN.claimId]: "unknown" })[claimId];
+  assert.deepEqual(selectionReportUsability([MEASURED.claimId], use, undefined, draft), { immediatelyUsable: true, refused: [], provisional: [], unknown: [], refusedMeasured: [] });
+  const mixed = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use, (claimId) => (claimId === OTHER.claimId ? "measurement" : "other"), draft);
+  assert.deepEqual(mixed, { immediatelyUsable: false, refused: [], provisional: [OTHER.claimId], unknown: [], refusedMeasured: [] });
+  assert.match(selectionReportUsabilityMessage(mixed), /1 selected finding\(s\) are provisional: KAI's checks admit them to an internal draft/);
+  assert.doesNotMatch(selectionReportUsabilityMessage(mixed), /will be refused/, "an admitted measured finding is never told the request will be refused (the defect repaired)");
+  const refusedDraft = (claimId) => (claimId === OTHER.claimId ? "refused" : "admitted");
+  const withRefused = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use, (claimId) => (claimId === OTHER.claimId ? "measurement" : "other"), refusedDraft);
+  assert.deepEqual([withRefused.refused, withRefused.refusedMeasured, withRefused.provisional], [[OTHER.claimId], [OTHER.claimId], []]);
+  assert.match(selectionReportUsabilityMessage(withRefused), /cannot be used in a new internal draft now, so this request will be refused/);
+  const unsure = selectionReportUsability([MEASURED.claimId, UNKNOWN.claimId], use, undefined, draft);
+  assert.match(selectionReportUsabilityMessage(unsure), /not confirmed for an internal draft here; KAI checks them when the draft is generated/);
+  // Without admission answers every selected claim is unconfirmed, never admitted.
+  assert.deepEqual(selectionReportUsability([MEASURED.claimId], use).unknown, [MEASURED.claimId]);
 });
 
 test("library reads: the first page alone is complete; continuation cursors are followed and kept at the bound; a truncated page without a valid cursor is an error, never a complete answer", async () => {

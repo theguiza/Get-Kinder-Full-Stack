@@ -318,12 +318,20 @@ export default function ClientInternalDrafts({
 // reports it available; otherwise the server's reasons and next steps.
 function InternalReport({ draft, canRead, report, onOpen, downloadPath, structuralOnly = false }) {
   const view = draft.internalReport;
+  const provisional = view.informationReasons.includes("cited_claims_not_currently_eligible");
   if (view.available) {
     return (
-      <div className="small mb-2" data-client-internal-report="available">
+      <div className="small mb-2" data-client-internal-report="available"
+        data-client-internal-report-provisional={provisional ? "true" : "false"}>
+        {/* Owner Package 3: a draft citing findings that have not completed
+            review is provisional; it never says no review is needed. */}
         <div className="mb-1">
-          This is your organization&apos;s internal report. Every cited claim is usable for internal use and every automated check
-          passed, so no further review or release step is needed. Internal use only: it is not approved for funders or the public.
+          {provisional
+            ? "This is your organization's provisional internal report. Every automated check passed, so it can be opened and used for internal "
+              + "planning and drafting now. Some cited findings have not completed review for final use: it is not reviewed, verified or released. "
+              + "Internal use only: it is not approved for funders or the public."
+            : "This is your organization's internal report. Every cited claim is usable for internal use and every automated check passed, so no "
+              + "further review or release step is needed for internal use. Internal use only: it is not approved for funders or the public."}
         </div>
         {canRead ? (
           <div className="d-flex flex-wrap gap-2">
