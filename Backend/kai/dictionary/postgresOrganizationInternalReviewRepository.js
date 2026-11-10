@@ -91,7 +91,18 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
   getKinder.push(...draft.getKinderReviewReasons);
   blocked.push(...draft.blockedReasons);
 
-  const sourceVersionIds = [...new Set(packet.blocks.flatMap((block) => block.citations.map((citation) => citation.sourceVersionId)))];
+  // Owner Package 3: a cross-source citation combines its own (primary)
+  // version with a reference version (for example a participant register);
+  // that version's current decision counts as well, exactly as it does for
+  // P2-06's ordinary authority and for generation, so a permitted primary
+  // source never stands in for a reference source whose use or AI processing
+  // is no longer permitted.
+  const sourceVersionIds = [...new Set(packet.blocks.flatMap((block) => block.citations.flatMap((citation) => [
+    citation.sourceVersionId,
+    ...(Array.isArray(citation.contributingSources) ? citation.contributingSources : [])
+      .filter((source) => source?.sourceRole === "reference")
+      .map((source) => source.sourceVersionId),
+  ])))];
   if (sourceVersionIds.length === 0) getKinder.push("sensitivity_review_not_complete");
   for (const sourceVersionId of sourceVersionIds) {
     const source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId });

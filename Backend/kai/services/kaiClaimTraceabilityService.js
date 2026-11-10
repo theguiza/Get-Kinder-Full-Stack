@@ -5,6 +5,7 @@ import {
   validateActorIsOrganizationAdministrator,
 } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
+import { PROVISIONAL_INTERNAL_DRAFT_BLOCKERS } from "../dictionary/postgresProvisionalInternalDraftAdmissionContract.js";
 
 const CLAIM_TRACEABILITY_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_TRACEABILITY_OPERATION = "get_claim_traceability_summary";
@@ -111,11 +112,17 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
   const repository =
     dependencies.claimTraceabilityRepository || (await createDefaultClaimTraceabilityRepository());
 
-  const result = await repository.getClaimTraceabilitySummary({
+  // Owner Package 3: the organization diagnostic also reads the claim's
+  // provisional internal draft admission in the same transaction, when the
+  // repository provides it; otherwise that answer is unknown (null).
+  const readInput = {
     organizationId: input.organizationId,
     claimId: input.claimId,
     requestedAudience: input.requestedAudience,
-  });
+  };
+  const result = auth.organizationTraceabilityDiagnostic === true && typeof repository.getOrganizationInternalDraftDiagnostic === "function"
+    ? await repository.getOrganizationInternalDraftDiagnostic(readInput)
+    : await repository.getClaimTraceabilitySummary(readInput);
 
   if (!result.ok) {
     const traceabilityConflictReason =
@@ -136,7 +143,7 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
     });
   }
   if (auth.organizationTraceabilityDiagnostic === true) {
-    return { ok: true, data: organizationTraceabilityDiagnostic(result.data, input.claimId), error: null };
+    return { ok: true, data: organizationTraceabilityDiagnostic(result.data, input.claimId, result.provisionalInternalDraft), error: null };
   }
   return { ok: true, data: result.data, error: null };
 }
@@ -174,7 +181,27 @@ export function authorizeClaimTraceabilityRead(actorContext, organizationId, req
 // outcomes, dimensions, gaps, follow-ups, conflict groups, or graph lineage.
 // A failed evaluation never reaches here: it keeps the GK error shape, whose
 // only data is the allowlisted traceability_conflict_reason.
-function organizationTraceabilityDiagnostic(data, claimId) {
+//
+// eligible / blocked / blocker_codes are the STRICT P2-06 internal answer
+// (final internal use, factual review, release). provisional_internal_draft
+// (owner Package 3) is the separate, operation-specific answer to whether the
+// claim may be used in a new internal provisional draft now: { admitted,
+// blocker_codes, source_role } from the closed vocabulary of
+// postgresProvisionalInternalDraftAdmission.js, or null when it was not read
+// (never inferred as admitted).
+const PROVISIONAL_SOURCE_ROLES = new Set(["primary", "reference"]);
+function provisionalInternalDraftProjection(provisional) {
+  if (!provisional || typeof provisional.admitted !== "boolean" || !Array.isArray(provisional.blockerCodes)) return null;
+  const blockerCodes = provisional.blockerCodes.filter((code) => PROVISIONAL_INTERNAL_DRAFT_BLOCKERS.includes(code));
+  if (blockerCodes.length !== provisional.blockerCodes.length || provisional.admitted !== (blockerCodes.length === 0)) return null;
+  return {
+    admitted: provisional.admitted,
+    blocker_codes: blockerCodes,
+    source_role: PROVISIONAL_SOURCE_ROLES.has(provisional.sourceRole) ? provisional.sourceRole : null,
+  };
+}
+
+function organizationTraceabilityDiagnostic(data, claimId, provisional = null) {
   const blockerCodes = Array.isArray(data?.blockerCodes)
     ? data.blockerCodes.filter((code) => typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code))
     : [];
@@ -187,6 +214,7 @@ function organizationTraceabilityDiagnostic(data, claimId) {
     blocked: blockerCodes.length > 0,
     blocker_codes: blockerCodes,
     traceability_conflict_reason: null,
+    provisional_internal_draft: provisionalInternalDraftProjection(provisional),
   };
 }
 

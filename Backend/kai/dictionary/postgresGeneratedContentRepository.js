@@ -2,7 +2,7 @@ import { STORY_SOURCE_NOTE_RESULT, storySourceWarnings } from "../../../shared/k
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
-import { readEffectiveAiProcessingProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
+import { readEffectiveAiProcessingSourceDecisionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
   evaluateClaimTraceabilityInTransaction,
@@ -1561,16 +1561,20 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // processing; one such claim refuses the whole request, never dropped.
       // A claim whose lineage cannot be walked is left to the P2-06
       // revalidation below.
-      const allowedUseProhibitions = await readEffectiveAiProcessingProhibitionsForClaims(tx, {
+      // Owner Package 3: each contributing version's decision is read, so the
+      // refusal names which one (primary or reference) refused the claim.
+      const sourceDecisions = await readEffectiveAiProcessingSourceDecisionsForClaims(tx, {
         organizationId: input.organizationId,
         claimIds: input.claimIds,
       });
       for (const claimId of input.claimIds) {
-        const prohibition = allowedUseProhibitions.has(claimId) ? allowedUseProhibitions.get(claimId) : "claim_lineage_missing";
-        const allowedUse = validateEffectiveAllowedUsePermitsOperation(prohibition, {
+        const refusing = (sourceDecisions.get(claimId) || [{ sourceRole: null, prohibition: "claim_lineage_missing" }])
+          .find((decision) => decision.prohibition !== null);
+        const allowedUse = validateEffectiveAllowedUsePermitsOperation(refusing?.prohibition ?? null, {
           operation: `create_${contentType}_draft`,
           objectType: "claim",
           objectId: claimId,
+          sourceRole: refusing?.sourceRole ?? null,
         });
         if (!allowedUse.ok && allowedUse.code !== "not_found") rollbackFailure(allowedUse.code, allowedUse.blockers);
       }

@@ -293,7 +293,8 @@ test("non-AI processing: the same AI-restricted file stays permitted for every a
 test("wiring: both model seams read the AI form before the generator; no other seam reads it", () => {
   const source = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
   const generation = source("Backend/kai/dictionary/postgresGeneratedContentRepository.js");
-  const check = generation.indexOf("readEffectiveAiProcessingProhibitionsForClaims(tx");
+  // Owner Package 3: the per-version form, so a refusal names the refusing version's role.
+  const check = generation.indexOf("readEffectiveAiProcessingSourceDecisionsForClaims(tx");
   assert.ok(check > 0 && check < generation.indexOf("const traceabilityResults = [];"));
   assert.ok(check < generation.indexOf("await dependencies.draftGenerator(generatorInput)"));
   assert.equal(generation.split("dependencies.draftGenerator(").length - 1, 1, "one generation boundary for every content type");

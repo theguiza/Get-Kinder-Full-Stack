@@ -170,7 +170,43 @@ test("an active client_admin (binding-derived or stored) reads the client-safe i
       blocked: true,
       blocker_codes: ["claim_review_unresolved", "client_followup_unresolved"],
       traceability_conflict_reason: null,
+      // A repository without the Package 3 read: the admission is unknown, never inferred.
+      provisional_internal_draft: null,
     }, label);
+  }
+});
+
+test("Package 3: the diagnostic carries the repository's provisional internal draft admission beside the unchanged strict answer; a malformed one is unknown", async () => {
+  const withAdmission = (provisionalInternalDraft) => {
+    const calls = [];
+    return {
+      calls,
+      async getClaimTraceabilitySummary() { throw new Error("the organization diagnostic reads the combined form"); },
+      async getOrganizationInternalDraftDiagnostic(input) {
+        calls.push(input);
+        return { ok: true, data: gkTraceabilityDto(), error: null, provisionalInternalDraft };
+      },
+      async listOrganizationReviewQueue() { throw new Error("review queue must not be reached"); },
+    };
+  };
+  const admitted = withAdmission({ admitted: true, blockerCodes: [], sourceRole: null });
+  const result = await getClaimTraceabilitySummary(traceInput(storedClientAdmin()), { env: ENV, claimTraceabilityRepository: admitted });
+  assert.deepEqual(admitted.calls, [{ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "internal" }]);
+  assert.deepEqual([result.data.eligible, result.data.blocked, result.data.blocker_codes], [false, true, ["claim_review_unresolved", "client_followup_unresolved"]],
+    "the strict P2-06 answer is unchanged by an admission");
+  assert.deepEqual(result.data.provisional_internal_draft, { admitted: true, blocker_codes: [], source_role: null });
+  const refused = await getClaimTraceabilitySummary(traceInput(storedClientAdmin()), {
+    env: ENV, claimTraceabilityRepository: withAdmission({ admitted: false, blockerCodes: ["ai_processing_not_permitted"], sourceRole: "reference" }) });
+  assert.deepEqual(refused.data.provisional_internal_draft, { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "reference" });
+  for (const malformed of [
+    { admitted: true, blockerCodes: ["ai_processing_not_permitted"] },
+    { admitted: false, blockerCodes: [] },
+    { admitted: false, blockerCodes: ["made_up_code"] },
+    { admitted: "yes", blockerCodes: [] },
+    undefined,
+  ]) {
+    const read = await getClaimTraceabilitySummary(traceInput(storedClientAdmin()), { env: ENV, claimTraceabilityRepository: withAdmission(malformed) });
+    assert.equal(read.data.provisional_internal_draft, null, JSON.stringify(malformed));
   }
 });
 
@@ -235,7 +271,8 @@ test("the client diagnostic never carries raw evidence, lineage, review identifi
     const serialized = JSON.stringify(result);
     for (const fragment of GK_ONLY_FRAGMENTS) assert.equal(serialized.includes(fragment), false, fragment);
     assert.deepEqual(Object.keys(result.data).sort(), [
-      "blocked", "blocker_codes", "claim_id", "eligible", "requested_audience", "traceability_conflict_reason", "traceability_passed", "view",
+      "blocked", "blocker_codes", "claim_id", "eligible", "provisional_internal_draft", "requested_audience", "traceability_conflict_reason",
+      "traceability_passed", "view",
     ]);
   }
   const passing = await getClaimTraceabilitySummary(traceInput(storedClientAdmin()), {

@@ -31,6 +31,7 @@ import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowu
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent,
   derivedMeasurementLabelsAdmitted, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
+import { evaluateProvisionalInternalDraftAdmissionInTransaction } from "./postgresProvisionalInternalDraftAdmission.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { SMALL_CELL_DECISION_ID } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
@@ -1001,6 +1002,30 @@ export function createPostgresClaimTraceabilityRepository({ runInTransaction } =
         return await run(async (tx) => {
           await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
           return evaluateClaimTraceabilityInTransaction(tx, input);
+        });
+      } catch (error) {
+        return shapeError(error);
+      }
+    },
+    // Owner Package 3: the organization administrator's diagnostic reads the
+    // internal P2-06 result and, in the same read-only transaction, the
+    // operation-specific provisional internal draft admission of that claim
+    // (postgresProvisionalInternalDraftAdmission.js). Strict eligibility is
+    // returned unchanged; the admission is a separate answer, never a
+    // substitute for it. Internal audience only.
+    async getOrganizationInternalDraftDiagnostic(input) {
+      if (!validateInput(input) || input.requestedAudience !== "internal") return failure("validation_blocker");
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const result = await evaluateClaimTraceabilityInTransaction(tx, input);
+          if (!result.ok) return result;
+          const provisionalInternalDraft = await evaluateProvisionalInternalDraftAdmissionInTransaction(tx, {
+            organizationId: input.organizationId,
+            data: result.data,
+          });
+          return { ...result, provisionalInternalDraft };
         });
       } catch (error) {
         return shapeError(error);

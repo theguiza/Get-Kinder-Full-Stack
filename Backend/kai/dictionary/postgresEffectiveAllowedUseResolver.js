@@ -115,7 +115,10 @@ export async function readEffectiveAllowedUseProhibition(tx, { organizationId, i
   return prohibitions.has(intakeSensitivityProfileId) ? prohibitions.get(intakeSensitivityProfileId) : "sensitivity_profile_missing";
 }
 
-async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfiles, name) {
+// claim_id -> [{ sourceRole: "primary" | "reference", prohibition }], the
+// claim's own source version first; a claim whose lineage cannot be walked
+// maps to [{ sourceRole: null, prohibition: "claim_lineage_missing" }].
+async function readClaimSourceDecisions(tx, { organizationId, claimIds }, readProfiles, name) {
   if (!isUuid(organizationId)) {
     throw new TypeError(`${name} requires an organizationId UUID.`);
   }
@@ -187,13 +190,22 @@ async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfi
   for (const id of ids) {
     const profileId = profileByClaim.get(id.toLowerCase());
     if (!isUuid(profileId)) {
-      result.set(id, "claim_lineage_missing");
+      result.set(id, [{ sourceRole: null, prohibition: "claim_lineage_missing" }]);
       continue;
     }
-    const all = [profileId, ...(referenceProfilesByClaim.get(id.toLowerCase()) || [])].map(prohibitionOf);
-    result.set(id, all.find((prohibition) => prohibition !== null) ?? null);
+    result.set(id, [
+      { sourceRole: "primary", prohibition: prohibitionOf(profileId) },
+      ...(referenceProfilesByClaim.get(id.toLowerCase()) || []).map((referenceId) => ({ sourceRole: "reference", prohibition: prohibitionOf(referenceId) })),
+    ]);
   }
   return result;
+}
+
+// The first prohibiting decision of each claim (or null): any one
+// contributing version prohibits the claim.
+async function readClaimProhibitions(tx, args, readProfiles, name) {
+  const decisions = await readClaimSourceDecisions(tx, args, readProfiles, name);
+  return new Map([...decisions].map(([id, list]) => [id, list.find((decision) => decision.prohibition !== null)?.prohibition ?? null]));
 }
 
 /**
@@ -214,4 +226,14 @@ export async function readEffectiveAllowedUseProhibitionsForClaims(tx, args) {
  */
 export async function readEffectiveAiProcessingProhibitionsForClaims(tx, args) {
   return readClaimProhibitions(tx, args, readEffectiveAiProcessingProhibitions, "readEffectiveAiProcessingProhibitionsForClaims");
+}
+
+/**
+ * The per-version form of readEffectiveAiProcessingProhibitionsForClaims, for
+ * callers that must say which contributing version's recorded decision
+ * refuses AI processing (owner Package 3): claim_id -> [{ sourceRole, prohibition }].
+ * Roles only; no file, profile or decision content.
+ */
+export async function readEffectiveAiProcessingSourceDecisionsForClaims(tx, args) {
+  return readClaimSourceDecisions(tx, args, readEffectiveAiProcessingProhibitions, "readEffectiveAiProcessingSourceDecisionsForClaims");
 }

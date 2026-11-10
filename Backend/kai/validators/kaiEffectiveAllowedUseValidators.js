@@ -50,11 +50,17 @@ const REQUIRED_FIXES = Object.freeze({
   ai_processing_not_permitted: "Only a new human sensitivity and allowed-use decision that permits AI processing can change this; other processing of the file is unaffected.",
 });
 
-export function validateEffectiveAllowedUsePermitsOperation(prohibition, { operation, objectType, objectId = null }) {
+// Owner Package 3: a cross-source measurement combines two source versions,
+// so a refusal names which one's recorded decision refused it (the role only).
+const REFERENCE_SOURCE_NOTE = " The refusing decision is the linked reference source's (for example a participant register), "
+  + "not the source the finding was counted from; a permitted primary source does not override it.";
+
+export function validateEffectiveAllowedUsePermitsOperation(prohibition, { operation, objectType, objectId = null, sourceRole = null }) {
   if (prohibition === null) return { ok: true };
   const outcome = PROHIBITION_OUTCOMES[prohibition];
   // A missing profile or claim lineage is a missing row, never a permission.
   if (!outcome) return { ok: false, code: "not_found", blockers: [] };
+  const role = sourceRole === "primary" || sourceRole === "reference" ? sourceRole : null;
   return {
     ok: false,
     code: outcome.code,
@@ -66,8 +72,8 @@ export function validateEffectiveAllowedUsePermitsOperation(prohibition, { opera
       object_id: objectId,
       message: MESSAGES[outcome.blockingReason],
       blocking_reason: outcome.blockingReason,
-      required_fix: REQUIRED_FIXES[outcome.blockingReason],
-      evidence: { basis: prohibition, bypass_allowed: false },
+      required_fix: `${REQUIRED_FIXES[outcome.blockingReason]}${role === "reference" ? REFERENCE_SOURCE_NOTE : ""}`,
+      evidence: { basis: prohibition, bypass_allowed: false, ...(role ? { source_role: role } : {}) },
     }],
   };
 }

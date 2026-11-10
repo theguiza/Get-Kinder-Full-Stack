@@ -283,6 +283,10 @@ function sanitizeServiceBlockers(blockers) {
         ...(authorityEffectivenessReason ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
         ...exportEligibilityDiagnostic,
         ...sanitizeUnsupportedAssertionEvidence(blocker),
+        // Owner Package 3: which contributing version's recorded processing
+        // decision refused the request (a role, never an identifier).
+        ...(blocker.evidence?.source_role === "primary" || blocker.evidence?.source_role === "reference"
+          ? { source_role: blocker.evidence.source_role } : {}),
       },
     }];
   });
