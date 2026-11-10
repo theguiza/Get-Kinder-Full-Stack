@@ -247,15 +247,18 @@ export function crossSourceExclusionText(entry) {
   const notCompleted = Number.isInteger(c.consistent_event_count) && Number.isInteger(c.completed_event_count)
     ? c.consistent_event_count - c.completed_event_count : null;
   const optional = (count, text) => (Number.isInteger(count) && count > 0 ? [`${count} ${text}`] : []);
+  // Copies of a conflicting identity are excluded with it (counted below),
+  // not counted once as duplicate copies.
+  const countedOnceCopies = c.excess_copy_record_count - ((c.conflicting_record_count ?? 0) - (c.conflicting_event_identity_count ?? 0));
   const parts = [
-    `${c.excess_copy_record_count} duplicate copies`,
+    `${countedOnceCopies} duplicate copies`,
     ...optional(c.blank_event_identifier_record_count, "without an event identifier"),
     ...(notCompleted === null ? [] : [`${notCompleted} with a status other than ${completedLabel ? `"${completedLabel}"` : "the completed value"}`]),
     ...optional(c.completed_without_date_count, "completed without a valid date"),
     `${c.completed_outside_period_count} completed outside the period`,
     ...optional(c.blank_participant_identifier_event_count, "without a participant identifier"),
     `${c.unmatched_event_count} with no register match`,
-    `${c.conflicting_event_identity_count} conflicting event identities`,
+    `${c.conflicting_event_identity_count} conflicting event identities${c.conflicting_event_identity_count > 0 && Number.isInteger(c.conflicting_record_count) ? ` (${c.conflicting_record_count} records)` : ""}`,
   ];
   return `Excluded and counted: ${parts.join(", ")}. Register: ${c.register_distinct_identifier_count} distinct registered participants.`;
 }

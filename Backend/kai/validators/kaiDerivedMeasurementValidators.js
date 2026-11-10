@@ -1050,6 +1050,17 @@ function monthlyActivityBody(row, interpretation) {
   return `${lead} grouped by actual service month (encounters, not people), reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}. The breakdown and exclusions are recorded with the measurement.${durationMapped}`;
 }
 
+/**
+ * Repeated copies of an event identifier that the reconciliation counted
+ * once: the excess copies of CONSISTENT identities only. The recorded
+ * excess-copy count also covers the copies of conflicting identities, which
+ * are excluded whole and never counted once (owner Package 4, 2026-11-10).
+ */
+export function countedOnceDuplicateCopyCount(counts) {
+  const c = counts || {};
+  return c.excess_copy_record_count - (c.conflicting_record_count - c.conflicting_event_identity_count);
+}
+
 function crossSourceBody(row, interpretation) {
   const c = row.component_counts;
   const d = row.definition;
@@ -1057,7 +1068,11 @@ function crossSourceBody(row, interpretation) {
   const linkage = `${events.event_identifier_field_key} events, ${events.status_field_key} = ${events.completed_value_label}, `
     + `${events.date_field_key} in reporting period ${d.period.period_start} to ${d.period.period_end} by day, `
     + `${events.participant_identifier_field_key} in register ${d.reference_source_version_id} ${d.mapping.register.participant_identifier_field_key}`;
-  const exclusions = `${c.excess_copy_record_count} duplicate copies counted once; excluded ${c.completed_outside_period_count} outside period, `
+  // Only copies of consistent identities are counted once; conflicting
+  // identities are stated as excluded. With no conflicting identity the
+  // wording is exactly as before, so no recorded statement changes, and the
+  // length never grows (the 500-character statement limit).
+  const exclusions = `${countedOnceDuplicateCopyCount(c)} duplicate copies counted once; excluded ${c.completed_outside_period_count} outside period, `
     + `${c.unmatched_event_count} unmatched, ${c.conflicting_event_identity_count} conflicting`;
   const scope = d.group ? ` in ${d.group.field_key} = ${d.group.value_label}` : "";
   switch (d.metric) {
@@ -1317,7 +1332,7 @@ export function derivedMeasurementLimitationCodes({ measurementRow: row, dimensi
   const counts = row.component_counts || {};
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) {
     codes.push(C.CROSS_SOURCE_LINKED, C.ENGAGEMENT_PERIOD_APPLIED);
-    if (counts.excess_copy_record_count > 0) codes.push(C.DUPLICATE_EVENT_COPIES_COLLAPSED);
+    if (countedOnceDuplicateCopyCount(counts) > 0) codes.push(C.DUPLICATE_EVENT_COPIES_COLLAPSED);
     if (counts.unmatched_event_count + counts.blank_participant_identifier_event_count > 0) codes.push(C.UNMATCHED_IDENTIFIERS_EXCLUDED);
     if (counts.conflicting_event_identity_count > 0) codes.push(C.CONFLICTING_EVENTS_EXCLUDED);
     if (counts.completed_without_date_count > 0) codes.push(C.RECORDS_WITHOUT_DATE_EXCLUDED);

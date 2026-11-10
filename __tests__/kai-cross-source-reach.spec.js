@@ -332,7 +332,20 @@ test("statements say encounters are not people, cite both versions and every exc
   }
   const encounters = D.composeDerivedMeasurementEvidenceStatement({ measurementRow: rowOf(metric(list, "eligible_linked_encounters")) });
   assert.match(encounters, /^Derived measurement: \d+ eligible service encounters \(encounters, not people\)/);
-  assert.match(encounters, /2 duplicate copies counted once; excluded 2 outside period, 1 unmatched, 1 conflicting/);
+  // Owner Package 4: E01's one exact copy is counted once; E02's two
+  // disagreeing records are excluded whole, never "counted once". (Before the
+  // correction this read "2 duplicate copies counted once; ... 1 conflicting".)
+  assert.match(encounters, /1 duplicate copies counted once; excluded 2 outside period, 1 unmatched, 1 conflicting\./);
+  const { reconciliation: recorded } = await measurements();
+  assert.equal(D.countedOnceDuplicateCopyCount(recorded.counts), recorded.row_exclusions.excess_duplicate_copies.count, "the statement agrees with the recorded exclusion rows");
+  assert.equal(recorded.counts.excess_copy_record_count, 2, "the recorded funnel is unchanged");
+  // Every repeated identifier conflicting: nothing is counted once, and the
+  // counted-once disclosure is not given.
+  const onlyConflict = { ...metric(list, "eligible_linked_encounters"), componentCounts: { ...metric(list, "eligible_linked_encounters").componentCounts,
+    duplicate_group_count: 1, duplicate_member_record_count: 2, excess_copy_record_count: 1, distinct_event_count: metric(list, "eligible_linked_encounters").componentCounts.distinct_event_count + 1 } };
+  assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: rowOf(onlyConflict) }), /0 duplicate copies counted once; .*1 conflicting\./);
+  assert.ok(!D.derivedMeasurementLimitationCodes({ measurementRow: rowOf(onlyConflict) }).includes("derived.duplicate_event_copies_counted_once"));
+  assert.ok(D.derivedMeasurementLimitationCodes({ measurementRow: rowOf(onlyConflict) }).includes("derived.conflicting_event_identities_excluded"));
   assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: rowOf(metric(list, "distinct_people_served")) }), /3 distinct register participants served, each counted once, among 5 eligible encounters: field_1 events/);
   const codes = D.derivedMeasurementLimitationCodes({ measurementRow: rowOf(metric(list, "eligible_linked_encounters")) });
   for (const code of ["derived.cross_source_linked", "derived.encounters_not_people", "derived.unmatched_identifiers_excluded", "derived.conflicting_event_identities_excluded",

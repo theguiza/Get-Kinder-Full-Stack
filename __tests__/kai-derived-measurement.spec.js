@@ -442,6 +442,11 @@ test("Package 2 client: the linked exclusion summary names every applied step; C
     + "5 completed outside the period, 2 with no register match, 0 conflicting event identities. Register: 72 distinct registered participants.");
   const blanks = { ...entry, component_counts: { ...entry.component_counts, blank_event_identifier_record_count: 1, completed_without_date_count: 3, blank_participant_identifier_event_count: 4 } };
   assert.match(crossSourceExclusionText(blanks), /1 without an event identifier, 18 with a status other than "completed", 3 completed without a valid date, 5 completed outside the period, 4 without a participant identifier, 2 with no register match/);
+  // Owner Package 4: copies of a conflicting identity are excluded with it,
+  // not reported as duplicate copies (one exact copy + one conflicting pair).
+  const conflicting = { ...entry, component_counts: { ...entry.component_counts, duplicate_group_count: 2, duplicate_member_record_count: 4, excess_copy_record_count: 2,
+    conflicting_event_identity_count: 1, conflicting_record_count: 2 } };
+  assert.match(crossSourceExclusionText(conflicting), /^Excluded and counted: 1 duplicate copies, .*1 conflicting event identities \(2 records\)\./);
   // The order the existing browser acceptances pin.
   assert.match(crossSourceExclusionText(entry), /duplicate copies.*completed outside the period.*no register match.*Register: 72 distinct registered participants/s);
 
