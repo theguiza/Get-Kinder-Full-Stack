@@ -191,6 +191,114 @@ export function composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, m
   return Object.freeze({ ok: true, blocks: composed });
 }
 
+/**
+ * Evidence Summary wording fallback (owner direction 2026-11-10): the model's
+ * wording can never fail an Evidence Summary request on its own. Each model
+ * block is checked on its own, with its server disclosure, by the same
+ * validators as the whole draft (`validate`). A block whose wording is
+ * refused, or a model result that is unusable as a whole, is replaced by the
+ * server-composed text of the claims it cites: each claim's own governed
+ * statement (as the model received it) with its disclosure - text the
+ * validators accept by construction. Blocks that pass keep the model's
+ * wording. Nothing is weakened: the final draft is validated whole again, and
+ * a refusal that is not about wording (claim revalidation VAL-GEN-001, the
+ * requested audience VAL-GEN-005) is never repaired - `ok: false` then, and
+ * the caller refuses exactly as before.
+ *
+ * Returns { ok, blocks, validation, evidence } with evidence naming the
+ * replaced block ordinals and the refused validator keys and classes.
+ */
+export const WORDING_FALLBACK_RESULT_KEY = "KAI-GEN-WORDING-FALLBACK-001";
+const WORDING_VALIDATOR_KEYS = new Set(["VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-008", "VAL-GEN-010", "RESULT-CONTRACT"]);
+
+export function composeEvidenceSummaryWithWordingFallback({
+  modelBlocks, modelResultUsable = true, claims, measuredValueByClaimId = new Map(), validate,
+  blockFits = () => true, resultFits = () => true,
+}) {
+  const claimById = generationClaimsById(claims || []);
+  const fallbackBlocksFor = (claimList) => claimList.map((claim) => ({
+    ordinal: 0,
+    text: claim.modelClaimStatement ?? claim.claimStatement,
+    citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
+  }));
+  const withDisclosures = (blocks) => composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, measuredValueByClaimId });
+  const numbered = (blocks) => blocks.map((block, index) => ({ ...block, ordinal: index + 1 }));
+
+  const out = [];
+  const replaced = [];
+  const refusedKeys = new Set();
+  const refusedClasses = new Set();
+  let keptModelBlocks = 0;
+  const restatedClaimIds = new Set();
+  const blocks = modelResultUsable && Array.isArray(modelBlocks) ? modelBlocks : [];
+  for (const block of blocks) {
+    const citedClaims = unique((Array.isArray(block?.citations) ? block.citations : [])
+      .map((citation) => claimById.get(citation?.claimId))
+      .filter((claim, index, list) => claim && block.citations[index]?.evidenceItemId === claim.evidenceItemId && list.indexOf(claim) === index));
+    const composed = withDisclosures([{ ...block, ordinal: 1 }]);
+    // A block that no longer fits the result contract once its disclosure
+    // is added is restated, never truncated.
+    const fits = composed.ok && blockFits(composed.blocks[0]);
+    const check = fits ? validate(composed.blocks) : null;
+    if (check?.ok) {
+      out.push(composed.blocks[0]);
+      keptModelBlocks += 1;
+      continue;
+    }
+    const keys = check ? check.blockers.map((item) => item.validator_key) : [composed.ok ? "RESULT-CONTRACT" : "VAL-GEN-008"];
+    // A refusal that is not about wording is never repaired.
+    if (keys.some((key) => !WORDING_VALIDATOR_KEYS.has(key))) return Object.freeze({ ok: false });
+    keys.forEach((key) => refusedKeys.add(key));
+    for (const item of check?.blockers || []) {
+      for (const kind of [...(item.evidence?.assertion_classes || []), ...(item.evidence?.violation_classes || [])]) refusedClasses.add(kind);
+    }
+    replaced.push(block?.ordinal ?? out.length + 1);
+    // Each claim is restated once, however many refused blocks cited it.
+    const fresh = citedClaims.filter((claim) => !restatedClaimIds.has(claim.claimId));
+    fresh.forEach((claim) => restatedClaimIds.add(claim.claimId));
+    const fallback = withDisclosures(fallbackBlocksFor(fresh));
+    if (!fallback.ok) return Object.freeze({ ok: false });
+    out.push(...fallback.blocks);
+  }
+  // Every selected claim is still represented: an unusable model result, or
+  // one whose blocks were all refused, is rebuilt from the claims; a claim
+  // no kept block cites is added in the claims' order.
+  const cited = new Set(out.flatMap((block) => block.citations.map((citation) => citation.claimId)));
+  const missing = (claims || []).filter((claim) => !cited.has(claim.claimId));
+  if (missing.length > 0) {
+    const fallback = withDisclosures(fallbackBlocksFor(missing));
+    if (!fallback.ok) return Object.freeze({ ok: false });
+    out.push(...fallback.blocks);
+  }
+  let final = numbered(out);
+  // Too much text in all: every selected claim in its own wording (shorter).
+  if (!resultFits(final)) {
+    const restated = withDisclosures(fallbackBlocksFor(claims || []));
+    if (!restated.ok) return Object.freeze({ ok: false });
+    final = numbered(restated.blocks);
+    replaced.splice(0, replaced.length, ...blocks.map((block, index) => block?.ordinal ?? index + 1));
+    refusedKeys.add("RESULT-CONTRACT");
+    keptModelBlocks = 0;
+    out.splice(0, out.length, ...final);
+    if (!resultFits(final)) return Object.freeze({ ok: false });
+  }
+  const validation = validate(final);
+  if (!validation.ok) return Object.freeze({ ok: false });
+  return Object.freeze({
+    ok: true,
+    blocks: final,
+    validation,
+    evidence: Object.freeze({
+      model_result_usable: modelResultUsable === true,
+      model_blocks_kept: keptModelBlocks,
+      replaced_model_block_ordinals: replaced,
+      fallback_block_count: out.length - keptModelBlocks,
+      refused_validator_keys: [...refusedKeys].sort(),
+      refused_classes: [...refusedClasses].sort(),
+    }),
+  });
+}
+
 // The model-authored text of an Evidence Summary block: the block without the
 // server's exact composed disclosure (composeEvidenceSummaryMeasurementDisclosures).
 // Removing only that authoritative text can hide nothing the model wrote, and
@@ -334,7 +442,8 @@ const SOURCE_ATTRIBUTION = new RegExp(
   "\\baccording to\\b|\\bsource[- ]reported\\b|"
   + "\\b(?:sources?|documents?|review|notes|note|report|draft|manager|management|file|pdf|coordinators?|staff)\\b(?:'s)?(?:\\s+[\\w'-]+){0,4}?\\s+"
   + "(?:states?|stated|says|said|reports?|reported|records|recorded|notes|noted|describes?|described|estimates|estimated|mentions?|mentioned|"
-  + "recommends?|recommended|requires?|required|calls? for|asks?|asked|instructs?|advises?|advised|gives?|gave|cites?|refers? to)\\b",
+  + "recommends?|recommended|requires?|required|calls? for|asks?|asked|instructs?|advises?|advised|gives?|gave|cites?|refers? to|"
+  + "puts?|placed|suggests?|suggested|claims?|claimed|indicates?|indicated|tallied|counted|lists?|listed|reads?)\\b",
   "i",
 );
 const KAI_AUTHORITY = /\b(?:KAI|we|our (?:analysis|calculation|reconciliation|measurement))\b(?:'s)?[^.!?;]{0,40}?\b(?:calculated|computed|established|verified|confirmed|validated|counted|measured|determined|deduplicated|de-duplicated|reconciled|found)\b|\bKAI[- ](?:calculated|verified|measured|established|confirmed)\b/i;
@@ -428,15 +537,24 @@ export function documentStatementAuthorityViolations({ blocks, generationClaims 
   return violations;
 }
 
+// A fiscal or calendar year range written short ("FY 2024-25") names its two
+// years: it is read as "2024-2025" in the draft and in the cited statements,
+// so it is supported exactly when those years are (owner direction
+// 2026-11-10: an ordinary period label is not an unsupported number).
+function expandShortYearRanges(text) {
+  return String(text ?? "").replace(/\b((19|20)\d{2})([-–/])(\d{2})\b(?![-–/]\d)/g, (whole, first, century, dash, tail) => (
+    Number(`${century}${tail}`) > Number(first) ? `${first}${dash}${century}${tail}` : whole));
+}
+
 export function unsupportedAssertionViolations({ blocks, generationClaims } = {}) {
   const claimById = generationClaimsById(generationClaims || []);
   const violations = [...documentStatementAuthorityViolations({ blocks, generationClaims })];
   for (const block of blocks || []) {
     const citedStatements = (block.citations || [])
-      .map((citation) => claimById.get(citation.claimId)?.claimStatement || "")
+      .map((citation) => expandShortYearRanges(claimById.get(citation.claimId)?.claimStatement || ""))
       .filter(Boolean);
     const citedText = citedStatements.join("\n");
-    const text = String(block.text ?? "");
+    const text = expandShortYearRanges(block.text);
     const marker = ASSESSMENT_BLOCK_MARKER.exec(text);
     const section = marker ? marker[1] : null;
     const allowedNumbers = new Set(citedStatements.flatMap((statement) => literals(statement, NUMERIC_LITERAL_PATTERN)).map(canonicalNumericLiteral));

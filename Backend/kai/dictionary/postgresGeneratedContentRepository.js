@@ -12,7 +12,8 @@ import {
   composeCountOnlyFindingText,
   ASSESSMENT_SELECTION_NOTE,
   composeEvidenceSummaryMeasurementDisclosures,
-  unsupportedAssertionEvidence,
+  composeEvidenceSummaryWithWordingFallback,
+  WORDING_FALLBACK_RESULT_KEY,
   unsupportedAssertionViolations,
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
@@ -25,6 +26,9 @@ import {
   MODEL_SECTION_KEYS,
   buildAssessmentModelContext,
   composeFreeImpactAssessmentBlocks,
+  parseAssessmentBlockText,
+  quotesOnlyCitedText,
+  withAssessmentSection,
 } from "../services/kaiFreeImpactAssessmentComposition.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
@@ -586,40 +590,91 @@ function assessmentCorrection(violations, modelBlocks) {
   return { reason: "unsupported_numeric_or_causal_assertion", blocks };
 }
 
-function assessmentAssertionBlocker(violations, extraEvidence) {
-  return [{
-    validator_key: "VAL-GEN-004",
-    severity: "blocker",
-    object_type: "generated_content_draft",
-    object_code: "request",
-    object_id: null,
-    message: "Request failed KAI validation.",
-    blocking_reason: "unsupported_numeric_or_causal_assertion",
-    required_fix: "Correct the request and retry.",
-    evidence: { ...unsupportedAssertionEvidence(violations), ...extraEvidence },
-  }];
-}
-
 // VAL-GEN-004 on the model-authored assessment text alone, before any server
 // text or disclosure is added, so a refusal is attributed to the text that
 // caused it. Returns the one permitted correction input, or null when the
 // model text passes (the whole assembled draft is still validated later).
-// A second refusal, or a correction that does not fit the input contract,
-// rolls back with safe block-level diagnostics. Nothing is removed or
-// rewritten by the server.
+// After the one correction (or when no correction fits the input contract),
+// still-refused sections are restated by restateAssessmentModelBlocks.
 function assessmentCorrectionInput(previousInput, generatorResult, modelProjections, attempts) {
-  const modelClassification = classifyGeneratorResult(generatorResult);
-  if (!modelClassification.ok) {
-    rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
-  }
+  // Owner direction 2026-11-10: an unusable model result, or wording still
+  // refused after the one correction, is restated from the cited claims
+  // (restateAssessmentModelBlocks) instead of failing the request.
+  if (!classifyGeneratorResult(generatorResult).ok) return null;
   const violations = unsupportedAssertionViolations({ blocks: generatorResult.blocks, generationClaims: modelProjections });
-  if (violations.length === 0) return null;
-  const refusal = assessmentAssertionBlocker(violations, { origin: "model_authored", generation_attempts: attempts });
-  if (attempts >= ASSESSMENT_MODEL_ATTEMPTS) rollbackFailure("validation_blocker", refusal);
+  if (violations.length === 0 || attempts >= ASSESSMENT_MODEL_ATTEMPTS) return null;
   const { correction: _previous, ...governed } = previousInput;
   const corrected = { ...governed, correction: assessmentCorrection(violations, generatorResult.blocks) };
-  if (!validateGeneratorInput(corrected)) rollbackFailure("validation_blocker", refusal);
+  if (!validateGeneratorInput(corrected)) return null;
   return corrected;
+}
+
+/**
+ * Free Impact Assessment wording fallback (owner direction 2026-11-10): a
+ * model section that VAL-GEN-004 still refuses after the one correction keeps
+ * its section and citations, and its body becomes the cited claims' own
+ * governed statements. An unusable model result (wrong shape, a missing or
+ * invalid section) becomes the required sections from the selected claims:
+ * a neutral snapshot, one finding per claim in its own wording, and no
+ * invented story. Returns { blocks, restated } (restated ordinals; "all").
+ */
+const RESTATED_SECTION_BODIES = Object.freeze({
+  executive_snapshot: "This assessment states each selected finding in its own recorded wording, with its limitations.",
+  impact_stories: "No participant account is stated beyond the cited findings.",
+  gaps_opportunities: "The gaps documented in the cited evidence are listed in this section.",
+});
+
+function restateAssessmentModelBlocks(generatorResult, modelProjections) {
+  const byId = new Map(modelProjections.map((claim) => [claim.claimId, claim]));
+  const statementOf = (claim) => claim.modelClaimStatement ?? claim.claimStatement;
+  const cite = (claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId });
+  const fromClaims = () => {
+    // Every selected claim is stated: one finding block per claim, grouped
+    // when there are more claims than finding blocks the contract allows.
+    const slots = MAX_MODEL_ASSESSMENT_BLOCKS - 2;
+    const groups = Array.from({ length: Math.min(slots, modelProjections.length) }, () => []);
+    modelProjections.forEach((claim, index) => groups[index % groups.length].push(claim));
+    return [
+      { text: withAssessmentSection("executive_snapshot", RESTATED_SECTION_BODIES.executive_snapshot), citations: [cite(modelProjections[0])] },
+      ...groups.map((group) => ({ text: withAssessmentSection("evidence_findings", group.map(statementOf).join(" ")), citations: group.map(cite) })),
+      { text: withAssessmentSection("impact_stories", RESTATED_SECTION_BODIES.impact_stories), citations: [cite(modelProjections[0])] },
+    ].map((block, index) => ({ ordinal: index + 1, ...block }));
+  };
+  if (!classifyGeneratorResult(generatorResult).ok) return { blocks: fromClaims(), restated: "all" };
+  // Per block: unsupported wording (VAL-GEN-004) or a quotation the cited
+  // evidence does not contain is restated; a block outside the model's
+  // sections is left out. Only a missing required section rebuilds all.
+  const refused = new Set(unsupportedAssertionViolations({ blocks: generatorResult.blocks, generationClaims: modelProjections }).map((violation) => violation.block_ordinal));
+  const sectioned = [];
+  for (const block of generatorResult.blocks) {
+    const parsed = parseAssessmentBlockText(block.text);
+    if (!parsed || !MODEL_SECTION_KEYS.includes(parsed.sectionKey) || parsed.body.trim().length === 0) { refused.add(block.ordinal); continue; }
+    const citedStatements = (block.citations || []).map((citation) => byId.get(citation.claimId)?.claimStatement || "");
+    if (!quotesOnlyCitedText(parsed.body, citedStatements)) refused.add(block.ordinal);
+    sectioned.push(block);
+  }
+  if (refused.size === 0 && composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections }).ok) {
+    return { blocks: generatorResult.blocks, restated: [] };
+  }
+  const blocks = sectioned.map((block) => {
+    if (!refused.has(block.ordinal)) return block;
+    const section = parseAssessmentBlockText(block.text)?.sectionKey;
+    const cited = (block.citations || []).map((citation) => byId.get(citation.claimId)).filter((claim, index) => claim && claim.evidenceItemId === block.citations[index].evidenceItemId);
+    if (!section || cited.length === 0) return null;
+    // A refused findings section states its claims in their own wording; a
+    // refused summary section says so in one neutral sentence (the findings
+    // are already stated in their own section, so nothing is repeated).
+    const body = section === "evidence_findings" ? cited.map(statementOf).join(" ") : RESTATED_SECTION_BODIES[section];
+    if (!body) return null;
+    return { ...block, citations: cited.map(cite), text: withAssessmentSection(section, body) };
+  });
+  if (blocks.includes(null)) return { blocks: fromClaims(), restated: "all" };
+  const restatedResult = { blocks: blocks.map((block, index) => ({ ...block, ordinal: index + 1 })) };
+  if (!composeFreeImpactAssessmentBlocks({ modelBlocks: restatedResult.blocks, claims: modelProjections }).ok
+    || unsupportedAssertionViolations({ blocks: restatedResult.blocks, generationClaims: modelProjections }).length > 0) {
+    return { blocks: fromClaims(), restated: "all" };
+  }
+  return { blocks: restatedResult.blocks, restated: [...refused].sort((a, b) => a - b) };
 }
 
 function validateGeneratorInput(input) {
@@ -1796,6 +1851,15 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         assessmentModelAttempts += 1;
         generatorInput = assessment ? assessmentCorrectionInput(generatorInput, generatorResult, modelProjections, assessmentModelAttempts) : null;
       }
+      let assessmentRestated = [];
+      if (assessment && modelProjections.length > 0) {
+        const restated = restateAssessmentModelBlocks(generatorResult, modelProjections);
+        generatorResult = { blocks: restated.blocks };
+        assessmentRestated = restated.restated;
+      }
+      const assessmentWordingFallback = assessment && (assessmentRestated === "all" || assessmentRestated.length > 0)
+        ? { model_generation_attempts: assessmentModelAttempts, restated_model_block_ordinals: assessmentRestated }
+        : null;
       // Free Impact Assessment: the model's section blocks pass the result
       // contract, then the server adds the composed sections (story
       // evidence, documented gaps, three proposed improvements, next steps)
@@ -1814,7 +1878,41 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // passes the result contract first; the combined result passes it
       // again below, so a disclosure that does not fit is refused, never
       // truncated, and the validators then run on exactly what persists.
-      if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0) {
+      // Owner direction 2026-11-10: in an Evidence Summary the model's
+      // wording never fails the request on its own. Refused blocks (or an
+      // unusable result) are restated from the cited claims' own governed
+      // text with their disclosures; every validator still runs on the
+      // whole draft below, and a non-wording refusal is never repaired.
+      let wordingFallback = null;
+      let composedWithDisclosures = false;
+      if (contentType === CONTENT_TYPE && !assessment && modelProjections.length > 0) {
+        const validationClaims = projections.map((projection) => ({
+          ...projection,
+          revalidatedForGeneration: true,
+          currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+        }));
+        const repaired = composeEvidenceSummaryWithWordingFallback({
+          modelBlocks: generatorResult?.blocks,
+          modelResultUsable: classifyGeneratorResult(generatorResult).ok,
+          claims: modelProjections,
+          measuredValueByClaimId,
+          blockFits: (block) => classifyGeneratorResult({ blocks: [{ ...block, ordinal: 1 }] }).ok,
+          resultFits: (blocks) => classifyGeneratorResult({ blocks }).ok,
+          validate: (blocks) => validateGeneratedContentDraft({
+            requestedAudience: input.requestedAudience,
+            generationClaims: validationClaims,
+            blocks,
+            draftAudience: input.requestedAudience,
+            contentType,
+          }),
+        });
+        if (repaired.ok && classifyGeneratorResult({ blocks: repaired.blocks }).ok) {
+          generatorResult = { blocks: repaired.blocks };
+          composedWithDisclosures = true;
+          if (repaired.evidence.fallback_block_count > 0) wordingFallback = repaired.evidence;
+        }
+      }
+      if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0 && !composedWithDisclosures) {
         const modelClassification = classifyGeneratorResult(generatorResult);
         if (!modelClassification.ok) {
           rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
@@ -1859,6 +1957,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             : item))
           : validation.blockers);
       }
+      if (assessmentWordingFallback) wordingFallback = assessmentWordingFallback;
+      if (wordingFallback) {
+        // Which blocks were restated from the claims' own wording and why
+        // (IDs, ordinals and codes only; never the refused text).
+        validation = { ...validation, results: [...validation.results, { validator_key: WORDING_FALLBACK_RESULT_KEY, severity: "pass", evidence: wordingFallback }] };
+      }
       if (assessment) {
         // Keep the exact selection outcome on the saved draft and its
         // idempotent response, without creating a citation or review authority
@@ -1867,6 +1971,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           validator_key: FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, severity: "pass", evidence: {
             excluded_claims: excludedClaims.map((item) => ({ claimId: item.claim.claim_id, blockerCodes: item.blockerCodes })),
             model_generation_attempts: assessmentModelAttempts,
+            restated_model_block_ordinals: assessmentRestated,
           },
         }] };
       }

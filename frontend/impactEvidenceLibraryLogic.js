@@ -2634,8 +2634,19 @@ export function errorText(result) {
     return `The generated draft${attempts} contained ${kinds.length > 0 ? kinds.join(" and ") : "an unsupported number or cause-and-effect wording"}, so nothing was saved. Retry generation; if it repeats, choose a more focused set of claims.`
       + (evidence.origin === "composed_draft" ? " This came from Get Kinder's own assembled text; report it to Get Kinder." : "");
   }
+  // The server's own reason and fix for the first specific blocker (for
+  // example which source's processing permission refused a claim), never the
+  // generic "Request failed KAI validation." when a reason was sent.
+  const specific = (result?.body?.blockers || []).find((blocker) => typeof blocker?.message === "string"
+    && blocker.message.trim() && !GENERIC_BLOCKER_MESSAGES.has(blocker.message.trim()));
+  if (specific) {
+    const fix = typeof specific.required_fix === "string" && specific.required_fix.trim() && !GENERIC_BLOCKER_MESSAGES.has(specific.required_fix.trim()) ? specific.required_fix.trim() : "";
+    return `${specific.message.trim()}${fix ? ` ${fix}` : ""}`;
+  }
   return result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
 }
+
+const GENERIC_BLOCKER_MESSAGES = new Set(["Request failed KAI validation.", "Correct the request and retry."]);
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];

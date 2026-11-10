@@ -306,15 +306,24 @@ test("workflow: a model slip gets exactly one correction with block-level diagno
   assert.match(run.calls[1].system, /If the input includes correction/);
 });
 
-test("workflow: a second slip is refused with safe diagnostics, nothing persists, and no third model call is made", async () => {
+test("workflow: a second slip is restated from the cited claims (never saved), with no third model call; the assessment is not failed", async () => {
   const run = await generate([SLIPPED_MODEL, SLIPPED_MODEL]);
-  assert.equal(run.result.ok, false);
-  assert.equal(run.calls.length, 2);
-  assert.deepEqual([run.store.drafts.length, run.store.blocks.length, run.store.citations.length, run.store.queues.length, run.store.runs.length], [0, 0, 0, 0, 0]);
-  const [blocker] = run.result.blockers;
-  assert.equal(blocker.validator_key, "VAL-GEN-004");
-  assert.equal(blocker.blocking_reason, "unsupported_numeric_or_causal_assertion");
-  assert.deepEqual(blocker.evidence, { violation_count: 4, assertion_classes: ["causal_language", "numeric_literal"], block_ordinals: [1], block_sections: ["executive_snapshot"], origin: "model_authored", generation_attempts: 2 });
+  // Owner direction 2026-11-10 (before: refused, nothing persisted).
+  assert.equal(run.result.ok, true, JSON.stringify(run.result.blockers));
+  assert.equal(run.calls.length, 2, "still one correction, never a third call");
+  assert.equal(run.store.drafts.length, 1);
+  const saved = run.store.blocks.map((block) => block.text).join("\n");
+  assert.doesNotMatch(saved, /positive impact|66%|58%/, "the slipped wording is not saved");
+  const snapshot = run.store.blocks.find((block) => block.text.startsWith("[[assessment:executive_snapshot]]\n"));
+  assert.ok(snapshot.text.startsWith(`${W("executive_snapshot", "This assessment states each selected finding in its own recorded wording, with its limitations.")} Measurement disclosure for the cited measurement: `),
+    "the refused summary section keeps its section and citation, in one neutral sentence (the findings keep their own section)");
+  assert.ok(run.store.blocks.some((block) => block.text.startsWith(W("evidence_findings", "Numeric outcome in column F"))), "the model's passing findings are kept");
+  const assessmentResult = run.store.drafts[0].validator_results.find((r) => r.validator_key === "VAL-GEN-ASSESSMENT-001");
+  assert.deepEqual(assessmentResult.evidence.restated_model_block_ordinals, [1]);
+  assert.ok(run.store.drafts[0].validator_results.some((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001"));
+  // The route boundary still sanitizes such a diagnostic (a composed-draft refusal can still occur).
+  const blocker = { validator_key: "VAL-GEN-004", blocking_reason: "unsupported_numeric_or_causal_assertion",
+    evidence: { violation_count: 4, assertion_classes: ["causal_language", "numeric_literal"], block_ordinals: [1], block_sections: ["executive_snapshot"], origin: "model_authored", generation_attempts: 2 } };
   // The API boundary keeps the safe fields and nothing else.
   const [sanitized] = routeTests.sanitizeServiceBlockers([{ ...blocker, evidence: { ...blocker.evidence, literal: "66%", text: "The programme shows a positive impact", block_sections: ["executive_snapshot", "<script>"] } }]);
   assert.deepEqual(sanitized.evidence, { violation_count: 4, assertion_classes: ["causal_language", "numeric_literal"], block_ordinals: [1], block_sections: ["executive_snapshot"], origin: "model_authored", generation_attempts: 2 });

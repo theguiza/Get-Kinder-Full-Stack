@@ -1,6 +1,6 @@
 import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { PROVISIONAL_REPORT_STATUS, reportInformationNotes } from "../../../shared/kaiReportInformation.js";
-import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
+import { COUNT_ONLY_LIMITATION_CODE, WORDING_FALLBACK_RESULT_KEY } from "../validators/kaiGeneratedContentValidators.js";
 import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
 import {
@@ -456,7 +456,11 @@ function authorityLines(model) {
     const open = !fact.currentlyEligible && (fact.blockerCodes || []).length > 0 ? `; open review items: ${fact.blockerCodes.map(code).join(", ")}` : "";
     lines.push(`- ${refs(fact.citationRefs)} Review for final use complete: ${fact.currentlyEligible ? "yes" : "no (provisional finding)"}; basis: ${basis}${open}.`);
   }
-  lines.push(`- **Automated validation of the generated text:** ${model.report.validatorKeys.length > 0 ? model.report.validatorKeys.map(code).join(", ") : "none recorded"} passed when the draft was generated; this report is re-checked against current eligibility each time it is opened.`);
+  const validatorKeys = model.report.validatorKeys.filter((key) => key !== WORDING_FALLBACK_RESULT_KEY);
+  lines.push(`- **Automated validation of the generated text:** ${validatorKeys.length > 0 ? validatorKeys.map(code).join(", ") : "none recorded"} passed when the draft was generated; this report is re-checked against current eligibility each time it is opened.`);
+  if (model.report.validatorKeys.includes(WORDING_FALLBACK_RESULT_KEY)) {
+    lines.push("- **Restated passages:** some generated wording did not pass these checks, so those passages state the cited findings in their own recorded wording instead. Nothing the checks refused was saved.");
+  }
   return lines;
 }
 

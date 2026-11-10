@@ -225,9 +225,11 @@ test("generation: a stored reviewed AI permission, or no human decision at all, 
     const harness = generationHarness(headsFor(restrictedHead));
     const result = await harness.repository.createEvidenceSummaryDraft(harness.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-permitted-1"), harness.dependencies);
     assert.deepEqual(harness.modelCalls, [[CLAIM_PERMITTED, CLAIM_RESTRICTED]], label);
-    assert.deepEqual(harness.evaluatorCalls, [CLAIM_PERMITTED, CLAIM_RESTRICTED], label);
-    // The spy's unusable result ends in the existing generator-result refusal.
-    assert.equal(result.blockers[0].blocking_reason, "generator_result_blocks_empty", label);
+    // Pre-generation revalidation of both claims (owner direction 2026-11-10:
+    // the spy's unusable result is now restated from the claims, so the
+    // post-generation revalidation follows; that is not a permission check).
+    assert.deepEqual(harness.evaluatorCalls.slice(0, 2), [CLAIM_PERMITTED, CLAIM_RESTRICTED], label);
+    assert.ok(!(result.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_ALLOWED_USE_VALIDATOR_KEY), label);
   }
   const harness = generationHarness(headsFor(reviewed("not_allowed", false)));
   const result = await harness.repository.createImpactNarrativeDraft(harness.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-not-allowed-1"), harness.dependencies);

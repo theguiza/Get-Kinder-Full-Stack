@@ -473,7 +473,7 @@ test("orchestration: mixed-citation measured claims persist per-claim disclosure
   assert.equal(state.citations.length, 3);
 });
 
-test("orchestration: contradictions, unsupported assertions and unauthorized citations are refused with nothing persisted", async () => {
+test("orchestration: contradictions, unsupported assertions and unauthorized citations are detected and never saved; the block is restated", async () => {
   for (const [label, items, expected] of [
     ["unique participants", [{ text: `${PARAPHRASE_112} These are 112 unique participants.`, citations: cite(M112) }], "VAL-GEN-008"],
     ["period verified", [{ text: `${LEAD_37} The period was verified against record dates.`, citations: cite(M37) }], "VAL-GEN-008"],
@@ -483,19 +483,29 @@ test("orchestration: contradictions, unsupported assertions and unauthorized cit
   ]) {
     const fixtures = label === "period verified" ? [M37] : [M112];
     const { result, state } = await generateThroughRepository(fixtures, recordingGenerator(() => items));
-    assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"], label);
-    assert.ok(result.blockers.some((blocker) => blocker.validator_key === expected), `${label}: ${JSON.stringify(result.blockers)}`);
-    assert.deepEqual([state.drafts.length, state.blocks.length, state.citations.length, state.audits.length], [0, 0, 0, 0], label);
+    // Owner direction 2026-11-10: detected, recorded, restated - never saved, never a failed request.
+    assert.equal(result.ok, true, label);
+    const fallback = state.drafts[0].validator_results.find((item) => item.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+    assert.ok(fallback.evidence.refused_validator_keys.includes(expected), `${label}: ${JSON.stringify(fallback.evidence)}`);
+    assert.ok(!state.blocks.some((row) => row.text.includes(items[0].text)), `${label}: refused wording not saved`);
+    assert.deepEqual(state.citations.map((row) => [row.claim_id, row.evidence_item_id]), [[fixtures[0].claimId, fixtures[0].evidenceItemId]], label);
   }
 });
 
-test("orchestration: a disclosure that cannot fit is refused by the result contract, never truncated", async () => {
+test("orchestration: a block whose disclosure cannot fit is restated from its claim, never truncated, and the request is not failed", async () => {
   const long = `${LEAD_112} ${"The organization reviewed this worksheet. ".repeat(90)}`.slice(0, 3900);
   assert.ok(long.length <= 4000);
-  const { result, state } = await generateThroughRepository([M112], recordingGenerator(() => [{ text: long, citations: cite(M112) }]));
-  assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"]);
-  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [[GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, "generator_result_block_text_too_long"]]);
-  assert.equal(state.blocks.length, 0);
+  const generator = recordingGenerator(() => [{ text: long, citations: cite(M112) }]);
+  const { result, state } = await generateThroughRepository([M112], generator);
+  // Owner direction 2026-11-10 (before: 422 generator_result_block_text_too_long, nothing saved).
+  assert.equal(result.ok, true, JSON.stringify(result.blockers));
+  assert.equal(state.blocks.length, 1);
+  assert.ok(state.blocks[0].text.length <= 4000);
+  assert.ok(state.blocks[0].text.startsWith(generator.calls[0].claims[0].claimStatement), "restated from the claim");
+  assert.ok(!state.blocks[0].text.includes("The organization reviewed this worksheet."), "the model text is not truncated into the draft");
+  const fallback = state.drafts[0].validator_results.find((item) => item.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.deepEqual(fallback.evidence.refused_validator_keys, ["RESULT-CONTRACT"]);
+  assert.ok(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY);
 });
 
 test("orchestration: audience authority is unchanged by composition", async () => {
@@ -546,14 +556,25 @@ function assertOrdinaryMeasuredPath(fixture, generator) {
   assert.deepEqual(generator.calls[0].claims.map((claim) => claim.limitationCodes), [fixture.limitationCodes], "the ordinary measured-claim projection");
 }
 
-function assertRefused(label, { result, generator, observed }, fixture, validatorKey, violationClass) {
+// Owner direction 2026-11-10: the validators still detect the false or
+// unsupported model wording (the validator key, class and block are
+// recorded on the draft), but it never fails the request and is never saved:
+// the block is restated from the cited claim's own governed text with its
+// disclosure, and a human still reviews the draft.
+function assertRefused(label, { result, state, generator, observed }, fixture, validatorKey, violationClass, refusedText = null) {
   assertOrdinaryMeasuredPath(fixture, generator);
-  assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"], `${label}: ${JSON.stringify(observed)}`);
-  const blocker = observed.blockers.find((item) => item.validator_key === validatorKey);
-  assert.ok(blocker, `${label}: ${JSON.stringify(observed.blockers)}`);
-  assert.ok(blocker.classes.includes(violationClass), `${label}: ${JSON.stringify(blocker)}`);
-  assert.deepEqual(blocker.block_ordinals, [1], label);
-  assert.deepEqual(observed.persisted, { drafts: 0, blocks: 0, citations: 0, audits: 0 }, `${label}: nothing persisted`);
+  assert.equal(result.ok, true, `${label}: ${JSON.stringify(observed)}`);
+  const fallback = state.drafts[0].validator_results.find((item) => item.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.ok(fallback, `${label}: ${JSON.stringify(state.drafts[0].validator_results)}`);
+  assert.ok(fallback.evidence.refused_validator_keys.includes(validatorKey), `${label}: ${JSON.stringify(fallback.evidence)}`);
+  assert.ok(fallback.evidence.refused_classes.includes(violationClass), `${label}: ${JSON.stringify(fallback.evidence)}`);
+  assert.deepEqual(fallback.evidence.replaced_model_block_ordinals, [1], label);
+  const generated = generator.calls[0].claims[0].claimStatement;
+  assert.equal(state.blocks.length, 1, label);
+  assert.ok(state.blocks[0].text.startsWith(generated), `${label}: restated from the claim`);
+  if (refusedText) assert.ok(!state.blocks[0].text.includes(refusedText), `${label}: the refused wording is not saved`);
+  assert.equal(validate([{ ordinal: 1, text: state.blocks[0].text, citations: cite(fixture) }], [fixture]).ok, true, label);
+  assert.equal(state.queues[0].queue_status, "open", `${label}: a human still reviews the draft`);
 }
 
 function assertAcceptedWithDisclosure(label, { result, state, generator, observed }, fixture, modelText) {
@@ -578,7 +599,7 @@ test("Case A: a false reporting-period assertion is refused despite the appended
   const falseText = `${LEAD_112} A reporting period was defined.`;
   const refused = await observe([M112], falseText);
   t.diagnostic(`CASE_A ${JSON.stringify(refused.observed)}`);
-  assertRefused("A", refused, M112, "VAL-GEN-008", "limitation_contradicted");
+  assertRefused("A", refused, M112, "VAL-GEN-008", "limitation_contradicted", "A reporting period was defined.");
 
   for (const truthful of [
     `${LEAD_112} No reporting period is established for this count.`,
@@ -597,14 +618,14 @@ test("Case B: false coverage-status assertions are refused despite the appended 
     ["B3", "Small-cell risk has been cleared.", "coverage.small_cell_risk.resolved_risk_flagged"],
   ]) {
     assert.ok(M112.limitationCodes.includes(code), `${label}: authoritative status ${code}`);
-    observations.push([label, await observe([M112], `${LEAD_112} ${sentence}`)]);
+    observations.push([label, await observe([M112], `${LEAD_112} ${sentence}`), sentence]);
   }
   const acceptedCleared = await observe([ACCEPTED_SMALL_CELL], `${LEAD_112} Small-cell risk has been cleared.`);
-  observations.push(["B3_ACCEPTED", acceptedCleared]);
+  observations.push(["B3_ACCEPTED", acceptedCleared, "Small-cell risk has been cleared."]);
   // Every case is observed and recorded before any is asserted.
   for (const [label, observation] of observations) t.diagnostic(`CASE_${label} ${JSON.stringify(observation.observed)}`);
-  for (const [label, observation] of observations) {
-    assertRefused(label, observation, label === "B3_ACCEPTED" ? ACCEPTED_SMALL_CELL : M112, "VAL-GEN-008", "limitation_contradicted");
+  for (const [label, observation, sentence] of observations) {
+    assertRefused(label, observation, label === "B3_ACCEPTED" ? ACCEPTED_SMALL_CELL : M112, "VAL-GEN-008", "limitation_contradicted", sentence);
   }
 
   for (const truthful of [
@@ -626,7 +647,7 @@ test("Case C: '112 participants were served' is refused; the literal 112 does no
   assert.doesNotMatch(falseText, /\b(unique|distinct|deduplicated)\b/i);
   const refused = await observe([M112], falseText);
   t.diagnostic(`CASE_C ${JSON.stringify(refused.observed)}`);
-  assertRefused("C", refused, M112, "VAL-GEN-008", "limitation_contradicted");
+  assertRefused("C", refused, M112, "VAL-GEN-008", "limitation_contradicted", "112 participants were served.");
 
   for (const truthful of [
     "112 source records were counted in selected worksheet sheet_1.",
@@ -647,7 +668,7 @@ test("Case C: '112 participants were served' is refused; the literal 112 does no
     "The source does not establish the reporting period; 112 participants were served.",
     `${LEAD_112} The source does not establish a period. That is 112 people.`,
   ]) {
-    assertRefused(asserted, await observe([M112], asserted), M112, "VAL-GEN-008", "limitation_contradicted");
+    assertRefused(asserted, await observe([M112], asserted), M112, "VAL-GEN-008", "limitation_contradicted", asserted);
   }
 });
 
@@ -659,7 +680,7 @@ test("Cases A–C hardening: the disclosure wording cannot mask an assertion, an
     ["value as people", `${LEAD_112} That is 112 people.`],
     ["value as participants, later sentence", `${LEAD_112} In total, 112 participants.`],
   ]) {
-    assertRefused(label, await observe([M112], text), M112, "VAL-GEN-008", "limitation_contradicted");
+    assertRefused(label, await observe([M112], text), M112, "VAL-GEN-008", "limitation_contradicted", text);
   }
   for (const text of [
     `${LEAD_112} The worksheet holds 112 records.`,
@@ -728,10 +749,10 @@ test("final acceptance: the 112-record count-and-worksheet-only draft persists w
   assert.deepEqual(state.claims, makeState([M112]).claims, "claim/evidence rows unchanged");
 });
 
-test("final acceptance: a refused generated draft leaves the claim, evidence and measurement unchanged", async () => {
+test("final acceptance: refused generated wording is not saved and leaves the claim, evidence and measurement unchanged", async () => {
   const fixtureBefore = structuredClone({ measurementRow: M112.measurementRow, claim: M112.claim });
   const refused = await observe([M112], "112 participants were served.");
-  assertRefused("refused", refused, M112, "VAL-GEN-008", "limitation_contradicted");
+  assertRefused("refused", refused, M112, "VAL-GEN-008", "limitation_contradicted", "112 participants were served.");
   assert.deepEqual(refused.state.claims, makeState([M112]).claims);
   assert.deepEqual({ measurementRow: M112.measurementRow, claim: M112.claim }, fixtureBefore);
 });

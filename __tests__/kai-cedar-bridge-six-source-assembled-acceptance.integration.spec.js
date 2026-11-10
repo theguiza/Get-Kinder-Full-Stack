@@ -938,16 +938,27 @@ async function runCedarBridgeAcceptance() {
       // Owner Package 3 reconciliation (draft first, 2026-11-06): these claims
       // are unreviewed, not rejected, and their measurements are intact, so an
       // internal assessment admits them provisionally and they DO reach the
-      // provider; open review is carried as a limitation. The refusal here is
-      // the assessment validator rejecting the deterministic stub's output
-      // (a required section missing), and nothing is persisted.
-      assert.equal(refused.status, 422, J(refused.body));
-      assert.deepEqual(blockersOf(refused), ["assessment_model_section_missing"], J(refused.body));
+      // provider; open review is carried as a limitation. The deterministic
+      // stub's output is unusable (a required section missing): before the
+      // 2026-11-10 wording fallback that refused the request (422
+      // assessment_model_section_missing); now the required sections are
+      // stated from the admitted claims' own wording and the provisional
+      // draft is saved, with nothing from the unusable output in it.
+      assert.equal(refused.status, 201, J(refused.body));
+      const [savedAssessment] = await query("SELECT draft_status, review_status, validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [refused.body.data.generatedContentDraftId]);
+      assert.deepEqual([savedAssessment.draft_status, savedAssessment.review_status], ["draft", "needs_gk_review"]);
+      assert.equal(savedAssessment.validator_results.find((r) => r.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.restated_model_block_ordinals, "all");
+      const restatedBlocks = refused.body.data.blocks.map((block) => block.text).join("\n");
+      for (const entry of scenario.claims) assert.ok(restatedBlocks.includes(entry.statement), "each admitted finding is stated in its own wording");
+      // The restated model sections (not the server's own gap / improvement sections) assert no improvement or cause.
+      const modelSections = refused.body.data.blocks.filter((block) => /^\[\[assessment:(executive_snapshot|evidence_findings|impact_stories)\]\]\n/.test(block.text))
+        .map((block) => block.text.replace(/^\[\[assessment:[a-z_]+\]\]\n/, "").split(" Measurement disclosure for ")[0]).join("\n");
+      assert.doesNotMatch(modelSections, /improv|caus/i);
       const sentForAssessment = modelCalls.slice(callsBefore);
       assert.ok(sentForAssessment.length >= 1 && sentForAssessment.length <= 2, "one model call, plus at most the single bounded correction");
       for (const call of sentForAssessment) assert.deepEqual(call.claims.map((claim) => claim.claimId).sort(), [...claimIds].sort(), "exactly the admitted claims");
       for (const call of sentForAssessment) for (const claim of call.claims) assert.ok(claim.limitationCodes.includes("claim_review_unresolved"), "open review travels as a limitation");
-      assert.equal(await draftCount(), draftsBefore, "refusal persists no draft");
+      assert.equal(await draftCount(), draftsBefore + 1, "the provisional assessment is saved");
 
       // These are new, attributed synthetic decisions on descriptive findings,
       // through the existing GK operations; no eligibility or approval is seeded.
@@ -1014,11 +1025,17 @@ async function runCedarBridgeAcceptance() {
         const unsupported = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, {
           claim_ids: claimIds, engagement_id: PROJECT, idempotency_key: `unresolved-overclaim-${randomUUID()}`,
         });
-        assert.equal(unsupported.status, 422, J(unsupported.body));
-        assert.ok(J(unsupported.body).includes("unsupported_numeric_or_causal_assertion"));
-        scenario.unsupported_output = { status: unsupported.status, blockers: blockersOf(unsupported) };
+        // Owner direction 2026-11-10: detected and never saved; the blocks are
+        // restated from the claims (before: 422, nothing saved).
+        assert.equal(unsupported.status, 201, J(unsupported.body));
+        const savedText = unsupported.body.data.blocks.map((block) => block.text).join("\n");
+        assert.doesNotMatch(savedText, /The programme caused participants to improve/);
+        const [unsupportedDraft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [unsupported.body.data.generatedContentDraftId]);
+        const detected = unsupportedDraft.validator_results.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001").evidence;
+        assert.ok(detected.refused_classes.includes("causal_language"), J(detected));
+        scenario.unsupported_output = { status: unsupported.status, detected };
       } finally { modelBlockText = null; }
-      assert.equal(await draftCount(), draftsBefore + 1, "only the descriptive assessment is saved");
+      assert.equal(await draftCount(), draftsBefore + 3, "the restated first assessment, the descriptive assessment and the restated summary are saved; nothing unsupported is");
     });
 
     await test("11b: an authorized person records synthetic meaning and units; arithmetic is unchanged and approvals are not copied", async () => {
@@ -1309,28 +1326,35 @@ async function runCedarBridgeAcceptance() {
       stage("events", "internal_generated_finding:derived", "cited in Evidence Summary", { draft_id: derivedDraftId });
     });
 
-    await test("15: fabricated, unsupported and stale outputs are refused through the same generation path", async () => {
-      const attempt = async (labels, text) => {
+    await test("15: fabricated and unsupported wording is detected and never saved; a stale claim is refused, through the same generation path", async () => {
+      // Owner direction 2026-11-10: model wording never fails an Evidence
+      // Summary; a refused block is restated from its claim and the detection
+      // is recorded on the draft (before: 422 with nothing saved).
+      const attempt = async (labels, text, injected = null) => {
         modelBlockText = text;
         try {
           const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: labels.map((l) => derivedClaims[l] ?? l), idempotency_key: `cedar-negative-${randomUUID()}`, engagement_id: PROJECT });
+          const draftId = created.body?.data?.generatedContentDraftId ?? null;
+          const [draft] = draftId ? await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]) : [];
+          const fallback = draft?.validator_results.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001")?.evidence ?? null;
+          const saved = draftId ? (await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid", [draftId])).map((row) => row.text).join("\n") : "";
           const validators = (created.body?.blockers || created.body?.error?.blockers || []).map((b) => [b.validator_key, b.blocking_reason]);
-          return { status: created.status, validators };
+          return { status: created.status, validators, detected: fallback?.refused_validator_keys ?? [], classes: fallback?.refused_classes ?? [], injected_saved: injected ? saved.includes(injected) : null };
         } finally { modelBlockText = null; }
       };
       const results = {
-        invented_number: await attempt(["followups_response_rate"], (claim) => `${claim.claimStatement} In total 412 people responded.`),
-        causal_assertion: await attempt(["paired_field_6"], (claim) => `${claim.claimStatement} The programme improves digital confidence because of the workshops.`),
-        verified_employment: await attempt(["followups_paid_work"], (claim) => `${claim.claimStatement} These are verified employment outcomes.`),
-        all_participants: await attempt(["followups_response_rate"], (claim) => `${claim.claimStatement} This holds for all participants.`),
+        invented_number: await attempt(["followups_response_rate"], (claim) => `${claim.claimStatement} In total 412 people responded.`, "412 people responded"),
+        causal_assertion: await attempt(["paired_field_6"], (claim) => `${claim.claimStatement} The programme improves digital confidence because of the workshops.`, "improves digital confidence"),
+        verified_employment: await attempt(["followups_paid_work"], (claim) => `${claim.claimStatement} These are verified employment outcomes.`, "These are verified employment outcomes"),
+        all_participants: await attempt(["followups_response_rate"], (claim) => `${claim.claimStatement} This holds for all participants.`, "This holds for all participants"),
         superseded_meaning: await attempt([derived.paired_field_7.supersededClaimId], null),
       };
       report.generation.derived_negative = results;
-      assert.deepEqual([results.invented_number.status, results.invented_number.validators], [422, [["VAL-GEN-004", "unsupported_numeric_or_causal_assertion"]]]);
-      assert.equal(results.causal_assertion.status, 422);
-      assert.ok(results.causal_assertion.validators.some(([key]) => key === "VAL-GEN-004"), J(results.causal_assertion));
-      assert.deepEqual([results.verified_employment.status, results.verified_employment.validators], [422, [["VAL-GEN-008", "material_limitation_not_disclosed"]]]);
-      assert.deepEqual([results.all_participants.status, results.all_participants.validators], [422, [["VAL-GEN-008", "material_limitation_not_disclosed"]]]);
+      for (const [label, key] of [["invented_number", "VAL-GEN-004"], ["causal_assertion", "VAL-GEN-004"], ["verified_employment", "VAL-GEN-008"], ["all_participants", "VAL-GEN-008"]]) {
+        const result = results[label];
+        assert.deepEqual([result.status, result.injected_saved], [201, false], `${label}: ${J(result)}`);
+        assert.ok(result.detected.includes(key), `${label}: ${J(result)}`);
+      }
       assert.ok(results.superseded_meaning.status >= 400, J(results.superseded_meaning));
     });
 
@@ -2115,12 +2139,18 @@ async function runCedarBridgeAcceptance() {
         modelBlockText = (claim) => (claim.claimId === claims.duration ? text(claim) : claim.claimStatement);
         try {
           const attempt = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: [claims.monthly, claims.duration], idempotency_key: `cedar-activity-negative-${randomUUID()}`, engagement_id: PROJECT });
-          refused[name] = [attempt.status, (attempt.body?.blockers || attempt.body?.error?.blockers || []).map((b) => b.validator_key)];
+          const draftId = attempt.body?.data?.generatedContentDraftId ?? null;
+          const [draft] = draftId ? await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]) : [];
+          const saved = draftId ? (await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid", [draftId])).map((row) => row.text).join("\n") : "";
+          refused[name] = [attempt.status, draft?.validator_results.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001")?.evidence.refused_validator_keys ?? [],
+            saved.includes("This is the complete service-time total.") || saved.includes("In total 20000 minutes were delivered.")];
         } finally { modelBlockText = null; }
       }
-      assert.equal(refused.complete_time[0], 422, J(refused));
-      assert.ok(refused.complete_time[1].includes("VAL-GEN-008"), J(refused));
-      assert.equal(refused.invented_minutes[0], 422, J(refused));
+      // Owner direction 2026-11-10: detected and never saved; the duration block
+      // is restated from its claim (before: 422 with nothing saved).
+      assert.deepEqual(refused.complete_time, [201, ["VAL-GEN-008"], false], J(refused));
+      assert.equal(refused.invented_minutes[0], 201, J(refused));
+      assert.ok(refused.invented_minutes[1].includes("VAL-GEN-004") && refused.invented_minutes[2] === false, J(refused));
       const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: [claims.monthly, claims.duration], idempotency_key: `cedar-activity-${tag}-${randomUUID()}`, engagement_id: PROJECT });
       assert.equal(created.status, 201, J(created.body));
       const draftId = created.body.data.generatedContentDraftId;
@@ -3171,26 +3201,29 @@ async function runCedarBridgeAcceptance() {
       console.log(`Cedar Bridge Free Impact Assessment: ${pages} PDF pages; ${J(statuses)}; ${markdownPath}`);
     });
 
-    await test("F3: the existing correction controls refuse a fabricated figure and an invented quotation, and nothing is persisted", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+    await test("F3: a fabricated figure and an invented quotation are never saved; the assessment is restated from the cited claims instead of failing", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
+      // Owner direction 2026-11-10 (before: 422 with nothing persisted).
       const claimIds = assessmentState.generation.claim_ids;
-      const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n;
       const outcomes = {};
-      for (const [label, mutate] of [
-        ["fabricated_figure", (blocks) => blocks.map((block, index) => (index === 0 ? { ...block, text: `${block.text} Participation rose by 47 per cent.` } : block))],
-        ["invented_quotation", (blocks) => blocks.map((block) => (block.section === "impact_stories" ? { ...block, text: `${block.text} One participant said "this programme changed my life completely".` } : block))],
+      for (const [label, mutate, injected] of [
+        ["fabricated_figure", (blocks) => blocks.map((block, index) => (index === 0 ? { ...block, text: `${block.text} Participation rose by 47 per cent.` } : block)), "Participation rose by 47 per cent."],
+        ["invented_quotation", (blocks) => blocks.map((block) => (block.section === "impact_stories" ? { ...block, text: `${block.text} One participant said "this programme changed my life completely".` } : block)), "this programme changed my life completely"],
       ]) {
         assessmentStub = mutate;
         try {
-          const refused = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, { claim_ids: claimIds, idempotency_key: `cedar-free-assessment-${label}-${randomUUID()}`, engagement_id: PROJECT });
-          outcomes[label] = { status: refused.status, blockers: blockersOf(refused) };
-          assert.equal(refused.status, 422, J(refused.body));
+          const created = await adminApi("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, { claim_ids: claimIds, idempotency_key: `cedar-free-assessment-${label}-${randomUUID()}`, engagement_id: PROJECT });
+          assert.equal(created.status, 201, J(created.body));
+          const draftId = created.body.data.generatedContentDraftId;
+          const [draft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+          const saved = (await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid", [draftId])).map((row) => row.text).join("\n");
+          const restated = draft.validator_results.find((r) => r.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.restated_model_block_ordinals;
+          outcomes[label] = { status: created.status, restated, injected_saved: saved.includes(injected) };
+          assert.equal(outcomes[label].injected_saved, false, `${label}: never saved`);
+          assert.ok(restated === "all" || restated.length > 0, J(outcomes[label]));
         } finally {
           assessmentStub = null;
         }
       }
-      assert.ok(J(outcomes.fabricated_figure.blockers).includes("unsupported_numeric_or_causal_assertion"), J(outcomes));
-      assert.ok(J(outcomes.invented_quotation.blockers).includes("assessment_quotation_not_in_cited_evidence"), J(outcomes));
-      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n, draftsBefore);
       assessmentState.refusals = outcomes;
     });
   } finally {

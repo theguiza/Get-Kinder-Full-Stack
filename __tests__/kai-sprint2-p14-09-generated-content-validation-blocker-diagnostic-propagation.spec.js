@@ -116,7 +116,7 @@ function makeFakeTx(draft) {
       }
 
       if (s.startsWith("INSERT INTO kai.generated_content_drafts")) {
-        const [generationRunId, organizationId, contentType, requestedAudience, draftStatus, reviewStatus, , now] = params;
+        const [generationRunId, organizationId, contentType, requestedAudience, draftStatus, reviewStatus, validatorResults, now] = params;
         const row = {
           generated_content_draft_id: randomUUID(),
           generation_run_id: generationRunId,
@@ -127,6 +127,7 @@ function makeFakeTx(draft) {
           review_status: reviewStatus,
           created_by_type: "system",
           created_at: now,
+          validator_results_recorded: JSON.parse(validatorResults),
         };
         draft.generatedContentDrafts.push(row);
         return { rows: [{ generated_content_draft_id: row.generated_content_draft_id }] };
@@ -313,7 +314,7 @@ function goodGenerator() {
 // blocking_reason produced by validateGeneratedContentDraft itself - never a
 // route-manufactured stand-in. ---
 
-test("P14-09 diagnostic propagation CASE A/B: an unresolved citation reference surfaces the real VAL-GEN-002/VAL-GEN-003 blockers end-to-end through the service", async () => {
+test("P14-09 diagnostic propagation CASE A/B: an unresolved citation reference is detected by the real VAL-GEN-002/VAL-GEN-003 and restated, never saved", async () => {
   const state = makeState();
   const evaluator = makeEvaluator();
   const repository = makeRepository(state, evaluator);
@@ -358,23 +359,20 @@ test("P14-09 diagnostic propagation CASE A/B: an unresolved citation reference s
     env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "validation_blocker");
-  assert.equal(result.error.status, 422);
-  const gotKeys = result.blockers.map((b) => b.validator_key).sort();
-  assert.deepEqual(gotKeys, expectedKeys);
-  const byKey = new Map(result.blockers.map((b) => [b.validator_key, b]));
-  assert.equal(byKey.get("VAL-GEN-002").blocking_reason, "missing_or_unresolved_exact_citation");
-  assert.equal(byKey.get("VAL-GEN-003").blocking_reason, "unauthorized_claim_reference");
-
-  // No durable state from the blocked attempt.
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
+  // Owner direction 2026-11-10: the model's wrong citation never fails the
+  // request; the block is restated from the claim it cited, the real
+  // validator keys are recorded on the draft, and nothing unresolved is saved.
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result.blockers));
+  assert.equal(state.generatedContentDrafts.length, 1);
+  const fallback = state.generatedContentDrafts[0].validator_results_recorded.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.deepEqual(fallback.evidence.refused_validator_keys, expectedKeys);
+  assert.deepEqual(state.generatedContentBlocks.map((b) => b.text), [claimRow().claim_statement]);
+  assert.deepEqual(state.generatedContentCitations.map((c) => c.evidence_item_id), [EVIDENCE], "only the projected evidence is cited");
 });
 
 // --- CASE C: VAL-GEN-004 unsupported numeric/causal assertion ---
 
-test("P14-09 diagnostic propagation CASE C: an unsupported causal assertion surfaces VAL-GEN-004", async () => {
+test("P14-09 diagnostic propagation CASE C: an unsupported causal assertion is detected by VAL-GEN-004 and never saved", async () => {
   const state = makeState();
   const evaluator = makeEvaluator();
   const repository = makeRepository(state, evaluator);
@@ -391,9 +389,13 @@ test("P14-09 diagnostic propagation CASE C: an unsupported causal assertion surf
     metadataOnlyAudit: auditRecorder(),
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "validation_blocker");
-  assert.ok(result.blockers.some((b) => b.validator_key === "VAL-GEN-004" && b.blocking_reason === "unsupported_numeric_or_causal_assertion"));
+  // Owner direction 2026-11-10: VAL-GEN-004 still detects the assertion; the
+  // refused wording is never saved, and the request is not failed for it.
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result.blockers));
+  const fallback = state.generatedContentDrafts[0].validator_results_recorded.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.deepEqual(fallback.evidence.refused_validator_keys, ["VAL-GEN-004"]);
+  assert.ok(fallback.evidence.refused_classes.includes("causal_language"));
+  assert.ok(!state.generatedContentBlocks.some((b) => /caused 13%/.test(b.text)), "the refused sentence is not saved");
 });
 
 // --- CASE D: VAL-GEN-005 audience-authority failure ---
@@ -417,7 +419,7 @@ test("P14-09 diagnostic propagation CASE D: a claim without internal audience au
 // --- CASE E: generator-result contract invalid (fail-closed, bounded stage
 // discriminator only - no VAL-GEN key, since the VAL-GEN validator never ran) ---
 
-test("P14-09 diagnostic propagation CASE E: an invalid generator result (e.g. empty blocks) remains fail-closed with only the bounded generator-result discriminator", async () => {
+test("P14-09 diagnostic propagation CASE E: an unusable generator result (empty blocks) is rebuilt from the selected claims", async () => {
   const state = makeState();
   const evaluator = makeEvaluator();
   const repository = makeRepository(state, evaluator);
@@ -427,16 +429,14 @@ test("P14-09 diagnostic propagation CASE E: an invalid generator result (e.g. em
     metadataOnlyAudit: auditRecorder(),
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "validation_blocker");
-  assert.equal(result.error.status, 422);
-  assert.deepEqual(result.blockers, [{
-    validator_key: GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
-    severity: "blocker",
-    blocking_reason: "generator_result_blocks_empty",
-  }]);
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
+  // Owner direction 2026-11-10: an unusable model result is rebuilt from the
+  // selected claims' own governed wording instead of failing the request.
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result.blockers));
+  assert.equal(state.generatedContentDrafts.length, 1);
+  const fallback = state.generatedContentDrafts[0].validator_results_recorded.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.equal(fallback.evidence.model_result_usable, false);
+  assert.deepEqual(state.generatedContentBlocks.map((b) => b.text), [claimRow().claim_statement]);
+  assert.ok(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY);
 });
 
 // --- CASE F: malformed traceability-result contract ---

@@ -1733,32 +1733,45 @@ async function runSuite() {
     ids.measuredDraftId = data.generatedContentDraftId;
   });
 
-  test("generation: fabricated numbers, causal language, missing citations, and 'distinct'/'verified' wording are rejected with nothing persisted", async () => {
+  test("generation: fabricated numbers, causal language, missing citations, and 'distinct'/'verified' wording are detected and never saved; the block is restated", async () => {
+    // Owner direction 2026-11-10: the model's wording never fails an
+    // Evidence Summary; refused blocks are restated from the claim and the
+    // detection is recorded on the draft (before: rejected, nothing persisted).
+    const saved = async (result) => {
+      const draftId = result.data.generatedContentDraftId;
+      const [draft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      const rows = await query(`SELECT b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+        JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id WHERE b.generated_content_draft_id = $1::uuid`, [draftId]);
+      const fallback = (draft.validator_results.results || draft.validator_results).find((item) => item.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+      return { rows, text: rows.map((row) => row.text).join("\n"), detected: fallback?.evidence.refused_validator_keys ?? [] };
+    };
     const before = await generationCounts();
     const cases = [
-      ["fabricated count", COMPLIANT_TEXT.replace("has 5 source records", "has 6 source records"), ["VAL-GEN-004"]],
-      ["fabricated rate", `${COMPLIANT_TEXT} That is 83% of planned sessions.`, ["VAL-GEN-004"]],
-      ["causal language", `${COMPLIANT_TEXT} The programme improves literacy.`, ["VAL-GEN-004"]],
-      ["period called verified", COMPLIANT_TEXT.replace("is attested in that definition and not verified against record dates", "was verified against the record dates"), ["VAL-GEN-008"]],
-      ["records called distinct sessions", `${COMPLIANT_TEXT} These are 5 distinct sessions delivered.`, ["VAL-GEN-008"]],
+      ["fabricated count", COMPLIANT_TEXT.replace("has 5 source records", "has 6 source records"), ["VAL-GEN-004"], "has 6 source records"],
+      ["fabricated rate", `${COMPLIANT_TEXT} That is 83% of planned sessions.`, ["VAL-GEN-004"], "83% of planned sessions"],
+      ["causal language", `${COMPLIANT_TEXT} The programme improves literacy.`, ["VAL-GEN-004"], "improves literacy"],
+      ["period called verified", COMPLIANT_TEXT.replace("is attested in that definition and not verified against record dates", "was verified against the record dates"), ["VAL-GEN-008"], "was verified against the record dates"],
+      ["records called distinct sessions", `${COMPLIANT_TEXT} These are 5 distinct sessions delivered.`, ["VAL-GEN-008"], "5 distinct sessions delivered"],
     ];
-    for (const [label, text, expected] of cases) {
+    for (const [label, text, expected, injected] of cases) {
       const provider = replying(measuredBlock(text));
       const result = await generate([ids.measurementClaimId], provider);
-      assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"], `${label}: ${JSON.stringify(result)}`);
+      assert.equal(result.ok, true, `${label}: ${JSON.stringify(result)}`);
       assert.equal(provider.calls.length, 1, label);
-      for (const key of expected) assert.ok(blockerKeys(result).includes(key), `${label}: ${JSON.stringify(result.blockers)}`);
+      const persisted = await saved(result);
+      for (const key of expected) assert.ok(persisted.detected.includes(key), `${label}: ${JSON.stringify(persisted.detected)}`);
+      assert.ok(!persisted.text.includes(injected), `${label}: the refused wording is not saved`);
+      assert.deepEqual(persisted.rows.map((row) => [row.claim_id, row.evidence_item_id]), [[ids.measurementClaimId, ids.measurementEvidenceId]], label);
     }
-    // An uncited block (even beside a compliant one) is not accepted.
-    const uncited = await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT), { text: "The source records 5 programme sessions.", citations: [] }));
-    assert.equal(uncited.ok, false);
-    // Refused by the generator-result contract, before the VAL-GEN set runs.
-    assert.ok(blockerKeys(uncited).some((key) => key === "VAL-GEN-002" || key === "VAL-GEN-RESULT-P0-001"), JSON.stringify(uncited.blockers));
-    // A citation to evidence that is not the claim's is not accepted.
-    const wrongPair = await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT, ids.measurementClaimId, ids.legacyFieldEvidenceId)));
-    assert.equal(wrongPair.ok, false);
-    assert.ok(blockerKeys(wrongPair).includes("VAL-GEN-003"), JSON.stringify(wrongPair.blockers));
-    assert.deepEqual(await generationCounts(), before, "no rejected draft is persisted");
+    // An uncited block (even beside a compliant one) is never saved.
+    const uncited = await saved(await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT), { text: "The source records 5 programme sessions.", citations: [] })));
+    assert.ok(uncited.rows.every((row) => row.claim_id === ids.measurementClaimId && row.evidence_item_id === ids.measurementEvidenceId), JSON.stringify(uncited.rows));
+    // A citation to evidence that is not the claim's is never saved.
+    const wrongPair = await saved(await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT, ids.measurementClaimId, ids.legacyFieldEvidenceId))));
+    assert.ok(wrongPair.detected.includes("VAL-GEN-003"), JSON.stringify(wrongPair.detected));
+    assert.deepEqual(wrongPair.rows.map((row) => [row.claim_id, row.evidence_item_id]), [[ids.measurementClaimId, ids.measurementEvidenceId]]);
+    const after = await generationCounts();
+    assert.equal(after.drafts, before.drafts + cases.length + 2, "each attempt saves one governed draft");
   });
 
   test("generation: truthful text that omits or paraphrases the disclosure wording persists with the server-composed disclosure", async () => {

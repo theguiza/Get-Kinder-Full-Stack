@@ -841,7 +841,7 @@ async function runPackage4Acceptance() {
     });
 
     // ---- Validator through the real route (API; stub responses chosen) ----
-    await test("V: through the real generation route, a qualified attribution of the estimate is saved; an estimate as KAI's result or guidance as a completed step is refused after one provider call with nothing saved", async () => {
+    await test("V: through the real generation route, a qualified attribution of the estimate is saved; an estimate as KAI's result or guidance as a completed step is detected and never saved, and the draft is restated instead of failing", async () => {
       const C = P.docs.C;
       const B = P.docs.B;
       const A = P.docs.A;
@@ -855,18 +855,33 @@ async function runPackage4Acceptance() {
         context_as_verified: { ids: [A.claimId], text: { [A.claimId]: "KAI verified that overlapping CC and RA attendance was legitimate." } },
       };
       report.validator.refused = {};
+      // Owner direction 2026-11-10: prohibited wording is detected by
+      // VAL-GEN-004 and never saved, and it no longer fails the request: the
+      // refused block is restated from the cited claim's own governed text.
       for (const [label, attempt] of Object.entries(attempts)) {
         respond = (claim) => attempt.text[claim.claimId] ?? null;
         const result = await generate(P, attempt.ids);
         respond = null;
-        assert.equal(result.status, 422, `${label}: ${J(result.body)}`);
-        assert.ok(result.validatorKeys.includes("VAL-GEN-004"), `${label}: ${J(result.validatorKeys)}`);
-        assert.ok(result.assertionClasses.some((k) => k.startsWith("document_")), `${label}: ${J(result.assertionClasses)}`);
-        assert.deepEqual([result.providerCalls, result.draftsWritten], [1, 0], label);
-        assert.match(result.customerMessage, /source document/);
-        report.validator.refused[label] = { http: result.status, validator: "VAL-GEN-004", classes: result.assertionClasses, provider_calls: result.providerCalls, drafts_written: result.draftsWritten,
-          customer_message: result.customerMessage };
-        recordRow("V prohibited output", { claims: label, operation: "generate internal evidence summary", http: result.status, provider_invoked: true, draft: "refused (VAL-GEN-004)", blocker: result.assertionClasses.join(",") });
+        assert.deepEqual([result.status, result.providerCalls, result.draftsWritten], [201, 1, 1], `${label}: ${J(result.body)}`);
+        const [draft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [result.draftId]);
+        const fallback = draft.validator_results.find((item) => item.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+        assert.ok(fallback, `${label}: ${J(draft.validator_results)}`);
+        assert.ok(fallback.evidence.refused_validator_keys.includes("VAL-GEN-004"), `${label}: ${J(fallback.evidence)}`);
+        assert.ok(fallback.evidence.refused_classes.some((k) => k.startsWith("document_")), `${label}: ${J(fallback.evidence)}`);
+        const saved = await query(`SELECT b.text, c.claim_id::text FROM kai.generated_content_blocks b JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [result.draftId]);
+        for (const text of Object.values(attempt.text)) assert.ok(!saved.some((row) => row.text.includes(text)), `${label}: the prohibited wording is not saved`);
+        for (const claimId of Object.keys(attempt.text)) {
+          const persistedClaim = Object.values(P.docs).find((doc) => doc.claimId === claimId);
+          assert.ok(saved.some((row) => row.claim_id === claimId && row.text === persistedClaim.statement), `${label}: restated as the source-reported claim`);
+        }
+        const reads = await clientReads(P, result.draftId);
+        assert.equal(reads.markdown, 200);
+        assert.match(reads.markdownText, /Restated passages:\*\* some generated wording did not pass these checks/);
+        report.validator.refused[label] = { http: result.status, provider_calls: result.providerCalls, drafts_written: result.draftsWritten,
+          detected: fallback.evidence.refused_validator_keys, classes: fallback.evidence.refused_classes, replaced_blocks: fallback.evidence.replaced_model_block_ordinals, saved: saved.map((row) => row.text.slice(0, 90)) };
+        recordRow("V prohibited wording", { claims: label, operation: "generate internal evidence summary", http: result.status, provider_invoked: true, draft: "saved (refused wording restated)", provisional_admitted: true,
+          blocker: fallback.evidence.refused_classes.join(",") });
       }
       const permittedText = {
         [C.claimId]: "The management review reports a preliminary estimate that at least 90 different people received a direct CC or RA service in FY 2024-25; the review says it came from a rough tally, not a distinct-person calculation, and it remains unverified.",
@@ -905,6 +920,9 @@ async function runPackage4Acceptance() {
       }
       const mixed = await generate(D, [D.claims.encounters.claimId, D.claims.people.claimId, D.docs.C.claimId]);
       assert.deepEqual([mixed.status, mixed.blockers[0], mixed.providerCalls, mixed.draftsWritten], [422, "ai_processing_not_permitted", 0, 0], J(mixed.body));
+      // The customer sees the server's reason and fix, never "Request failed KAI validation."
+      assert.doesNotMatch(mixed.customerMessage, /^Request failed/);
+      assert.match(mixed.customerMessage, /AI processing/i);
       const measuredOnly = await generate(D, [D.claims.encounters.claimId, D.claims.people.claimId]);
       assert.deepEqual([measuredOnly.status, measuredOnly.providerCalls, measuredOnly.draftsWritten], [201, 1, 1], J(measuredOnly.body));
       assert.ok(!measuredOnly.sent[0].claims.some((c) => c.claimId === D.docs.C.claimId));
