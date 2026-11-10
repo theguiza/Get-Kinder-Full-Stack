@@ -79,6 +79,19 @@ const DERIVED_MEASUREMENT_INSTRUCTION = [
   "say whether the meaning was stated by a person at the organization or not yet stated.",
 ].join(" ");
 
+// Owner Package 4: a source document statement is what the source says.
+const DOCUMENT_STATEMENT_INSTRUCTION = [
+  "For a claim whose limitationCodes include document. codes:",
+  "attribute what it says to the source document (for example \"the review reports\"), keeping its qualifiers;",
+  "a document.source_estimate figure is the source's own estimate: keep its estimate wording and never present it as calculated, verified or established by KAI;",
+  "a document.method_or_instruction statement says what should be done: never write that the step was carried out unless another cited claim shows it;",
+  "never replace a cited measurement's number with a document's figure.",
+].join(" ");
+
+function hasDocumentStatementClaims(claims) {
+  return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.some((code) => typeof code === "string" && code.startsWith("document.")));
+}
+
 function hasDerivedMeasurementClaims(claims) {
   return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.some(isDerivedLimitationCode));
 }
@@ -160,6 +173,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
         // byte-for-byte unchanged.
         ...(hasMeasurementLimitations(generatorInput.claims) ? [MEASUREMENT_INSTRUCTION] : []),
         ...(hasDerivedMeasurementClaims(generatorInput.claims) ? [DERIVED_MEASUREMENT_INSTRUCTION] : []),
+        ...(hasDocumentStatementClaims(generatorInput.claims) ? [DOCUMENT_STATEMENT_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",

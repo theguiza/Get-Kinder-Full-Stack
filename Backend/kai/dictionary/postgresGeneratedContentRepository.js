@@ -18,7 +18,7 @@ import {
 } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { measuredFactIntegrityHoldsInTransaction, traceabilityRecordsReviewRejection } from "./postgresOrdinaryInternalFactAuthority.js";
-import { omitDirectIdentifiersForExternalUse } from "../validators/kaiDocumentEvidenceValidators.js";
+import { DOCUMENT_EVIDENCE_TYPE, documentGenerationLimitationCodes, omitDirectIdentifiersForExternalUse } from "../validators/kaiDocumentEvidenceValidators.js";
 import {
   FREE_IMPACT_ASSESSMENT_COMPOSITION,
   MAX_MODEL_ASSESSMENT_BLOCKS,
@@ -1749,6 +1749,13 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           }
           measuredValueByClaimId.set(projection.claimId, derivedRow.measured_value);
           measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
+        }
+        // Owner Package 4: a document statement's caveats and meaning (its
+        // source-reported status, uncertainty, estimate or method/instruction
+        // wording) travel with it, from the persisted claim's quoted excerpt,
+        // so the model and the validators know it is what the source says.
+        if (projection.evidenceType === DOCUMENT_EVIDENCE_TYPE) {
+          measurementCodes = documentGenerationLimitationCodes(projection.claimStatement);
         }
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }

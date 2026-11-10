@@ -240,7 +240,9 @@ function sanitizeExportEligibilityDiagnosticEvidence(evidence) {
 // model's own text or the assembled draft failed, and how many model
 // attempts ran. Closed values and bounded integers only; generated wording,
 // unsupported terms, claim text and prompts are never returned.
-const UNSUPPORTED_ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language"]);
+// Owner Package 4: the document statement authority classes of VAL-GEN-004.
+const UNSUPPORTED_ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language", "document_value_presented_as_established",
+  "document_estimate_qualifier_dropped", "document_guidance_presented_as_completed", "document_statement_presented_as_verified"]);
 const ASSESSMENT_SECTION_KEYS = new Set(["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]);
 const UNSUPPORTED_ASSERTION_ORIGINS = new Set(["model_authored", "composed_draft"]);
 

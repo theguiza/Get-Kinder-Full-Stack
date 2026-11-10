@@ -19,6 +19,7 @@ import {
   composeDerivedMeasurementDisclosure,
   isDerivedLimitationCode,
 } from "./kaiDerivedMeasurementValidators.js";
+import { documentEstimateQuantities, excerptFromDocumentClaimStatement, statedQuantities } from "./kaiDocumentEvidenceValidators.js";
 
 // A record-count (measurement./coverage.) or source-derived (derived.) code:
 // either makes a claim a measured claim for VAL-GEN-008.
@@ -303,9 +304,133 @@ function canonicalNumericLiteral(literal) {
   return Number.isFinite(value) ? `${value}${percent ? "%" : ""}` : literal;
 }
 
-export function unsupportedAssertionViolations({ blocks, generationClaims } = {}) {
+// ---------------------------------------------------------------------------
+// Document statement authority (owner Package 4, 2026-11-10). A cited source
+// document statement licenses reporting what the SOURCE says, never that KAI
+// established it. Identified by provenance: the server gives every claim from
+// document-statement evidence the source-reported code, and its meaning codes
+// from the persisted excerpt (documentGenerationLimitationCodes). Applied per
+// sentence of a block that cites such a claim:
+// - a quantity that only a cited document claim states (not a cited measured
+//   or other claim) must be attributed to the source, must not be presented
+//   as calculated, verified or established by KAI, and - when the source gave
+//   it as an estimate - must keep estimate or uncertainty wording;
+// - a completed processing step (deduplicated, reconciled, verified, ...) is
+//   not asserted from a document: only a cited non-document claim's own words,
+//   or a sentence stating that claim's measured number, license it; a source
+//   instruction may be reported as an instruction ("must be deduplicated");
+// - KAI is not said to have verified, confirmed or established anything a
+//   sentence does not support with a cited non-document claim's number.
+// A verbatim quotation of a cited excerpt introduced as the source's words is
+// the source speaking: only its estimate qualifiers are checked.
+const DOCUMENT_SOURCE_CODE = "document.source_reported_not_verified";
+const DOCUMENT_ESTIMATE_CODE = "document.source_estimate";
+const DOCUMENT_METHOD_CODE = "document.method_or_instruction";
+// The source as the subject of a reporting verb ("the management review
+// reports", "the programme notes state"), "according to", or the claim's own
+// "Source-reported" wording. "As the review's estimate shows" endorses rather
+// than attributes, so it is not attribution.
+const SOURCE_ATTRIBUTION = new RegExp(
+  "\\baccording to\\b|\\bsource[- ]reported\\b|"
+  + "\\b(?:sources?|documents?|review|notes|note|report|draft|manager|management|file|pdf|coordinators?|staff)\\b(?:'s)?(?:\\s+[\\w'-]+){0,4}?\\s+"
+  + "(?:states?|stated|says|said|reports?|reported|records|recorded|notes|noted|describes?|described|estimates|estimated|mentions?|mentioned|"
+  + "recommends?|recommended|requires?|required|calls? for|asks?|asked|instructs?|advises?|advised|gives?|gave|cites?|refers? to)\\b",
+  "i",
+);
+const KAI_AUTHORITY = /\b(?:KAI|we|our (?:analysis|calculation|reconciliation|measurement))\b(?:'s)?[^.!?;]{0,40}?\b(?:calculated|computed|established|verified|confirmed|validated|counted|measured|determined|deduplicated|de-duplicated|reconciled|found)\b|\bKAI[- ](?:calculated|verified|measured|established|confirmed)\b/i;
+const INDEPENDENT_AUTHORITY = /\b(?:independently (?:verified|confirmed|calculated|established|reconciled|validated)|verified (?:figure|result|count|total|number|distinct))\b/i;
+const UNCERTAINTY_KEPT = /\b(?:preliminary|estimate[sd]?|estimated|approximately|approximate|about|around|roughly|rough|tally|at least|at most|nearly|up to|unverified|unreconciled|unconfirmed|not (?:been )?(?:independently )?(?:verified|reconciled|confirmed|established|calculated))\b/i;
+const COMPLETED_PROCESSING = /\b(?:deduplicated|de-duplicated|reconciled|cross-checked|verified|validated|confirmed|calculated|matched|corrected)\b/gi;
+const GUIDED_PROCESSING = /\b(?:should|must|shall|needs? to|ought to|to)\s+(?:not\s+)?(?:be|have been|first be)\s+(?:\w+\s+)?$/i;
+
+function isDocumentGenerationClaim(claim) {
+  return (claim?.limitationCodes || []).includes(DOCUMENT_SOURCE_CODE);
+}
+
+function canonicalQuantity(literal) {
+  return canonicalNumericLiteral(String(literal).replace(/^[-+]/, ""));
+}
+
+function blockSentences(text) {
+  return String(text || "").split(/(?<=[.!?;])\s+(?=["“(]?[A-Z0-9])/).filter((sentence) => sentence.trim().length > 0);
+}
+
+function negatedWithin(sentence, index) {
+  return /(?:\bnot|\bnever|n't|\bno)\b(?:\s+\w+){0,3}\s*$/i.test(sentence.slice(Math.max(0, index - 40), index));
+}
+
+function affirmativeAuthority(sentence) {
+  for (const pattern of [KAI_AUTHORITY, INDEPENDENT_AUTHORITY]) {
+    const match = new RegExp(pattern.source, "gi");
+    for (const found of sentence.matchAll(match)) {
+      if (!/\bnot\b|n't|\bnever\b/i.test(found[0]) && !negatedWithin(sentence, found.index)) return true;
+    }
+  }
+  return false;
+}
+
+export function documentStatementAuthorityViolations({ blocks, generationClaims } = {}) {
   const claimById = generationClaimsById(generationClaims || []);
   const violations = [];
+  for (const block of blocks || []) {
+    const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
+    const documents = cited.filter(isDocumentGenerationClaim);
+    if (documents.length === 0) continue;
+    const others = cited.filter((claim) => !isDocumentGenerationClaim(claim));
+    const otherText = others.map((claim) => claim.claimStatement || "").join("\n");
+    const otherNumbers = new Set(literals(otherText, NUMERIC_LITERAL_PATTERN).map(canonicalQuantity));
+    const excerpts = documents.map((claim) => excerptFromDocumentClaimStatement(claim.claimStatement) ?? String(claim.claimStatement || ""));
+    const documentQuantities = new Set(excerpts.flatMap(statedQuantities).map(canonicalQuantity).filter((value) => !otherNumbers.has(value)));
+    const estimateQuantities = new Set(documents.filter((claim) => claim.limitationCodes.includes(DOCUMENT_ESTIMATE_CODE))
+      .flatMap((claim) => documentEstimateQuantities(excerptFromDocumentClaimStatement(claim.claimStatement) ?? "")).map(canonicalQuantity));
+    const methodCited = documents.some((claim) => claim.limitationCodes.includes(DOCUMENT_METHOD_CODE));
+    // Processing words a cited excerpt itself asserts as done (not as an instruction).
+    const sourceAssertedProcessing = new Set(excerpts.flatMap((excerpt) => [...excerpt.matchAll(COMPLETED_PROCESSING)]
+      .filter((match) => !GUIDED_PROCESSING.test(excerpt.slice(Math.max(0, match.index - 40), match.index)) && !negatedWithin(excerpt, match.index))
+      .map((match) => match[0].toLowerCase())));
+    const push = (type) => violations.push({ type, block_ordinal: block.ordinal, section: ASSESSMENT_BLOCK_MARKER.exec(String(block.text ?? ""))?.[1] ?? null });
+
+    // The server's own measurement disclosures are not the model's assertions.
+    let text = modelAuthoredText(block.text, others.filter((claim) => (claim.limitationCodes || []).some(isMeasuredClaimCode)));
+    // Verbatim quotations of a cited excerpt, introduced as the source's own words.
+    text = text.replace(/"([^"\n]+)"|“([^”\n]+)”/g, (whole, straight, curly, offset, full) => {
+      const quotation = straight ?? curly;
+      const lead = full.slice(Math.max(0, offset - 160), offset).split(/(?<=[.!?])\s+/).at(-1) ?? "";
+      if (!excerpts.some((excerpt) => excerpt.includes(quotation)) || !SOURCE_ATTRIBUTION.test(lead)) return whole;
+      const quotedEstimates = statedQuantities(quotation).map(canonicalQuantity).filter((value) => estimateQuantities.has(value));
+      if (quotedEstimates.length > 0 && !UNCERTAINTY_KEPT.test(quotation) && !UNCERTAINTY_KEPT.test(lead)) push("document_estimate_qualifier_dropped");
+      return " [quoted source words] ";
+    });
+
+    for (const sentence of blockSentences(text)) {
+      const sentenceNumbers = statedQuantities(sentence).map(canonicalQuantity);
+      const measuredSentence = sentenceNumbers.some((value) => otherNumbers.has(value));
+      const documentOnly = sentenceNumbers.filter((value) => documentQuantities.has(value));
+      const attributed = SOURCE_ATTRIBUTION.test(sentence);
+      const authority = affirmativeAuthority(sentence);
+      if (documentOnly.length > 0) {
+        if (!attributed || authority) push("document_value_presented_as_established");
+        if (documentOnly.some((value) => estimateQuantities.has(value)) && !UNCERTAINTY_KEPT.test(sentence)) push("document_estimate_qualifier_dropped");
+      } else if (authority && !measuredSentence) {
+        push("document_statement_presented_as_verified");
+      }
+      if (measuredSentence) continue;
+      for (const match of sentence.matchAll(COMPLETED_PROCESSING)) {
+        const word = match[0].toLowerCase();
+        if (negatedWithin(sentence, match.index) || GUIDED_PROCESSING.test(sentence.slice(Math.max(0, match.index - 40), match.index))) continue;
+        if (new RegExp(`\\b${word}\\b`, "i").test(otherText)) continue;
+        if (!methodCited && attributed && !authority && sourceAssertedProcessing.has(word)) continue;
+        push("document_guidance_presented_as_completed");
+        break;
+      }
+    }
+  }
+  return violations;
+}
+
+export function unsupportedAssertionViolations({ blocks, generationClaims } = {}) {
+  const claimById = generationClaimsById(generationClaims || []);
+  const violations = [...documentStatementAuthorityViolations({ blocks, generationClaims })];
   for (const block of blocks || []) {
     const citedStatements = (block.citations || [])
       .map((citation) => claimById.get(citation.claimId)?.claimStatement || "")

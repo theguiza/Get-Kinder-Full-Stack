@@ -3615,7 +3615,7 @@ export default function ImpactEvidenceLibrary({
                       {item.statement ? <FindingText statement={item.statement} /> : <div className="fw-semibold">Evidence statement not yet available</div>}
                     </div>
                     <div className="d-flex flex-wrap gap-2 mt-1">
-                      <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent)}</span>
+                      <span className="badge text-bg-light border">{findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent, item.statement)}</span>
                       {gkSourceVersions.get(item.sourceVersionId)?.fileName ? (
                         <span className="small text-muted">Source: {gkSourceVersions.get(item.sourceVersionId).fileName}</span>
                       ) : null}
@@ -3794,7 +3794,7 @@ export default function ImpactEvidenceLibrary({
                     </span>
                     <StatusBadge status={claim.libraryStatus} />
                   </div>
-                  <div className="small mt-1">{findingTypeLabel(claim.evidenceType, null)}</div>
+                  <div className="small mt-1">{findingTypeLabel(claim.evidenceType, null, null, claim.claimStatement)}</div>
                   {workflowOperations.generateDrafts && canSelectClaimForInternalGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input

@@ -1,5 +1,18 @@
 import { createHash } from "node:crypto";
 import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
+import {
+  DOCUMENT_CLAIM_STATEMENT_PREFIX,
+  DOCUMENT_EVIDENCE_STATEMENT_PREFIX,
+  DOCUMENT_MEANING_CODES,
+  documentEstimateQuantities,
+  documentExcerptFromStatement,
+  documentStatementMeaning,
+  documentStatementMeaningCodes,
+  splitDocumentSentences,
+  statedQuantities,
+} from "../../../shared/kaiDocumentStatementMeaning.js";
+
+export { DOCUMENT_MEANING_CODES, documentEstimateQuantities, documentStatementMeaningCodes, splitDocumentSentences, statedQuantities };
 
 /**
  * KAI document-statement evidence (pure; no SQL, no I/O).
@@ -130,7 +143,6 @@ const INSTRUCTION_PATTERNS = Object.freeze([
 ]);
 
 const TERMINAL_PUNCTUATION = /[.!?]["'”’)\]]*$/;
-const ABBREVIATIONS = /\b(e\.g|i\.e|etc|vs|approx|fig|dr|mr|mrs|ms|inc|ltd|cf|al)\.$/i;
 
 export function documentExcerptSha256(excerpt) {
   return createHash("sha256").update(excerpt, "utf8").digest("hex");
@@ -157,28 +169,6 @@ function joinLines(lines) {
     else text += ` ${line}`;
   }
   return text;
-}
-
-/**
- * Sentences of one paragraph, split after terminal punctuation followed by
- * whitespace and an opening capital, digit or quote; common abbreviations
- * and decimals ("65.8%") never split.
- */
-export function splitDocumentSentences(paragraph) {
-  const sentences = [];
-  let start = 0;
-  const pattern = /[.!?]["'”’)\]]*(?=\s+["“'(]?[A-Z0-9])/g;
-  let match;
-  while ((match = pattern.exec(paragraph)) !== null) {
-    const end = match.index + match[0].length;
-    const candidate = paragraph.slice(start, end).trim();
-    if (ABBREVIATIONS.test(paragraph.slice(start, match.index + 1))) continue;
-    if (candidate) sentences.push(candidate);
-    start = end;
-  }
-  const rest = paragraph.slice(start).trim();
-  if (rest) sentences.push(rest);
-  return sentences;
 }
 
 // A block continues into the next only when it stops mid-sentence: prose of
@@ -322,8 +312,8 @@ function sentenceLabel(coordinates) {
     : `sentences ${coordinates.sentence_start}-${coordinates.sentence_end}`;
 }
 
-const STATEMENT_PREFIX = "Source document statement";
-const CLAIM_PREFIX = "Source-reported, not independently verified";
+const STATEMENT_PREFIX = DOCUMENT_EVIDENCE_STATEMENT_PREFIX;
+const CLAIM_PREFIX = DOCUMENT_CLAIM_STATEMENT_PREFIX;
 
 export function composeDocumentEvidenceStatement({ excerpt, coordinates }) {
   return `${STATEMENT_PREFIX} (${documentLocatorLabel(coordinates)}, ${sentenceLabel(coordinates)}): "${excerpt}"`;
@@ -410,11 +400,48 @@ export function documentLimitationCodes(excerpt) {
   ];
 }
 
+// What a document statement is (owner Package 4, 2026-11-10): the shared
+// meaning helpers (shared/kaiDocumentStatementMeaning.js), so the server and
+// Knowledge Studio name a statement the same way.
+/**
+ * One label for how a reader should take a document statement, in order of
+ * what would most mislead if lost: an estimate, a method or instruction, an
+ * interpretation, a limitation or caveat, or a reported observation.
+ */
+export function documentStatementRole(excerpt) {
+  const meaning = documentStatementMeaning(excerpt);
+  if (meaning) return meaning;
+  const signals = documentStatementSignals(String(excerpt ?? ""));
+  if (signals.contains_interpretation_or_guidance) return "source_interpretation";
+  if (signals.contains_limitation) return "source_limitation";
+  return "source_observation";
+}
+
+// The excerpt a composed document claim statement quotes, or null.
+export function excerptFromDocumentClaimStatement(statement) {
+  return typeof statement === "string" && statement.startsWith(`${CLAIM_PREFIX} (`) ? documentExcerptFromStatement(statement) : null;
+}
+
+/**
+ * The limitation codes a document statement claim carries into generation and
+ * the internal report: its statement codes (documentLimitationCodes) and its
+ * meaning codes, all from the quoted excerpt of the persisted claim. A
+ * statement that is not a composed document claim still carries the
+ * source-reported code, never none.
+ */
+export function documentGenerationLimitationCodes(claimStatement) {
+  const excerpt = excerptFromDocumentClaimStatement(claimStatement);
+  if (excerpt === null) return ["document.source_reported_not_verified"];
+  return [...new Set([...documentLimitationCodes(excerpt), ...documentStatementMeaningCodes(excerpt)])].sort();
+}
+
 const LIMITATION_DESCRIPTIONS = Object.freeze({
   "document.source_reported_not_verified": "This is what the source document states; KAI has not verified it against the underlying records.",
   "document.contains_interpretation_or_guidance": "The statement includes the source's own interpretation or guidance, not only an observed fact.",
   "document.contains_uncertainty": "The statement carries its own uncertainty or estimate wording; keep it when the statement is used.",
   "document.self_reported": "The statement rests on self-reported ratings or staff recollection.",
+  [DOCUMENT_MEANING_CODES.SOURCE_ESTIMATE]: "The figure is the source's own estimate; KAI did not calculate or verify it, and it is not a KAI measurement. Keep the source's qualifiers with it.",
+  [DOCUMENT_MEANING_CODES.METHOD_OR_INSTRUCTION]: "The statement is a method, requirement or recommendation in the source; it does not show that the step was carried out.",
 });
 
 export function describeDocumentLimitationCode(code) {

@@ -9,6 +9,7 @@ import { loadReportContextInTransaction } from "./postgresExportManifestRenderMo
 import { MEASUREMENT_EVIDENCE_TYPE, countedDuplicateGroups, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import { DOCUMENT_EVIDENCE_TYPE, documentGenerationLimitationCodes } from "../validators/kaiDocumentEvidenceValidators.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const INTERNAL_REPORT_MODEL_CONTRACT_VERSION = "kai-sprint2-internal-report-model-v1";
@@ -162,9 +163,13 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         profileCanonicalSha256: source.profile_canonical_sha256,
         fieldKeys: [...source.field_keys],
       })),
+    // Owner Package 4: a document statement keeps its own caveats and meaning
+    // (source-reported, uncertainty, estimate, method or instruction), from
+    // the persisted claim's quoted excerpt, exactly as generation carried them.
     limitationCodes: measurementRow
       ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions })
-      : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions }) : [],
+      : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions })
+        : evidenceItemRow?.evidence_type === DOCUMENT_EVIDENCE_TYPE ? documentGenerationLimitationCodes(data.claim.statement) : [],
   };
 }
 

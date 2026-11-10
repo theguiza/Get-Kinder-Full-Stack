@@ -24,6 +24,8 @@
  *   measurement's current statement is the finding, never both.
  */
 
+import { documentStatementTypeLabel } from "../../shared/kaiDocumentStatementMeaning.js";
+
 export const KNOWLEDGE_STUDIO_VIEWS = Object.freeze([
   ["sources", "Sources"],
   ["impact", "Impact"],
@@ -89,10 +91,12 @@ export function findingCategory(evidenceType, measurementFamily, measurementEvid
   return "findings";
 }
 
-export function findingTypeLabel(evidenceType, measurementFamily, measurementEvidenceCurrent = null) {
+// A document statement is named by what it is (owner Package 4): the source's
+// estimate or method guidance is not an observation; from its own words.
+export function findingTypeLabel(evidenceType, measurementFamily, measurementEvidenceCurrent = null, statement = null) {
   if (evidenceType === EVIDENCE_TYPES.structural) return "Column in a source";
   if (evidenceType === EVIDENCE_TYPES.derived && measurementEvidenceCurrent === false) return "Earlier statement of a measurement (meaning since recorded)";
-  if (evidenceType === EVIDENCE_TYPES.document) return "From a document";
+  if (evidenceType === EVIDENCE_TYPES.document) return documentStatementTypeLabel(statement);
   if (evidenceType === EVIDENCE_TYPES.recordCount) return "Record count";
   if (evidenceType === EVIDENCE_TYPES.derived) {
     if (measurementFamily === MEASUREMENT_FAMILIES.pairedOutcome) return "Baseline and follow-up measurement";
@@ -149,7 +153,7 @@ export function buildFindings({ evidenceItems = [], claims = [], sources = [] } 
       statement: item.statement || "",
       evidenceType: item.evidenceType || null,
       category: findingCategory(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent),
-      typeLabel: findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent),
+      typeLabel: findingTypeLabel(item.evidenceType, item.measurementFamily, item.measurementEvidenceCurrent, item.statement),
       sourceVersionId: item.sourceVersionId || null,
       sourceFileName: version?.fileName || "",
       sourceIsCurrent: version ? version.isCurrent : null,
@@ -169,7 +173,7 @@ export function buildFindings({ evidenceItems = [], claims = [], sources = [] } 
       // The Claim Library does not carry the measurement family: a derived
       // measurement whose evidence is not loaded stays a neutral measurement.
       category: findingCategory(claim.evidenceType, null),
-      typeLabel: findingTypeLabel(claim.evidenceType, null),
+      typeLabel: findingTypeLabel(claim.evidenceType, null, null, claim.claimStatement || claim.evidenceStatement),
       sourceVersionId: claim.evidenceSourceVersionId || null,
       sourceFileName: version?.fileName || "",
       sourceIsCurrent: claim.evidenceSourceVersionIsCurrent ?? (version ? version.isCurrent : null),

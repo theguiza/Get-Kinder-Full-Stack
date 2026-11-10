@@ -9,7 +9,7 @@ import {
   DERIVED_MEASUREMENT_FAMILIES,
   describeDerivedLimitationCode,
 } from "../validators/kaiDerivedMeasurementValidators.js";
-import { DOCUMENT_EVIDENCE_TYPE } from "../validators/kaiDocumentEvidenceValidators.js";
+import { DOCUMENT_EVIDENCE_TYPE, documentStatementRole, excerptFromDocumentClaimStatement } from "../validators/kaiDocumentEvidenceValidators.js";
 
 const COUNT_ONLY_LIMITATION_TEXT = STORY_SOURCE_NOTE;
 
@@ -71,6 +71,30 @@ function isDocumentFact(fact) {
   return !fact.measurement && fact.evidenceType === DOCUMENT_EVIDENCE_TYPE;
 }
 
+// Owner Package 4: what a cited document statement is, from its persisted
+// words (documentStatementRole). A source's estimate or its method guidance is
+// not an observation of what happened, and is never described as one.
+function documentRole(fact) {
+  return documentStatementRole(excerptFromDocumentClaimStatement(text(fact.claimStatement)) ?? observationText(fact));
+}
+
+function isDocumentObservation(fact) {
+  return isDocumentFact(fact) && !["source_estimate", "source_method_or_instruction"].includes(documentRole(fact));
+}
+
+function isDocumentEstimate(fact) {
+  return isDocumentFact(fact) && documentRole(fact) === "source_estimate";
+}
+
+function isDocumentMethod(fact) {
+  return isDocumentFact(fact) && documentRole(fact) === "source_method_or_instruction";
+}
+
+const DOCUMENT_ROLE_LABELS = Object.freeze({
+  source_estimate: "Source-reported preliminary estimate (not calculated or verified by KAI)",
+  source_method_or_instruction: "Source-reported method or guidance (not evidence that it was carried out)",
+});
+
 function isDerivedFact(fact) {
   return !fact.measurement && (Boolean(fact.derivedMeasurement) || fact.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE);
 }
@@ -90,7 +114,9 @@ function pairedOutcomeOf(fact) {
 function evidenceKinds(model) {
   return {
     counts: measuredFacts(model),
-    documents: model.facts.filter(isDocumentFact),
+    documents: model.facts.filter(isDocumentObservation),
+    estimates: model.facts.filter(isDocumentEstimate),
+    methods: model.facts.filter(isDocumentMethod),
     paired: model.facts.filter((fact) => pairedOutcomeOf(fact)),
     otherDerived: model.facts.filter((fact) => isDerivedFact(fact) && !pairedOutcomeOf(fact)),
   };
@@ -188,6 +214,8 @@ function findingLines(model) {
       lines.push(`- **${countOnlyFinding(m)}**; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded. `
         + `${period ? `The organization states the reporting period ${period}; it was not checked against dates in the rows. ` : ""}`
         + `${humanMeaning(m)} ${refs(fact.citationRefs)}`);
+    } else if (DOCUMENT_ROLE_LABELS[isDocumentFact(fact) ? documentRole(fact) : ""]) {
+      lines.push(`- **${DOCUMENT_ROLE_LABELS[documentRole(fact)]}:** ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     } else {
       lines.push(`- ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     }
@@ -282,6 +310,8 @@ function establishesLines(model) {
   for (const fact of model.facts) {
     if (fact.measurement) {
       lines.push(`- The promoted source version ${code(fact.sourceVersionId)} contains ${countedRows(fact.measurement)}. ${refs(fact.citationRefs)}`);
+    } else if (isDocumentFact(fact)) {
+      lines.push(`- That the cited source document states: "${observationText(fact)}" ${refs(fact.citationRefs)} (what the source says, not a fact KAI established).`);
     } else {
       lines.push(`- The recorded claim: ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     }
@@ -291,8 +321,15 @@ function establishesLines(model) {
 }
 
 function doesNotEstablishLines(model) {
-  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
+  const { counts, documents, estimates, methods, paired, otherDerived } = evidenceKinds(model);
   const lines = [];
+  for (const fact of estimates) {
+    lines.push(`- That the source's estimate ${refs(fact.citationRefs)} is a KAI-calculated or verified figure: KAI did not calculate or verify it. `
+      + "It is not comparable with a KAI measurement unless the same people, period, programmes and eligibility rules are established, so it neither confirms nor contradicts one.");
+  }
+  for (const fact of methods) {
+    lines.push(`- That the method or guidance ${refs(fact.citationRefs)} was carried out: the source says what should be done; only a cited KAI measurement shows a calculation that was performed.`);
+  }
   if (counts.length > 0) {
     lines.push(`- How many distinct people the counted records represent ${citedRefs(counts)}: the records are not linked to individuals, and no participant count was measured from them.`);
     if (counts.some((fact) => fact.measurement.duplicateRecordCount > 0)) {
@@ -343,7 +380,7 @@ function doesNotEstablishLines(model) {
 }
 
 function analysisLines(model) {
-  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
+  const { counts, documents, estimates, methods, paired, otherDerived } = evidenceKinds(model);
   const lines = [];
   for (const fact of counts) {
     const m = fact.measurement;
@@ -355,6 +392,15 @@ function analysisLines(model) {
   for (const fact of documents) {
     lines.push(`- ${refs(fact.citationRefs)} **Source-reported observation (qualitative):** the source records that "${observationText(fact)}" `
       + "This is qualitative evidence as the source reports it. It is not a measurement, KAI did not verify it, and how many people it reflects is not recorded.");
+  }
+  for (const fact of estimates) {
+    lines.push(`- ${refs(fact.citationRefs)} **${DOCUMENT_ROLE_LABELS.source_estimate}:** the source states that "${observationText(fact)}" `
+      + "This is the source's own estimate, kept with its own qualifiers; KAI did not calculate or verify it, and it is not a measurement. "
+      + "Whether it covers the same people, period, programmes and eligibility rules as a KAI measurement is not established.");
+  }
+  for (const fact of methods) {
+    lines.push(`- ${refs(fact.citationRefs)} **${DOCUMENT_ROLE_LABELS.source_method_or_instruction}:** the source states that "${observationText(fact)}" `
+      + "This is the source's own method, requirement or recommendation; it does not show that the step was carried out. Any calculation KAI performed is cited and described separately.");
   }
   for (const fact of paired) {
     const p = pairedOutcomeOf(fact);
@@ -418,7 +464,7 @@ function authorityLines(model) {
 // qualification: row counts as rows, observations as source-reported,
 // derived measurements by their recorded values and limitations.
 function substantiveConclusion(model) {
-  const { counts, documents, paired, otherDerived } = evidenceKinds(model);
+  const { counts, documents, estimates, methods, paired, otherDerived } = evidenceKinds(model);
   const parts = ["On the available evidence,"];
   if (counts.length > 0) {
     parts.push(`the promoted source contains ${counts.map((fact) => `${countedRows(fact.measurement)} ${refs(fact.citationRefs)}`).join("; ")}. `
@@ -437,6 +483,12 @@ function substantiveConclusion(model) {
   }
   for (const fact of otherDerived) {
     parts.push(`${parts.length > 1 ? "The" : "the"} cited derived measurement records: ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
+  }
+  if (estimates.length + methods.length > 0) {
+    const context = [...estimates, ...methods];
+    parts.push(`${parts.length > 1 ? "The" : "the"} cited source ${estimates.length > 0 ? `estimate${estimates.length === 1 ? "" : "s"} ${citedRefs(estimates)}` : ""}`
+      + `${estimates.length > 0 && methods.length > 0 ? " and " : ""}${methods.length > 0 ? `method guidance ${citedRefs(methods)}` : ""} `
+      + `${context.length === 1 ? "is" : "are"} reported as the source states ${context.length === 1 ? "it" : "them"}, as context: not calculated, verified or carried out by KAI.`);
   }
   const substantive = documents.length + paired.length;
   if (substantive > 0) {
