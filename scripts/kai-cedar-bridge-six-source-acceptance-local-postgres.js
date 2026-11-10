@@ -26,8 +26,19 @@
  * and no KAI_CEDAR_BRIDGE_PACKAGE, it runs
  * __tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js
  * instead, against the same migration chain and verifiers.
+ *
+ * Owner Package 3 (2026-11-10), governed measurement-to-draft usability: with
+ * KAI_COMMUNITY_PROJECT_B_PACKAGE and KAI_PROJECT_B_PROVISIONAL_DRAFT=true it
+ * runs
+ * __tests__/kai-community-project-b-provisional-draft-acceptance.integration.spec.js
+ * instead. That spec also drives the built application in a local headless
+ * Chrome (KAI_BROWSER_ACCEPTANCE_CHROME, default the macOS Google Chrome), and
+ * loads the last revision before the Package 1 integrity repair
+ * (LEGACY_REVISION, checked out by `git clone --shared` into the work
+ * directory, removed with it) so a genuine pre-repair record-count claim is
+ * written by that revision's own code.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -37,7 +48,12 @@ import { MIGRATION_CHAIN, PRODUCTION_HISTORY_ONLY, verifyChainAgainstRepository 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const cedarPackage = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
 const projectBPackage = cedarPackage ? null : process.env.KAI_COMMUNITY_PROJECT_B_PACKAGE;
-const dbName = projectBPackage ? "kai_community_project_b_synthetic" : "kai_cedar_bridge_six_source_synthetic";
+const provisionalDraft = Boolean(projectBPackage) && process.env.KAI_PROJECT_B_PROVISIONAL_DRAFT === "true";
+const dbName = provisionalDraft ? "kai_project_b_provisional_draft_synthetic"
+  : projectBPackage ? "kai_community_project_b_synthetic" : "kai_cedar_bridge_six_source_synthetic";
+// The last revision before the Package 1 measurement-to-claim integrity repair (44950111).
+const LEGACY_REVISION = "58c4e0d9";
+const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
 const binDir = process.env.PG_BIN_DIR || (existsSync(join(defaultServerBin, "postgres")) ? defaultServerBin : fallbackBin);
@@ -54,9 +70,12 @@ const port = String(62100 + Math.floor(Math.random() * 400));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
-const spec = projectBPackage
-  ? "__tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js"
-  : "__tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js";
+const spec = provisionalDraft
+  ? "__tests__/kai-community-project-b-provisional-draft-acceptance.integration.spec.js"
+  : projectBPackage
+    ? "__tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js"
+    : "__tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js";
+const legacyCheckout = join(workDir, `checkout-${LEGACY_REVISION}`);
 const packageRoot = projectBPackage || cedarPackage;
 const reportPath = process.env.KAI_CEDAR_BRIDGE_REPORT || join(workDir, projectBPackage ? "community-project-b-report.json" : "cedar-bridge-six-source-report.json");
 
@@ -120,6 +139,13 @@ if (!packageRoot || !existsSync(join(packageRoot, "01_UPLOAD_TO_KAI"))) {
 let started = false;
 try {
   verifyChainAgainstRepository(repoRoot);
+  if (provisionalDraft) {
+    if (!existsSync(chromePath)) throw new Error(`Package 3 acceptance requires a local Chrome binary (set KAI_BROWSER_ACCEPTANCE_CHROME); not found: ${chromePath}`);
+    if (!existsSync(join(repoRoot, "public", "js", "bundles", "entry.js"))) throw new Error("Package 3 acceptance requires the built bundle: run npm run build first");
+    run("git", ["clone", "--quiet", "--shared", "--no-checkout", repoRoot, legacyCheckout], { capture: true });
+    run("git", ["checkout", "--quiet", "--detach", LEGACY_REVISION], { cwd: legacyCheckout, capture: true });
+    symlinkSync(join(repoRoot, "node_modules"), join(legacyCheckout, "node_modules"));
+  }
   mkdirSync(socketDir, { recursive: true });
   run(initdb, ["-D", dataDir, "--no-locale", "--encoding=UTF8"], { capture: true });
   run(pgCtl, ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -h 127.0.0.1 -p ${port}`, "start"], { capture: true });
@@ -228,6 +254,13 @@ try {
       KAI_CEDAR_ACCEPTANCE_DATABASE_URL: targetUrl,
       KAI_CEDAR_ACCEPTANCE_DATABASE_NAME: dbName,
       ...(projectBPackage ? { KAI_COMMUNITY_PROJECT_B_PACKAGE: projectBPackage } : { KAI_CEDAR_BRIDGE_PACKAGE: cedarPackage }),
+      ...(provisionalDraft ? {
+        KAI_PROJECT_B_PROVISIONAL_DRAFT: "true",
+        KAI_P3_CHROME: chromePath,
+        KAI_P3_WORKDIR: workDir,
+        KAI_P3_LEGACY_CHECKOUT: legacyCheckout,
+        KAI_P3_LEGACY_REVISION: LEGACY_REVISION,
+      } : {}),
       KAI_CEDAR_BRIDGE_REPORT: reportPath,
     },
   });

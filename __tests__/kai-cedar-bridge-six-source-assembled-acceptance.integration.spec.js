@@ -323,6 +323,39 @@ async function runCedarBridgeAcceptance() {
   const orgPath = `${BASE_PATH}/admin/organizations/${ORG}`;
   const COCKPIT = `${BASE_PATH}/admin/review-cockpit`;
   const blockersOf = (response) => (response.body?.blockers || response.body?.error?.blockers || []).map((b) => b.blocking_reason || b.code || b.reason);
+  // Owner Package 3 (2026-11-10), reconciling these assertions with the
+  // draft-first contract (owner direction 2026-11-06; Operating Model v0.2
+  // section 7.2: "The control applies to release, not drafting or analysis"):
+  // the organization administrator's own read of its INTERNAL draft is an
+  // internal read, not a release. Recorded personal information is shown with
+  // the report as information; Get Kinder's release authority for that output
+  // is unchanged (asserted separately where each test releases). A 200 read is
+  // safe when it is this tenant's administrator reading its own internal draft,
+  // the report says it is provisional and internal-only and carries the
+  // personal-information note and its citations, no identifier appears, and
+  // the read records no review, authority, candidate or manifest.
+  const decisionAndReleaseRows = async () => (await query(`SELECT
+      (SELECT count(*) FROM kai.claim_review_decisions WHERE organization_id = $1::uuid)::int AS claim_reviews,
+      (SELECT count(*) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)::int AS evidence_reviews,
+      (SELECT count(*) FROM kai.human_authority_decisions WHERE organization_id = $1::uuid)::int AS authority,
+      (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS candidates,
+      (SELECT count(*) FROM kai.export_manifests WHERE organization_id = $1::uuid)::int AS manifests`, [ORG]))[0];
+  const readOwnInternalMarkdown = async (draftId) => {
+    const before = await decisionAndReleaseRows();
+    const response = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, draftId));
+    assert.deepEqual(await decisionAndReleaseRows(), before, "the internal read records no review, authority or release");
+    return response;
+  };
+  const assertOwnInternalMarkdownSafe = (response) => {
+    assert.deepEqual([response.status, blockersOf(response)], [200, []], J(response.body));
+    const markdown = typeof response.body === "string" ? response.body : response.body?.data?.markdown;
+    assert.match(markdown, /\*\*Status:\*\* Provisional internal draft\. It can be used for internal planning and drafting now; it is not approved for release, funders or the public\./);
+    assert.match(markdown, /## Information[\s\S]*A cited source may contain personal information\. Keep participant names and direct identifiers out of anything shared outside the organization\./);
+    assert.match(markdown, /CIT-001/);
+    assert.match(markdown, /## Source and evidence traceability/);
+    assert.doesNotMatch(markdown, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier");
+    return markdown;
+  };
   // The released manifest's CSV evidence appendix: claim id -> its source_version_id cell (header pinned).
   const csvRowsByClaim = (response) => {
     assert.equal(response.status, 200, J(response.body));
@@ -608,7 +641,7 @@ async function runCedarBridgeAcceptance() {
       report.generation.evidence_summary = { status: created.status, blockers: blockersOf(created), claim_ids: claimIds, model_calls: modelCalls.length };
       if (created.status < 300) {
         const draftId = created.body.data.generatedContentDraftId;
-        const markdown = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, draftId));
+        const markdown = await readOwnInternalMarkdown(draftId);
         const blocks = await query(
           `SELECT b.ordinal, b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
              JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
@@ -770,10 +803,12 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual(detail("workbook", "paired_outcome_read:sheet_3").blockers, ["paired_outcome_participant_identifier_not_found"]);
       assert.ok(Object.values(report.measurements).filter((x) => x.kind === "paired_outcome").every((x) => x.persisted === false));
       // Generation: the persisted internal Evidence Summary cites all four counts;
-      // the client's own Markdown stays closed for personal-information sources.
+      // the client's own internal read is open with the personal-information
+      // note (draft first; Package 3 reconciliation above).
       const summary = report.generation.evidence_summary;
       assert.deepEqual([summary.status, summary.blocks.length, summary.markdown_status, summary.markdown_blockers, summary.gk_review_packet.status],
-        [201, 4, 422, ["personal_information_not_cleared"], 200]);
+        [201, 4, 200, [], 200]);
+      assertOwnInternalMarkdownSafe({ status: summary.markdown_status, body: summary.markdown });
       for (const block of summary.blocks) assert.match(block.text, /Measurement disclosure for the cited count/);
     });
 
@@ -899,8 +934,18 @@ async function runCedarBridgeAcceptance() {
         claim_ids: claimIds, engagement_id: PROJECT, idempotency_key: `unresolved-blocked-${randomUUID()}`,
       });
       scenario.before_review = { status: refused.status, body: refused.body };
+      // Owner Package 3 reconciliation (draft first, 2026-11-06): these claims
+      // are unreviewed, not rejected, and their measurements are intact, so an
+      // internal assessment admits them provisionally and they DO reach the
+      // provider; open review is carried as a limitation. The refusal here is
+      // the assessment validator rejecting the deterministic stub's output
+      // (a required section missing), and nothing is persisted.
       assert.equal(refused.status, 422, J(refused.body));
-      assert.equal(modelCalls.length, callsBefore, "blocked claims never reach the provider");
+      assert.deepEqual(blockersOf(refused), ["assessment_model_section_missing"], J(refused.body));
+      const sentForAssessment = modelCalls.slice(callsBefore);
+      assert.ok(sentForAssessment.length >= 1 && sentForAssessment.length <= 2, "one model call, plus at most the single bounded correction");
+      for (const call of sentForAssessment) assert.deepEqual(call.claims.map((claim) => claim.claimId).sort(), [...claimIds].sort(), "exactly the admitted claims");
+      for (const call of sentForAssessment) for (const claim of call.claims) assert.ok(claim.limitationCodes.includes("claim_review_unresolved"), "open review travels as a limitation");
       assert.equal(await draftCount(), draftsBefore, "refusal persists no draft");
 
       // These are new, attributed synthetic decisions on descriptive findings,
@@ -1297,8 +1342,9 @@ async function runCedarBridgeAcceptance() {
       const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
       process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
       try {
-      const markdown = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, derivedDraftId));
+      const markdown = await readOwnInternalMarkdown(derivedDraftId);
       delivery.client_internal_markdown = [markdown.status, blockersOf(markdown)];
+      delivery.client_internal_markdown_response = markdown;
       const ownRelease = await adminApi("POST", clientInternalDraftReleasePath(ORG, PROJECT, derivedDraftId), { decision: "release_for_internal_use", limitations_confirmed: true });
       delivery.client_admin_release = [ownRelease.status, blockersOf(ownRelease)];
       const queueOf = async (queueType) => (await query(
@@ -1350,7 +1396,9 @@ async function runCedarBridgeAcceptance() {
       report.generation.derived_delivery = delivery;
       console.log(`Cedar Bridge derived delivery: ${J(delivery, null, 0).slice(0, 3000)}`);
       // The existing rule is not bypassed: the client's own Markdown stays closed for personal information.
-      assert.deepEqual(delivery.client_internal_markdown, [422, ["personal_information_not_cleared"]]);
+      // The client's own internal read is open (draft first); its release still needs Get Kinder.
+      assertOwnInternalMarkdownSafe(delivery.client_internal_markdown_response);
+      delete delivery.client_internal_markdown_response;
       assert.deepEqual(delivery.client_admin_release, [422, ["personal_information_not_cleared", "factual_review_not_complete"]]);
       // Get Kinder's existing review and release chain, then the organization's existing released-report route.
       assert.deepEqual(delivery.gk_content_review, [200, 200, []]);
@@ -1775,9 +1823,10 @@ async function runCedarBridgeAcceptance() {
           [["primary", state.events.sourceVersionId, true], ["reference", state.register.sourceVersionId, true]], label);
       }
       for (const label of REGRESSION_LABELS) assert.equal(packetCitations.find((c) => c.claimId === derivedClaims[label]).contributingSources, undefined, label);
-      const clientMarkdown = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, crossDraftId));
+      const clientMarkdown = await readOwnInternalMarkdown(crossDraftId);
       report.generation.cross_source_evidence_summary = { status: created.status, draft_id: crossDraftId, blocks, review_packet: packet.status, client_internal_markdown: [clientMarkdown.status, blockersOf(clientMarkdown)] };
-      assert.deepEqual(report.generation.cross_source_evidence_summary.client_internal_markdown, [422, ["personal_information_not_cleared"]]);
+      const crossMarkdown = assertOwnInternalMarkdownSafe(clientMarkdown);
+      for (const sourceVersionId of [state.events.sourceVersionId, state.register.sourceVersionId]) assert.ok(crossMarkdown.includes(sourceVersionId), "both contributing versions are cited");
     });
 
     await test("21: delivery of the cross-source findings through Get Kinder's existing review and release path to the client route", async () => {
@@ -2103,9 +2152,11 @@ async function runCedarBridgeAcceptance() {
         assert.deepEqual(citation.contributingSources.map((c) => [c.sourceRole, c.sourceVersionId, c.isCurrent]),
           [["primary", primaryVersionId, true], ["reference", state.register.sourceVersionId, true]]);
       }
-      // Personal-information-derived output stays with Get Kinder's release authority.
-      const own = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, draftId));
-      assert.deepEqual([own.status, blockersOf(own)], [422, ["personal_information_not_cleared"]]);
+      // Personal-information-derived output stays with Get Kinder's release
+      // authority (the release below); the organization's own internal read is
+      // open with the personal-information note (draft first, Package 3).
+      const own = await readOwnInternalMarkdown(draftId);
+      assert.ok(assertOwnInternalMarkdownSafe(own).includes(state.register.sourceVersionId), "the linked register version is cited");
       const delivery = await releaseThroughGetKinder(draftId);
       const { released, entries, ...statuses } = delivery;
       assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
