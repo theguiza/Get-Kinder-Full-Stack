@@ -329,6 +329,7 @@ const BLOCKER_TEXT = Object.freeze({
   client_followup_unresolved: "A client follow-up is unresolved.",
   potential_conflict_review_unresolved: "A potential conflict is unresolved.",
   traceability_incomplete: "Traceability is incomplete.",
+  measured_claim_integrity_not_established: "The claim states more than its measurement established, so no review makes it usable.",
 });
 
 export function eligibilityBlockerText(code) {

@@ -480,15 +480,21 @@ test("readable statement: a paired measurement leads with the organization's rec
   }
 });
 
-test("readable statement: a record count leads with its counted value and unit, from the real composer; an unrecognized technical statement is neutral; prose is unchanged", () => {
+test("readable statement: a record count leads with its counted source records, from the real composer; the organization's label is a note, never the headline; an unrecognized technical statement is neutral; prose is unchanged", () => {
   const recorded = composeMeasurementEvidenceStatement({
-    measurement: { measuredValue: 5, calculationMethod: "csv", blankRecordCount: 0, duplicateRecordCount: 1 },
+    measurement: { measuredValue: 5, calculationMethod: "csv", blankRecordCount: 0, duplicateRecordCount: 2, countedDuplicates: { memberRecordCount: 2, excessCopyCount: 1 } },
     definition: { unitLabel: "programme sessions", countedUnit: "programme session", periodStart: "2026-01-01", periodEnd: "2026-06-30" },
   });
   const count = findingDisplay(recorded);
-  assert.equal(count.headline, "5 programme sessions");
-  assert.match(count.summary, /^For the reporting period 2026-01-01 to 2026-06-30; counting each .* as one programme session; 0 blank records excluded; 1 exact-duplicate record included\.$/);
+  assert.equal(count.headline, "5 source records");
+  assert.equal(count.summary, "Counting each CSV data record after the header row as one record; 0 blank records excluded; 2 in exact-duplicate groups (1 excess copy), not removed.");
+  assert.equal(count.note, "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-01-01 to 2026-06-30, and its inclusion and exclusion rules.");
   assert.equal(count.full, recorded);
+  // A statement recorded before owner Package 1 never leads with its label.
+  const legacy = findingDisplay("Source version record count: 217 completed FY contacts for the reporting period 2025-04-01 to 2026-03-31, counting each CSV data record after the header row as one completed contact; 0 blank records excluded; 4 exact-duplicate records included.");
+  assert.equal(legacy.headline, "217 data records");
+  assert.match(legacy.note, /^Recorded label and period, not applied by the count: completed FY contacts, for the reporting period 2025-04-01 to 2026-03-31\.$/);
+  assert.doesNotMatch(`${legacy.headline} ${legacy.summary}`, /completed|FY/);
   const technical = findingDisplay("Derived measurement: 3 records in selected worksheet sheet_1 have field_3 = Yes, across all dates.");
   assert.equal(technical.neutral, true);
   assert.equal(technical.summary, "");

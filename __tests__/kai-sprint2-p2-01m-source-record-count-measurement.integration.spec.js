@@ -478,7 +478,8 @@ async function runSuite() {
     assert.equal(evidenceItem.created_by, ADMIN.actorUserId);
     assert.equal(
       evidenceItem.statement,
-      "Source version record count: 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each CSV data record after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included.");
+      "Source version record count: 5 source records (each CSV data record after the header row; 1 blank record excluded; 2 in exact-duplicate groups (1 excess copy), not removed). "
+        + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
     assert.deepEqual(
       [measurement.measured_value, measurement.total_record_count, measurement.blank_record_count, measurement.duplicate_record_count, measurement.unit_label, measurement.calculation_method, measurement.profile_canonical_sha256],
       [independentRecordCount(CSV), 6, 1, 2, "programme sessions", "p1_csv_profile_data_records_excluding_blank_v1", ids.main.profileSha]);
@@ -919,7 +920,7 @@ async function runSuite() {
       s3.data.measurement.blank_record_count, s3.data.measurement.duplicate_record_count, s3.data.sourceLocator.coordinates],
     [false, "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", SHEETS.sheet_3.counted, 364, 0, SHEETS.sheet_3.duplicates,
       { scope: "data_records_after_header", sheet_key: "sheet_3" }]);
-    assert.match(s3.data.evidenceItem.statement, /^Source version record count: 364 service events .* from selected worksheet sheet_3, /);
+    assert.match(s3.data.evidenceItem.statement, /^Source version record count: 364 source records from selected worksheet sheet_3 \(/);
     assert.notEqual(s3.data.evidenceItem.evidence_item_id, fixture.sheet_5.evidence_item_id);
     assert.notEqual(s3.data.definition.source_measurement_definition_id, fixture.sheet_5.definition_id);
     assert.equal(s3.data.definition.definition_fingerprint, fixture.sheet_5.definition_fingerprint,
@@ -976,10 +977,24 @@ async function runSuite() {
     // sheet_3 is claimed on its own; the previous revision's claim and rows are unchanged.
     const proposal = await proposeIn(WORKSHEET_ORG, WORKSHEET_ADMIN, s3.data.evidenceItem.evidence_item_id);
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
-    assert.match(proposal.data.claim.statement, /^The promoted source records 364 service events .* in selected worksheet sheet_3 /);
+    assert.match(proposal.data.claim.statement, /^The promoted source has 364 source records in selected worksheet sheet_3 \(/);
     assert.notEqual(proposal.data.claim.claim_id, fixture.sheet_5.claim_id);
     const replayClaim5 = await proposeIn(WORKSHEET_ORG, WORKSHEET_ADMIN, fixture.sheet_5.evidence_item_id);
     assert.deepEqual([replayClaim5.ok, replayClaim5.data.replayed, replayClaim5.data.claim.claim_id], [true, true, fixture.sheet_5.claim_id]);
+    // Owner Package 1 (real PostgreSQL, real P2-06): the previous revision's
+    // claim asserted its label as the counted entity. It is replayed exactly
+    // as recorded and is kept from every audience; the new sheet_3 claim is not.
+    assert.match(replayClaim5.data.claim.statement, /^The promoted source records 37 service events /);
+    for (const requestedAudience of ["internal", "funder"]) {
+      const legacyTrace = await traceRepository.getClaimTraceabilitySummary({ organizationId: WORKSHEET_ORG, claimId: fixture.sheet_5.claim_id, requestedAudience });
+      assert.equal(legacyTrace.ok, true, JSON.stringify(legacyTrace.error));
+      assert.equal(legacyTrace.data.eligible, false, requestedAudience);
+      assert.ok(legacyTrace.data.blockerCodes.includes("measured_claim_integrity_not_established"), `${requestedAudience}: ${legacyTrace.data.blockerCodes}`);
+      assert.equal(legacyTrace.data.claim.statement, replayClaim5.data.claim.statement);
+    }
+    const currentTrace = await traceRepository.getClaimTraceabilitySummary({ organizationId: WORKSHEET_ORG, claimId: proposal.data.claim.claim_id, requestedAudience: "internal" });
+    assert.equal(currentTrace.ok, true, JSON.stringify(currentTrace.error));
+    assert.ok(!currentTrace.data.blockerCodes.includes("measured_claim_integrity_not_established"), JSON.stringify(currentTrace.data.blockerCodes));
     assert.deepEqual(await worksheetLegacyRows(), legacyBefore, "every historical definition, measurement, evidence, locator, and claim column is unchanged");
   });
 
@@ -1139,6 +1154,8 @@ async function runSuite() {
     assert.deepEqual(basis.data.basis, {
       measurable: true, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", source_format: "xlsx", worksheet: { sheet_key: "sheet_1", sheet_name: "Sessions" },
       data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5,
+      // Owner Package 1: group members versus excess copies of the counted records, and the applied policy.
+      counted_duplicate_record_count: 2, counted_duplicate_excess_copy_count: 1, duplicate_policy: "duplicates_counted_not_removed",
       worksheet_options: [],
     });
     const result = await record(promoted.sourceVersionId);
@@ -1147,14 +1164,15 @@ async function runSuite() {
     assert.deepEqual([measurement.calculation_method, measurement.measured_value, measurement.total_record_count, measurement.blank_record_count, measurement.duplicate_record_count],
       ["p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", 5, 6, 1, 2]);
     assert.deepEqual([sourceLocator.locator_type, sourceLocator.coordinates], ["source_data_records", { scope: "data_records_after_header", sheet_key: "sheet_1" }]);
-    assert.match(evidenceItem.statement, /counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included\.$/);
+    assert.match(evidenceItem.statement, /\(each worksheet data row after the header row; 1 blank record excluded; 2 in exact-duplicate groups \(1 excess copy\), not removed\)\. Not applied by KAI: /);
     assert.doesNotMatch(JSON.stringify(result.data), /literacy|mentoring|2026-09-16|measured"/, "no cell value");
     const replay = await record(promoted.sourceVersionId);
     assert.deepEqual([replay.ok, replay.data.replayed, replay.data.evidenceItem.evidence_item_id], [true, true, evidenceItem.evidence_item_id]);
     const proposal = await propose(evidenceItem.evidence_item_id);
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
     assert.equal(proposal.data.claim.statement,
-      "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 (record count: one programme session per worksheet data row; 1 blank record excluded, 2 exact-duplicate records included).");
+      "The promoted source has 5 source records (record count: one record per worksheet data row; 1 blank record excluded; 2 in exact-duplicate groups (1 excess copy), not removed). "
+        + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
     // Missingness comes from the worksheet's own per-column counts: the
     // workbook's only empty cells are in its blank row, so it is clear (no gap).
     assert.deepEqual(await gapStateOf(proposal.data.claim.claim_id), {
@@ -1188,7 +1206,8 @@ async function runSuite() {
     const { claim } = proposal.data;
     assert.equal(
       claim.statement,
-      "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 (record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included).");
+      "The promoted source has 5 source records (record count: one record per CSV data record; 1 blank record excluded; 2 in exact-duplicate groups (1 excess copy), not removed). "
+        + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
     assert.deepEqual([claim.claim_type, claim.claim_status, claim.claim_review_status, claim.claim_strength, claim.internal_only, claim.export_ready],
       ["finding", "proposed", "needs_gk_review", "unassessed", true, false]);
     assert.deepEqual([claim.llm_processing_allowed, claim.public_use_allowed, claim.funder_use_allowed], [false, false, false]);
@@ -1216,6 +1235,8 @@ async function runSuite() {
     assert.deepEqual(counts, {
       measurable: true, calculation_method: "p1_csv_profile_data_records_excluding_blank_v1", source_format: "csv", worksheet: null,
       data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: independentRecordCount(CSV),
+      // Owner Package 1: group members versus excess copies of the counted records, and the applied policy.
+      counted_duplicate_record_count: 2, counted_duplicate_excess_copy_count: 1, duplicate_policy: "duplicates_counted_not_removed",
       worksheet_options: [],
     });
     assert.equal(recorded.definition.counted_unit, DEFINITION.counted_unit);
@@ -1276,7 +1297,7 @@ async function runSuite() {
     assert.deepEqual([recorded.data.measurement.measured_value, recorded.data.measurement.blank_record_count, recorded.data.measurement.duplicate_record_count], [2, 0, 0]);
     const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
-    assert.match(proposal.data.claim.statement, /records 2 programme sessions with no reporting period defined/);
+    assert.match(proposal.data.claim.statement, /^The promoted source has 2 source records \(.*; no reporting period was defined\.$/);
     const state = await gapStateOf(proposal.data.claim.claim_id);
     assert.deepEqual(state.followups, []);
     const gapKeys = state.gaps.map(([key]) => key);
@@ -1464,8 +1485,8 @@ async function runSuite() {
     assert.equal(eligibleTrace.data.eligible, true);
     // The value, definition, and arithmetic reach the evaluator verbatim, and
     // each accepted limitation stays attached.
-    assert.match(eligibleTrace.data.claim.statement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
-    assert.match(eligibleTrace.data.evidence.statement, /1 blank record excluded; 2 exact-duplicate records included\.$/);
+    assert.match(eligibleTrace.data.claim.statement, /^The promoted source has 5 source records \(record count: /);
+    assert.match(eligibleTrace.data.evidence.statement, /1 blank record excluded; 2 in exact-duplicate groups \(1 excess copy\), not removed\)\. Not applied by KAI: /);
     for (const dimensionKey of unresolved) assert.equal(eligibleTrace.data.dimensions[dimensionKey].internal_limitation_accepted, true, dimensionKey);
     // Funder use stays closed: the review approved internal use only.
     const funder = await getClaimTraceabilitySummary(
@@ -1604,8 +1625,8 @@ async function runSuite() {
   ];
   // Every number is from the cited claim statement; every limitation is
   // stated; the records are not called distinct and the period not verified.
-  const COMPLIANT_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
-    + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
+  const COMPLIANT_TEXT = "The promoted source has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30. "
+    + "This is a count of source records, each described as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
     + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment were accepted for internal use only.";
@@ -1677,7 +1698,7 @@ async function runSuite() {
     assert.deepEqual([sent.contentType, sent.requestedAudience, sent.claims.length], ["evidence_summary", "internal", 1]);
     const [claim] = sent.claims;
     assert.deepEqual([claim.claimId, claim.evidenceItemId, claim.sourceVersionId], [ids.measurementClaimId, ids.measurementEvidenceId, ids.main.sourceVersionId]);
-    assert.match(claim.claimStatement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 \(record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included\)\.$/);
+    assert.match(claim.claimStatement, /^The promoted source has 5 source records \(record count: one record per CSV data record; 1 blank record excluded; 2 in exact-duplicate groups \(1 excess copy\), not removed\)\. Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules\.$/);
     assert.deepEqual(claim.limitationCodes, MEASURED_LIMITATION_CODES);
     ids.generatorClaimStatement = claim.claimStatement;
     assert.equal(payload.system.startsWith(LEGACY_SYSTEM_PROMPT), true, "the existing instructions are kept");
@@ -1715,7 +1736,7 @@ async function runSuite() {
   test("generation: fabricated numbers, causal language, missing citations, and 'distinct'/'verified' wording are rejected with nothing persisted", async () => {
     const before = await generationCounts();
     const cases = [
-      ["fabricated count", COMPLIANT_TEXT.replace("records 5 programme", "records 6 programme"), ["VAL-GEN-004"]],
+      ["fabricated count", COMPLIANT_TEXT.replace("has 5 source records", "has 6 source records"), ["VAL-GEN-004"]],
       ["fabricated rate", `${COMPLIANT_TEXT} That is 83% of planned sessions.`, ["VAL-GEN-004"]],
       ["causal language", `${COMPLIANT_TEXT} The programme improves literacy.`, ["VAL-GEN-004"]],
       ["period called verified", COMPLIANT_TEXT.replace("is attested in that definition and not verified against record dates", "was verified against the record dates"), ["VAL-GEN-008"]],
@@ -1745,7 +1766,7 @@ async function runSuite() {
     const cases = [
       ["no blank or duplicate disclosure", COMPLIANT_TEXT.replace("1 blank record was excluded and 2 exact-duplicate records were included. ", "")],
       ["no coverage limitation", COMPLIANT_TEXT.replace(/ Internal limitations:.*$/, "")],
-      ["paraphrase, negated wording", "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+      ["paraphrase, negated wording", "The promoted source has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30. "
         + "The organization decided what one row stands for; the period was not independently verified, and the rows are not unique."],
     ];
     for (const [label, text] of cases) {
@@ -2019,7 +2040,7 @@ async function runSuite() {
   test("review: a count-only model sentence persists with the server-composed disclosure, and the client draft read and GK review packet return exactly that text and citation with the review open", onNormalChain, async () => {
     // Owner prompt "KAI — Complete the existing VAL-GEN-008 repair" (2026-11-01):
     // the model supplies no disclosure; the server composes it from the claim's codes.
-    const MODEL_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30.";
+    const MODEL_TEXT = "The promoted source has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30.";
     const underlying = async () => (await query(`SELECT
         (SELECT to_jsonb(c) FROM kai.claims c WHERE c.claim_id = $1::uuid) AS claim,
         (SELECT to_jsonb(e) FROM kai.evidence_items e WHERE e.evidence_item_id = $2::uuid) AS evidence,
@@ -2141,7 +2162,7 @@ async function runSuite() {
 
   // Independent reading of a rendered or stored text: the number of
   // programme sessions it states.
-  const statedCount = (text) => Number((/(\d+) programme sessions/.exec(text) || [])[1]);
+  const statedCount = (text) => Number((/(\d+) (?:source records|nonblank data rows)/.exec(text) || [])[1]);
 
   test("Markdown: retrieved through the delivery route, the document states the same independently computed count, qualified, cited, and with every material limitation", onNormalChain, async () => {
     const app = express();
@@ -2205,7 +2226,7 @@ async function runSuite() {
     const stages = {
       file: expected,
       measurement: Number(stored.measured_value),
-      evidence: Number((/record count: (\d+) programme sessions/.exec(stored.evidence) || [])[1]),
+      evidence: Number((/record count: (\d+) source records/.exec(stored.evidence) || [])[1]),
       claim: statedCount(stored.claim),
       generatorInput: statedCount(ids.generatorClaimStatement),
       draft: statedCount(stored.block),
@@ -2219,8 +2240,8 @@ async function runSuite() {
     assert.match(markdown, new RegExp(`Organization: Riverside Literacy Collective \\(synthetic\\) \\(\`${ORG}\`\\)`));
     assert.match(markdown, new RegExp(`Engagement: \`p2-01m\` \\(\`${ENGAGEMENT}\`\\)`));
     assert.match(markdown, /Requested audience: `internal`/);
-    assert.match(markdown, /records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
-    assert.match(markdown, /count of source records, each counted as one programme session under the human-confirmed definition/);
+    assert.match(markdown, /has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30/);
+    assert.match(markdown, /count of source records, each described as one programme session under the human-confirmed definition/);
     assert.match(markdown, /1 blank record was excluded/);
     assert.match(markdown, /2 exact-duplicate records were included/);
     assert.match(markdown, /period is attested in that definition and not verified against record dates/);
@@ -2267,7 +2288,7 @@ async function runSuite() {
     ]) {
       const refused = await ids.getClientMarkdown(organizationId, engagementId, manifestId, actor);
       assert.equal(refused.statusCode, status, `${label}: ${refused.body}`);
-      assert.doesNotMatch(refused.body, /programme sessions/, label);
+      assert.doesNotMatch(refused.body, /programme session|source records/, label);
     }
     // The customer route never reaches the GK delivery route or any GK decision.
     assert.equal((await ids.getMarkdown(ORG, "client_admin")).statusCode, 403);
@@ -2283,7 +2304,7 @@ async function runSuite() {
     ]) {
       const refused = await ids.getMarkdown(organizationId, actor);
       assert.equal(refused.statusCode, status, `${actor}@${organizationId}: ${refused.body}`);
-      assert.doesNotMatch(refused.body, /programme sessions/);
+      assert.doesNotMatch(refused.body, /programme session|source records/);
     }
     const before = await exportCounts();
     const revoked = await decideAuthority(GK_ADMIN, "revoke");
@@ -2293,10 +2314,10 @@ async function runSuite() {
     assert.equal(afterRevoke.statusCode, 409, afterRevoke.body);
     const clientAfterRevoke = await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin");
     assert.equal(clientAfterRevoke.statusCode, 409, clientAfterRevoke.body);
-    assert.doesNotMatch(clientAfterRevoke.body, /programme sessions/);
+    assert.doesNotMatch(clientAfterRevoke.body, /programme session|source records/);
     assert.deepEqual((await clientDraft(ADMIN)).data.release, { state: "release_no_longer_valid", releasedReportId: null });
     assert.match(afterRevoke.body, /conflict_current_state_changed/);
-    assert.doesNotMatch(afterRevoke.body, /programme sessions/);
+    assert.doesNotMatch(afterRevoke.body, /programme session|source records/);
     const noNewRelease = await releaseManifest(GK_ADMIN, tick());
     assert.equal(noNewRelease.ok, false, "no new manifest while authority is revoked");
     const regranted = await decideAuthority(GK_ADMIN, "grant");
@@ -2534,7 +2555,7 @@ async function runSuite() {
     const markdown = received.body;
     console.log(`[p2-01m] organization-released Markdown:\n${markdown}`);
     assert.equal(statedCount(markdown), independentRecordCount(CSV));
-    assert.match(markdown, /records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+    assert.match(markdown, /has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30/);
     assert.match(markdown, /period is attested in that definition and not verified against record dates/);
     assert.ok(markdown.includes(`- [CIT-001] Claim \`${ordinary.claimId}\`; evidence \`${ordinary.evidenceItemId}\`; source `), markdown);
     assert.ok(markdown.includes(`source version \`${ordinary.sourceVersionId}\`.`), markdown);
@@ -2677,12 +2698,12 @@ async function runSuite() {
       // The released document is no longer retrievable, and nothing new can be released.
       const retrieval = await ids.getMarkdown(ORG, "gk_admin");
       assert.equal(retrieval.statusCode, 409, retrieval.body);
-      assert.doesNotMatch(retrieval.body, /programme sessions/);
+      assert.doesNotMatch(retrieval.body, /programme session|source records/);
       const release = await releaseManifest(GK_ADMIN);
       assert.equal(release.ok, false, JSON.stringify(release));
       const clientRetrieval = await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin");
       assert.equal(clientRetrieval.statusCode, 409, clientRetrieval.body);
-      assert.doesNotMatch(clientRetrieval.body, /programme sessions/);
+      assert.doesNotMatch(clientRetrieval.body, /programme session|source records/);
     }
   });
 }

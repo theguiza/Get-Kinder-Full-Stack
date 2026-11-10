@@ -36,7 +36,9 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
  *   measurement still matches its basis (validateMeasurementClaimBasis) under
  *   a human-confirmed definition of the same source version;
  * - the claim is the 'finding' that restates exactly that measurement
- *   (composeMeasurementClaimStatement), so it adds no interpretation;
+ *   (composeMeasurementClaimStatement), so it adds no interpretation
+ *   (evaluateMeasuredClaimIntegrityInTransaction, the same rule P2-06 applies
+ *   to every audience);
  * - the source version is current, and its current Phase-5 sensitivity
  *   decision is complete, permits the use and AI processing, and clears the
  *   independently governed sensitivity categories. Story presence is metadata.
@@ -162,6 +164,53 @@ export function isConfirmedMeasurement(measurementRow, evidenceItemRow) {
     && measurementRow.definition_source_version_id === evidenceItemRow.source_version_id;
 }
 
+/**
+ * Measurement-to-claim factual integrity (owner Package 1, 2026-11-10): the
+ * one rule, independent of review, eligibility and audience, that a claim on
+ * measurement evidence asserts exactly what its calculation established. The
+ * stored measurement must still match its basis (a record count: its
+ * human-confirmed definition, arithmetic and bound profile; a derived
+ * measurement: its interpretation and arithmetic), and the claim must be the
+ * 'finding' that is exactly the current composition of that measurement.
+ * A record-count claim composed before the repair asserted the person's unit
+ * label and period as the counted entity and an applied period; it is not the
+ * current composition, so it fails here however it was reviewed. Nothing is
+ * rewritten: the stored claim, evidence and review decisions are unchanged.
+ *
+ * Returns { applies, reason, measurementRow }: applies is false for evidence
+ * that is not a measurement; reason is null, "measurement_definition_not_confirmed"
+ * or "claim_not_measurement_restatement". claimRow is optional (evidence only).
+ * Read-only.
+ */
+export async function evaluateMeasuredClaimIntegrityInTransaction(tx, {
+  organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow = null,
+}) {
+  const restates = (statement) => !claimRow || (
+    claimRow.claim_type === "finding"
+    && claimRow.evidence_item_id === evidenceItemRow.evidence_item_id
+    && claimRow.statement === statement
+  );
+  if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
+    if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
+      return { applies: true, reason: "measurement_definition_not_confirmed", measurementRow: null };
+    }
+    return { applies: true, reason: restates(composeDerivedClaimStatementFromRow(derivedRow)) ? null : "claim_not_measurement_restatement", measurementRow: null };
+  }
+  if (evidenceItemRow?.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) return { applies: false, reason: null, measurementRow: null };
+  const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
+  if (!isConfirmedMeasurement(measurementRow, evidenceItemRow)
+    || !validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow }).ok) {
+    return { applies: true, reason: "measurement_definition_not_confirmed", measurementRow };
+  }
+  const composed = composeMeasurementClaimStatement({
+    measurementRow,
+    definitionRow: measurementRow,
+    locatorCoordinates: locatorRow?.coordinates ?? null,
+  });
+  return { applies: true, reason: restates(composed) ? null : "claim_not_measurement_restatement", measurementRow };
+}
+
 function orderedReasons(reasons) {
   const present = new Set(reasons);
   return ORDINARY_AUTHORITY_REASONS.filter((reason) => present.has(reason));
@@ -185,15 +234,10 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     // interpretation, and the claim restates exactly that measurement.
     // Source story presence has no role in this decision.
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
-    if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
-      reasons.push("measurement_definition_not_confirmed");
-    } else if (claimRow && (
-      claimRow.claim_type !== "finding"
-      || claimRow.evidence_item_id !== evidenceItemRow.evidence_item_id
-      || claimRow.statement !== composeDerivedClaimStatementFromRow(derivedRow)
-    )) {
-      reasons.push("claim_not_measurement_restatement");
-    }
+    const integrity = await evaluateMeasuredClaimIntegrityInTransaction(tx, {
+      organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
+    });
+    if (integrity.reason) reasons.push(integrity.reason);
     source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
     // A cross-source measurement is ordinary only when every version it
@@ -215,21 +259,11 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   if (!evidenceItemRow || evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
     reasons.push("evidence_type_not_measurement");
   } else {
-    measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
-    if (!isConfirmedMeasurement(measurementRow, evidenceItemRow)
-      || !validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow }).ok) {
-      reasons.push("measurement_definition_not_confirmed");
-    } else if (claimRow && (
-      claimRow.claim_type !== "finding"
-      || claimRow.evidence_item_id !== evidenceItemRow.evidence_item_id
-      || claimRow.statement !== composeMeasurementClaimStatement({
-        measurementRow,
-        definitionRow: measurementRow,
-        locatorCoordinates: locatorRow?.coordinates ?? null,
-      })
-    )) {
-      reasons.push("claim_not_measurement_restatement");
-    }
+    const integrity = await evaluateMeasuredClaimIntegrityInTransaction(tx, {
+      organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
+    });
+    measurementRow = integrity.measurementRow;
+    if (integrity.reason) reasons.push(integrity.reason);
     source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
   }

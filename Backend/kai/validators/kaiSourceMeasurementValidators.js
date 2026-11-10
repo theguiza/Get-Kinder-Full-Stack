@@ -174,6 +174,26 @@ function isCountAtMost(value, total) {
   return isCount(value) && value <= total;
 }
 
+/**
+ * The exact-duplicate structure of the counted records, from the committed
+ * profile's tabular measurement basis of the same table (CSV) or worksheet
+ * (XLSX): how many counted records belong to groups of identical records
+ * (members) and how many are copies beyond the first of their group (excess
+ * copies). Two pairs are 4 members and 2 excess copies. Only when that basis
+ * was assessed over exactly the counted records and is internally consistent
+ * (M members in G >= 1 groups of two or more: excess = M - G); otherwise
+ * null, and the statement says the excess is not recorded. The P1 profile's
+ * duplicate_row_count is members over every data row, blank rows included.
+ */
+export function countedDuplicateGroups(tabularBasis, countedRecords) {
+  const duplicates = isPlainObject(tabularBasis) ? tabularBasis.exact_duplicates : null;
+  if (!isPlainObject(tabularBasis) || tabularBasis.status !== "assessed" || tabularBasis.record_count !== countedRecords || !isPlainObject(duplicates)) return null;
+  const { group_count: groups, member_record_count: members, excess_copy_count: excess } = duplicates;
+  if (![groups, members, excess].every(isCount) || members > countedRecords || excess !== members - groups) return null;
+  if (groups === 0 ? members !== 0 : members < 2 * groups) return null;
+  return Object.freeze({ memberRecordCount: members, excessCopyCount: excess });
+}
+
 const UNCOUNTABLE_WORKSHEET_CONDITIONS = Object.freeze([
   ["formula_cell_count", "measurement_xlsx_formula_cells_present",
     "The worksheet has formula cells; KAI does not evaluate formulas, so it cannot tell which rows hold values.",
@@ -223,6 +243,7 @@ function deriveCsvRecordCount(profile) {
       totalRecordCount: counts.row_count,
       blankRecordCount: counts.blank_record_count,
       duplicateRecordCount: counts.duplicate_row_count,
+      countedDuplicates: countedDuplicateGroups(profile.tabular_measurement_basis, counts.row_count - counts.blank_record_count),
       measuredValue: counts.row_count - counts.blank_record_count,
     }),
   };
@@ -296,6 +317,7 @@ function deriveXlsxRecordCount(profile, selectedWorksheetKey = null) {
       totalRecordCount: total,
       blankRecordCount: basis.blank_record_count,
       duplicateRecordCount: basis.duplicate_record_count,
+      countedDuplicates: countedDuplicateGroups(sheet.tabular_measurement_basis, total - basis.blank_record_count),
       measuredValue: total - basis.blank_record_count,
     }),
   };
@@ -319,22 +341,11 @@ export function deriveRecordCountMeasurement(profile, selectedWorksheetKey = nul
   );
 }
 
-function periodPhrase(definition) {
-  return definition.periodStart
-    ? `for the reporting period ${definition.periodStart} to ${definition.periodEnd}`
-    : "with no reporting period defined";
+function plural(count, singular, pluralForm = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
-function plural(count, singular) {
-  return `${count} ${singular}${count === 1 ? "" : "s"}`;
-}
-
-/**
- * Evidence statement: the value, unit, counted unit, period, and the
- * arithmetic, composed only from the measurement and the human definition.
- */
-// What one counted record is, by calculation method. The CSV wording is the
-// wording every existing measured evidence item and claim was composed with.
+// What one counted record is, by calculation method.
 const RECORD_NOUN = Object.freeze({
   [MEASUREMENT_CALCULATION_METHOD]: "CSV data record",
   [MEASUREMENT_XLSX_CALCULATION_METHOD]: "worksheet data row",
@@ -354,35 +365,80 @@ export function describeMeasurementCalculationMethod(calculationMethod) {
     : "every CSV data record after the header row of the exact promoted source version is one record; records whose every field is empty are excluded.";
 }
 
+/**
+ * Measurement-to-claim factual integrity (owner Package 1, 2026-11-10). The
+ * P2-01M calculation establishes exactly one thing: how many physical data
+ * records (rows after the header row, blank ones excluded) the exact source
+ * version holds. It applies no status, date, period, roster, inclusion or
+ * exclusion predicate and removes no duplicate. The person's definition
+ * (counted unit, unit label, period, inclusion and exclusion rules) is
+ * recorded and attributed to the organization; it never becomes the counted
+ * entity, an applied period or an applied rule. A stronger measurement
+ * (records with a status, in a period, distinct people) is a source-derived
+ * measurement whose method executes those conditions.
+ *
+ * Duplicates: the committed profile states how many records belong to groups
+ * of identical records (group members) and, for profiles committed since,
+ * how many are copies beyond the first of their group (excess copies). The
+ * record count removes neither.
+ */
+export const MEASURED_RECORD_UNIT = "source records";
+
+// The duplicate policy the record count applied (none: every counted record
+// stays counted), with the committed duplicate structure. dataRowMembers is
+// the measurement's own group-member count over every data row.
+function duplicatePhrase(countedDuplicates, dataRowMembers) {
+  if (countedDuplicates) {
+    return countedDuplicates.memberRecordCount === 0
+      ? "no exact duplicates"
+      : `${countedDuplicates.memberRecordCount} in exact-duplicate groups `
+        + `(${plural(countedDuplicates.excessCopyCount, "excess copy", "excess copies")}), not removed`;
+  }
+  return !isCount(dataRowMembers) || dataRowMembers === 0
+    ? "no exact duplicates"
+    : `${dataRowMembers} data records in exact-duplicate groups (excess copies not recorded), not removed`;
+}
+
+function definitionAttribution({ countedUnit, periodStart, periodEnd }) {
+  return periodStart
+    ? `Not applied by KAI: the organization's description of each record as one ${countedUnit}, its stated period ${periodStart} to ${periodEnd}, and its inclusion and exclusion rules.`
+    : `Not applied by KAI: the organization's description of each record as one ${countedUnit} and its inclusion and exclusion rules; no reporting period was defined.`;
+}
+
+/**
+ * Evidence statement: the calculated count of source records, with the
+ * method's own blank and duplicate handling, then the person's definition
+ * attributed to the organization and explicitly not applied. The unit label
+ * stays on the recorded definition.
+ */
 export function composeMeasurementEvidenceStatement({ measurement, definition }) {
   const sheetCitation = measurement.calculationMethod === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD
-    ? ` from selected worksheet ${measurement.sheetKey}, `
-    : " ";
-  return `Source version record count: ${measurement.measuredValue} ${definition.unitLabel} ${periodPhrase(definition)},`
-    + `${sheetCitation}`
-    + `counting each ${recordNoun(measurement.calculationMethod)} after the header row as one ${definition.countedUnit}; `
+    ? ` from selected worksheet ${measurement.sheetKey}`
+    : "";
+  return `Source version record count: ${measurement.measuredValue} ${MEASURED_RECORD_UNIT}${sheetCitation} `
+    + `(each ${recordNoun(measurement.calculationMethod)} after the header row; `
     + `${plural(measurement.blankRecordCount, "blank record")} excluded; `
-    + `${plural(measurement.duplicateRecordCount, "exact-duplicate record")} included.`;
+    + `${duplicatePhrase(measurement.countedDuplicates ?? null, measurement.duplicateRecordCount)}). `
+    + definitionAttribution(definition);
 }
 
 /**
  * Claim statement: composed from the persisted measurement and definition
- * rows - never from the evidence statement text. States only the counted
- * value and its definition; no outcome, cause, participant, or rate.
+ * rows - never from the evidence statement text. Asserts only the number of
+ * source records the calculation established; the counted unit and period
+ * the person defined are attributed to the organization as not applied. No
+ * outcome, cause, participant, status, period or rate is asserted.
  */
 export function composeMeasurementClaimStatement({ measurementRow, definitionRow, locatorCoordinates = null }) {
-  const definition = {
-    periodStart: definitionRow.period_start,
-    periodEnd: definitionRow.period_end,
-  };
   const sheetCitation = measurementRow.calculation_method === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD
     ? ` in selected worksheet ${locatorCoordinates?.sheet_key ?? "(unavailable)"}`
     : "";
-  return `The promoted source records ${measurementRow.measured_value} ${definitionRow.unit_label} ${periodPhrase(definition)}`
-    + `${sheetCitation} `
-    + `(record count: one ${definitionRow.counted_unit} per ${recordNoun(measurementRow.calculation_method)}; `
-    + `${plural(Number(measurementRow.blank_record_count), "blank record")} excluded, `
-    + `${plural(Number(measurementRow.duplicate_record_count), "exact-duplicate record")} included).`;
+  const countedDuplicates = countedDuplicateGroups(measurementRow.profile_tabular_duplicates ?? null, measurementRow.measured_value);
+  return `The promoted source has ${measurementRow.measured_value} ${MEASURED_RECORD_UNIT}${sheetCitation} `
+    + `(record count: one record per ${recordNoun(measurementRow.calculation_method)}; `
+    + `${plural(Number(measurementRow.blank_record_count), "blank record")} excluded; `
+    + `${duplicatePhrase(countedDuplicates, Number(measurementRow.duplicate_record_count))}). `
+    + definitionAttribution({ countedUnit: definitionRow.counted_unit, periodStart: definitionRow.period_start, periodEnd: definitionRow.period_end });
 }
 
 export function validateComposedStatement(statement) {
@@ -616,7 +672,7 @@ export function isMeasurementLimitationCode(code) {
 // meaning: an accepted limitation stays a limitation, never a resolved fact.
 const MEASUREMENT_LIMITATION_DESCRIPTIONS = Object.freeze({
   [MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED]:
-    "What one record represents was defined by a person at the organization; KAI counted the records but did not verify what they represent.",
+    "What one record represents, and its inclusion and exclusion rules, were defined by a person at the organization; KAI counted the records but did not apply those rules or verify what the records represent.",
   [MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED]:
     "The reporting period was stated in that definition; it was not checked against dates in the records.",
   [MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD]: "No reporting period was defined for the count.",
@@ -766,13 +822,31 @@ export function coverageStatusClearedPattern(code) {
   );
 }
 
-// The measured value and human-defined unit label of a composed measurement
-// claim statement (composeMeasurementClaimStatement), or null.
-const MEASURED_COUNT_STATEMENT_PATTERN = /^The promoted source records (\d+) (.+?) (?:for the reporting period |with no reporting period defined)/;
+// The measured value, the unit the calculation established, and the text that
+// asserts it, of a composed measurement claim statement, or null. A current
+// statement asserts "source records"; what follows it is the organization's
+// definition, attributed and not applied, so it authorizes no counted entity,
+// status or service. A statement composed before the Package 1 integrity
+// repair asserted the person's unit label as the counted entity; it is read
+// as asserting records only (unitLabel null), never the label.
+const MEASURED_COUNT_STATEMENT_PATTERN = /^The promoted source has (\d+) source records\b[^.]*?\)\./;
+const LEGACY_MEASURED_COUNT_STATEMENT_PATTERN = /^The promoted source records (\d+) (.+?) (?:for the reporting period |with no reporting period defined)/;
 
 export function parseMeasuredCountStatement(statement) {
-  const match = MEASURED_COUNT_STATEMENT_PATTERN.exec(String(statement || ""));
-  return match ? Object.freeze({ value: match[1], unitLabel: match[2] }) : null;
+  const text = String(statement || "");
+  const current = MEASURED_COUNT_STATEMENT_PATTERN.exec(text);
+  if (current) return Object.freeze({ value: current[1], unitLabel: MEASURED_RECORD_UNIT, assertedText: current[0], legacy: false });
+  const legacy = LEGACY_MEASURED_COUNT_STATEMENT_PATTERN.exec(text);
+  return legacy ? Object.freeze({ value: legacy[1], unitLabel: null, assertedText: `The promoted source records ${legacy[1]} records.`, legacy: true }) : null;
+}
+
+/**
+ * The part of a claim statement that is asserted as established. For a
+ * record-count claim it is the count of source records only; any other
+ * statement is asserted as a whole.
+ */
+export function assertedClaimText(statement) {
+  return parseMeasuredCountStatement(statement)?.assertedText ?? String(statement || "");
 }
 
 // A service or outcome asserted of the counted records. A source record

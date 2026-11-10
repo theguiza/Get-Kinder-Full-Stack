@@ -55,6 +55,7 @@ export const GET_KINDER_REVIEW_REASONS = Object.freeze([
 
 export const BLOCKED_REASONS = Object.freeze([
   "cited_claims_not_currently_eligible",
+  "cited_measured_claim_integrity_not_established",
   "source_version_not_current",
   "processing_permission_not_established",
 ]);
@@ -64,9 +65,17 @@ export function classifyDraftPacket(packet) {
   const getKinderReviewReasons = [];
   if (packet.contentType !== ORGANIZATION_REVIEWABLE_CONTENT_TYPE) getKinderReviewReasons.push("content_type_requires_get_kinder_review");
   if (packet.requestedAudience !== ORGANIZATION_REVIEWABLE_AUDIENCE) getKinderReviewReasons.push("audience_requires_get_kinder_review");
+  // Owner Package 1 (2026-11-10): a cited measured claim that asserts more
+  // than its calculation established (P2-06 measured_claim_integrity_not_established)
+  // withholds the draft; unlike open review it is not a provisional finding.
+  const integrityFails = (packet.blocks || []).some((block) => (block?.citations || [])
+    .some((citation) => Array.isArray(citation?.blockerCodes) && citation.blockerCodes.includes("measured_claim_integrity_not_established")));
   return {
     getKinderReviewReasons,
-    blockedReasons: packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"],
+    blockedReasons: [
+      ...(packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
+      ...(integrityFails ? ["cited_measured_claim_integrity_not_established"] : []),
+    ],
   };
 }
 
@@ -141,7 +150,8 @@ async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
 // with no recorded permission, a use or AI prohibition, a superseded source
 // and a structure-only draft still withhold it. The organization's factual
 // review and release (evaluateOrganizationInternalReviewInTransaction /
-// evaluateOrganizationInternalReleaseInTransaction) are unchanged.
+// evaluateOrganizationInternalReleaseInTransaction) are unchanged. A cited
+// measured claim whose factual integrity fails also withholds it.
 const SENSITIVITY_INFORMATION_REASONS = new Set(Object.values(HIGH_RISK_SENSITIVITY_FIELDS));
 const PROVISIONAL_REPORT_INFORMATION_REASONS = new Set(["cited_claims_not_currently_eligible"]);
 

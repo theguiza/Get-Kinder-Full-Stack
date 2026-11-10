@@ -381,7 +381,7 @@ async function runBrowserAcceptance() {
   const Anthropic = (await import("@anthropic-ai/sdk")).default;
   const messagesPrototype = Object.getPrototypeOf(new Anthropic({ apiKey: "sk-ant-test-unused-dummy-key" }).messages);
   const modelCalls = [];
-  const COMPLIANT_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+  const COMPLIANT_TEXT = "The promoted source has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30. "
     + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
@@ -404,7 +404,7 @@ async function runBrowserAcceptance() {
           approved: true,
           draftStatus: "released",
           blocks: requestBody.claims.map((claim) => ({
-            text: claim.claimStatement.startsWith("The promoted source records 5 programme sessions")
+            text: claim.claimStatement.startsWith("The promoted source has 5 source records")
               ? COMPLIANT_TEXT
               : claim.claimStatement,
             citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
@@ -708,7 +708,7 @@ async function runBrowserAcceptance() {
     assert.match(shown, /\*\*Definition:\*\* Each row of the session log records one delivered programme session\./);
     assert.match(shown, /The period is stated in the organization's recorded definition; it was not checked against dates in the records\./, "human-attested period");
     assert.match(shown, /\| CIT-001 \| `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \| `[0-9a-f]{64}` `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \(/, "claim / evidence / source / version lineage");
-    assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
+    assert.match(shown, /2 counted records in exact-duplicate groups \(1 excess copy\)\. The record count removes no duplicate: every one of them stays in the count of 5, not removed or merged/);
     assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*caused any result/);
     for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
     assert.ok(shown.includes(`\`${ids.claimId}\``) && shown.includes(`\`${ids.evidenceItemId}\``) && shown.includes(`\`${ids.sourceVersionId}\``), "traceability");
@@ -875,13 +875,13 @@ async function runBrowserAcceptance() {
       await adminPage.waitForText("Confirm that the reporting period is your organization's statement.");
       await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
       await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 programme sessions");
+      await adminPage.waitForText("Measurement: 5 source records");
       await adminPage.idle();
       const [measurement] = await query("SELECT measured_value, evidence_item_id::text FROM kai.evidence_measurements WHERE organization_id = $1::uuid", [ORG_X]);
       assert.equal(Number(measurement.measured_value), independentRecordCount(CSV));
       ids.evidenceItemId = measurement.evidence_item_id;
       await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${ids.evidenceItemId}"]`, "Propose a claim");
-      await adminPage.waitForText("Claim: The promoted source records 5 programme sessions");
+      await adminPage.waitForText("Claim: The promoted source has 5 source records");
       const [claim] = await query("SELECT claim_id::text FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_X, ids.evidenceItemId]);
       ids.claimId = claim.claim_id;
       const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
@@ -1000,7 +1000,7 @@ async function runBrowserAcceptance() {
       ]) {
         const response = await fetchText(page, target);
         assert.equal(response.status, status, `${label}: ${response.body}`);
-        assert.doesNotMatch(response.body, /programme sessions\*\*/, label);
+        assert.doesNotMatch(response.body, /programme session|source records/, label);
         outcomes[label] = response.status;
       }
       const { getClientInternalReportMarkdown } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");

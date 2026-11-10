@@ -35,15 +35,23 @@ const generationClaim = (statement = SHEET_5_STATEMENT, limitationCodes = SHEET_
   audienceAuthority: { internal: true }, limitationCodes: [...limitationCodes],
 });
 
-test("I4 regression: the lexical boundary alone admits the misleading sentence (the defect path)", () => {
-  // VAL-GEN-008 would require the limitation wording; VAL-GEN-010 admits
-  // "service events" because the cited statement uses the label.
+test("I4 regression: the lexical boundary now refuses the misleading sentence; a record-count label never authorizes the counted entity", () => {
+  // Before owner Package 1 (2026-11-10) the lexical validators admitted
+  // "37 service events" because the cited (pre-repair) statement used the
+  // human label. A record count asserts source records only, so the label
+  // no longer authorizes that wording, even from a pre-repair statement.
   const withDisclosure = `${I4_SENTENCE} It is a count of records under the human-defined definition; no reporting period is defined.`;
   const result = validateGeneratedContentDraft({
     requestedAudience: "internal", generationClaims: [generationClaim()], contentType: "evidence_summary",
     blocks: [{ ordinal: 1, text: withDisclosure, citations: [{ claimId: CLAIM_5, evidenceItemId: EVIDENCE_5 }] }],
   });
-  assert.equal(result.ok, true, "the lexical validators pass it, so they cannot be the guard");
+  assert.equal(result.ok, false, "the label-bearing sentence is refused");
+  assert.ok(result.blockers.some((item) => item.validator_key === "VAL-GEN-008" && item.evidence?.violation_classes?.includes("limitation_contradicted")), JSON.stringify(result.blockers));
+  const truthful = validateGeneratedContentDraft({
+    requestedAudience: "internal", generationClaims: [generationClaim()], contentType: "evidence_summary",
+    blocks: [{ ordinal: 1, text: `In selected worksheet sheet_5 the promoted source has 37 records. It is a count of records under the human-defined definition; no reporting period is defined.`, citations: [{ claimId: CLAIM_5, evidenceItemId: EVIDENCE_5 }] }],
+  });
+  assert.deepEqual(truthful.blockers.filter((item) => item.validator_key === "VAL-GEN-008"), [], "37 records stays truthful");
 });
 
 test("I4 regression: a count-only block is accepted only when it is exactly the server-composed finding of its own measurement", () => {
@@ -161,7 +169,7 @@ test("two worksheets of one version: each section states each worksheet's own co
   const section = (from, to) => markdown.slice(markdown.indexOf(`\n## ${from}\n`), markdown.indexOf(`\n## ${to}\n`));
   const findings = section("Key findings", "Reporting period").split("\n").filter((line) => line.startsWith("- "));
   assert.equal(findings.length, 2);
-  assert.match(findings[0], /^- \*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 exact-duplicate records\*\*; 0 blank rows were excluded\. The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\. .* \[CIT-001\]$/);
+  assert.match(findings[0], /^- \*\*364 nonblank data rows were counted in Service_Events \(`sheet_3`\), including 2 data records in exact-duplicate groups \(the number of excess copies is not recorded for this profile\)\*\*; 0 blank rows were excluded\. The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\. .* \[CIT-001\]$/);
   assert.match(findings[1], /^- \*\*37 nonblank data rows were counted in Data_Dictionary \(`sheet_5`\)\*\*; 0 blank rows were excluded\. .* \[CIT-002\]$/);
   assert.doesNotMatch(findings[1], /364|sheet_3|duplicate|2026-09/);
   assert.doesNotMatch(findings[0], /\b37\b|sheet_5|Data_Dictionary/);

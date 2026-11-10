@@ -1430,6 +1430,10 @@ export async function listClientFollowupWorkflowsForOrganization({ organizationI
  * measurement was derived from - for an XLSX count, its worksheet's
  * per-column data-record missing counts - (null when that profile is no
  * longer the one bound to the version, so the assessment stays unknown).
+ * profile_tabular_duplicates is the same profile's tabular-basis status,
+ * record count and exact-duplicate structure (group, member and excess-copy
+ * counts over the non-blank records) of the measured table or worksheet;
+ * its parts are null for a profile committed before that basis existed.
  */
 export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organizationId, evidenceItemIds }, db = pool) {
   if (!Array.isArray(evidenceItemIds) || evidenceItemIds.length === 0) return [];
@@ -1459,7 +1463,21 @@ export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organiza
                      LIMIT 1)
               ELSE (SELECT jsonb_agg(field->'missing_count' ORDER BY ordinality)
                       FROM jsonb_array_elements(p.profile->'fields') WITH ORDINALITY AS fields(field, ordinality))
-            END AS profile_field_missing_counts
+            END AS profile_field_missing_counts,
+            CASE WHEN m.calculation_method IN (
+              'p1_xlsx_single_worksheet_data_rows_excluding_blank_v1',
+              'p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1'
+            )
+              THEN (SELECT jsonb_build_object('status', sheet->'tabular_measurement_basis'->'status',
+                                              'record_count', sheet->'tabular_measurement_basis'->'record_count',
+                                              'exact_duplicates', sheet->'tabular_measurement_basis'->'exact_duplicates')
+                      FROM jsonb_array_elements(p.profile->'sheets') AS sheet
+                     WHERE sheet->>'sheet_key' = sl.coordinates->>'sheet_key'
+                     LIMIT 1)
+              ELSE jsonb_build_object('status', p.profile->'tabular_measurement_basis'->'status',
+                                      'record_count', p.profile->'tabular_measurement_basis'->'record_count',
+                                      'exact_duplicates', p.profile->'tabular_measurement_basis'->'exact_duplicates')
+            END AS profile_tabular_duplicates
        FROM kai.evidence_measurements m
        JOIN kai.source_measurement_definitions d
          ON d.source_measurement_definition_id = m.source_measurement_definition_id

@@ -234,7 +234,14 @@ export function nextVisitedViews(visited, view) {
 // wording and the full statement one click away.
 
 const TECHNICAL_TEXT_RE = /\bfield_\d+\b|\bsheet_\d+\b|\(column [A-Z]{1,3}\)|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-const RECORD_COUNT_RE = /^Source version record count: (\d+) (.+?) (for the reporting period \S+ to \S+|with no reporting period defined),(?: from selected worksheet (\S+?),)? counting each (.+?) after the header row as one (.+?); (\d+ blank records?) excluded; (\d+ exact-duplicate records?) included\.$/s;
+// A record count stated since the measurement-to-claim integrity repair
+// (owner Package 1, 2026-11-10): the counted source records lead; the
+// organization's attributed description follows as a note.
+const RECORD_COUNT_RE = /^Source version record count: (\d+) source records(?: from selected worksheet (\S+?))? \(each (.+?) after the header row; (\d+ blank records?) excluded; (.+?)\)\. (Not applied by KAI: .+)$/s;
+// A record count stated before it: the recorded label was worded as the
+// counted entity, so the display leads with the counted records instead and
+// shows the label only as the organization's recorded label.
+const LEGACY_RECORD_COUNT_RE = /^Source version record count: (\d+) (.+?) (for the reporting period \S+ to \S+|with no reporting period defined),(?: from selected worksheet (\S+?),)? counting each (.+?) after the header row as one (.+?); (\d+ blank records?) excluded; (\d+ exact-duplicate records?) included\.$/s;
 const INTERPRETATION_RE = /^(.+?) \((meaning stated by the organization(?:; [^)]*)?)\): (.+)$/s;
 const PAIRED_BODY_RE = /^numeric outcome (\S+ \(column [A-Z]{1,3}\)), (in selected worksheet \S+|in the CSV data records), baseline to follow-up, no reporting period: (.+)$/s;
 
@@ -258,11 +265,23 @@ export function findingDisplay(statement) {
   if (!full) return plain;
   const count = RECORD_COUNT_RE.exec(full);
   if (count) {
-    const [, value, unit, period, sheet, noun, counted, blank, duplicates] = count;
+    const [, value, sheet, noun, blank, duplicates, attribution] = count;
     return {
-      headline: `${value} ${unit}`,
-      summary: `${capitalize(period)}; counting each ${noun} after the header row as one ${counted}; ${blank} excluded; ${duplicates} included.`,
-      note: "",
+      headline: `${value} source records`,
+      summary: `Counting each ${noun} after the header row as one record; ${blank} excluded; ${duplicates}.`,
+      note: attribution,
+      location: sheet ? `From selected worksheet ${sheet}` : "",
+      full,
+      neutral: false,
+    };
+  }
+  const legacy = LEGACY_RECORD_COUNT_RE.exec(full);
+  if (legacy) {
+    const [, value, unit, period, sheet, noun, , blank, duplicates] = legacy;
+    return {
+      headline: `${value} data records`,
+      summary: `Counting each ${noun} after the header row as one record; ${blank} excluded; ${duplicates} included.`,
+      note: `Recorded label and period, not applied by the count: ${unit}, ${period}.`,
       location: sheet ? `From selected worksheet ${sheet}` : "",
       full,
       neutral: false,

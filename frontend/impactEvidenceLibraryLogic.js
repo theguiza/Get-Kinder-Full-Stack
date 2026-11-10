@@ -228,6 +228,7 @@ export const CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS = Object.freeze([
   "indigenous_governance_not_cleared",
   "small_cell_risk_not_cleared",
   "cited_claims_not_currently_eligible",
+  "cited_measured_claim_integrity_not_established",
   "source_version_not_current",
   "processing_permission_not_established",
 ]);

@@ -90,8 +90,10 @@ const compose = (blocks, fixtures) => generatedContentValidators.composeEvidence
 });
 const blockerClasses = (validation) => validation.blockers.map((blocker) => [blocker.validator_key, ...(blocker.evidence.violation_classes || blocker.evidence.assertion_classes || [])]);
 
-const LEAD_112 = "The promoted source records 112 Participant assessment records in selected worksheet sheet_1.";
-const LEAD_37 = "The promoted source records 37 Participant assessment records in selected worksheet sheet_1.";
+// Owner Package 1: a record count asserts source records; the organization's
+// label is attributed and authorizes no counted entity.
+const LEAD_112 = "The promoted source has 112 source records in selected worksheet sheet_1.";
+const LEAD_37 = "The promoted source has 37 source records in selected worksheet sheet_1.";
 // Truthful model prose that never uses the validator's exact tokens.
 const PARAPHRASE_112 = `${LEAD_112} The organization decided what one row stands for, and KAI did not check that meaning. The count is not restricted to any dates.`;
 const COMPLETE_112 = `${LEAD_112} This is a count of source records under a human-defined record meaning. No reporting period is defined.`;
@@ -107,7 +109,7 @@ test("baseline fixture: the ordinary 112-record claim carries every applicable m
     "measurement.no_reporting_period",
     "measurement.record_meaning_human_defined",
   ]);
-  assert.match(M112.claim.claimStatement, /^The promoted source records 112 Participant assessment records with no reporting period defined in selected worksheet sheet_1 /);
+  assert.match(M112.claim.claimStatement, /^The promoted source has 112 source records in selected worksheet sheet_1 \(record count: one record per selected worksheet data row; .*Not applied by KAI: the organization's description of each record as one Participant assessment record and its inclusion and exclusion rules; no reporting period was defined\.$/);
   assert.ok(M37.limitationCodes.includes("measurement.period_human_attested_not_row_verified"));
   assert.ok(M37.limitationCodes.includes("measurement.blank_records_excluded"));
   assert.ok(M37.limitationCodes.includes("measurement.duplicate_records_included"));
@@ -627,7 +629,7 @@ test("Case C: '112 participants were served' is refused; the literal 112 does no
   assertRefused("C", refused, M112, "VAL-GEN-008", "limitation_contradicted");
 
   for (const truthful of [
-    "112 Participant assessment records were counted in selected worksheet sheet_1.",
+    "112 source records were counted in selected worksheet sheet_1.",
     `${LEAD_112} The source does not establish how many participants were served.`,
     // Owner prompt "KAI — Complete the existing VAL-GEN-008 repair" (2026-11-01),
     // Case C: denying that the source establishes the count is not asserting it.
@@ -653,7 +655,7 @@ test("Cases A–C hardening: the disclosure wording cannot mask an assertion, an
   for (const [label, text] of [
     ["copied disclosure prefix", `${LEAD_112} Measurement disclosure for the cited count: A reporting period was defined.`],
     ["any dimension asserted resolved", `${LEAD_112} Any conflicting sources have been resolved.`],
-    ["service asserted of the counted unit", "112 Participant assessment records were served in selected worksheet sheet_1."],
+    ["service asserted of the counted unit", "112 source records were served in selected worksheet sheet_1."],
     ["value as people", `${LEAD_112} That is 112 people.`],
     ["value as participants, later sentence", `${LEAD_112} In total, 112 participants.`],
   ]) {
@@ -674,7 +676,7 @@ test("Cases A–C hardening: the disclosure wording cannot mask an assertion, an
 // applicable disclosure from the claim's authoritative limitation codes. ---
 
 test("final acceptance: the 112-record count-and-worksheet-only draft persists with server-composed disclosures, unchanged evidence, and an open review", async (t) => {
-  const modelText = "112 Participant assessment records were counted in selected worksheet sheet_1.";
+  const modelText = "112 source records were counted in selected worksheet sheet_1.";
   assert.doesNotMatch(modelText, /reporting period|record meaning|human-defined|conflicting|alignment|small-cell|limitation/i, "the model supplies no disclosure of its own");
   const fixtureBefore = structuredClone({ measurementRow: M112.measurementRow, claim: M112.claim, dimensions: M112.dimensions });
   const observed = await observe([M112], modelText);
@@ -705,10 +707,11 @@ test("final acceptance: the 112-record count-and-worksheet-only draft persists w
   assert.deepEqual([M112.measurementRow.measured_value, M112.measurementRow.worksheet_key, M112.measurementRow.duplicate_record_count,
     M112.measurementRow.blank_record_count, M112.measurementRow.period_start, M112.measurementRow.period_end], [112, "sheet_1", 0, 0, null, null]);
   assert.deepEqual(persisted.match(/\d+/g), ["112", "1"], "only the measured value and the worksheet key's own digit");
-  // 112 is stated only of the counted unit; "Participant" occurs only inside
-  // that human-defined unit label, and nothing asserts people, uniqueness or service.
-  assert.deepEqual([...persisted.matchAll(/112 (\S+ \S+ \S+)/g)].map((match) => match[1]), ["Participant assessment records"]);
-  assert.doesNotMatch(persisted.replaceAll("Participant assessment records", ""), /\b(unique|distinct|deduplicated|individuals?|people|participants?|served|reached)\b/i);
+  // 112 is stated only of the counted source records (owner Package 1: the
+  // human-defined label is not the counted entity), and nothing asserts
+  // people, uniqueness or service.
+  assert.deepEqual([...persisted.matchAll(/112 (\S+ \S+)/g)].map((match) => match[1]), ["source records"]);
+  assert.doesNotMatch(persisted, /\b(unique|distinct|deduplicated|individuals?|people|participants?|served|reached)\b/i);
   assert.deepEqual(state.citations.map((row) => [row.claim_id, row.evidence_item_id]), [[M112.claimId, M112.evidenceItemId]], "the measurement stays traceable through its citation");
 
   // Unapproved draft in an open review queue; nothing approved, exported or written to evidence.

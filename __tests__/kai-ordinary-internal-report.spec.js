@@ -127,7 +127,7 @@ test("internal report: an available report is returned as complete Markdown with
   assert.match(markdown, /\*\*5 nonblank data rows were counted/);
   assert.match(markdown, /reporting period 2026-09-01 to 2026-09-30/);
   assert.match(markdown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
-  assert.match(markdown, /2 exact-duplicate records\. They are included in the count of 5/);
+  assert.match(markdown, /2 data records in exact-duplicate groups \(the number of excess copies is not recorded for this profile\)\. The record count removes no duplicate: every one of them stays in the count of 5/);
   assert.match(markdown, /no further approval is required for internal use/);
   assert.match(markdown, /Small-number \(small-cell\) risk: not yet resolved\. \(`coverage\.small_cell_risk\.unresolved`\)/);
   assert.ok(markdown.includes(`\`${CLAIM}\``) && markdown.includes(`\`${EVIDENCE}\``) && markdown.includes(`\`${VERSION}\``));

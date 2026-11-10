@@ -728,6 +728,7 @@ export function createPostgresClaimProposalRepository({
 
         let claimRecord;
         let isFreshlyCreated;
+        let preRepairMeasurementClaim = false;
         if (insertedClaimRow) {
           claimRecord = rowToClaimRecord(insertedClaimRow);
           isFreshlyCreated = true;
@@ -739,10 +740,16 @@ export function createPostgresClaimProposalRepository({
           if (!existingClaimRow) throw new MalformedInsertedRowError("claims");
           claimRecord = rowToClaimRecord(existingClaimRow);
           isFreshlyCreated = false;
+          // Owner Package 1 (2026-11-10): a record-count claim stated before
+          // the measurement-to-claim integrity repair keeps its identity and
+          // is replayed exactly as recorded, never rewritten or duplicated;
+          // P2-06 (measured_claim_integrity_not_established) keeps it from
+          // every use.
+          preRepairMeasurementClaim = isMeasurementClaim && claimRecord.statement_fingerprint !== statementFingerprint;
           // A mismatched immutable claim identity on reread (statement drift
           // against what this call would have written for the same identity)
           // is a genuine conflict, never a silent replay.
-          if (claimRecord.statement_fingerprint !== statementFingerprint) {
+          if (claimRecord.statement_fingerprint !== statementFingerprint && !preRepairMeasurementClaim) {
             throw new ConcurrentStateChangedError("claim");
           }
         }
@@ -792,8 +799,10 @@ export function createPostgresClaimProposalRepository({
           queueRecord,
           organizationId,
           evidenceItemId,
-          expectedStatement: statement,
-          expectedStatementFingerprint: statementFingerprint,
+          // A replayed pre-repair record-count claim is verified against its
+          // own recorded identity, which is kept exactly as stored.
+          expectedStatement: preRepairMeasurementClaim ? claimRecord.statement : statement,
+          expectedStatementFingerprint: preRepairMeasurementClaim ? claimRecord.statement_fingerprint : statementFingerprint,
         });
 
         if (!isFreshlyCreated) {

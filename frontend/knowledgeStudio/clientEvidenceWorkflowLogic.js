@@ -218,6 +218,9 @@ export const CLAIM_USE_BLOCKER_MESSAGES = Object.freeze({
   potential_conflict_review_unresolved: "a possible conflict with other evidence is unresolved",
   requirement_authority_absent: "a requirement it depends on has no recorded authority",
   traceability_incomplete: "its evidence lineage is incomplete",
+  measured_claim_integrity_not_established: "its wording states more than its record count established (for example the organization's label "
+    + "or period as if KAI had applied them), so it is kept as recorded but not used; count the records again on a new intake version, "
+    + "or use a measurement that applies those conditions",
 });
 
 const REVIEW_BLOCKERS = new Set(["claim_review_unresolved", "evidence_review_unresolved"]);
@@ -747,6 +750,7 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   indigenous_governance_not_cleared: "A cited source is not recorded as free of Indigenous or governance-sensitive information.",
   small_cell_risk_not_cleared: "A cited source is not recorded as free of small-cell re-identification risk.",
   cited_claims_not_currently_eligible: "At least one cited claim is not currently eligible for internal use.",
+  cited_measured_claim_integrity_not_established: "A cited record-count claim states more than its count established, so this draft is withheld.",
   source_version_not_current: "A cited source version is recorded as non-current.",
   processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
@@ -771,6 +775,7 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
   cited_claims_not_currently_eligible: "Each cited claim's current condition is shown on it under Claims for internal drafts. A new draft from claims "
     + "marked \"Usable in internal reports now\" is usable immediately; this draft becomes available only once every claim it cites is usable.",
   source_version_not_current: "Use findings from a current source version in a new draft. If the cited file should still be current, investigate its source-version history.",
+  cited_measured_claim_integrity_not_established: "Generate a new draft from claims marked \"Usable in internal reports now\". The cited claim stays recorded as it was.",
   processing_permission_not_established: "Ask Get Kinder to review the cited source's current processing permission, then reload this draft.",
 });
 

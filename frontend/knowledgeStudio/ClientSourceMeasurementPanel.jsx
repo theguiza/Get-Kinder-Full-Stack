@@ -185,7 +185,7 @@ export default function ClientSourceMeasurementPanel({
           <div className="fw-semibold">Recorded definition</div>
           <div className="text-muted">Your organization's definition of one record. KAI counted the rows; it did not verify what they represent.</div>
           <div>One record is one {recorded.definition.countedUnit}: {recorded.definition.definitionText}</div>
-          <div>Counts: {recorded.definition.inclusionRule} Excludes: {recorded.definition.exclusionRule}</div>
+          <div>Your inclusion rule: {recorded.definition.inclusionRule} Your exclusion rule: {recorded.definition.exclusionRule} (recorded with the count; Count records does not apply them).</div>
           <div data-client-source-measurement-period="">
             {recorded.definition.periodStart
               ? `Reporting period ${recorded.definition.periodStart} to ${recorded.definition.periodEnd}, as stated by your organization (not verified against dates in the records).`
@@ -193,7 +193,8 @@ export default function ClientSourceMeasurementPanel({
           </div>
           {recorded.measurement ? (
             <div className="mt-1" data-client-source-measurement-value={recorded.measurement.measuredValue}>
-              Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong>.
+              {/* Owner Package 1: the count is of source records; the label is the organization's description. */}
+              Measurement: <strong>{recorded.measurement.measuredValue} source records</strong> (your label: {recorded.measurement.unitLabel}).
               <div className="text-muted" data-client-source-measurement-evidence={recorded.measurement.evidenceItemId}>
                 {recorded.measurement.measuredValue} non-blank data records counted; that each is one {recorded.definition.countedUnit} is your
                 organization's definition. Evidence item: {recorded.measurement.evidenceItemId}

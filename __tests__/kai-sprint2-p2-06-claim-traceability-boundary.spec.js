@@ -130,6 +130,7 @@ test("P2-06 repository contract fixes blocker ordering and exposes potential gro
     "claim_review_unresolved",
     "evidence_review_unresolved",
     "support_strength_unassessed",
+    "measured_claim_integrity_not_established",
     "coverage_dimension_unresolved",
     "client_followup_unresolved",
     "potential_conflict_review_unresolved",

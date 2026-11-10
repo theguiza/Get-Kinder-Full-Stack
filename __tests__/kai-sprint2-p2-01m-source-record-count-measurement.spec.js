@@ -95,7 +95,10 @@ test("the measurement is the committed record count minus blank records; duplica
     sheetKey: null,
     totalRecordCount: 4,
     blankRecordCount: 1,
+    // One pair of identical records: 2 group members, 1 excess copy (the
+    // committed tabular basis of the counted records).
     duplicateRecordCount: 2,
+    countedDuplicates: { memberRecordCount: 2, excessCopyCount: 1 },
     measuredValue: 3,
   });
   const csv = { status: "profiled", format: "csv", structural_metadata: { header_row_assumed: true } };
@@ -131,6 +134,7 @@ test("XLSX: single-worksheet compatibility and explicit selection for multi-work
       totalRecordCount: 6,
       blankRecordCount: 1,
       duplicateRecordCount: 2,
+      countedDuplicates: { memberRecordCount: 2, excessCopyCount: 1 },
       measuredValue: 5,
     }, `styled blank row: ${styledBlank}`);
   }
@@ -198,24 +202,28 @@ test("XLSX: single-worksheet compatibility and explicit selection for multi-work
   assert.doesNotMatch(JSON.stringify(current.sheets[0].tabular_measurement_basis), /2026-09-|"a","b"/, "the basis keeps months and listed labels only");
 });
 
-test("statements state only the counted value, its definition, period, and arithmetic", () => {
+test("statements state only the counted source records and arithmetic; the definition and period are attributed, not applied", () => {
   const definition = validateRecordCountDefinition({ ...DEFINITION, period_start: "2026-09-01", period_end: "2026-09-30" }).definition;
   const measurement = { totalRecordCount: 4, blankRecordCount: 1, duplicateRecordCount: 0, measuredValue: 3 };
   const evidence = composeMeasurementEvidenceStatement({ measurement, definition });
-  assert.equal(evidence, "Source version record count: 3 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each CSV data record after the header row as one programme session; 1 blank record excluded; 0 exact-duplicate records included.");
+  assert.equal(evidence, "Source version record count: 3 source records (each CSV data record after the header row; 1 blank record excluded; no exact duplicates). "
+    + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
   const claim = composeMeasurementClaimStatement({
     measurementRow: { measured_value: 3, blank_record_count: 1, duplicate_record_count: 0 },
     definitionRow: { unit_label: "programme sessions", counted_unit: "programme session", period_start: null, period_end: null },
   });
-  assert.equal(claim, "The promoted source records 3 programme sessions with no reporting period defined (record count: one programme session per CSV data record; 1 blank record excluded, 0 exact-duplicate records included).");
+  assert.equal(claim, "The promoted source has 3 source records (record count: one record per CSV data record; 1 blank record excluded; no exact duplicates). "
+    + "Not applied by KAI: the organization's description of each record as one programme session and its inclusion and exclusion rules; no reporting period was defined.");
   // A workbook count names worksheet rows; the CSV wording above is unchanged.
   const xlsxEvidence = composeMeasurementEvidenceStatement({ measurement: { ...measurement, calculationMethod: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" }, definition });
-  assert.equal(xlsxEvidence, "Source version record count: 3 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 0 exact-duplicate records included.");
+  assert.equal(xlsxEvidence, "Source version record count: 3 source records (each worksheet data row after the header row; 1 blank record excluded; no exact duplicates). "
+    + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
   const xlsxClaim = composeMeasurementClaimStatement({
     measurementRow: { measured_value: 3, blank_record_count: 1, duplicate_record_count: 0, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" },
     definitionRow: { unit_label: "programme sessions", counted_unit: "programme session", period_start: null, period_end: null },
   });
-  assert.equal(xlsxClaim, "The promoted source records 3 programme sessions with no reporting period defined (record count: one programme session per worksheet data row; 1 blank record excluded, 0 exact-duplicate records included).");
+  assert.equal(xlsxClaim, "The promoted source has 3 source records (record count: one record per worksheet data row; 1 blank record excluded; no exact duplicates). "
+    + "Not applied by KAI: the organization's description of each record as one programme session and its inclusion and exclusion rules; no reporting period was defined.");
   const selectedEvidence = composeMeasurementEvidenceStatement({ measurement: { ...measurement, calculationMethod: "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", sheetKey: "sheet_2" }, definition });
   assert.match(selectedEvidence, /from selected worksheet sheet_2/);
   const selectedClaim = composeMeasurementClaimStatement({

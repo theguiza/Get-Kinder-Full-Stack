@@ -131,9 +131,25 @@ function countedRows(m) {
   return `${plural(m.measuredValue, "nonblank data row")} in ${worksheetOf(m)}`;
 }
 
+// Duplicates as the committed profile states them: the records that belong
+// to groups of identical records, and (when recorded) how many of those are
+// copies beyond the first of their group. A record count removes neither.
+function duplicateGroupText(m) {
+  const counted = m.countedDuplicates;
+  if (counted && Number.isSafeInteger(counted.memberRecordCount) && Number.isSafeInteger(counted.excessCopyCount)) {
+    return `${plural(counted.memberRecordCount, "counted record")} in exact-duplicate groups (${plural(counted.excessCopyCount, "excess copy", "excess copies")})`;
+  }
+  return `${plural(m.duplicateRecordCount, "data record")} in exact-duplicate groups (the number of excess copies is not recorded for this profile)`;
+}
+
+// Whether the counted records include any exact duplicate.
+function hasCountedDuplicates(m) {
+  return m.countedDuplicates ? m.countedDuplicates.memberRecordCount > 0 : m.duplicateRecordCount > 0;
+}
+
 function countOnlyFinding(m) {
   const counted = `${plural(m.measuredValue, "nonblank data row")} ${m.measuredValue === 1 ? "was" : "were"} counted in ${worksheetOf(m)}`;
-  return m.duplicateRecordCount > 0 ? `${counted}, including ${plural(m.duplicateRecordCount, "exact-duplicate record")}` : counted;
+  return hasCountedDuplicates(m) ? `${counted}, including ${duplicateGroupText(m)}` : counted;
 }
 
 function humanLabel(value) {
@@ -164,17 +180,14 @@ function contextLines(model) {
 function findingLines(model) {
   const lines = [];
   for (const fact of model.facts) {
-    if (fact.measurement && fact.countOnly) {
+    // Owner Package 1: every record count is stated as the rows it counted;
+    // the person's label, period and rules are never stated as applied.
+    if (fact.measurement) {
       const m = fact.measurement;
       const period = periodText(m);
       lines.push(`- **${countOnlyFinding(m)}**; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded. `
         + `${period ? `The organization states the reporting period ${period}; it was not checked against dates in the rows. ` : ""}`
         + `${humanMeaning(m)} ${refs(fact.citationRefs)}`);
-    } else if (fact.measurement) {
-      const m = fact.measurement;
-      const period = periodText(m);
-      lines.push(`- The promoted source records **${m.measuredValue} ${text(m.unitLabel)}**${period ? ` for the reporting period ${period}` : ""}: `
-        + `${plural(m.measuredValue, `qualifying ${text(m.countedUnit)} record`)} counted under the organization's recorded definition. ${refs(fact.citationRefs)}`);
     } else {
       lines.push(`- ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     }
@@ -236,8 +249,8 @@ function duplicateLines(model) {
   const lines = [];
   for (const fact of measuredFacts(model)) {
     const m = fact.measurement;
-    lines.push(m.duplicateRecordCount > 0
-      ? `- ${refs(fact.citationRefs)} The profiler reported ${plural(m.duplicateRecordCount, "exact-duplicate record")}. They are included in the count of ${m.measuredValue}, not removed or merged, because the recorded definition gives no rule that makes them invalid. The count is therefore a count of records, not of distinct sessions or events.`
+    lines.push(hasCountedDuplicates(m)
+      ? `- ${refs(fact.citationRefs)} The profiler reported ${duplicateGroupText(m)}. The record count removes no duplicate: every one of them stays in the count of ${m.measuredValue}, not removed or merged. The count is therefore a count of records, not of distinct sessions or events.`
       : `- ${refs(fact.citationRefs)} The profiler reported no exact-duplicate records.`);
   }
   if (lines.length === 0) {
@@ -267,12 +280,8 @@ function limitationLines(model) {
 function establishesLines(model) {
   const lines = [];
   for (const fact of model.facts) {
-    if (fact.measurement && fact.countOnly) {
+    if (fact.measurement) {
       lines.push(`- The promoted source version ${code(fact.sourceVersionId)} contains ${countedRows(fact.measurement)}. ${refs(fact.citationRefs)}`);
-    } else if (fact.measurement) {
-      const m = fact.measurement;
-      lines.push(`- The promoted source version ${code(fact.sourceVersionId)} contains ${plural(m.measuredValue, "non-blank data record")}, `
-        + `each of which the organization's recorded definition treats as one ${text(m.countedUnit)}. ${refs(fact.citationRefs)}`);
     } else {
       lines.push(`- The recorded claim: ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     }
@@ -338,19 +347,10 @@ function analysisLines(model) {
   const lines = [];
   for (const fact of counts) {
     const m = fact.measurement;
-    if (fact.countOnly) {
-      lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data row")} after the header in ${worksheetOf(m)} `
-        + `${m.measuredValue === 1 ? "was" : "were"} nonblank and counted; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded`
-        + `${m.duplicateRecordCount > 0 ? `, and ${plural(m.duplicateRecordCount, "exact-duplicate row")} ${m.duplicateRecordCount === 1 ? "is" : "are"} included` : ""}. `
-        + "The figure is a number of rows in that worksheet only.");
-      continue;
-    }
-    const share = m.totalRecordCount > 0 ? Math.round((m.measuredValue / m.totalRecordCount) * 100) : null;
-    lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data record")} in the source qualified`
-      + `${share === null ? "" : ` (${share}%)`}; ${plural(m.blankRecordCount, "blank record")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded.`
-      + (m.duplicateRecordCount > 0
-        ? ` ${plural(m.duplicateRecordCount, "exact-duplicate record")} ${m.duplicateRecordCount === 1 ? "is" : "are"} included, so the figure should be reported as records, not as distinct sessions.`
-        : ""));
+    lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data row")} after the header in ${worksheetOf(m)} `
+      + `${m.measuredValue === 1 ? "was" : "were"} nonblank and counted; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded`
+      + `${hasCountedDuplicates(m) ? `, and ${duplicateGroupText(m)} are included` : ""}. `
+      + "The figure is a number of rows in that worksheet only.");
   }
   for (const fact of documents) {
     lines.push(`- ${refs(fact.citationRefs)} **Source-reported observation (qualitative):** the source records that "${observationText(fact)}" `

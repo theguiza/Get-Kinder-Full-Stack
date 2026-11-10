@@ -6,6 +6,7 @@ import {
   REPORTING_PERIOD_ASSERTION_PATTERNS,
   SERVICE_DELIVERY_PATTERN,
   affirmativeMatches,
+  assertedClaimText,
   composeMeasurementDisclosure,
   coverageStatusClearedPattern,
   isMeasurementLimitationCode,
@@ -65,7 +66,8 @@ const SELECTED_WORKSHEET_PATTERN = /\bin selected worksheet (sheet_[1-9][0-9]{0,
 
 export function countOnlyBlockViolations(text, citedStatements) {
   const blockText = String(text || "");
-  const citedText = citedStatements.join("\n").toLowerCase();
+  // A record-count claim's attributed definition authorizes no wording.
+  const citedText = citedStatements.map(assertedClaimText).join("\n").toLowerCase();
   const violations = [];
   if (QUOTATION_PATTERN.test(blockText)) violations.push("quotation");
   if (FIRST_PERSON_PATTERN.test(blockText)) violations.push("first_person");
@@ -225,13 +227,16 @@ function evidenceSummaryContradicts(modelText, codes, citedClaims) {
   }
   if ([...codes].some((code) => code.startsWith("coverage.") && coverageStatusClearedPattern(code).test(modelText))) return true;
   if (!codes.has(MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED)) return false;
-  const citedText = citedClaims.map((claim) => claim.claimStatement || "").join("\n").toLowerCase();
+  // Owner Package 1: only what a record count asserts (its number of source
+  // records) authorizes wording; the organization's attributed description
+  // of a record, its period and rules were not applied by the calculation.
+  const citedText = citedClaims.map((claim) => assertedClaimText(claim.claimStatement)).join("\n").toLowerCase();
   for (const claim of citedClaims) {
     const measured = parseMeasuredCountStatement(claim.claimStatement);
     if (!measured) continue;
-    const words = measured.unitLabel.split(/\s+/);
-    const units = words.map((_, index) => escapeRegExp(words.slice(index).join(" "))).join("|");
-    const countedUnit = new RegExp(`^(?:\\s*(?:[.,;:)]|$)|\\s+(?:${units}|(?:counted\\s+)?(?:non-?blank\\s+)?(?:source\\s+|data\\s+)?(?:records?|rows?))\\b)`, "i");
+    const words = measured.unitLabel ? measured.unitLabel.split(/\s+/) : [];
+    const units = words.map((_, index) => escapeRegExp(words.slice(index).join(" "))).map((unit) => `${unit}|`).join("");
+    const countedUnit = new RegExp(`^(?:\\s*(?:[.,;:)]|$)|\\s+(?:${units}(?:counted\\s+)?(?:non-?blank\\s+)?(?:source\\s+|data\\s+)?(?:records?|rows?))\\b)`, "i");
     // "The source does not establish that 112 participants were served" denies
     // that statement rather than making it, so the clause it governs (to the
     // next clause break) is not read as an assertion of the value; any other

@@ -778,7 +778,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual(writes(adminPage, mark), [], "switching views writes nothing");
       await adminPage.click('[data-client-source-measurement-field="periodAttested"]', null, "attest the period");
       await adminPage.click("[data-client-source-measurement-submit]", null, "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 programme sessions");
+      await adminPage.waitForText("Measurement: 5 source records");
       await adminPage.idle();
       const [measurement] = await query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [ids.sessionsVersion]);
       assert.equal(Number(measurement.measured_value), 5);
@@ -797,7 +797,7 @@ async function runBrowserAcceptance() {
       await adminPage.tab("Drafts");
       await adminPage.idle();
       await adminPage.tab("Sources");
-      await adminPage.waitForText("Measurement: 5 programme sessions");
+      await adminPage.waitForText("Measurement: 5 source records");
       assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [ids.sessionsVersion]))[0].n, 1, "no duplicate measurement");
     });
 

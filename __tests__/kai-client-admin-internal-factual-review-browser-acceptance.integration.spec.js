@@ -300,7 +300,7 @@ async function runBrowserAcceptance() {
   const Anthropic = (await import("@anthropic-ai/sdk")).default;
   const messagesPrototype = Object.getPrototypeOf(new Anthropic({ apiKey: "sk-ant-test-unused-dummy-key" }).messages);
   const modelCalls = [];
-  const COMPLIANT_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+  const COMPLIANT_TEXT = "The promoted source has 5 source records; the organization states the reporting period 2026-09-01 to 2026-09-30. "
     + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
@@ -315,7 +315,7 @@ async function runBrowserAcceptance() {
           approved: true,
           draftStatus: "released",
           blocks: requestBody.claims.map((claim) => ({
-            text: claim.claimStatement.startsWith("The promoted source records 5 programme sessions")
+            text: claim.claimStatement.startsWith("The promoted source has 5 source records")
               ? COMPLIANT_TEXT
               : claim.claimStatement,
             citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
@@ -593,7 +593,7 @@ async function runBrowserAcceptance() {
       await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
       const mark = adminPage.mark();
       await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 programme sessions");
+      await adminPage.waitForText("Measurement: 5 source records");
       await adminPage.idle();
       const requests = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/record-count-measurement"));
       assert.deepEqual(requests[0] && [requests[0].method, requests[0].status], ["POST", 200], "the measurement write succeeded");
@@ -611,10 +611,10 @@ async function runBrowserAcceptance() {
 
     await test("A2: the administrator proposes the measured claim from the panel; it states the count, records its gaps, and creates no client follow-up", async () => {
       await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${ids.evidenceItemId}"]`, "Propose a claim");
-      await adminPage.waitForText("Claim: The promoted source records 5 programme sessions");
+      await adminPage.waitForText("Claim: The promoted source has 5 source records");
       assert.match(await adminPage.text(), /status: proposed; review: needs_gk_review/);
       const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_X, ids.evidenceItemId]);
-      assert.match(claim.statement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+      assert.match(claim.statement, /^The promoted source has 5 source records \(record count: .*its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules\.$/);
       const [gaps] = await query(`SELECT (SELECT count(*) FROM kai.gap_log_items WHERE claim_id = $1::uuid)::int AS gaps,
         (SELECT count(*) FROM kai.client_followup_items WHERE claim_id = $1::uuid)::int AS followups`, [claim.claim_id]);
       assert.ok(gaps.gaps > 0, "gap state recorded at proposal");
@@ -731,7 +731,7 @@ async function runBrowserAcceptance() {
       assert.ok(await textOf(adminPage, '[data-client-internal-report="available"]'), "the internal report is available");
       const detailText = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`);
       assert.ok(detailText.includes(COMPLIANT_TEXT), "the draft's actual text");
-      assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /The promoted source records 5 programme sessions/);
+      assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /The promoted source has 5 source records/);
       assert.doesNotMatch(await textOf(adminPage, "[data-client-internal-draft-limitations]"), /factual review/i);
       for (const selector of ["[data-client-factual-review-action]", "[data-client-factual-review-approve]", "[data-client-internal-release-action]",
         "[data-client-internal-release-submit]", "[data-client-internal-draft-release-state]"]) {
@@ -868,7 +868,7 @@ async function runBrowserAcceptance() {
         assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independentRecordCount(CSV));
         assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
         assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
-        assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
+        assert.match(shown, /2 counted records in exact-duplicate groups \(1 excess copy\)\. The record count removes no duplicate: every one of them stays in the count of 5, not removed or merged/);
         assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*caused any result/);
         assert.match(shown, /## Conclusion\n\nOn the available evidence, the organization's promoted source records 5 programme sessions for 2026-09-01 to 2026-09-30\./);
         for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
@@ -897,7 +897,7 @@ async function runBrowserAcceptance() {
       ]) {
         const response = await fetchText(page, target);
         assert.equal(response.status, status, `${label}: ${response.body}`);
-        assert.doesNotMatch(response.body, /programme sessions/, label);
+        assert.doesNotMatch(response.body, /programme session|source records/, label);
         outcomes[label] = response.status;
       }
       const { getClientInternalReportMarkdown } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
@@ -918,7 +918,7 @@ async function runBrowserAcceptance() {
       await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       const stale = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId));
       assert.equal(stale.status, 409, stale.body);
-      assert.doesNotMatch(stale.body, /programme sessions/);
+      assert.doesNotMatch(stale.body, /programme session|source records/);
       await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       const restored = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId));
       assert.equal(restored.status, 200);

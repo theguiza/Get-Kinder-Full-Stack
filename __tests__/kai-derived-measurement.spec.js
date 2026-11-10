@@ -313,7 +313,11 @@ test("interpretations: required label and meaning, direction only for paired out
 // both families pass the same contract, disclosure composition and validators.
 const RECORD_COUNT_CLAIM = Object.freeze({
   claimId: "c0000000-0000-4000-8000-000000000001", evidenceItemId: "e0000000-0000-4000-8000-000000000001",
-  claimStatement: "The promoted source records 9 visit records with no reporting period defined (record count: one visit record per CSV data record; 1 blank record excluded, 2 exact-duplicate records included).",
+  // Owner Package 1 composition: the record count asserts source records; the
+  // organization's description is attributed and not applied.
+  claimStatement: "The promoted source has 9 source records (record count: one record per CSV data record; 1 blank record excluded; "
+    + "2 in exact-duplicate groups (1 excess copy), not removed). Not applied by KAI: the organization's description of each record "
+    + "as one visit record and its inclusion and exclusion rules; no reporting period was defined.",
   limitationCodes: ["measurement.blank_records_excluded", "measurement.duplicate_records_included", "measurement.no_reporting_period", "measurement.record_meaning_human_defined"],
 });
 

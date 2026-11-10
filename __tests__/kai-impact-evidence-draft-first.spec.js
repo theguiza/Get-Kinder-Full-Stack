@@ -437,3 +437,44 @@ test("D derived-outcome evidence: a paired outcome without a row count is recogn
   assert.doesNotMatch(md, /nonblank data row|activity volume/);
   assertNoUnqualifiedImprovement(md);
 });
+
+// Owner Package 1 (2026-11-10): measurement-to-claim factual integrity. The
+// exact wording the pre-repair composer persisted for this fixture's count,
+// which asserted the person's label as the counted entity.
+const PRE_REPAIR_COUNT_STATEMENT = "The promoted source records 37 service events with no reporting period defined (record count: one service event per CSV data record; 0 blank records excluded, 0 exact-duplicate records included).";
+
+test("Package 1: a persisted pre-repair record-count claim is not drafted from, is left out of an assessment, and withholds an earlier draft that cites it; the current claim stays usable", async () => {
+  const h = harness([ACTIVITY, FEEDBACK]);
+  const [activity, feedback] = h.fixtures;
+  assert.match(activity.claimRow.statement, /^The promoted source has 37 source records \(record count: one record per CSV data record;/);
+  // The current, truthful record count drafts provisionally with no review.
+  const earlier = await createImpactNarrativeDraft(h.input([activity.claimId, feedback.claimId], "package-1-before"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(earlier.ok, true, JSON.stringify(earlier));
+  assert.match(h.providerInputs[0].claims.find((claim) => claim.claimId === activity.claimId).claimStatement, /^37 nonblank data rows were counted/,
+    "the model sees the row count, never the label");
+  assert.equal((await readReport(h, earlier.data.generatedContentDraftId)).detail.data.internalReport.available, true);
+
+  // The same lineage holding the pre-repair wording (stored, never rewritten).
+  activity.claimRow.statement = PRE_REPAIR_COUNT_STATEMENT;
+  const trace = await evaluateClaimTraceabilityInTransaction(h.tx, { organizationId: ORG, claimId: activity.claimId, requestedAudience: "internal" });
+  assert.equal(trace.data.eligible, false);
+  assert.ok(trace.data.blockerCodes.includes("measured_claim_integrity_not_established"), JSON.stringify(trace.data.blockerCodes));
+  const calls = h.providerInputs.length;
+  const narrative = await createImpactNarrativeDraft(h.input([activity.claimId], "package-1-narrative"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(narrative.ok, false);
+  assert.equal(narrative.blockers?.[0]?.blocking_reason, "measured_claim_not_currently_eligible", JSON.stringify(narrative));
+  const summary = await createEvidenceSummaryDraft(h.input([activity.claimId], "package-1-summary"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(summary.ok, false);
+  assert.equal(h.providerInputs.length, calls, "the provider is never called for it");
+  const assessment = await createFreeImpactAssessmentDraft(h.input([activity.claimId, feedback.claimId], "package-1-assessment"),
+    { ...h.dependencies, draftGenerator: assessmentGenerator(h, [feedback.claimId]) });
+  assert.equal(assessment.ok, true, JSON.stringify(assessment));
+  assert.deepEqual(h.providerInputs.at(-1).claims.map((claim) => claim.claimId), [feedback.claimId], "left out of the assessment; the rest is kept");
+  assert.ok(assessment.data.blocks.some((block) => block.text.endsWith(ASSESSMENT_SELECTION_NOTE)));
+
+  // The earlier draft citing it is kept as generated but withheld as a report.
+  const { detail } = await readReport(h, earlier.data.generatedContentDraftId);
+  assert.equal(detail.data.internalReport.available, false);
+  assert.ok(detail.data.internalReport.blockedReasons.includes("cited_measured_claim_integrity_not_established"), JSON.stringify(detail.data.internalReport));
+  assert.equal(h.store.drafts.find((draft) => draft.generated_content_draft_id === earlier.data.generatedContentDraftId).draft_status, "draft", "the stored draft is unchanged");
+});

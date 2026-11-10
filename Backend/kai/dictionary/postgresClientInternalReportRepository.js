@@ -6,7 +6,7 @@ import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentR
 import { evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGeneratedContentRepository.js";
 import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
-import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import { MEASUREMENT_EVIDENCE_TYPE, countedDuplicateGroups, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 
@@ -130,6 +130,7 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         totalRecordCount: measurementRow.total_record_count,
         blankRecordCount: measurementRow.blank_record_count,
         duplicateRecordCount: measurementRow.duplicate_record_count,
+        countedDuplicates: countedDuplicateGroups(measurementRow.profile_tabular_duplicates ?? null, measurementRow.measured_value),
         calculationMethod: measurementRow.calculation_method,
         worksheetKey: measurementRow.worksheet_key || null,
         worksheetName: measurementRow.worksheet_name || null,

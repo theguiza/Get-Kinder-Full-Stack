@@ -437,8 +437,12 @@
       return result(S.WAITING, `${observed}; no claim proposed yet`,
         `In the Count records panel click "Propose a claim" ([data-client-source-measurement-propose-claim="${m.evidence_item_id}"]) once, then KAI_CANARY.next().`);
     }
-    const expectedStart = `The promoted source records 5 ${d.unit_label} for the reporting period ${d.period_start} to ${d.period_end}`;
-    if (!isUuid(claim.claim_id) || !String(claim.statement || "").startsWith(expectedStart)) {
+    // Owner Package 1 (2026-11-10): the claim asserts source records only; the
+    // definition's unit and period are attributed and stated as not applied.
+    const expectedStart = "The promoted source has 5 source records (";
+    const expectedPeriod = `its stated period ${d.period_start} to ${d.period_end}, and its inclusion and exclusion rules.`;
+    const statement = String(claim.statement || "");
+    if (!isUuid(claim.claim_id) || !statement.startsWith(expectedStart) || !statement.endsWith(expectedPeriod)) {
       return result(S.FAIL, `${observed}; claim ${claim.claim_id}: "${short(claim.statement, 160)}"`, "The claim does not state the measured value and period; do not continue.");
     }
     state.ids.claimId = claim.claim_id;
@@ -554,7 +558,7 @@
       internalEvidenceSummary: text.startsWith("# Internal Evidence Summary\n") && /internal use by this organization only/.test(text),
       countAndUnit: /\*\*5 nonblank data rows were counted/.test(section("Key findings")),
       methodAndArithmetic: /minus 1 blank record excluded = \*\*5\*\* counted/.test(section("Measurement definition and counting method")),
-      duplicatesIncluded: /2 exact-duplicate records\. They are included in the count of 5/.test(section("Duplicate records")),
+      duplicatesIncluded: /2 (?:counted|data) records in exact-duplicate groups \([^)]*\)\. The record count removes no duplicate: every one of them stays in the count of 5/.test(section("Duplicate records")),
       doesNotEstablish: /distinct people/.test(section("What this evidence does not establish")),
       conclusion: /5 nonblank data rows/.test(section("Conclusion")),
       reportingPeriod: text.includes(state.period.start) && text.includes(state.period.end),

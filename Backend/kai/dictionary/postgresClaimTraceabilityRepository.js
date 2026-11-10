@@ -53,6 +53,7 @@ import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthor
 import {
   ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS,
   attachOrdinaryInternalAuthority,
+  evaluateMeasuredClaimIntegrityInTransaction,
   evaluateOrdinaryMeasurementAuthorityInTransaction,
 } from "./postgresOrdinaryInternalFactAuthority.js";
 
@@ -82,6 +83,7 @@ const BLOCKER_ORDER = Object.freeze([
   "claim_review_unresolved",
   "evidence_review_unresolved",
   "support_strength_unassessed",
+  "measured_claim_integrity_not_established",
   "coverage_dimension_unresolved",
   "client_followup_unresolved",
   "potential_conflict_review_unresolved",
@@ -709,6 +711,14 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     })
     : null;
   const ordinaryInternal = ordinaryAuthority?.ordinary === true;
+  // Owner Package 1 (2026-11-10): a claim on measurement evidence is usable
+  // for any audience only while it asserts exactly what its calculation
+  // established (postgresOrdinaryInternalFactAuthority.js). A recorded review,
+  // an accepted limitation or provisional use never establishes measurement
+  // correctness, so this blocks whatever review the claim has.
+  const measuredIntegrity = await evaluateMeasuredClaimIntegrityInTransaction(tx, {
+    organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
+  });
 
   // KAI P2-10: read every accepted_internal_with_limitation decision already
   // recorded for this claim, then determine - per dimension, using the exact
@@ -852,6 +862,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     || (ordinaryInternal && !head && strength === "unassessed");
   if (!supported(claimRow.claim_strength, claimReviewHead) || !supported(evidenceItemRow.support_strength, evidenceReviewHead)) {
     addOrderedBlocker(blockers, "support_strength_unassessed");
+    affectedObjectIds.add(claimId);
+    affectedObjectIds.add(evidenceItemRow.evidence_item_id);
+  }
+  if (measuredIntegrity.reason) {
+    addOrderedBlocker(blockers, "measured_claim_integrity_not_established");
     affectedObjectIds.add(claimId);
     affectedObjectIds.add(evidenceItemRow.evidence_item_id);
   }

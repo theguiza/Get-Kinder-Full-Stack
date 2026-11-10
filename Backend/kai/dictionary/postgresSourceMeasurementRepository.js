@@ -6,6 +6,7 @@ import {
   getScopedPromotionDecisionBySourceVersionId,
   getScopedSensitivityProfileById,
   getScopedDataDictionaryById,
+  getScopedEvidenceItemById,
   getScopedEvidenceItemByStatementFingerprint,
   getScopedSourceLocatorByFingerprint,
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
@@ -398,6 +399,11 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
                   data_record_count: derived.measurement.totalRecordCount,
                   blank_record_count: derived.measurement.blankRecordCount,
                   duplicate_record_count: derived.measurement.duplicateRecordCount,
+                  // The counted records' exact-duplicate structure (members and
+                  // excess copies), or null when the profile does not record it.
+                  counted_duplicate_record_count: derived.measurement.countedDuplicates?.memberRecordCount ?? null,
+                  counted_duplicate_excess_copy_count: derived.measurement.countedDuplicates?.excessCopyCount ?? null,
+                  duplicate_policy: "duplicates_counted_not_removed",
                   counted_record_count: derived.measurement.measuredValue,
                   worksheet_options: worksheetOptions(measurable.fileProfileRow.profile),
                 }
@@ -506,8 +512,16 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
             if (!locatorRow) throw new MalformedInsertedRowError("source_locators");
           }
 
+          // Replay: the same definition already measured keeps its own
+          // evidence item exactly as recorded (an item stated before the
+          // Package 1 wording is never restated or duplicated); its claim
+          // is governed by the shared measured-claim integrity rule.
+          const recordedMeasurement = await readMeasurement(tx, { organizationId, sourceVersionId, worksheetKey: worksheetIdentity });
+          const replayEvidenceId = recordedMeasurement?.source_measurement_definition_id === definitionRow.source_measurement_definition_id
+            ? recordedMeasurement.evidence_item_id
+            : null;
           const evidencePrint = statementFingerprint({ organizationId, sourceVersionId, statement });
-          let evidenceRow = await insertMeasurementEvidenceIfAbsent(tx, {
+          let evidenceRow = replayEvidenceId ? null : await insertMeasurementEvidenceIfAbsent(tx, {
             organizationId,
             sourceId: sourceRow.source_id,
             sourceVersionId,
@@ -517,7 +531,10 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
             actorUserId,
           });
           const evidenceFresh = Boolean(evidenceRow);
-          if (!evidenceRow) {
+          if (replayEvidenceId) {
+            evidenceRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId: replayEvidenceId }, tx);
+            if (!evidenceRow) throw new MalformedInsertedRowError("evidence_items");
+          } else if (!evidenceRow) {
             evidenceRow = await getScopedEvidenceItemByStatementFingerprint({ organizationId, sourceVersionId, statementFingerprint: evidencePrint }, tx);
             if (!evidenceRow) throw new MalformedInsertedRowError("evidence_items");
           }
