@@ -19,6 +19,13 @@
  * Then it runs
  * __tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js
  * in a child Node process whose ambient pool points only at this cluster.
+ *
+ * The same disposable schema also serves the synthetic Community Impact
+ * Project B cross-source acceptance (owner Package 2, 2026-11-10): with
+ *   KAI_COMMUNITY_PROJECT_B_PACKAGE=<.../KAI_Synthetic_Community_Impact_Project_B>
+ * and no KAI_CEDAR_BRIDGE_PACKAGE, it runs
+ * __tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js
+ * instead, against the same migration chain and verifiers.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +35,9 @@ import { Client } from "pg";
 import { MIGRATION_CHAIN, PRODUCTION_HISTORY_ONLY, verifyChainAgainstRepository } from "./kai-sprint2-plan-a-migration-chain.js";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const dbName = "kai_cedar_bridge_six_source_synthetic";
+const cedarPackage = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
+const projectBPackage = cedarPackage ? null : process.env.KAI_COMMUNITY_PROJECT_B_PACKAGE;
+const dbName = projectBPackage ? "kai_community_project_b_synthetic" : "kai_cedar_bridge_six_source_synthetic";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
 const binDir = process.env.PG_BIN_DIR || (existsSync(join(defaultServerBin, "postgres")) ? defaultServerBin : fallbackBin);
@@ -45,9 +54,11 @@ const port = String(62100 + Math.floor(Math.random() * 400));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
-const spec = "__tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js";
-const cedarPackage = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
-const reportPath = process.env.KAI_CEDAR_BRIDGE_REPORT || join(workDir, "cedar-bridge-six-source-report.json");
+const spec = projectBPackage
+  ? "__tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js"
+  : "__tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js";
+const packageRoot = projectBPackage || cedarPackage;
+const reportPath = process.env.KAI_CEDAR_BRIDGE_REPORT || join(workDir, projectBPackage ? "community-project-b-report.json" : "cedar-bridge-six-source-report.json");
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -102,8 +113,8 @@ const schemaFingerprintSql = `SELECT md5(string_agg(x, '|' ORDER BY x)) AS finge
      WHERE connamespace IN (SELECT oid FROM pg_namespace WHERE nspname LIKE 'kai%')
   ) t`;
 
-if (!cedarPackage || !existsSync(join(cedarPackage, "01_UPLOAD_TO_KAI"))) {
-  throw new Error("Cedar Bridge runner requires KAI_CEDAR_BRIDGE_PACKAGE (the directory holding 01_UPLOAD_TO_KAI)");
+if (!packageRoot || !existsSync(join(packageRoot, "01_UPLOAD_TO_KAI"))) {
+  throw new Error("Cedar Bridge runner requires KAI_CEDAR_BRIDGE_PACKAGE or KAI_COMMUNITY_PROJECT_B_PACKAGE (the directory holding 01_UPLOAD_TO_KAI)");
 }
 
 let started = false;
@@ -216,7 +227,7 @@ try {
       KAI_GENERATION_ENABLED: "true",
       KAI_CEDAR_ACCEPTANCE_DATABASE_URL: targetUrl,
       KAI_CEDAR_ACCEPTANCE_DATABASE_NAME: dbName,
-      KAI_CEDAR_BRIDGE_PACKAGE: cedarPackage,
+      ...(projectBPackage ? { KAI_COMMUNITY_PROJECT_B_PACKAGE: projectBPackage } : { KAI_CEDAR_BRIDGE_PACKAGE: cedarPackage }),
       KAI_CEDAR_BRIDGE_REPORT: reportPath,
     },
   });

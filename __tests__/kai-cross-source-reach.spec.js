@@ -518,3 +518,132 @@ test("a bounded large synthetic service-event file reconciles exactly", async ()
   assert.ok(elapsed < 20000, `reconciled 100,000 rows in ${elapsed} ms`);
   assert.doesNotMatch(JSON.stringify(reconciliation), /X\d+|P0\d/);
 });
+
+// ---------------------------------------------------------------------------
+// Owner Package 2 (2026-11-10): counterfactual controls on a fixture shaped
+// like synthetic Community Project B (two programmes, cancelled and no-show
+// events, completed events either side of the period, unmatched participants,
+// an exact duplicate and people served in both programmes). Every expected
+// count below is fixed by how the fixture is built, not recomputed by a
+// second implementation; each mutation states the exact change it must make.
+const PB_PERIOD = Object.freeze({ start: "2024-04-01", end: "2025-03-31" });
+const PB_HEADER = ["event_ref", "person_ref", "programme", "held_on", "outcome"];
+const pid = (number) => `PB${String(number).padStart(2, "0")}`;
+function projectBShapedEvents() {
+  let sequence = 0;
+  const rows = [];
+  const event = (person, programme, day, outcome = "completed") => {
+    sequence += 1;
+    const row = [`EV${String(sequence).padStart(3, "0")}`, person, programme, day, outcome];
+    rows.push(row);
+    return row;
+  };
+  // CC: PB01..PB12, two completed in-period contacts each (24 contacts, 12 people); PB01's first is the period's first day.
+  for (let n = 1; n <= 12; n += 1) { event(pid(n), "CC", n === 1 ? "2024-04-01" : "2024-05-10"); event(pid(n), "CC", "2024-09-10"); }
+  // RA: PB10..PB18, one completed in-period contact each (9 contacts, 9 people); PB18's is the period's last day. PB10-PB12 are in both.
+  for (let n = 10; n <= 18; n += 1) event(pid(n), "RA", n === 18 ? "2025-03-31" : "2024-11-10");
+  // 3 cancelled and 2 no-show events, in period.
+  event(pid(1), "CC", "2024-06-01", "cancelled"); event(pid(2), "CC", "2024-06-01", "cancelled"); event(pid(13), "RA", "2024-06-01", "cancelled");
+  event(pid(3), "CC", "2024-06-02", "no_show"); event(pid(14), "RA", "2024-06-02", "no_show");
+  // 2 completed events just outside the period.
+  event(pid(4), "CC", "2024-03-31"); event(pid(5), "CC", "2025-04-01");
+  // 2 completed in-period events of people not on the register.
+  event("PB90", "CC", "2024-07-01"); event("PB91", "RA", "2024-07-02");
+  // 1 exact duplicate copy of PB06's first CC contact.
+  rows.push([...rows.find((row) => row[1] === pid(6))]);
+  return [PB_HEADER, ...rows];
+}
+const PB_REGISTER = [["person_ref", "joined_on"], ...Array.from({ length: 30 }, (_, index) => [pid(index + 1), "2024-03-01"])];
+const PB_BASE = Object.freeze({
+  physical: 43, distinct: 42, excess: 1, conflicting: 0, completed: 37, outside: 2, inPeriod: 35, unmatched: 2,
+  eligible: 33, people: 18, cc: [24, 12], ra: [9, 9], both: 3,
+});
+
+async function projectBShapedReach(eventRows, { registerRows = PB_REGISTER, period = PB_PERIOD } = {}) {
+  const [eventsProfile, registerProfile] = [await profile(eventRows), await profile(registerRows)];
+  const listed = eventsProfile.tabular_measurement_basis.fields.find((field) => field.field_key === "field_5").categorical.values;
+  const mapping = D.validateCrossSourceReachMapping({
+    events: { event_identifier_field_key: "field_1", participant_identifier_field_key: "field_2", status_field_key: "field_5",
+      completed_value_key: listed.find((value) => value.label === "completed").value_key, date_field_key: "field_4", group_field_key: "field_3" },
+    register: { participant_identifier_field_key: "field_1" },
+  });
+  assert.equal(mapping.ok, true, JSON.stringify(mapping.blockers));
+  const resolved = D.resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping: mapping.mapping, reportingPeriod: period });
+  assert.equal(resolved.ok, true, JSON.stringify(resolved.blockers));
+  const { counts: c, groups } = reconcileLinkedReach({ eventRecords: eventRows, registerRecords: registerRows, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  const group = (label) => { const g = groups.find((item) => item.label === label); return [g.encounter_count, g.distinct_person_count]; };
+  return {
+    physical: c.physical_record_count, distinct: c.distinct_event_count, excess: c.excess_copy_record_count, conflicting: c.conflicting_event_identity_count,
+    completed: c.completed_event_count, outside: c.completed_outside_period_count, inPeriod: c.in_period_completed_event_count, unmatched: c.unmatched_event_count,
+    eligible: c.eligible_encounter_count, people: c.distinct_person_count, cc: group("CC"), ra: group("RA"), both: c.multi_group_person_count,
+  };
+}
+const mutate = (change) => { const rows = projectBShapedEvents().map((row) => [...row]); change(rows); return rows; };
+const firstRow = (rows, person, programme) => rows.find((row) => row[1] === person && row[2] === programme);
+
+test("Package 2: the Project-B-shaped fixture reconciles to the counts its construction fixes", async () => {
+  assert.deepEqual(await projectBShapedReach(projectBShapedEvents()), PB_BASE);
+});
+
+test("Package 2 counterfactuals: each change moves exactly the stage it should, and nothing else", async () => {
+  const cases = {
+    // One contact's participant identifier no longer matches the register: reach changes, raw records do not.
+    unmatched_identifier: [mutate((rows) => { firstRow(rows, pid(7), "CC")[1] = "PB95"; }),
+      { eligible: 32, unmatched: 3, cc: [23, 12] }],
+    // Both of PB07's contacts unmatched: one person fewer.
+    unmatched_person: [mutate((rows) => { for (const row of rows) if (row[1] === pid(7)) row[1] = "PB95"; }),
+      { eligible: 31, unmatched: 4, people: 17, cc: [22, 11] }],
+    // An eligible contact moved one day past the period end.
+    moved_outside_period: [mutate((rows) => { firstRow(rows, pid(15), "RA")[3] = "2025-04-01"; }),
+      { outside: 3, inPeriod: 34, eligible: 32, people: 17, ra: [8, 8] }],
+    // A completed contact recorded as cancelled instead.
+    completed_to_cancelled: [mutate((rows) => { firstRow(rows, pid(16), "RA")[4] = "cancelled"; }),
+      { completed: 36, inPeriod: 34, eligible: 32, people: 17, ra: [8, 8] }],
+    // Another exact copy of an eligible contact: one more physical record, nothing else.
+    added_exact_duplicate: [mutate((rows) => { rows.push([...firstRow(rows, pid(9), "CC")]); }),
+      { physical: 44, excess: 2 }],
+    // A CC participant also served in RA: more contacts and more overlap, not more people.
+    repeated_across_programmes: [mutate((rows) => { rows.push(["EV900", pid(1), "RA", "2024-12-01", "completed"]); }),
+      { physical: 44, distinct: 43, completed: 38, inPeriod: 36, eligible: 34, ra: [10, 10], both: 4 }],
+    // The same event identifier with a different participant: the identity is excluded whole, never resolved by choosing a copy.
+    // (The method's excess-copy count covers every repeated identifier beyond its first record, conflicting or not.)
+    conflicting_event_identity: [mutate((rows) => { const copy = [...firstRow(rows, pid(8), "CC")]; copy[1] = pid(20); rows.push(copy); }),
+      { physical: 44, excess: 2, conflicting: 1, completed: 36, inPeriod: 34, eligible: 32, cc: [23, 12] }],
+  };
+  for (const [name, [rows, change]] of Object.entries(cases)) {
+    assert.deepEqual(await projectBShapedReach(rows), { ...PB_BASE, ...change }, name);
+  }
+  // The period is applied by day: moving its start one day later drops PB01's first-day contact.
+  assert.deepEqual(await projectBShapedReach(projectBShapedEvents(), { period: { ...PB_PERIOD, start: "2024-04-02" } }),
+    { ...PB_BASE, outside: 3, inPeriod: 34, eligible: 32, cc: [23, 12] });
+  // A register without one person served in both programmes: reach and overlap change, raw records do not.
+  assert.deepEqual(await projectBShapedReach(projectBShapedEvents(), { registerRows: PB_REGISTER.filter((row) => row[0] !== pid(10)) }),
+    { ...PB_BASE, unmatched: 5, eligible: 30, people: 17, cc: [22, 11], ra: [8, 8], both: 2 });
+});
+
+test("Package 2: ambiguous or unsupported mappings fail with structured blockers, never a guessed value", async () => {
+  const [eventsProfile, registerProfile] = [await profile(projectBShapedEvents()), await profile(PB_REGISTER)];
+  const base = {
+    events: { event_identifier_field_key: "field_1", participant_identifier_field_key: "field_2", status_field_key: "field_5",
+      completed_value_key: "value_1", date_field_key: "field_4", group_field_key: "field_3" },
+    register: { participant_identifier_field_key: "field_1" },
+  };
+  const attempt = (mapping, period = PB_PERIOD) => {
+    const valid = D.validateCrossSourceReachMapping(mapping);
+    if (!valid.ok) return valid.blockers.map((b) => b.blocking_reason);
+    const resolved = D.resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping: valid.mapping, reportingPeriod: period });
+    return resolved.ok ? [] : resolved.blockers.map((b) => b.blocking_reason);
+  };
+  const events = (patch) => ({ ...base, events: { ...base.events, ...patch } });
+  assert.deepEqual(attempt(base), []);
+  assert.deepEqual(attempt(events({ participant_identifier_field_key: "field_1" })), ["cross_source_mapping_fields_not_distinct"]);
+  assert.deepEqual(attempt(events({ date_field_key: "field_5", status_field_key: "field_3", group_field_key: null })), ["cross_source_field_role_not_proposed"]);
+  assert.deepEqual(attempt(events({ event_identifier_field_key: "field_3", group_field_key: null })), ["cross_source_field_role_not_proposed"]);
+  assert.deepEqual(attempt({ ...base, register: { participant_identifier_field_key: "field_2" } }), ["cross_source_field_role_not_proposed"]);
+  assert.deepEqual(attempt(events({ completed_value_key: "value_9" })), ["cross_source_value_not_listed"]);
+  assert.deepEqual(attempt(events({ completed_value_key: "completed" })), ["cross_source_mapping_invalid"], "a typed label is not a listed value key");
+  assert.deepEqual(attempt({ ...base, rule: "completed or attended" }), ["cross_source_mapping_invalid"]);
+  assert.deepEqual(attempt(base, null), ["cross_source_reporting_period_not_recorded"]);
+  assert.deepEqual(attempt(base, { start: "2025-03-31", end: "2024-04-01" }), ["cross_source_reporting_period_invalid"]);
+  assert.deepEqual(attempt(base, { start: "2024-04-01", end: "2025-02-30" }), ["cross_source_reporting_period_invalid"]);
+});
