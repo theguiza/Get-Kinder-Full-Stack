@@ -753,7 +753,8 @@ async function runCedarBridgeAcceptance() {
           `${label}: personal information present needs Get Kinder review first`);
         assert.equal(claim.traceability_after_review.eligible, true, label);
         assert.deepEqual([claim.funder_eligible, claim.public_eligible], [false, false], label);
-        assert.match(claim.statement, /with no reporting period defined/, `${label}: the engagement's reporting period is not applied to the count`);
+        // Package 1 contract: the count asserts source records; the period is attributed, never applied.
+        assert.match(claim.statement, /Not applied by KAI: .*no reporting period was defined\./, `${label}: the engagement's reporting period is not applied to the count`);
       }
       // The engagement carries the reporting context, but no measurement reads it.
       assert.deepEqual(report.reporting_context.stored.engagement_requirement_target, {
