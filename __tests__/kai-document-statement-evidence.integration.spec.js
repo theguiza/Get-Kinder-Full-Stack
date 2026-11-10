@@ -437,7 +437,7 @@ async function runDocumentEvidenceAcceptance() {
       assert.deepEqual(await counts(), afterHandoff);
     });
 
-    await test("B4: the real Impact Evidence Library read lists the document evidence for review; the pipeline moves the documents to Get Kinder's evidence review", async () => {
+    await test("B4: the real Impact Evidence Library read lists the document evidence for review; the pipeline offers the administrator the propose-claims step", async () => {
       const seen = [];
       let after = null;
       do {
@@ -453,7 +453,12 @@ async function runDocumentEvidenceAcceptance() {
       assert.match(cited.statement, /^Source document statement \(line \d+, sentences? [\d-]+\): ".*No independently verified employment records were obtained for this test period\."$/);
       assert.equal(seen.filter((item) => item.evidenceType === "source_document_statement").length, DOCUMENTS.reduce((sum, key) => sum + state[key].evidenceIds.length, 0));
       const data = await pipeline();
-      for (const key of DOCUMENTS) assert.deepEqual([fileOf(data, key).currentStage, fileOf(data, key).reason], ["evidence_review", "evidence_awaiting_review"], key);
+      // Owner decision 2026-11-05 (draft first, commit 1dc33b50): evidence with
+      // no claim yet is the administrator's propose-claims step, not a Get
+      // Kinder wait (this expected evidence_awaiting_review before that
+      // decision; reconciled in owner Package 4). Nothing was reviewed: every
+      // statement above still needs Get Kinder's review.
+      for (const key of DOCUMENTS) assert.deepEqual([fileOf(data, key).currentStage, fileOf(data, key).reason], ["evidence_review", "claim_proposal_ready"], key);
     });
 
     await test("B5: Get Kinder reviews one statement and the administrator proposes a claim that restates it as source-reported", async () => {

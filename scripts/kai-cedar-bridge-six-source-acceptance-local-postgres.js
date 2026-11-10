@@ -37,6 +37,11 @@
  * (LEGACY_REVISION, checked out by `git clone --shared` into the work
  * directory, removed with it) so a genuine pre-repair record-count claim is
  * written by that revision's own code.
+ *
+ * Owner Package 4 (2026-11-10), document evidence meaning: with
+ * KAI_COMMUNITY_PROJECT_B_PACKAGE and KAI_PROJECT_B_DOCUMENT_EVIDENCE=true it
+ * runs __tests__/kai-community-project-b-document-evidence-acceptance.integration.spec.js
+ * (also headless Chrome on the built bundle; no previous revision).
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,8 +53,9 @@ import { MIGRATION_CHAIN, PRODUCTION_HISTORY_ONLY, verifyChainAgainstRepository 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const cedarPackage = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
 const projectBPackage = cedarPackage ? null : process.env.KAI_COMMUNITY_PROJECT_B_PACKAGE;
-const provisionalDraft = Boolean(projectBPackage) && process.env.KAI_PROJECT_B_PROVISIONAL_DRAFT === "true";
-const dbName = provisionalDraft ? "kai_project_b_provisional_draft_synthetic"
+const documentEvidence = Boolean(projectBPackage) && process.env.KAI_PROJECT_B_DOCUMENT_EVIDENCE === "true";
+const provisionalDraft = !documentEvidence && Boolean(projectBPackage) && process.env.KAI_PROJECT_B_PROVISIONAL_DRAFT === "true";
+const dbName = documentEvidence ? "kai_project_b_document_evidence_synthetic" : provisionalDraft ? "kai_project_b_provisional_draft_synthetic"
   : projectBPackage ? "kai_community_project_b_synthetic" : "kai_cedar_bridge_six_source_synthetic";
 // The last revision before the Package 1 measurement-to-claim integrity repair (44950111).
 const LEGACY_REVISION = "58c4e0d9";
@@ -70,7 +76,9 @@ const port = String(62100 + Math.floor(Math.random() * 400));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
-const spec = provisionalDraft
+const spec = documentEvidence
+  ? "__tests__/kai-community-project-b-document-evidence-acceptance.integration.spec.js"
+  : provisionalDraft
   ? "__tests__/kai-community-project-b-provisional-draft-acceptance.integration.spec.js"
   : projectBPackage
     ? "__tests__/kai-community-project-b-cross-source-acceptance.integration.spec.js"
@@ -139,6 +147,10 @@ if (!packageRoot || !existsSync(join(packageRoot, "01_UPLOAD_TO_KAI"))) {
 let started = false;
 try {
   verifyChainAgainstRepository(repoRoot);
+  if (documentEvidence) {
+    if (!existsSync(chromePath)) throw new Error(`Package 4 acceptance requires a local Chrome binary (set KAI_BROWSER_ACCEPTANCE_CHROME); not found: ${chromePath}`);
+    if (!existsSync(join(repoRoot, "public", "js", "bundles", "entry.js"))) throw new Error("Package 4 acceptance requires the built bundle: run npm run build first");
+  }
   if (provisionalDraft) {
     if (!existsSync(chromePath)) throw new Error(`Package 3 acceptance requires a local Chrome binary (set KAI_BROWSER_ACCEPTANCE_CHROME); not found: ${chromePath}`);
     if (!existsSync(join(repoRoot, "public", "js", "bundles", "entry.js"))) throw new Error("Package 3 acceptance requires the built bundle: run npm run build first");
@@ -254,6 +266,7 @@ try {
       KAI_CEDAR_ACCEPTANCE_DATABASE_URL: targetUrl,
       KAI_CEDAR_ACCEPTANCE_DATABASE_NAME: dbName,
       ...(projectBPackage ? { KAI_COMMUNITY_PROJECT_B_PACKAGE: projectBPackage } : { KAI_CEDAR_BRIDGE_PACKAGE: cedarPackage }),
+      ...(documentEvidence ? { KAI_PROJECT_B_DOCUMENT_EVIDENCE: "true", KAI_P3_CHROME: chromePath, KAI_P3_WORKDIR: workDir } : {}),
       ...(provisionalDraft ? {
         KAI_PROJECT_B_PROVISIONAL_DRAFT: "true",
         KAI_P3_CHROME: chromePath,

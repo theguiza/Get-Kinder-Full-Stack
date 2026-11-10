@@ -1,4 +1,5 @@
 import test from "node:test";
+import * as DOCUMENT_EVIDENCE from "../Backend/kai/validators/kaiDocumentEvidenceValidators.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -2838,8 +2839,28 @@ async function runCedarBridgeAcceptance() {
         const version = versions.find((candidate) => candidate.sourceVersionId === documentState[key].sourceVersionId);
         reload[key] = { stage: file.currentStage, reason: file.reason, next_action: file.nextAction, capability: version.evidenceExtractionCapability, offered: canOfferEvidenceExtraction(version) };
         assert.notEqual(file.nextAction, "extract_evidence", key);
-        assert.equal(file.reason, "evidence_awaiting_review", key);
+        // Owner decision 2026-11-05 (draft first, commit 1dc33b50): evidence
+        // with no claim yet is the administrator's propose-claims step, not a
+        // Get Kinder wait. (This assertion expected evidence_awaiting_review
+        // before that decision; reconciled in owner Package 4.)
+        assert.equal(file.reason, "claim_proposal_ready", key);
+        assert.equal(file.nextAction, "propose_claims", key);
       }
+      // Nothing was reviewed to get here: every statement still waits for
+      // Get Kinder's evidence review, and no review or claim decision exists.
+      for (const key of DOCUMENT_KEYS) {
+        for (const row of await documentRows(key)) assert.equal(row.evidence_review_status, "needs_gk_review", key);
+      }
+      assert.deepEqual((await query(`SELECT
+          (SELECT count(*) FROM kai.evidence_review_decisions d JOIN kai.evidence_items e ON e.evidence_item_id = d.evidence_item_id WHERE e.organization_id = $1::uuid AND e.evidence_type = 'source_document_statement')::int AS evidence,
+          (SELECT count(*) FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE c.organization_id = $1::uuid AND e.evidence_type = 'source_document_statement')::int AS claims`, [ORG]))[0],
+        { evidence: 0, claims: 0 }, "no review or claim was manufactured");
+      // The manager estimate keeps its meaning: a claim from it would be
+      // source-reported, a source estimate, and never a KAI calculation.
+      const estimateExcerpt = DOCUMENT_EVIDENCE.excerptFromDocumentEvidenceStatement(anchors.manager_estimate.statement);
+      const estimateClaim = DOCUMENT_EVIDENCE.composeDocumentClaimStatement({ excerpt: estimateExcerpt, coordinates: anchors.manager_estimate.coordinates });
+      assert.match(estimateClaim, /^Source-reported, not independently verified \(/);
+      assert.ok(DOCUMENT_EVIDENCE.documentGenerationLimitationCodes(estimateClaim).includes("document.source_estimate"), estimateClaim);
       const originalFile = pipelineView.files.find((candidate) => candidate.intakeFileId === documentState.original.intakeFileId);
       reload.original = { stage: originalFile.currentStage, status: originalFile.currentStatus, reason: originalFile.reason, next_action: originalFile.nextAction };
       assert.equal(originalFile.currentStatus, "failed", J(originalFile));
