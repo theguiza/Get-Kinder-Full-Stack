@@ -9,6 +9,7 @@ import { syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSynthet
 import {
   EMPTY_CROSS_SOURCE_FORM,
   crossSourceActivityDetail,
+  crossSourceExclusionText,
   crossSourceFormProblem,
   crossSourceHeadlineValue,
   crossSourceRequestBody,
@@ -23,6 +24,7 @@ import {
   tabularMeasurementPath,
   EMPTY_TABULAR_FORM,
 } from "../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js";
+import { RECORD_COUNT_SCOPE_NOTE, measurementFailureMessage } from "../frontend/knowledgeStudio/clientSourceMeasurementLogic.js";
 
 /**
  * Measurement MVP: the shared source-derived measurement contract, pure.
@@ -424,4 +426,31 @@ test("the linkage screen requests monthly activity and a confirmed duration mapp
 
   const jobs = [{ reconciliation_job_id: "a", primary_source_version_id: SV }, { reconciliation_job_id: "b", primary_source_version_id: "old" }, { reconciliation_job_id: "c", primary_source_version_id: "other" }];
   assert.deepEqual(reconciliationHistory(jobs, SV, ["old"]).map(({ job, historical }) => [job.reconciliation_job_id, historical]), [["a", false], ["b", true]]);
+});
+
+test("Package 2 client: the linked exclusion summary names every applied step; Count records says what it does not do; refusals show the reason", () => {
+  // The recorded funnel of synthetic Project B (component_counts as the server records them).
+  const entry = {
+    definition: { metric: "eligible_linked_encounters", mapping: { events: { completed_value_label: "completed" } } },
+    component_counts: {
+      excess_copy_record_count: 2, blank_event_identifier_record_count: 0, consistent_event_count: 215, completed_event_count: 197,
+      completed_without_date_count: 0, completed_outside_period_count: 5, blank_participant_identifier_event_count: 0,
+      unmatched_event_count: 2, conflicting_event_identity_count: 0, register_distinct_identifier_count: 72,
+    },
+  };
+  assert.equal(crossSourceExclusionText(entry), "Excluded and counted: 2 duplicate copies, 18 with a status other than \"completed\", "
+    + "5 completed outside the period, 2 with no register match, 0 conflicting event identities. Register: 72 distinct registered participants.");
+  const blanks = { ...entry, component_counts: { ...entry.component_counts, blank_event_identifier_record_count: 1, completed_without_date_count: 3, blank_participant_identifier_event_count: 4 } };
+  assert.match(crossSourceExclusionText(blanks), /1 without an event identifier, 18 with a status other than "completed", 3 completed without a valid date, 5 completed outside the period, 4 without a participant identifier, 2 with no register match/);
+  // The order the existing browser acceptances pin.
+  assert.match(crossSourceExclusionText(entry), /duplicate copies.*completed outside the period.*no register match.*Register: 72 distinct registered participants/s);
+
+  assert.match(RECORD_COUNT_SCOPE_NOTE, /does not apply your inclusion or exclusion rules or a reporting period, does not remove duplicates and does not link another source/);
+  assert.match(RECORD_COUNT_SCOPE_NOTE, /not a count of completed contacts or of distinct people/);
+  assert.match(RECORD_COUNT_SCOPE_NOTE, /"Link to a participant register"/);
+
+  const refused = { statusCode: 422, body: { ok: false, error: { code: "validation_blocker", message: "Request failed KAI validation." },
+    blockers: [{ blocking_reason: "cross_source_value_not_listed", message: "value_99 is not a listed value of field_6.", required_fix: "Select the listed value that means a completed service." }] } };
+  assert.equal(measurementFailureMessage(refused), "value_99 is not a listed value of field_6. Select the listed value that means a completed service.");
+  assert.equal(measurementFailureMessage({ statusCode: 409, body: { ok: false, error: { message: "The source changed." } } }), "The source changed.");
 });

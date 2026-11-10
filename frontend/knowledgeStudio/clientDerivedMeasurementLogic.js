@@ -233,6 +233,33 @@ export function crossSourceHeadlineValue(entry) {
   return groupDigits(entry?.measured_value ?? "");
 }
 
+/**
+ * What a linked reconciliation excluded before its counts, from the server's
+ * recorded funnel (owner Package 2): every exclusion step the method applied,
+ * including the events whose status is not the person-selected completed
+ * value (for example cancelled and no-show events). Blank identifiers and
+ * completed events without a valid date are listed only when they excluded
+ * something. Display only: every number is one the server recorded.
+ */
+export function crossSourceExclusionText(entry) {
+  const c = entry?.component_counts || {};
+  const completedLabel = entry?.definition?.mapping?.events?.completed_value_label;
+  const notCompleted = Number.isInteger(c.consistent_event_count) && Number.isInteger(c.completed_event_count)
+    ? c.consistent_event_count - c.completed_event_count : null;
+  const optional = (count, text) => (Number.isInteger(count) && count > 0 ? [`${count} ${text}`] : []);
+  const parts = [
+    `${c.excess_copy_record_count} duplicate copies`,
+    ...optional(c.blank_event_identifier_record_count, "without an event identifier"),
+    ...(notCompleted === null ? [] : [`${notCompleted} with a status other than ${completedLabel ? `"${completedLabel}"` : "the completed value"}`]),
+    ...optional(c.completed_without_date_count, "completed without a valid date"),
+    `${c.completed_outside_period_count} completed outside the period`,
+    ...optional(c.blank_participant_identifier_event_count, "without a participant identifier"),
+    `${c.unmatched_event_count} with no register match`,
+    `${c.conflicting_event_identity_count} conflicting event identities`,
+  ];
+  return `Excluded and counted: ${parts.join(", ")}. Register: ${c.register_distinct_identifier_count} distinct registered participants.`;
+}
+
 /** "2025-04" -> "Apr 2025", for display only; the recorded month is unchanged. */
 export function monthLabel(month) {
   const [year, number] = month.split("-");

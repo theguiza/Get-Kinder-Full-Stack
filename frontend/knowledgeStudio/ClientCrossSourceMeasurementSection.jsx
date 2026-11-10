@@ -4,6 +4,7 @@ import { errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import {
   EMPTY_CROSS_SOURCE_FORM,
   crossSourceActivityDetail,
+  crossSourceExclusionText,
   crossSourceFormProblem,
   crossSourceHeadlineValue,
   crossSourceMeasurementsPath,
@@ -18,6 +19,7 @@ import {
   reconciliationJobSettled,
   reconciliationJobStateText,
 } from "./clientDerivedMeasurementLogic.js";
+import { measurementFailureMessage } from "./clientSourceMeasurementLogic.js";
 
 const POLL_INTERVAL_MS = 1000;
 const ROLE_LABELS = Object.freeze({ identifier: "identifier", categorical: "category", date: "date" });
@@ -185,7 +187,8 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     }
     if (!mountedRef.current) return;
     if (result.statusCode !== 202 || !result.body?.ok) {
-      setNotice({ kind: "warning", text: errorText(result) });
+      // The server's structured blocker: the supported reason and the action it needs.
+      setNotice({ kind: "warning", text: measurementFailureMessage(result) });
       return;
     }
     const queued = result.body.data.reconciliationJob;
@@ -295,13 +298,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
             </div>
           ))}
           {job.measurements?.length ? (
-            <div className="text-muted" data-client-cross-source-exclusions="">
-              Excluded and counted: {job.measurements[0].component_counts.excess_copy_record_count} duplicate copies,{" "}
-              {job.measurements[0].component_counts.completed_outside_period_count} completed outside the period,{" "}
-              {job.measurements[0].component_counts.unmatched_event_count} with no register match,{" "}
-              {job.measurements[0].component_counts.conflicting_event_identity_count} conflicting event identities.
-              Register: {job.measurements[0].component_counts.register_distinct_identifier_count} distinct registered participants.
-            </div>
+            <div className="text-muted" data-client-cross-source-exclusions="">{crossSourceExclusionText(job.measurements[0])}</div>
           ) : null}
         </div>
       ) : null}

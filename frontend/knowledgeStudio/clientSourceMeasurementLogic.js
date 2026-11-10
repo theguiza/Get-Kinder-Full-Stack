@@ -14,6 +14,18 @@ export function sourceRecordCountMeasurementPath(organizationId, sourceVersionId
   return worksheetKey ? `${path}?worksheet_key=${encodeURIComponent(worksheetKey)}` : path;
 }
 
+/**
+ * What Count records does and does not do (owner Package 2): it counts
+ * non-blank data records and applies none of the organization's rules, so it
+ * is never a count of eligible contacts or distinct people. Those come from
+ * the linked reconciliation in the same panel.
+ */
+export const RECORD_COUNT_SCOPE_NOTE = "Count records counts every non-blank data record. It does not apply your inclusion or exclusion "
+  + "rules or a reporting period, does not remove duplicates and does not link another source, so its result is not a count of "
+  + "completed contacts or of distinct people. To count completed service events in the Project's reporting period that are "
+  + "linked to a participant register, and the distinct people they reached, use \"Link to a participant register\" under "
+  + "Measure field values (a CSV service-event source linked to a CSV participant register).";
+
 const isCount = (value) => Number.isInteger(value) && value >= 0;
 const isText = (value) => typeof value === "string";
 

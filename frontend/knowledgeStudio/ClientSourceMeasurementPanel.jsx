@@ -6,6 +6,7 @@ import ClientDerivedMeasurementSection from "./ClientDerivedMeasurementSection.j
 import {
   EMPTY_MEASUREMENT_FORM,
   MEASUREMENT_FORM_READINESS_MESSAGES,
+  RECORD_COUNT_SCOPE_NOTE,
   measurementDefinitionBody,
   measurementFailureMessage,
   measurementFormReadiness,
@@ -199,6 +200,7 @@ export default function ClientSourceMeasurementPanel({
                 {recorded.measurement.measuredValue} non-blank data records counted; that each is one {recorded.definition.countedUnit} is your
                 organization's definition. Evidence item: {recorded.measurement.evidenceItemId}
               </div>
+              <div className="text-muted" data-client-source-measurement-scope="">{RECORD_COUNT_SCOPE_NOTE}</div>
             </div>
           ) : null}
           {recorded.limitations.length > 0 ? (
@@ -226,6 +228,7 @@ export default function ClientSourceMeasurementPanel({
           <div className="text-muted mb-1">
             Only your organization can say what one record represents. KAI counts the records; it does not infer their meaning.
           </div>
+          <div className="text-muted mb-1" data-client-source-measurement-scope="">{RECORD_COUNT_SCOPE_NOTE}</div>
           {FIELDS.map(([key, label, placeholder]) => (
             <label key={key} className="d-block mb-1">
               {label}
