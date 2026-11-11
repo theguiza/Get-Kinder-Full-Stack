@@ -10,6 +10,7 @@ import { MEASUREMENT_EVIDENCE_TYPE, countedDuplicateGroups, measurementLimitatio
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import { DOCUMENT_EVIDENCE_TYPE, documentGenerationLimitationCodes } from "../validators/kaiDocumentEvidenceValidators.js";
+import { composeImpactFindingReading } from "../services/kaiImpactFindingReading.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const INTERNAL_REPORT_MODEL_CONTRACT_VERSION = "kai-sprint2-internal-report-model-v1";
@@ -150,6 +151,10 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         family: derivedRow.measurement_family,
         percentage: derivedRow.percentage ?? null,
         componentCounts: { ...(derivedRow.component_counts || {}) },
+        // What the measurement means in plain language: the organization's
+        // stated meaning and direction with KAI's arithmetic (null when the
+        // governed statement says all there is to say).
+        reading: composeImpactFindingReading(derivedRow),
       }
       : null,
     // Every other source version a cross-source measurement combines, cited

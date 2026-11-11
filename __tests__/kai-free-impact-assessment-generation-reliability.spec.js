@@ -265,9 +265,16 @@ function assertPersistedAssessment({ result, store }, attempts) {
   const sections = parseFreeImpactAssessment(result.data.blocks);
   assert.ok(sections, "the persisted draft reads back as a six-section assessment");
   assert.deepEqual(sections.map((s) => s.key), ASSESSMENT_SECTIONS.map((s) => s.key));
-  // Two improvements are grounded by these claims; none is invented to make three.
-  assert.equal(sections[4].title, "Recommended Improvements");
-  assert.equal(sections[4].blocks.filter((b) => b.body.startsWith("Proposed change:")).length, 2);
+  // Owner direction 2026-11-11: these outcomes have no stated direction, so
+  // the first proposal is the one clarification they need; with the two
+  // follow-up and exclusion proposals they ground three, none invented.
+  assert.equal(sections[4].title, "Three Recommended Improvements");
+  const proposals = sections[4].blocks.filter((b) => b.body.startsWith("Proposed change:"));
+  assert.equal(proposals.length, 3);
+  assert.match(proposals[0].body, /^Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better/);
+  // The clarification is also stated in the analysis, and the change is never read as progress.
+  assert.match(sections[3].blocks.map((b) => b.body).join("\n"), /Clarification needed: state what the value in column F measures and whether a higher value is better\./);
+  assert.doesNotMatch(result.data.blocks.map((b) => b.text).join("\n"), /\bimprov(?:ed|ement|ing)\b|favourable/);
   assert.equal(store.drafts.length, 1);
   assert.equal(store.blocks.length, result.data.blocks.length);
   assert.ok(result.data.blocks.every((b) => b.citations.length > 0 && b.citations.every((c) => CLAIMS.some((x) => x.claimId === c.claimId && x.evidenceItemId === c.evidenceItemId))));
@@ -315,8 +322,11 @@ test("workflow: a second slip is restated from the cited claims (never saved), w
   const saved = run.store.blocks.map((block) => block.text).join("\n");
   assert.doesNotMatch(saved, /positive impact|66%|58%/, "the slipped wording is not saved");
   const snapshot = run.store.blocks.find((block) => block.text.startsWith("[[assessment:executive_snapshot]]\n"));
-  assert.ok(snapshot.text.startsWith(`${W("executive_snapshot", "This assessment states each selected finding in its own recorded wording, with its limitations.")} Measurement disclosure for the cited measurement: `),
-    "the refused summary section keeps its section and citation, in one neutral sentence (the findings keep their own section)");
+  // Owner direction 2026-11-11: a refused snapshot becomes the composed
+  // headline results (no disclosure repeated: the findings section carries it).
+  assert.ok(snapshot.text.startsWith(W("executive_snapshot", "The most important findings from the selected evidence:\n- The numeric outcome in column F: values changed between baseline and follow-up")),
+    "the refused summary section keeps its section, restated as the selected findings' headline results");
+  assert.doesNotMatch(snapshot.text, /Measurement disclosure for/);
   assert.ok(run.store.blocks.some((block) => block.text.startsWith(W("evidence_findings", "Numeric outcome in column F"))), "the model's passing findings are kept");
   const assessmentResult = run.store.drafts[0].validator_results.find((r) => r.validator_key === "VAL-GEN-ASSESSMENT-001");
   assert.deepEqual(assessmentResult.evidence.restated_model_block_ordinals, [1]);

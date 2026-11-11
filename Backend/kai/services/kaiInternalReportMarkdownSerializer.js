@@ -1,7 +1,7 @@
 import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { PROVISIONAL_REPORT_STATUS, reportInformationNotes } from "../../../shared/kaiReportInformation.js";
 import { COUNT_ONLY_LIMITATION_CODE, WORDING_FALLBACK_RESULT_KEY } from "../validators/kaiGeneratedContentValidators.js";
-import { ASSESSMENT_SECTIONS, parseAssessmentBlockText } from "./kaiFreeImpactAssessmentComposition.js";
+import { ASSESSMENT_SECTIONS, parseAssessmentBlockText, parseFreeImpactAssessment } from "./kaiFreeImpactAssessmentComposition.js";
 import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
 import {
   DERIVED_LIMITATION_CODES,
@@ -122,6 +122,12 @@ function evidenceKinds(model) {
   };
 }
 
+// The plain-language reading of a derived measurement (organization-stated
+// meaning and direction with KAI's arithmetic), when one was composed.
+function readingOf(fact) {
+  return fact.derivedMeasurement?.reading || null;
+}
+
 function directionNotEstablished(fact) {
   return !(fact.limitationCodes || []).includes(DERIVED_LIMITATION_CODES.DIRECTION_HUMAN_STATED);
 }
@@ -216,6 +222,8 @@ function findingLines(model) {
         + `${humanMeaning(m)} ${refs(fact.citationRefs)}`);
     } else if (DOCUMENT_ROLE_LABELS[isDocumentFact(fact) ? documentRole(fact) : ""]) {
       lines.push(`- **${DOCUMENT_ROLE_LABELS[documentRole(fact)]}:** ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
+    } else if (readingOf(fact)) {
+      lines.push(`- ${text(readingOf(fact).text)} ${refs(fact.citationRefs)}`);
     } else {
       lines.push(`- ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
     }
@@ -404,11 +412,17 @@ function analysisLines(model) {
   }
   for (const fact of paired) {
     const p = pairedOutcomeOf(fact);
+    if (readingOf(fact)) {
+      lines.push(`- ${refs(fact.citationRefs)} **Outcome result (baseline and follow-up comparison):** ${text(readingOf(fact).text)}`);
+      continue;
+    }
     lines.push(`- ${refs(fact.citationRefs)} **Outcome measurement (derived baseline and follow-up comparison):** ${pairedResult(p)}. ${pairedCoverage(p)}. `
       + `${directionText(fact)} It is a change observed among the comparable pairs and does not by itself show that the programme caused it.`);
   }
   for (const fact of otherDerived) {
-    lines.push(`- ${refs(fact.citationRefs)} **Derived measurement:** ${text(fact.claimStatement)} It is reported with its recorded limitations.`);
+    lines.push(readingOf(fact)
+      ? `- ${refs(fact.citationRefs)} **${readingOf(fact).kind === "rate" ? "Reported result" : readingOf(fact).kind === "reach" ? "Reach" : "Derived measurement"}:** ${text(readingOf(fact).text)}`
+      : `- ${refs(fact.citationRefs)} **Derived measurement:** ${text(fact.claimStatement)} It is reported with its recorded limitations.`);
   }
   if (lines.length === 0) lines.push("- The cited claims are reported as recorded; no measured value is available for further analysis.");
   if (counts.some((fact) => fact.countOnly)) {
@@ -482,6 +496,12 @@ function substantiveConclusion(model) {
   }
   for (const fact of paired) {
     const p = pairedOutcomeOf(fact);
+    const reading = readingOf(fact);
+    if (reading?.directionKnown) {
+      parts.push(`${parts.length > 1 ? "For" : "for"} ${text(reading.indicator)}, ${pairedResult(p)} ${refs(fact.citationRefs)}; the organization states which direction is better, `
+        + `and on that basis this is ${reading.signal === "favourable" ? "a favourable observed change" : reading.signal === "favourable_minority" ? "a modestly favourable observed change" : reading.signal === "mixed" ? "a mixed result" : "an unfavourable observed change"}.`);
+      continue;
+    }
     parts.push(`${parts.length > 1 ? "In" : "in"} the baseline and follow-up comparison, ${pairedResult(p)} ${refs(fact.citationRefs)}; `
       + `${pairedCoverage(p)}. ${directionText(fact)}`);
   }
@@ -574,11 +594,58 @@ function narrativeIntroduction() {
   return "The text below states findings from the cited claims and measurements, with their limitations. Automated checks cover citations, numbers, causal language and limitation disclosure.";
 }
 
+// A Free Impact Assessment block's prose and its server-composed measurement
+// disclosure, shown apart so a reader meets the finding first and each
+// limitation once (owner direction 2026-11-11).
+const DISCLOSURE_PATTERN = /\s*(Measurement disclosure for [\s\S]*)$/;
+
+function splitDisclosure(body) {
+  const match = DISCLOSURE_PATTERN.exec(body);
+  return match ? { prose: body.slice(0, match.index).trim(), disclosure: match[1].trim() } : { prose: body.trim(), disclosure: null };
+}
+
+function assessmentLines(model, sections) {
+  const lines = [
+    "## Impact assessment",
+    "",
+    "_A provisional internal assessment for the organization's own planning and learning. Each figure restates a cited measurement; references in brackets lead to the supporting evidence below._",
+  ];
+  const disclosures = new Map();
+  for (const section of sections) {
+    lines.push("", `### ${section.title}`);
+    for (const block of section.blocks) {
+      const { prose, disclosure } = splitDisclosure(block.body);
+      lines.push("", `${text(prose)} ${refs(block.citationRefs)}`);
+      if (disclosure) {
+        const entry = disclosures.get(disclosure) || new Set();
+        block.citationRefs.forEach((ref) => entry.add(ref));
+        disclosures.set(disclosure, entry);
+      }
+    }
+  }
+  if (disclosures.size > 0) {
+    lines.push("", "### Limitations of the figures", "");
+    for (const [disclosure, citationRefs] of disclosures) {
+      lines.push(`- ${refs([...citationRefs].sort())} ${text(disclosure.replace(/^Measurement disclosure for [^:]*: /, ""))}`);
+    }
+  }
+  // Outcome and reach readings the assessment's own text does not already give.
+  const blockText = model.blocks.map((block) => String(block.text ?? "")).join("\n");
+  const explained = model.facts.filter((fact) => readingOf(fact) && !blockText.includes(readingOf(fact).text));
+  if (explained.length > 0) {
+    lines.push("", "### What the measured results mean", "");
+    for (const fact of explained) lines.push(`- ${text(readingOf(fact).text)} ${refs(fact.citationRefs)}`);
+  }
+  lines.push("", "## Supporting evidence and method", "", "_The sections below give the detailed reconciliation, provenance and limitations behind the assessment._", "");
+  return lines;
+}
+
 export function serializeInternalReportToMarkdown(model) {
   if (!model || model.available !== true || !Array.isArray(model.blocks) || !Array.isArray(model.facts) || model.facts.length === 0) {
     throw new TypeError("An available internal report model is required.");
   }
   model = { ...model, facts: model.facts.map((fact) => ({ ...fact, countOnly: Boolean(fact.measurement) })) };
+  const assessmentSections = parseFreeImpactAssessment(model.blocks);
   const lines = [
     `# ${REPORT_TITLES[model.report.contentType] || "Internal Report"}`,
     "",
@@ -589,6 +656,7 @@ export function serializeInternalReportToMarkdown(model) {
     STORY_SOURCE_NOTE,
     "",
     ...informationLines(model),
+    ...(assessmentSections ? assessmentLines(model, assessmentSections) : []),
     "## Context",
     "",
     ...contextLines(model),
@@ -624,14 +692,12 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     ...analysisLines(model),
     "",
-    "## Generated narrative",
-    "",
-    narrativeIntroduction(model),
+    ...(assessmentSections ? [] : ["## Generated narrative", "", narrativeIntroduction(model)]),
   ];
   // A Free Impact Assessment's blocks carry their section marker; the section
   // title is shown once, as a heading, instead of the marker.
   let currentSection = null;
-  for (const block of [...model.blocks].sort((a, b) => a.ordinal - b.ordinal)) {
+  for (const block of assessmentSections ? [] : [...model.blocks].sort((a, b) => a.ordinal - b.ordinal)) {
     const section = parseAssessmentBlockText(block.text);
     if (section && section.sectionKey !== currentSection) {
       currentSection = section.sectionKey;

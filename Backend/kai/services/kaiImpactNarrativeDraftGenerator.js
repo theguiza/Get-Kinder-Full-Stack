@@ -111,6 +111,7 @@ export function createProductionImpactNarrativeDraftGenerator({
         "Use only the supplied governed claim projection -- do not use outside knowledge.",
         "Every block must cite at least one supplied claim/evidence pair.",
         "Write narrative prose, not a bulleted list of facts.",
+        "A claim may carry plainReading: KAI's plain-language reading of that measurement, composed from its recorded values and the organization's own stated meaning, direction and evidence basis. Use it to say in ordinary words what was measured, who is included, what changed and what that suggests, and its practical implication; it is governed text, so its numbers and words may be used exactly as it gives them. When it states that whether a higher value is better has not been stated, report the change as a numerical change only and repeat its clarification; never present that change as progress or decline.",
         "Do not add numbers, percentages, or counts unless they appear verbatim in a cited claim statement.",
         "Do not state or imply causation; describe only what a cited claim actually asserts.",
         "If a claim carries limitationCodes, the narrative must reflect that limitation rather than stating the claim as an unconditional fact.",

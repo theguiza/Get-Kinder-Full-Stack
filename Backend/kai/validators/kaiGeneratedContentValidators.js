@@ -218,7 +218,7 @@ export function composeEvidenceSummaryWithWordingFallback({
   const claimById = generationClaimsById(claims || []);
   const fallbackBlocksFor = (claimList) => claimList.map((claim) => ({
     ordinal: 0,
-    text: claim.modelClaimStatement ?? claim.claimStatement,
+    text: claim.plainReading ?? claim.modelClaimStatement ?? claim.claimStatement,
     citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
   }));
   const withDisclosures = (blocks) => composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, measuredValueByClaimId });
@@ -361,6 +361,30 @@ function evidenceSummaryContradicts(modelText, codes, citedClaims) {
     }
   }
   return false;
+}
+
+// Free Impact Assessment disclose-once rule: the measured claims whose
+// server-composed disclosure appears, exactly, in a findings-section block
+// that cites them. Any other assessment section is a summary block.
+const ASSESSMENT_FINDINGS_MARKER = "[[assessment:evidence_findings]]\n";
+function assessmentSummaryBlock(block) {
+  const text = String(block?.text ?? "");
+  return /^\[\[assessment:[a-z_]+\]\]\n/.test(text) && !text.startsWith(ASSESSMENT_FINDINGS_MARKER);
+}
+
+function assessmentFindingsDisclosedClaimIds(blocks, claimById) {
+  const disclosed = new Set();
+  for (const block of blocks || []) {
+    const text = String(block?.text ?? "");
+    if (!text.startsWith(ASSESSMENT_FINDINGS_MARKER)) continue;
+    for (const citation of block.citations || []) {
+      const claim = claimById.get(citation.claimId);
+      if (!claim || claim.evidenceItemId !== citation.evidenceItemId) continue;
+      const body = (claim.limitationCodes || []).some(isMeasuredClaimCode) ? measuredClaimDisclosure(claim) : null;
+      if (body && text.includes(body)) disclosed.add(claim.claimId);
+    }
+  }
+  return disclosed;
 }
 
 function pass(validatorKey, evidence = {}) {
@@ -550,8 +574,15 @@ export function unsupportedAssertionViolations({ blocks, generationClaims } = {}
   const claimById = generationClaimsById(generationClaims || []);
   const violations = [...documentStatementAuthorityViolations({ blocks, generationClaims })];
   for (const block of blocks || []) {
+    // A cited derived measurement's server-composed plain reading
+    // (kaiImpactFindingReading.js) is governed text from the same persisted
+    // measurement and the organization's recorded interpretation, so it
+    // supports a figure or term exactly as the claim statement does.
     const citedStatements = (block.citations || [])
-      .map((citation) => expandShortYearRanges(claimById.get(citation.claimId)?.claimStatement || ""))
+      .flatMap((citation) => {
+        const claim = claimById.get(citation.claimId);
+        return [claim?.claimStatement || "", claim?.plainReading || ""].map(expandShortYearRanges);
+      })
       .filter(Boolean);
     const citedText = citedStatements.join("\n");
     const text = expandShortYearRanges(block.text);
@@ -670,20 +701,32 @@ export function validateGeneratedContentDraft({
   // Every other block keeps exactly the rules above.
   if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).some(isMeasuredClaimCode))) {
     const disclosureViolations = [];
+    // Free Impact Assessment (owner direction 2026-11-11): each measured
+    // claim's limitations are disclosed once, in full, in the findings
+    // section block that states it, instead of after every summary,
+    // recommendation or next-step block that also cites it. A summary block
+    // still may not contradict any limitation (the "forbids" checks below run
+    // on every block); only the repeated disclosure is no longer required.
+    const disclosedInFindings = assessmentFindingsDisclosedClaimIds(blocks, claimById);
     for (const block of blocks || []) {
       const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
       const codes = new Set(cited.flatMap((claim) => (claim.limitationCodes || []).filter(isMeasuredClaimCode)));
+      const summaryBlock = assessmentSummaryBlock(block);
+      const requiredCodes = new Set(cited
+        .filter((claim) => !(summaryBlock && disclosedInFindings.has(claim.claimId)))
+        .flatMap((claim) => (claim.limitationCodes || []).filter(isMeasuredClaimCode)));
       const text = block.text || "";
       const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE;
       const contradicts = (pattern) => (evidenceSummaryRules ? affirmativeMatches(text, pattern).length > 0 : pattern.test(text));
       for (const rule of [...MEASUREMENT_DISCLOSURE_RULES, ...DERIVED_DISCLOSURE_RULES]) {
         const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
         if (!applies || (evidenceSummaryRules && rule.codePrefix === "coverage.")) continue;
-        if (![rule.requires].flat().every((pattern) => pattern.test(text))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
+        const required = rule.code ? requiredCodes.has(rule.code) : [...requiredCodes].some((code) => code.startsWith(rule.codePrefix));
+        if (required && ![rule.requires].flat().every((pattern) => pattern.test(text))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
         if (rule.forbids && contradicts(rule.forbids)) disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
       }
       if (evidenceSummaryRules) {
-        if ([...codes].some((code) => code.startsWith("coverage.") && !namesCoverageDimension(text, code))) {
+        if ([...requiredCodes].some((code) => code.startsWith("coverage.") && !namesCoverageDimension(text, code))) {
           disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
         }
         const citedText = cited.map((claim) => claim.claimStatement || "").join("\n").toLowerCase();

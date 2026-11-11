@@ -25,12 +25,14 @@ import {
   MAX_MODEL_ASSESSMENT_BLOCKS,
   MODEL_SECTION_KEYS,
   buildAssessmentModelContext,
+  composeAssessmentSnapshot,
   composeFreeImpactAssessmentBlocks,
   parseAssessmentBlockText,
   quotesOnlyCitedText,
   withAssessmentSection,
 } from "../services/kaiFreeImpactAssessmentComposition.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import { composeImpactFindingReading } from "../services/kaiImpactFindingReading.js";
 import {
   DERIVED_MEASUREMENT_EVIDENCE_TYPE,
   derivedContributingSourcesCurrent,
@@ -619,15 +621,23 @@ function assessmentCorrectionInput(previousInput, generatorResult, modelProjecti
  * invented story. Returns { blocks, restated } (restated ordinals; "all").
  */
 const RESTATED_SECTION_BODIES = Object.freeze({
-  executive_snapshot: "This assessment states each selected finding in its own recorded wording, with its limitations.",
+  executive_snapshot: "The selected findings are stated, each with its limitations, in the next section.",
   impact_stories: "No participant account is stated beyond the cited findings.",
   gaps_opportunities: "The gaps documented in the cited evidence are listed in this section.",
 });
 
+const INTERNAL_KEY_PATTERN = /\b(?:field|sheet|value)_\d+\b/;
+
 function restateAssessmentModelBlocks(generatorResult, modelProjections) {
   const byId = new Map(modelProjections.map((claim) => [claim.claimId, claim]));
-  const statementOf = (claim) => claim.modelClaimStatement ?? claim.claimStatement;
+  // A finding is restated in its plain-language reading (the organization's
+  // stated meaning and direction with KAI's arithmetic) where one exists.
+  const statementOf = (claim) => claim.plainReading ?? claim.modelClaimStatement ?? claim.claimStatement;
   const cite = (claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId });
+  const snapshot = composeAssessmentSnapshot(modelProjections);
+  const snapshotBlock = () => (snapshot
+    ? { text: withAssessmentSection("executive_snapshot", snapshot.body), citations: snapshot.citations.map((citation) => ({ ...citation })) }
+    : { text: withAssessmentSection("executive_snapshot", RESTATED_SECTION_BODIES.executive_snapshot), citations: [cite(modelProjections[0])] });
   const fromClaims = () => {
     // Every selected claim is stated: one finding block per claim, grouped
     // when there are more claims than finding blocks the contract allows.
@@ -635,7 +645,7 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
     const groups = Array.from({ length: Math.min(slots, modelProjections.length) }, () => []);
     modelProjections.forEach((claim, index) => groups[index % groups.length].push(claim));
     return [
-      { text: withAssessmentSection("executive_snapshot", RESTATED_SECTION_BODIES.executive_snapshot), citations: [cite(modelProjections[0])] },
+      snapshotBlock(),
       ...groups.map((group) => ({ text: withAssessmentSection("evidence_findings", group.map(statementOf).join(" ")), citations: group.map(cite) })),
       { text: withAssessmentSection("impact_stories", RESTATED_SECTION_BODIES.impact_stories), citations: [cite(modelProjections[0])] },
     ].map((block, index) => ({ ordinal: index + 1, ...block }));
@@ -649,8 +659,15 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
   for (const block of generatorResult.blocks) {
     const parsed = parseAssessmentBlockText(block.text);
     if (!parsed || !MODEL_SECTION_KEYS.includes(parsed.sectionKey) || parsed.body.trim().length === 0) { refused.add(block.ordinal); continue; }
-    const citedStatements = (block.citations || []).map((citation) => byId.get(citation.claimId)?.claimStatement || "");
+    const citedStatements = (block.citations || []).flatMap((citation) => [byId.get(citation.claimId)?.claimStatement || "", byId.get(citation.claimId)?.plainReading || ""]);
     if (!quotesOnlyCitedText(parsed.body, citedStatements)) refused.add(block.ordinal);
+    // Owner direction 2026-11-11: a section that exposes internal field or
+    // worksheet keys where every cited measurement has a plain-language
+    // reading is restated in those readings (the keys stay in the
+    // supporting evidence). Record counts, whose worksheet must be named,
+    // have no reading and are never affected.
+    const citedClaims = (block.citations || []).map((citation) => byId.get(citation.claimId));
+    if (INTERNAL_KEY_PATTERN.test(parsed.body) && citedClaims.length > 0 && citedClaims.every((claim) => claim?.plainReading)) refused.add(block.ordinal);
     sectioned.push(block);
   }
   if (refused.size === 0 && composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections }).ok) {
@@ -664,6 +681,7 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
     // A refused findings section states its claims in their own wording; a
     // refused summary section says so in one neutral sentence (the findings
     // are already stated in their own section, so nothing is repeated).
+    if (section === "executive_snapshot") return { ...block, ...snapshotBlock() };
     const body = section === "evidence_findings" ? cited.map(statementOf).join(" ") : RESTATED_SECTION_BODIES[section];
     if (!body) return null;
     return { ...block, citations: cited.map(cite), text: withAssessmentSection(section, body) };
@@ -675,6 +693,10 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
     return { blocks: fromClaims(), restated: "all" };
   }
   return { blocks: restatedResult.blocks, restated: [...refused].sort((a, b) => a - b) };
+}
+
+function isAssessmentFindingsBlock(block) {
+  return parseAssessmentBlockText(block?.text)?.sectionKey === "evidence_findings";
 }
 
 function validateGeneratorInput(input) {
@@ -703,7 +725,12 @@ function validateGeneratorInput(input) {
     "limitationCodes",
   ]);
   for (const claim of input.claims) {
-    if (!hasExactKeys(claim, allowedClaimKeys)) return false;
+    // A derived measurement may carry its server-composed plain-language
+    // reading (kaiImpactFindingReading.js): the organization's stated
+    // meaning and direction with KAI's arithmetic, never free model input.
+    const keys = claim && Object.hasOwn(claim, "plainReading") ? new Set([...allowedClaimKeys, "plainReading"]) : allowedClaimKeys;
+    if (!hasExactKeys(claim, keys)) return false;
+    if (Object.hasOwn(claim, "plainReading") && (typeof claim.plainReading !== "string" || claim.plainReading.length === 0 || claim.plainReading.length > 2000)) return false;
     if (!UUID_PATTERN.test(claim.claimId)) return false;
     if (typeof claim.claimStatement !== "string" || claim.claimStatement.length === 0) return false;
     if (typeof claim.claimType !== "string") return false;
@@ -1440,6 +1467,7 @@ function toGeneratorInput({ requestedAudience, projections, contentType, authori
       sourceId: claim.sourceId,
       sourceVersionId: claim.sourceVersionId,
       limitationCodes: claim.limitationCodes,
+      ...(claim.plainReading ? { plainReading: claim.plainReading } : {}),
     })),
   };
   if (contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
@@ -1804,6 +1832,15 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           }
           measuredValueByClaimId.set(projection.claimId, derivedRow.measured_value);
           measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
+          // What the measurement means, in plain language, from the same
+          // persisted row and the interpretation its evidence is stated under
+          // (the organization's meaning, direction and evidence basis).
+          // Internal drafts only: external generation is unchanged.
+          const reading = provisionalInternal ? composeImpactFindingReading(derivedRow) : null;
+          if (reading) {
+            projection.plainReading = reading.text;
+            projection.impactReading = reading;
+          }
         }
         // Owner Package 4: a document statement's caveats and meaning (its
         // source-reported status, uncertainty, estimate or method/instruction
@@ -1917,9 +1954,14 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         if (!modelClassification.ok) {
           rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
         }
-        const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: generatorResult.blocks, claims: modelProjections, measuredValueByClaimId });
+        // A Free Impact Assessment discloses each measured claim once, in the
+        // findings block that states it (every selected claim has one; see
+        // composeFreeImpactAssessmentBlocks); summary blocks are not repeated.
+        const disclosed = assessment ? generatorResult.blocks.filter(isAssessmentFindingsBlock) : generatorResult.blocks;
+        const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: disclosed, claims: modelProjections, measuredValueByClaimId });
         if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
-        generatorResult = { blocks: composed.blocks };
+        const byOrdinal = new Map(composed.blocks.map((block) => [block.ordinal, block]));
+        generatorResult = { blocks: generatorResult.blocks.map((block) => byOrdinal.get(block.ordinal) ?? block) };
       }
       if (assessment && excludedClaims.length > 0) {
         const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));

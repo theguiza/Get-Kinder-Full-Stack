@@ -140,7 +140,12 @@ async function runCedarBridgeAcceptance() {
       blocks.push({ section: "executive_snapshot", text: `For the reporting period, the cited evidence records: ${lead.map(stubFigure).join("; ")}. `
         + "Alongside these figures, the organization's own documents describe how the programmes run and where their records are incomplete.", citations: cite(lead) });
     }
-    for (const group of ordered) blocks.push({ section: "evidence_findings", text: `${group.map(stubFigure).join("; ")}.`, citations: cite(group) });
+    // Owner direction 2026-11-11: as the prompt instructs, a finding that
+    // carries KAI's plainReading is written from it (still no intelligence:
+    // the reading is copied, never paraphrased).
+    for (const group of ordered) {
+      blocks.push({ section: "evidence_findings", text: group.every((claim) => claim.plainReading) ? group.map((claim) => claim.plainReading).join(" ") : `${group.map(stubFigure).join("; ")}.`, citations: cite(group) });
+    }
     if (documents.length > 0) {
       const quoted = documents.map((claim) => /\(([^)]*)\): ("[\s\S]*")$/.exec(claim.claimStatement)).map((match) => `${match[2]} (${match[1]})`);
       blocks.push({ section: "impact_stories", text: `The organization's own documents describe the programme in these words, each source-reported: ${quoted.join(" ")}`, citations: cite(documents) });
@@ -949,7 +954,15 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual([savedAssessment.draft_status, savedAssessment.review_status], ["draft", "needs_gk_review"]);
       assert.equal(savedAssessment.validator_results.find((r) => r.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.restated_model_block_ordinals, "all");
       const restatedBlocks = refused.body.data.blocks.map((block) => block.text).join("\n");
-      for (const entry of scenario.claims) assert.ok(restatedBlocks.includes(entry.statement), "each admitted finding is stated in its own wording");
+      // Owner direction 2026-11-11: each admitted finding is restated in its
+      // plain reading: its figures, an observed numerical change only (no
+      // direction is stated), and the one clarification it needs.
+      for (const entry of scenario.claims) {
+        const [, higher, pairs, percentage] = /(\d+) of (\d+) comparable participant pairs \(([\d.]+)%\)/.exec(entry.statement);
+        assert.ok(restatedBlocks.includes(`Among the ${pairs} participants with a comparable baseline and follow-up value, ${higher} (${percentage}%) had a higher value at follow-up`), `each admitted finding is stated: ${entry.statement}`);
+      }
+      assert.match(restatedBlocks, /Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\./);
+      assert.match(restatedBlocks, /Clarification needed: state what the value in column [FG] measures and whether a higher value is better\./);
       // The restated model sections (not the server's own gap / improvement sections) assert no improvement or cause.
       const modelSections = refused.body.data.blocks.filter((block) => /^\[\[assessment:(executive_snapshot|evidence_findings|impact_stories)\]\]\n/.test(block.text))
         .map((block) => block.text.replace(/^\[\[assessment:[a-z_]+\]\]\n/, "").split(" Measurement disclosure for ")[0]).join("\n");
@@ -1005,9 +1018,12 @@ async function runCedarBridgeAcceptance() {
       const sections = parseFreeImpactAssessment(blocks);
       assert.equal(sections?.length, 6);
       const text = blocks.map((block) => block.text).join("\n");
-      assert.match(text, /25 of 38 comparable participant pairs \(65\.79%\)/);
-      assert.match(text, /23 of 40 comparable participant pairs \(57\.50%\)/);
-      assert.match(text, /whether higher is better is not established/);
+      // Owner direction 2026-11-11: stated in plain readings (the stub's
+      // field-key wording is restated); the change stays numerical only.
+      assert.match(text, /Among the 38 participants with a comparable baseline and follow-up value, 25 \(65\.79%\) had a higher value at follow-up/);
+      assert.match(text, /Among the 40 participants with a comparable baseline and follow-up value, 23 \(57\.50%\) had a higher value at follow-up/);
+      assert.match(text, /Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\./);
+      assert.doesNotMatch(text, /favourable|better direction|Working well/);
       assert.match(text, /not every participant/);
       assert.doesNotMatch(text, /participants? improved|programme (?:caused|improves)|unique participants|2025-04-01/);
       scenario.sections = sections.map((section) => section.title);
@@ -3115,14 +3131,34 @@ async function runCedarBridgeAcceptance() {
         assert.match(rec.body, /^Proposed change: .+ Basis: .+ This is a proposal for the organization to consider; it is not a measured or confirmed result\.(?: Measurement disclosure for .+)?$/s);
         assert.ok(rec.claimIds.length >= 1);
       }
-      assert.match(recommendations[0].body, /duration/i);
-      assert.ok(recommendations[0].claimIds.includes(documentClaims.missing_duration), "duration: grounded in the operations note on missing durations");
-      assert.match(recommendations[1].body, /follow-up/i);
-      assert.ok(recommendations[1].claimIds.includes(documentClaims.convenience_sample) && recommendations[1].claimIds.includes(documentClaims.employment_not_verified), "follow-up: grounded in the convenience-sample and check-in statements");
-      assert.match(recommendations[2].body, /duplicate/i);
-      const [dupClaim] = recommendations[2].claimIds;
-      const [dupCodes] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [dupClaim]);
-      assert.ok(dupCodes, "duplicates: grounded in a measured claim");
+      // Owner direction 2026-11-11: the outcome moving in the direction the
+      // organization states is better comes first, grounded in that measurement.
+      assert.match(recommendations[0].body, /^Proposed change: Build on the outcome that is moving in the right direction/);
+      const [outcomeAnchor] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [recommendations[0].claimIds[0]]);
+      assert.match(outcomeAnchor.statement, /comparable participant pairs .* the organization states higher is better/, "grounded in a favourable paired outcome");
+      assert.match(recommendations[1].body, /duration/i);
+      assert.ok(recommendations[1].claimIds.includes(documentClaims.missing_duration), "duration: grounded in the operations note on missing durations");
+      assert.match(recommendations[2].body, /follow-up/i);
+      assert.ok(recommendations[2].claimIds.includes(documentClaims.convenience_sample) && recommendations[2].claimIds.includes(documentClaims.employment_not_verified), "follow-up: grounded in the convenience-sample and check-in statements");
+      // Case A (meaning known): the outcome is named, its organization-stated
+      // meaning given, its change interpreted in the stated direction, with an
+      // implication and its limits; it is never presented as verified or caused.
+      const findings = prose(sections[1]);
+      assert.match(findings, /Digital confidence: human-supplied for this synthetic acceptance: the participant's self-rated digital confidence on a 1 to 5 scale\./);
+      assert.match(findings, /Among the 38 participants with a comparable baseline and follow-up value, 25 \(65\.79%\) had a higher value at follow-up, 10 had the same value and 3 had a lower value\. The organization states that a higher value is better, so 25 participants moved in the better direction and 3 in the worse direction: more than half of the comparable participants had a better value at follow-up, a favourable observed change on this outcome\./);
+      assert.match(findings, /What this suggests: this is an encouraging signal for Digital confidence/);
+      assert.match(findings, /does not by itself show that the programme was responsible for it/);
+      // Case C (self-reported follow-up result): what respondents reported, not verified employment.
+      assert.match(findings, /Self-reported paid work: 9 records\. The organization describes Self-reported paid work as: .*answered follow-ups in which the participant reported starting paid work; not verified employment\. These are participants' own answers \(self-reported\), not an independent assessment\./);
+      const analysis = prose(sections[3]);
+      assert.match(analysis, /What the results suggest:\n/);
+      assert.match(analysis, /- Working well: Digital confidence: more than half of participants with comparable values had a better value at follow-up/);
+      assert.match(analysis, /- Working well: Employment readiness:/);
+      assert.match(analysis, /- Reported result: Follow-up response rate: more than half of the measured population; it describes only those who answered or were counted/);
+      // Each figure's limitations are disclosed once, in the findings section.
+      for (const section of sections.filter((entry) => entry.key !== "evidence_findings")) {
+        assert.ok(!section.blocks.some((b) => /Measurement disclosure for/.test(b.body)), `${section.title}: no repeated disclosure`);
+      }
       // Saved and retrievable: the Library's drafts index and the review packet.
       const index = await gkApi("GET", `${orgPath}/generated-content-drafts?limit=25`);
       assert.equal(index.status, 200, J(index.body));
@@ -3185,7 +3221,9 @@ async function runCedarBridgeAcceptance() {
         assert.ok(pdfText.includes(normalizeText(prose)), `reviewed prose missing from PDF: ${prose.slice(0, 100)}`);
       }
       for (const title of ASSESSMENT_TITLES) assert.ok(pdfText.includes(title), title);
-      for (const figure of ["25 of 38 comparable participant pairs (65.79%)", "23 of 40 comparable participant pairs (57.50%)"]) assert.ok(pdfText.includes(figure), figure);
+      for (const figure of [/38 participants with a comparable baseline and follow-up value, 25 \(65\.79%\)/, /40 participants with a comparable baseline and follow-up value, 23 \(57\.50%\)/]) {
+        assert.match(pdfText.replace(/\s+/g, " "), figure);
+      }
       assert.ok(pdfText.includes("not every participant") && pdfText.includes("not independently verified"), "population and evidence limitations survive PDF rendering");
       assert.doesNotMatch(pdfText, /CB0\d\d|EV0\d\d|FU0\d\d|\[\[assessment:/);
       const again = await readReleased(delivery.export_manifest_id);

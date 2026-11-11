@@ -317,7 +317,9 @@ function sectionOf(md, from, to) {
 function sectionsOf(md) {
   return {
     limits: sectionOf(md, "What this evidence does not establish", "Analysis"),
-    analysis: sectionOf(md, "Analysis", "Generated narrative"),
+    // An assessment's narrative now leads the report (owner direction
+    // 2026-11-11), so its Analysis ends at the traceability section.
+    analysis: sectionOf(md, "Analysis", md.includes("\n## Generated narrative\n") ? "Generated narrative" : "Source and evidence traceability"),
     conclusion: sectionOf(md, "Conclusion", "References"),
   };
 }
@@ -353,7 +355,10 @@ test("A mixed evidence: activity rows, a participant observation and a paired ou
   // Analysis: all three findings, each in its own analytical context.
   assert.match(analysis, /\[CIT-001\] 37 of the 37 data rows after the header .* were nonblank and counted/);
   assert.match(analysis, /\[CIT-002\] \*\*Source-reported observation \(qualitative\):\*\* the source records that "Participants told staff the weekly sessions helped them feel more confident about finding work\."/);
-  assert.match(analysis, /\[CIT-003\] \*\*Outcome measurement \(derived baseline and follow-up comparison\):\*\* 25 of 38 comparable participant pairs \(65\.79%\) recorded a numerically higher follow-up value than baseline, 10 the same and 3 lower\. 24 of 62 participants lacked comparable baseline and follow-up observations/);
+  // Owner direction 2026-11-11: the outcome is read in plain language; with no
+  // stated meaning or direction it stays a numerical change and asks for both.
+  assert.match(analysis, /\[CIT-003\] \*\*Outcome result \(baseline and follow-up comparison\):\*\* The numeric outcome in column F, recorded at baseline and at follow-up\. What it measures has not yet been stated by the organization\. Among the 38 participants with a comparable baseline and follow-up value, 25 \(65\.79%\) had a higher value at follow-up, 10 had the same value and 3 had a lower value\. Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\. 24 of 62 participants had no comparable pair and are not included/);
+  assert.match(analysis, /Clarification needed: state what the value in column F measures and whether a higher value is better\./);
   assert.match(analysis, /The row count \[CIT-001\] describes what was recorded, not who took part or what changed/);
   assert.match(analysis, /neither confirms the other/);
   // Limitations: specific to the evidence, not blanket denials.
@@ -425,8 +430,8 @@ test("D derived-outcome evidence: a paired outcome without a row count is recogn
   const md = (await readReport(h, result.data.generatedContentDraftId)).markdown.data.markdown;
   await dumpScenario("D-derived-outcome", md);
   const { limits, analysis, conclusion } = sectionsOf(md);
-  assert.match(analysis, /\[CIT-001\] \*\*Outcome measurement \(derived baseline and follow-up comparison\):\*\* 25 of 38 comparable participant pairs \(65\.79%\)/);
-  assert.match(analysis, /Whether a higher value is better has not been established, so this is an observed numerical change, not an established improvement\./);
+  assert.match(analysis, /\[CIT-001\] \*\*Outcome result \(baseline and follow-up comparison\):\*\* The numeric outcome in column F, recorded at baseline and at follow-up\. What it measures has not yet been stated by the organization\. Among the 38 participants with a comparable baseline and follow-up value, 25 \(65\.79%\) had a higher value at follow-up, 10 had the same value and 3 had a lower value\. Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\. /);
+  assert.match(analysis, /Clarification needed: state what the value in column F measures and whether a higher value is better\./);
   assert.match(limits, /That the numerical change \[CIT-001\] is an improvement/);
   assert.match(limits, /24 of 62 participants lacked comparable/);
   assert.match(md, /- No reporting period was applied to the derived measurement \[CIT-001\]\./);

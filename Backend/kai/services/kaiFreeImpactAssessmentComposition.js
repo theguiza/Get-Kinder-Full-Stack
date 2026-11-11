@@ -127,6 +127,23 @@ const PROVISIONAL_REVIEW_CODES = Object.freeze([
 ]);
 
 const GAP_CATALOGUE = Object.freeze([
+  // Owner direction 2026-11-11: outcome results come first. An outcome whose
+  // direction is not stated needs one clarification; a favourable outcome is
+  // something to build on. Both are grounded in the cited measurement only.
+  Object.freeze({
+    key: "outcome_direction_unresolved",
+    codes: ["derived.direction_not_established"],
+    gap: "For at least one outcome measure, the organization has not yet stated whether a higher value is better, so its change between baseline and follow-up is reported only as a numerical change.",
+    recommendation: "Record, on each outcome measure that does not yet state it, whether a higher value is better (a short confirmation on the measurement in Knowledge Studio), so the next assessment can read its change as progress or decline.",
+    nextStep: "confirm whether a higher value is better for each outcome measure that does not yet state it",
+  }),
+  Object.freeze({
+    key: "favourable_outcome_to_build_on",
+    readingSignals: ["favourable"],
+    gap: "At least one outcome measure moved in the direction the organization states is better for more than half of the comparable participants, but it describes only participants with both a baseline and a follow-up value.",
+    recommendation: "Build on the outcome that is moving in the right direction: record the same baseline and follow-up rating for every new participant, at intake and at a fixed follow-up point, and review the results each quarter with programme staff so the organization can see whether the favourable pattern holds and where it does not.",
+    nextStep: "agree the fixed follow-up point and who will review the outcome ratings each quarter",
+  }),
   Object.freeze({
     key: "recorded_duration_incomplete",
     codes: ["derived.known_recorded_minutes_subtotal"],
@@ -238,7 +255,9 @@ export function detectAssessmentGaps(claims) {
       : entry.documentPattern
         ? documents.filter((claim) => entry.documentPattern.test(claim.claimStatement || ""))
         : [];
-    const measuredGrounding = entry.codes || entry.codePrefixes ? measured.filter((claim) => carriesGap(claim, entry)) : [];
+    const measuredGrounding = entry.readingSignals
+      ? measured.filter((claim) => entry.readingSignals.includes(claim.impactReading?.signal))
+      : entry.codes || entry.codePrefixes ? measured.filter((claim) => carriesGap(claim, entry)) : [];
     if (entry.story && documentGrounding.length === 0) continue;
     if (documentGrounding.length === 0 && measuredGrounding.length === 0) continue;
     gaps.push({ key: entry.key, entry, documentGrounding, measuredGrounding });
@@ -312,6 +331,90 @@ function sentenceList(items) {
   return items.map((item) => `- ${item}`).join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// What the results suggest (owner direction 2026-11-11): a server-composed
+// reading of the selected measurements' plain-language readings
+// (kaiImpactFindingReading.js) - strengths, results needing attention, the
+// one clarification an unresolved outcome needs, and whether any outcome
+// evidence is selected at all. It restates only what those readings say.
+
+function readingOf(claim) {
+  return claim?.impactReading || null;
+}
+
+/** The headline results of the selected claims, most important first, with their citations. */
+export function assessmentHeadlines(claims) {
+  const list = [...(claims || [])].sort(byClaimId);
+  const ranked = [
+    ...list.filter((claim) => readingOf(claim)?.kind === "paired_outcome" && readingOf(claim).directionKnown),
+    ...list.filter((claim) => readingOf(claim)?.kind === "reach" && readingOf(claim).headline),
+    ...list.filter((claim) => readingOf(claim)?.kind === "rate"),
+    ...list.filter((claim) => readingOf(claim)?.kind === "paired_outcome" && !readingOf(claim).directionKnown),
+  ].filter((claim) => readingOf(claim).headline);
+  return ranked.slice(0, 5).map((claim) => ({ claim, text: readingOf(claim).headline }));
+}
+
+/** The composed snapshot body when the model's own snapshot is not usable, or null. */
+export function composeAssessmentSnapshot(claims) {
+  const headlines = assessmentHeadlines(claims);
+  if (headlines.length === 0) return null;
+  return {
+    body: `The most important findings from the selected evidence:\n${sentenceList(headlines.map((item) => item.text))}\nEach is explained, with its limitations, in the next section.`,
+    citations: headlines.map((item) => citationOf(item.claim)),
+  };
+}
+
+function resultsAnalysis(claims) {
+  const list = [...(claims || [])].sort(byClaimId);
+  const lines = [];
+  const cited = [];
+  const add = (claim, line) => { lines.push(line); if (!cited.includes(claim)) cited.push(claim); };
+  const outcomes = list.filter((claim) => readingOf(claim)?.kind === "paired_outcome");
+  for (const claim of outcomes) {
+    const reading = readingOf(claim);
+    if (reading.signal === "favourable" || reading.signal === "favourable_minority") add(claim, `Working well: ${reading.headline}.`);
+  }
+  for (const claim of outcomes) {
+    const reading = readingOf(claim);
+    if (reading.signal === "unfavourable" || reading.signal === "mixed") add(claim, `Needs attention: ${reading.headline}.`);
+  }
+  for (const claim of list.filter((item) => readingOf(item)?.kind === "rate")) {
+    add(claim, `Reported result: ${readingOf(claim).headline}; it describes only those who answered or were counted, so it is an indication rather than a result for everyone served.`);
+  }
+  for (const claim of outcomes) {
+    const reading = readingOf(claim);
+    if (reading.clarification) add(claim, reading.clarification);
+  }
+  const reach = list.find((claim) => readingOf(claim)?.kind === "reach" && readingOf(claim).headline);
+  if (outcomes.length === 0) {
+    const anchor = reach || list.find((claim) => readingOf(claim) && readingOf(claim).kind !== "activity") || null;
+    if (anchor) {
+      add(anchor, "No baseline and follow-up outcome measure is among the selected evidence, so these results show the organization's activity and reach, not yet what changed for the people it served. "
+        + "Recording a simple outcome measure at the start and at a later point would let a future assessment describe change.");
+    }
+  }
+  if (lines.length === 0) return null;
+  return { body: `What the results suggest:\n${sentenceList(lines)}`, citations: cited.map(citationOf) };
+}
+
+// Every selected measured claim is stated, with its full disclosure, in the
+// findings section; a claim the model's findings did not cite is stated in
+// its plain reading (or governed statement), grouped by identical
+// limitations so one disclosure covers each group.
+function uncitedFindings(bySection, claims) {
+  const cited = new Set(bySection.get("evidence_findings").flatMap((block) => (block.citations || []).map((citation) => citation.claimId)));
+  const missing = [...(claims || [])].filter((claim) => isMeasuredClaim(claim) && !cited.has(claim.claimId)).sort(byClaimId);
+  const groups = new Map();
+  for (const claim of missing) {
+    const key = [...(claim.limitationCodes || [])].sort().join(",");
+    groups.set(key, [...(groups.get(key) || []), claim]);
+  }
+  return [...groups.values()].map((group) => ({
+    text: withAssessmentSection("evidence_findings", group.map((claim) => claim.plainReading || claim.modelClaimStatement || claim.claimStatement).join(" ")),
+    citations: group.map(citationOf),
+  }));
+}
+
 /**
  * The full assessment: the model's marked blocks in section order, then the
  * server-composed blocks. Returns { ok: true, blocks } (ordinals 1..n) or
@@ -328,13 +431,15 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
     if (!parsed || !MODEL_SECTION_KEYS.includes(parsed.sectionKey) || parsed.body.trim().length === 0) {
       return { ok: false, reason: "assessment_model_section_invalid" };
     }
-    const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)?.claimStatement || "");
+    const cited = (block.citations || []).flatMap((citation) => [claimById.get(citation.claimId)?.claimStatement || "", claimById.get(citation.claimId)?.plainReading || ""]);
     if (!quotesOnlyCitedText(parsed.body, cited)) return { ok: false, reason: "assessment_quotation_not_in_cited_evidence" };
     bySection.get(parsed.sectionKey).push(block);
   }
   if (REQUIRED_MODEL_SECTION_KEYS.some((key) => bySection.get(key).length === 0)) {
     return { ok: false, reason: "assessment_model_section_missing" };
   }
+
+  bySection.get("evidence_findings").push(...uncitedFindings(bySection, claims));
 
   const gaps = detectAssessmentGaps(claims);
   const story = gaps.find((gap) => gap.key === "participant_story_missing");
@@ -347,6 +452,9 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
       citations: story ? gapCitations(story) : fallback.map((citation) => ({ ...citation })),
     });
   }
+
+  const analysis = resultsAnalysis(claims);
+  if (analysis) bySection.get("gaps_opportunities").push({ text: withAssessmentSection("gaps_opportunities", analysis.body), citations: analysis.citations });
 
   const documented = gaps;
   if (documented.length > 0) {

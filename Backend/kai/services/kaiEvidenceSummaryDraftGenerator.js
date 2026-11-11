@@ -77,6 +77,7 @@ const DERIVED_MEASUREMENT_INSTRUCTION = [
   "a numerically higher follow-up value is not an improvement unless the claim says the organization states higher is better;",
   "never say a value was verified, and never extend a result beyond its comparable pairs or measured population;",
   "say whether the meaning was stated by a person at the organization or not yet stated.",
+  "A claim may carry plainReading: KAI's plain-language reading of that measurement, composed from its recorded values and the organization's own stated meaning, direction and evidence basis. Use it to say in ordinary words what was measured, who is included, what changed and what that suggests, and its practical implication; it is governed text, so its numbers and words may be used exactly as it gives them. When it states that whether a higher value is better has not been stated, report the change as a numerical change only and repeat its clarification; never present that change as progress or decline.",
 ].join(" ");
 
 // Owner Package 4: a source document statement is what the source says.
