@@ -904,7 +904,7 @@ async function runPackage4Acceptance() {
     });
 
     // ---- D: document AI processing withdrawn ------------------------------
-    await test("D: the review PDF's AI processing is withdrawn; a draft with its estimate is refused before the provider; the 190/67 measurements stay admitted and draft alone", async () => {
+    await test("D: the review PDF's AI processing is withdrawn; a draft selecting its estimate leaves it out before the provider and discloses it; the 190/67 measurements draft; the estimate alone is refused", async () => {
       const D = await buildMeasured(ORGS.D);
       D.review = await uploadAndPromote(D, FILES.review);
       await extract(D, D.review);
@@ -918,22 +918,44 @@ async function runPackage4Acceptance() {
       for (const label of ["encounters", "people"]) {
         assert.deepEqual((await diagnose(D, D.claims[label].claimId)).provisional, { admitted: true, blocker_codes: [], source_role: null }, `${label} stays admitted`);
       }
+      // Owner direction 2026-11-11 (amends the B1A-02 whole-request rule for
+      // provisional internal drafts): the prohibited PDF claim is left out
+      // before the provider, disclosed, and the draft uses the 190/67 claims.
       const mixed = await generate(D, [D.claims.encounters.claimId, D.claims.people.claimId, D.docs.C.claimId]);
-      assert.deepEqual([mixed.status, mixed.blockers[0], mixed.providerCalls, mixed.draftsWritten], [422, "ai_processing_not_permitted", 0, 0], J(mixed.body));
+      assert.deepEqual([mixed.status, mixed.providerCalls, mixed.draftsWritten], [201, 1, 1], J(mixed.body));
+      assert.deepEqual(mixed.sentClaimIds, [D.claims.encounters.claimId, D.claims.people.claimId].sort(), "only the permitted claims reach the provider");
+      assert.doesNotMatch(J(mixed.sent), /at least 90|rough tally|management review/i, "no PDF content reaches the provider");
+      assert.deepEqual(mixed.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.blockingReason]), [[D.docs.C.claimId, "ai_processing_not_permitted"]]);
+      const mixedSaved = await query(`SELECT b.text, c.claim_id::text FROM kai.generated_content_blocks b JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+        WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [mixed.draftId]);
+      assert.ok(!mixedSaved.some((row) => row.claim_id === D.docs.C.claimId), "the left-out claim is never cited");
+      assert.ok(!mixedSaved.some((row) => /at least 90|rough tally/.test(row.text)), "nothing from the left-out claim is asserted");
+      assert.ok(mixedSaved.some((row) => /Selection note: one selected finding was not sent to the AI model and is not part of this draft/.test(row.text)), "the exclusion is disclosed in the saved draft");
+      const [mixedDraft] = await query("SELECT validator_results, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [mixed.draftId]);
+      assert.deepEqual(mixedDraft.validator_results.find((item) => item.validator_key === "KAI-GEN-PERMISSION-EXCLUSION-001").evidence.excluded_claims.map((item) => item.claimId), [D.docs.C.claimId]);
+      assert.equal(mixedDraft.review_status, "needs_gk_review", "still provisional; no review manufactured");
+      const mixedReads = await clientReads(D, mixed.draftId);
+      assert.deepEqual([mixedReads.detail, mixedReads.markdown], [200, 200]);
+      assert.match(mixedReads.markdownText, /Selection note: one selected finding was not sent to the AI model/);
+      // Every selected claim prohibited: the specific refusal and no provider call.
+      const estimateOnly = await generate(D, [D.docs.C.claimId]);
+      assert.deepEqual([estimateOnly.status, estimateOnly.blockers[0], estimateOnly.providerCalls, estimateOnly.draftsWritten], [422, "ai_processing_not_permitted", 0, 0], J(estimateOnly.body));
       // The customer sees the server's reason and fix, never "Request failed KAI validation."
-      assert.doesNotMatch(mixed.customerMessage, /^Request failed/);
-      assert.match(mixed.customerMessage, /AI processing/i);
+      assert.doesNotMatch(estimateOnly.customerMessage, /^Request failed/);
+      assert.match(estimateOnly.customerMessage, /AI processing/i);
       const measuredOnly = await generate(D, [D.claims.encounters.claimId, D.claims.people.claimId]);
       assert.deepEqual([measuredOnly.status, measuredOnly.providerCalls, measuredOnly.draftsWritten], [201, 1, 1], J(measuredOnly.body));
       assert.ok(!measuredOnly.sent[0].claims.some((c) => c.claimId === D.docs.C.claimId));
-      report.refusals = { D: { document_admission: docAdmission, mixed: { http: mixed.status, blockers: mixed.blockers, source_role: mixed.sourceRole, provider_calls: mixed.providerCalls, drafts_written: mixed.draftsWritten, customer_message: mixed.customerMessage },
+      report.refusals = { D: { document_admission: docAdmission, mixed: { http: mixed.status, sent_claim_ids: mixed.sentClaimIds, provider_calls: mixed.providerCalls, drafts_written: mixed.draftsWritten, permission_excluded: mixed.body.data.permissionExcludedClaims, saved: mixedSaved.map((row) => row.text.slice(0, 160)) },
+        estimate_only: { http: estimateOnly.status, blockers: estimateOnly.blockers, provider_calls: estimateOnly.providerCalls, customer_message: estimateOnly.customerMessage },
         measured_only: { http: measuredOnly.status, provider_calls: measuredOnly.providerCalls, drafts_written: measuredOnly.draftsWritten } } };
-      recordRow("D document AI withdrawn", { claims: "190 + 67 + C", operation: "generate internal evidence summary", http: mixed.status, provider_invoked: false, draft: "refused", provisional_admitted: false, blocker: mixed.blockers.join(",") });
+      recordRow("D document AI withdrawn", { claims: "190 + 67 + C", operation: "generate internal evidence summary", http: mixed.status, provider_invoked: true, draft: "saved without C (disclosed)", provisional_admitted: true, blocker: "C left out: ai_processing_not_permitted" });
+      recordRow("D document AI withdrawn", { claims: "C only", operation: "generate internal evidence summary", http: estimateOnly.status, provider_invoked: false, draft: "refused", provisional_admitted: false, blocker: estimateOnly.blockers.join(",") });
       recordRow("D document AI withdrawn", { claims: "190 + 67", operation: "generate internal evidence summary", http: measuredOnly.status, provider_invoked: true, draft: "saved", provisional_admitted: true });
     });
 
     // ---- R: roster AI processing withdrawn --------------------------------
-    await test("R: the roster's AI processing is withdrawn; the cross-source claims are refused (reference); the separately permitted estimate is not falsely refused", async () => {
+    await test("R: the roster's AI processing is withdrawn; the cross-source claims are left out (reference) and disclosed; the separately permitted estimate still drafts; the roster claims alone are refused", async () => {
       const R = await buildMeasured(ORGS.R);
       R.review = await uploadAndPromote(R, FILES.review);
       await extract(R, R.review);
@@ -943,14 +965,21 @@ async function runPackage4Acceptance() {
       assert.deepEqual(peopleAdmission.provisional, { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "reference" }, J(peopleAdmission));
       assert.deepEqual((await diagnose(R, R.docs.C.claimId)).provisional, { admitted: true, blocker_codes: [], source_role: null });
       const mixed = await generate(R, [R.claims.encounters.claimId, R.claims.people.claimId, R.docs.C.claimId]);
-      assert.deepEqual([mixed.status, mixed.blockers[0], mixed.sourceRole, mixed.providerCalls, mixed.draftsWritten], [422, "ai_processing_not_permitted", "reference", 0, 0], J(mixed.body));
+      assert.deepEqual([mixed.status, mixed.providerCalls, mixed.sentClaimIds, mixed.draftsWritten], [201, 1, [R.docs.C.claimId], 1], J(mixed.body));
+      assert.deepEqual(mixed.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.blockingReason, item.sourceRole]).sort(),
+        [[R.claims.encounters.claimId, "ai_processing_not_permitted", "reference"], [R.claims.people.claimId, "ai_processing_not_permitted", "reference"]].sort());
+      assert.doesNotMatch(J(mixed.sent), /\b190\b|\b67\b|register participant/, "no roster-dependent measurement reaches the provider");
+      const rSaved = await query(`SELECT b.text, c.claim_id::text FROM kai.generated_content_blocks b JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+        WHERE b.generated_content_draft_id = $1::uuid`, [mixed.draftId]);
+      assert.ok(rSaved.every((row) => row.claim_id === R.docs.C.claimId), "only the permitted document is cited");
+      assert.ok(rSaved.some((row) => /Selection note: some selected findings were not sent to the AI model and are not part of this draft/.test(row.text)));
       const docOnly = await generate(R, [R.docs.C.claimId]);
       assert.deepEqual([docOnly.status, docOnly.providerCalls, docOnly.sentClaimIds, docOnly.draftsWritten], [201, 1, [R.docs.C.claimId], 1], J(docOnly.body));
       const measured = await generate(R, [R.claims.encounters.claimId, R.claims.people.claimId]);
       assert.deepEqual([measured.status, measured.sourceRole, measured.providerCalls], [422, "reference", 0]);
-      report.refusals.R = { people_admission: peopleAdmission, mixed: { http: mixed.status, blockers: mixed.blockers, source_role: mixed.sourceRole, provider_calls: mixed.providerCalls },
+      report.refusals.R = { people_admission: peopleAdmission, mixed: { http: mixed.status, sent_claim_ids: mixed.sentClaimIds, permission_excluded: mixed.body.data.permissionExcludedClaims, provider_calls: mixed.providerCalls },
         document_only: { http: docOnly.status, provider_calls: docOnly.providerCalls }, measured_only: { http: measured.status, source_role: measured.sourceRole, provider_calls: measured.providerCalls } };
-      recordRow("R roster AI withdrawn", { claims: "190 + 67 + C", operation: "generate internal evidence summary", http: mixed.status, provider_invoked: false, draft: "refused", provisional_admitted: false, blocker: "ai_processing_not_permitted (reference)" });
+      recordRow("R roster AI withdrawn", { claims: "190 + 67 + C", operation: "generate internal evidence summary", http: mixed.status, provider_invoked: true, draft: "saved from C only (190/67 left out, disclosed)", provisional_admitted: true, blocker: "190/67 left out: ai_processing_not_permitted (reference)" });
       recordRow("R roster AI withdrawn", { claims: "C only", operation: "generate internal evidence summary", http: docOnly.status, provider_invoked: true, draft: "saved", provisional_admitted: true });
       recordRow("R roster AI withdrawn", { claims: "190 + 67", operation: "generate internal evidence summary", http: measured.status, provider_invoked: false, draft: "refused", provisional_admitted: false });
     });

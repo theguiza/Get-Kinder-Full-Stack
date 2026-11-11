@@ -421,12 +421,22 @@ export default function ClientEvidenceWorkflow({
           return rest;
         });
         setLastDraft(internalDraftResultSummary(data, contentType));
+        const notices = [];
         if (contentType === "free_impact_assessment" && data.excludedClaims?.length > 0) {
-          setNotice({ kind: "warning", text: data.excludedClaims.map((excluded) => {
+          notices.push(...data.excludedClaims.map((excluded) => {
             const claim = claims.items.find((item) => item.claimId === excluded.claimId);
             return `Selected claim ${claim?.claimStatement || excluded.claimId} was not used as an assertion. ${claimNotUsableMessage({ blockerCodes: excluded.blockerCodes })}`;
-          }).join(" ") });
+          }));
         }
+        // Owner direction 2026-11-11: a selected finding whose source does not
+        // permit AI processing (or this use) is left out, never silently.
+        if (data.permissionExcludedClaims?.length > 0) {
+          notices.push(...data.permissionExcludedClaims.map((excluded) => {
+            const claim = claims.items.find((item) => item.claimId === excluded.claimId);
+            return `Selected finding ${claim?.claimStatement || excluded.claimId} was left out of this draft and was not sent to the AI model: its source's current decision does not permit ${excluded.blockingReason === "allowed_use_not_allowed" ? "this use" : "AI processing"}. The draft was written from the remaining selected evidence.`;
+          }));
+        }
+        if (notices.length > 0) setNotice({ kind: "warning", text: notices.join(" ") });
         // The persisted draft is read back and opened below, never shown from this response.
         setDraftsRefreshToken((value) => value + 1);
       },

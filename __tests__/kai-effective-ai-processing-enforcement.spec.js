@@ -194,33 +194,50 @@ const headsFor = (restrictedHead, permittedHead = reviewed("allowed", true)) => 
   ...(restrictedHead ? [{ intake_sensitivity_profile_id: PROFILE_RESTRICTED, ...restrictedHead }] : []),
 ];
 
-test("generation (evidence summary and impact narrative): an AI-prohibited claim, alone or mixed with a permitted claim, never reaches traceability or the model and is refused with a structured blocker", async () => {
+test("generation (evidence summary and impact narrative): an AI-prohibited claim alone is refused before traceability or the model; mixed with a permitted claim it is left out of the model, disclosed, and the internal draft is written from the permitted claim", async () => {
   for (const [label, restrictedHead, basis] of [
     ["explicit reviewed AI prohibition", reviewed("allowed", false), "reviewed_llm_processing_not_allowed"],
     ["reviewed 'unknown' (AI permission not established)", reviewed("unknown", false), "reviewed_llm_processing_not_allowed"],
     ["reopened review", NEEDS_MORE_INFORMATION, "sensitivity_ai_processing_unresolved"],
   ]) {
     for (const method of ["createEvidenceSummaryDraft", "createImpactNarrativeDraft"]) {
-      for (const claimIds of [[CLAIM_RESTRICTED], [CLAIM_PERMITTED, CLAIM_RESTRICTED]]) {
-        const harness = generationHarness(headsFor(restrictedHead));
-        const result = await harness.repository[method](harness.input(claimIds, `ai-${method}-${claimIds.length}`), harness.dependencies);
-        const context = `${label} / ${method} / ${claimIds.length} claim(s)`;
-        assert.equal(result.ok, false, context);
-        assert.deepEqual([result.error.code, result.error.status], ["validation_blocker", 422], context);
-        assert.deepEqual(
-          [result.blockers[0].validator_key, result.blockers[0].blocking_reason, result.blockers[0].object_id, result.blockers[0].evidence.basis],
-          [EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY, "ai_processing_not_permitted", CLAIM_RESTRICTED, basis], context,
-        );
-        assert.deepEqual(harness.modelCalls, [], `${context}: model calls`);
-        assert.deepEqual(harness.evaluatorCalls, [], `${context}: P2-06 not reached`);
-        assert.deepEqual(harness.tx.writes, ["INSERT INTO kai.generation_runs"], `${context}: only the reservation the refusal rolls back`);
-        assert.deepEqual(harness.audits, [], `${context}: no success audit prepared`);
-      }
+      // Every selected claim prohibited: the specific refusal, no model call, nothing written.
+      const alone = generationHarness(headsFor(restrictedHead));
+      const refused = await alone.repository[method](alone.input([CLAIM_RESTRICTED], `ai-${method}-1`), alone.dependencies);
+      const context = `${label} / ${method}`;
+      assert.equal(refused.ok, false, context);
+      assert.deepEqual([refused.error.code, refused.error.status], ["validation_blocker", 422], context);
+      assert.deepEqual(
+        [refused.blockers[0].validator_key, refused.blockers[0].blocking_reason, refused.blockers[0].object_id, refused.blockers[0].evidence.basis],
+        [EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY, "ai_processing_not_permitted", CLAIM_RESTRICTED, basis], context,
+      );
+      assert.deepEqual(alone.modelCalls, [], `${context}: model calls`);
+      assert.deepEqual(alone.evaluatorCalls, [], `${context}: P2-06 not reached`);
+      assert.deepEqual(alone.tx.writes, ["INSERT INTO kai.generation_runs"], `${context}: only the reservation the refusal rolls back`);
+      assert.deepEqual(alone.audits, [], `${context}: no success audit prepared`);
+
+      // Owner direction 2026-11-11: mixed with a permitted claim, the
+      // prohibited claim never reaches traceability or the model, and
+      // generation continues from the permitted claim. (This fake
+      // transaction cannot persist a draft; the saved draft, its disclosure
+      // and citations are proven on PostgreSQL by the Project B document
+      // evidence acceptance.)
+      const mixed = generationHarness(headsFor(restrictedHead));
+      const drafted = await mixed.repository[method](mixed.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], `ai-${method}-2`), mixed.dependencies);
+      assert.deepEqual(mixed.modelCalls, [[CLAIM_PERMITTED]], `${context}: only the permitted claim reaches the model`);
+      assert.ok(!mixed.evaluatorCalls.includes(CLAIM_RESTRICTED), `${context}: the prohibited claim never reaches P2-06`);
+      assert.ok(!(drafted.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY), `${context}: not refused for the left-out claim`);
     }
   }
+  // Funder generation keeps refusing the whole request.
+  const funder = generationHarness(headsFor(reviewed("allowed", false)));
+  const refused = await funder.repository.createEvidenceSummaryDraft({ ...funder.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-funder"), requestedAudience: "funder" }, funder.dependencies);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.blockers[0].blocking_reason, "ai_processing_not_permitted");
+  assert.deepEqual(funder.modelCalls, []);
 });
 
-test("generation: a stored reviewed AI permission, or no human decision at all, reaches the model without any new approval; an existing not_allowed still refuses first", async () => {
+test("generation: a stored reviewed AI permission, or no human decision at all, reaches the model without any new approval; an existing not_allowed is left out of an internal draft and refuses alone", async () => {
   for (const [label, restrictedHead] of [["reviewed AI permission", reviewed("allowed", true)], ["no human decision", null]]) {
     const harness = generationHarness(headsFor(restrictedHead));
     const result = await harness.repository.createEvidenceSummaryDraft(harness.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-permitted-1"), harness.dependencies);
@@ -230,12 +247,17 @@ test("generation: a stored reviewed AI permission, or no human decision at all, 
     // post-generation revalidation follows; that is not a permission check).
     assert.deepEqual(harness.evaluatorCalls.slice(0, 2), [CLAIM_PERMITTED, CLAIM_RESTRICTED], label);
     assert.ok(!(result.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_ALLOWED_USE_VALIDATOR_KEY), label);
+
   }
   const harness = generationHarness(headsFor(reviewed("not_allowed", false)));
   const result = await harness.repository.createImpactNarrativeDraft(harness.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-not-allowed-1"), harness.dependencies);
-  assert.deepEqual([result.blockers[0].validator_key, result.blockers[0].blocking_reason, result.blockers[0].evidence.basis],
+  assert.ok(!(result.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_ALLOWED_USE_VALIDATOR_KEY));
+  assert.deepEqual(harness.modelCalls, [[CLAIM_PERMITTED]]);
+  const alone = generationHarness(headsFor(reviewed("not_allowed", false)));
+  const refused = await alone.repository.createImpactNarrativeDraft(alone.input([CLAIM_RESTRICTED], "ai-not-allowed-2"), alone.dependencies);
+  assert.deepEqual([refused.blockers[0].validator_key, refused.blockers[0].blocking_reason, refused.blockers[0].evidence.basis],
     [EFFECTIVE_ALLOWED_USE_VALIDATOR_KEY, "allowed_use_not_allowed", "reviewed_allowed_use_not_allowed"]);
-  assert.deepEqual(harness.modelCalls, []);
+  assert.deepEqual(alone.modelCalls, []);
 });
 
 test("impact evaluation (read and persist paths): an AI-prohibited claim never reaches the model; a permitted one does", async () => {

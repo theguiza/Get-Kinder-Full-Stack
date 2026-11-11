@@ -695,6 +695,24 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
   return { blocks: restatedResult.blocks, restated: [...refused].sort((a, b) => a - b) };
 }
 
+// Owner direction 2026-11-11: individually prohibited selected claims.
+export const PERMISSION_EXCLUSION_RESULT_KEY = "KAI-GEN-PERMISSION-EXCLUSION-001";
+const PARTIAL_PERMISSION_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
+const INDIVIDUAL_SOURCE_PROHIBITIONS = new Set([
+  "reviewed_llm_processing_not_allowed",
+  "sensitivity_ai_processing_unresolved",
+  "reviewed_allowed_use_not_allowed",
+  "intake_allowed_use_not_allowed",
+]);
+
+// No digits, causal words or claim text: it names only what happened.
+function permissionExclusionNote(excluded) {
+  const one = excluded.length === 1;
+  return `Selection note: ${one ? "one selected finding was" : "some selected findings were"} not sent to the AI model and ${one ? "is" : "are"} not part of this draft, `
+    + `as the current decision for ${one ? "its source does" : "their sources do"} not permit AI processing or this use. `
+    + "The draft was written from the remaining authorized evidence; the left-out findings are listed with this draft in Knowledge Studio.";
+}
+
 function isAssessmentFindingsBlock(block) {
   return parseAssessmentBlockText(block?.text)?.sectionKey === "evidence_findings";
 }
@@ -1588,6 +1606,9 @@ function toResult(state, replayed = false) {
     ...((draft.validator_results || []).some((result) => result.validator_key === FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY)
       ? { excludedClaims: draft.validator_results.find((result) => result.validator_key === FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY).evidence.excluded_claims }
       : {}),
+    ...((draft.validator_results || []).some((result) => result.validator_key === PERMISSION_EXCLUSION_RESULT_KEY)
+      ? { permissionExcludedClaims: draft.validator_results.find((result) => result.validator_key === PERMISSION_EXCLUSION_RESULT_KEY).evidence.excluded_claims }
+      : {}),
     generatedContentDraftId: draft.generated_content_draft_id,
     requestedAudience: draft.requested_audience,
     draftStatus: draft.draft_status,
@@ -1650,6 +1671,17 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         organizationId: input.organizationId,
         claimIds: input.claimIds,
       });
+      // Owner direction 2026-11-11 (amends the B1A-02 whole-request rule for
+      // provisional INTERNAL drafts only): a selected claim whose own source
+      // decision prohibits AI processing or its use is left out before any
+      // model call and disclosed; the draft is generated from the remaining
+      // authorized claims. Lineage, tenant and request-wide refusals, and all
+      // funder/public requests, keep refusing the whole request. When every
+      // selected claim is prohibited, the specific refusal is returned with
+      // no model call.
+      const partialPermitted = input.requestedAudience === "internal" && PARTIAL_PERMISSION_CONTENT_TYPES.has(contentType);
+      const permissionExcluded = [];
+      let firstPermissionRefusal = null;
       for (const claimId of input.claimIds) {
         const refusing = (sourceDecisions.get(claimId) || [{ sourceRole: null, prohibition: "claim_lineage_missing" }])
           .find((decision) => decision.prohibition !== null);
@@ -1659,11 +1691,27 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           objectId: claimId,
           sourceRole: refusing?.sourceRole ?? null,
         });
-        if (!allowedUse.ok && allowedUse.code !== "not_found") rollbackFailure(allowedUse.code, allowedUse.blockers);
+        if (allowedUse.ok || allowedUse.code === "not_found") continue;
+        if (partialPermitted && INDIVIDUAL_SOURCE_PROHIBITIONS.has(refusing?.prohibition)) {
+          firstPermissionRefusal ??= allowedUse;
+          permissionExcluded.push({
+            claimId,
+            blockingReason: allowedUse.blockers?.[0]?.blocking_reason ?? refusing.prohibition,
+            validatorKey: allowedUse.blockers?.[0]?.validator_key ?? null,
+            sourceRole: refusing?.sourceRole ?? null,
+          });
+          continue;
+        }
+        rollbackFailure(allowedUse.code, allowedUse.blockers);
       }
+      if (permissionExcluded.length === input.claimIds.length) {
+        rollbackFailure(firstPermissionRefusal.code, firstPermissionRefusal.blockers);
+      }
+      const permissionExcludedIds = new Set(permissionExcluded.map((item) => item.claimId));
+      const generationClaimIds = input.claimIds.filter((claimId) => !permissionExcludedIds.has(claimId));
 
       const traceabilityResults = [];
-      for (const claimId of input.claimIds) {
+      for (const claimId of generationClaimIds) {
         const result = await evaluator(tx, {
           organizationId: input.organizationId,
           claimId,
@@ -1735,7 +1783,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         rollbackFailure("funder_use_not_currently_eligible");
       }
 
-      let projections = await loadGenerationProjection(tx, input, funderAuthorityByClaimId);
+      let projections = await loadGenerationProjection(tx, { ...input, claimIds: generationClaimIds }, funderAuthorityByClaimId);
       if (!projections) rollbackFailure("conflict_current_state_changed");
       // Owner direction 2026-11-06 (draft first): an INTERNAL provisional
       // draft does not wait for review, coverage acceptance or final-use
@@ -1967,6 +2015,15 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
         gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
       }
+      // Claims left out for their source's processing permission are
+      // disclosed in the saved content (never cited) and in the results.
+      if (permissionExcluded.length > 0) {
+        const note = permissionExclusionNote(permissionExcluded);
+        const target = assessment
+          ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
+          : generatorResult.blocks[generatorResult.blocks.length - 1];
+        target.text += ` ${note}`;
+      }
       const generatorResultClassification = classifyGeneratorResult(generatorResult);
       if (!generatorResultClassification.ok) {
         rollbackFailure(
@@ -2016,6 +2073,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             restated_model_block_ordinals: assessmentRestated,
           },
         }] };
+      }
+
+      if (permissionExcluded.length > 0) {
+        validation = { ...validation, results: [...validation.results, { validator_key: PERMISSION_EXCLUSION_RESULT_KEY, severity: "pass", evidence: {
+          excluded_claims: permissionExcluded.map((item) => ({ claimId: item.claimId, blockingReason: item.blockingReason, validatorKey: item.validatorKey, sourceRole: item.sourceRole })),
+        } }] };
       }
 
       // Persist an informational reminder separately from generated prose and
