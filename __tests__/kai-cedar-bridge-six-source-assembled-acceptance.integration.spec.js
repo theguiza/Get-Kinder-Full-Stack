@@ -3,7 +3,7 @@ import * as DOCUMENT_EVIDENCE from "../Backend/kai/validators/kaiDocumentEvidenc
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -183,6 +183,7 @@ async function runCedarBridgeAcceptance() {
     pairedOutcomeMeasurementsPath, tabularMeasurementPath,
   } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { clientInternalDraftReleasePath, clientReleasedReportMarkdownPath, coverageInternalAcceptancePath, generatedContentReviewCompletePath, generatedContentReviewStartPath } = await import("../frontend/impactEvidenceLibraryLogic.js");
+  const { organizationFactualReviewPath, projectOrganizationFactualReview } = await import("../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js");
   const router = (await import("../Backend/kai/routes/sprint2IntakeApi.js")).default;
   const config = await import("../Backend/kai/config/kaiSprint2Config.js");
   const auth = await import("../Backend/kai/middleware/kaiSprint2Authentication.js");
@@ -1063,6 +1064,200 @@ async function runCedarBridgeAcceptance() {
         scenario.unsupported_output = { status: unsupported.status, detected };
       } finally { modelBlockText = null; }
       assert.equal(await draftCount(), draftsBefore + 3, "the restated first assessment, the descriptive assessment and the restated summary are saved; nothing unsupported is");
+    });
+
+    // Owner prompt 2026-11-12 (uninterpreted paired-outcome factual review): the
+    // reported state is exactly this one - the Employment readiness (field_7)
+    // claim is eligible for internal use and its measurement has no recorded
+    // meaning. State A reads it in both factual-review panels with nothing
+    // preloaded; State B records the meaning through the panel's own control
+    // with the same synthetic values 11b states first (so 11b replays them).
+    await test("11a (browser): the uninterpreted paired outcome is readable in both factual-review panels; the administrator then records its meaning there", { skip: !CHROME || !WORKDIR ? "Chrome or the built bundle not available" : false }, async () => {
+      const field7 = report.unresolved_outcome_assessment.claims.find((entry) => entry.field === "field_7");
+      const claimId = field7.claim_id;
+      const measurementId = derived.paired_field_7.measurementId;
+      const capture = (name, text) => { if (REPORT_PATH) writeFileSync(`${REPORT_PATH.replace(/\.json$/, "")}.factual-review-${name}.txt`, text ?? "(not shown)"); };
+      const scenario = { claim_id: claimId, measurement_id: measurementId };
+      report.paired_factual_review_browser = scenario;
+      const [interpretationsBefore] = await query("SELECT count(*)::int AS n FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [measurementId]);
+      assert.equal(interpretationsBefore.n, 0, "State A: no interpretation is preloaded");
+
+      const browser = await launchChrome();
+      const page = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
+      const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
+      const clientPanel = `[data-client-measured-claim-review="${claimId}"]`;
+      const openStudio = async () => {
+        await page.goto("/impact-library");
+        await page.clickNav("Knowledge Studio");
+        await page.waitFor(() => page.visible("#gk-shell-project-select"), "the Project selector");
+        await page.idle();
+        await page.selectProject(PROJECT);
+        await page.idle();
+        await page.clickTab("Evidence");
+        await page.idle();
+      };
+      const openClientReview = async (id) => {
+        const mark = page.mark();
+        await page.clickVisible(`[data-client-open-measured-claim-review="${id}"]`, `${id}: View measurement`);
+        const panel = `[data-client-measured-claim-review="${id}"]`;
+        await page.waitFor(async () => /Loading the review/.test((await page.textOf(panel)) || "") === false && Boolean(await page.textOf(panel)), `${id}: the review panel`);
+        await page.idle();
+        const read = page.requestsSince(mark).find((r) => r.method === "GET" && new URL(r.url).pathname === organizationFactualReviewPath(ORG, id));
+        return { panel, read, body: read ? await page.responseBody(read) : null };
+      };
+      try {
+        // --- State A: the authorized API, the frontend projection and the rendered panels ---
+        await openStudio();
+        const opened = await openClientReview(claimId);
+        const clientText = await page.textOf(clientPanel);
+        capture("state-a-client", clientText);
+        assert.equal(opened.read?.status, 200, "the panel read the factual-review API");
+        const dto = opened.body.data;
+        const projected = projectOrganizationFactualReview(dto);
+        scenario.state_a = {
+          api: { measurement: dto.measurement, derived_measurement: dto.derived_measurement, internal_eligibility: dto.internal_eligibility, viewer: dto.viewer,
+            limitation_codes: dto.limitations.map((l) => l.code) },
+          projection_keeps_derived_measurement: Boolean(projected.derivedMeasurement),
+          client_text: clientText,
+        };
+        // GK reviewer's "Review finding" for the same claim (captured before any assertion).
+        await gkPage.goto("/impact-library");
+        await gkPage.clickNav("Knowledge Studio");
+        await gkPage.idle();
+        // The reviewer's only organization is already selected in the shell.
+        assert.ok((await gkPage.text()).includes(ORG_NAME), "Get Kinder's shell shows the Cedar organization");
+        await gkPage.clickTab("Evidence");
+        await gkPage.idle();
+        const gkAction = `[data-gk-review-finding="${claimId}"]`;
+        const gkPanel = `[data-gk-finding-review="${claimId}"]`;
+        let gkText = null;
+        const offered = await gkPage.waitFor(() => gkPage.evaluate(`Boolean(document.querySelector(${J(gkAction)}))`), "Review finding on the paired claim", { timeout: 20000 }).then(() => true, () => false);
+        if (offered) {
+          await gkPage.clickVisible(gkAction, "Review finding");
+          await gkPage.waitFor(async () => /Among \d+ participants/.test((await gkPage.textOf(gkPanel)) || "") || /could not be loaded/.test((await gkPage.textOf(gkPanel)) || ""), "the GK finding panel", { timeout: 30000 }).catch(() => {});
+          await gkPage.idle();
+          gkText = await gkPage.textOf(gkPanel);
+        }
+        capture("state-a-gk", gkText);
+        scenario.state_a.gk_review_finding_offered = offered;
+        scenario.state_a.gk_text = gkText;
+
+        // Backend boundary: the governed paired result, with no meaning.
+        assert.equal(dto.measurement, null);
+        const p = dto.derived_measurement;
+        assert.deepEqual([p.measurement_type, p.comparable_pair_count, p.increased_count, p.unchanged_count, p.decreased_count, p.percentage, p.participant_count, p.excluded_participant_count],
+          ["paired_outcome_change", 40, 23, 13, 4, "57.50", 62, 22], J(p));
+        assert.deepEqual([p.interpretation, p.score_direction, p.reporting_period, p.source_derived_measurement_id], [null, "not_established", null, measurementId]);
+        assert.equal(dto.internal_eligibility.eligible, true, "the reported state: internally eligible, meaning not recorded");
+        assert.equal(dto.viewer, "organization_administrator");
+        // Frontend projection keeps it.
+        assert.ok(projected.derivedMeasurement, "the adapter keeps derived_measurement");
+        assert.deepEqual([projected.derivedMeasurement.comparablePairCount, projected.derivedMeasurement.increasedCount, projected.derivedMeasurement.unchangedCount,
+          projected.derivedMeasurement.decreasedCount, projected.derivedMeasurement.excludedParticipantCount, projected.derivedMeasurement.interpretation], [40, 23, 13, 4, 22, null]);
+
+        // The customer view, in both panels.
+        const RESULT = "Among 40 participants with comparable baseline and follow-up values, 23 (57.50%) had a higher follow-up value, 13 were unchanged and 4 had a lower follow-up value.";
+        const assertReadable = (text, who) => {
+          assert.ok(text.includes(RESULT), `${who}: the paired breakdown\n${text}`);
+          assert.match(text, /22 of 62 participants were excluded/, who);
+          assert.match(text, /5 with no baseline observation; 7 with no follow-up observation; 8 whose baseline and follow-up used different instrument versions; 2 with a missing baseline value/, who);
+          assert.match(text, /not everyone served/, who);
+          assert.match(text, /has not stated what these values represent or whether a higher value is better/, who);
+          assert.match(text, /No reporting period was applied to this measurement/, who);
+          assert.doesNotMatch(text, /\bfield_\d+\b|\bsheet_\d+\b/, `${who}: internal keys are not the primary finding`);
+          assert.doesNotMatch(text, /recorded definition:|under your organization's recorded definition|as defined by the organization|One record is|records in the file|Counting method|the count is supported|\bimproved\b|\bworsened\b|2025-04-01/i, who);
+        };
+        assertReadable(clientText, "client panel");
+        assert.equal(await page.attrOf(`${clientPanel} [data-factual-review-paired]`, "data-factual-review-meaning-state"), "not_recorded");
+        assert.ok(offered, "Get Kinder's reviewer is offered Review finding for the paired claim");
+        assertReadable(gkText, "GK panel");
+        assert.match(gkText, /the organization has not stated/);
+        assert.match(gkText, /Only the organization can record what this measures\./);
+        assert.doesNotMatch(gkText, /Record what this measures/, "only the organization records its meaning");
+        // Provenance stays accessible: the source details on request.
+        await page.clickVisible(`${clientPanel} [data-knowledge-studio-disclosure="paired-source-details"] button`, "Source details");
+        const details = await page.textOf(`${clientPanel} [data-factual-review-source-details]`);
+        assert.match(details, /Worksheet key: sheet_1/);
+        assert.match(details, /Outcome column key: field_7/);
+        assert.ok(details.includes(state.workbook.sourceVersionId), "the source version is named");
+        assert.match(details, /Claim, as recorded: Numeric outcome field_7/);
+        assert.match(await page.textOf(clientPanel), /Observations that could not be compared were excluded and counted\./);
+        // Reload: still readable.
+        await openStudio();
+        await openClientReview(claimId);
+        const reloaded = await page.textOf(clientPanel);
+        assertReadable(reloaded, "client panel after reload");
+        assert.equal(reloaded, clientText, "the reloaded view is the same");
+
+        // --- State B: the administrator records the meaning through the panel's existing interpretation route ---
+        const semantics = HUMAN_SEMANTICS.paired_field_7_first;
+        await page.clickVisible(`${clientPanel} [data-client-measured-claim-clarify="${measurementId}"]`, "Record what this measures");
+        assert.ok(await page.type(`${clientPanel} [data-client-measured-claim-clarify-field="indicatorLabel"]`, semantics.indicator_label));
+        assert.ok(await page.type(`${clientPanel} [data-client-measured-claim-clarify-field="meaningText"]`, semantics.meaning_text));
+        assert.equal(await page.attrOf(`${clientPanel} [data-client-measured-claim-clarify-field="scoreDirection"]`, "data-client-measured-claim-clarify-field"), "scoreDirection");
+        assert.ok(await page.choose(`${clientPanel} [data-client-measured-claim-clarify-field="evidenceBasis"]`, semantics.evidence_basis));
+        const recordMark = page.mark();
+        await page.clickVisible(`${clientPanel} [data-client-measured-claim-clarify-submit]`, "Record meaning");
+        await page.waitFor(() => page.requestsSince(recordMark).some((r) => r.method === "POST" && r.done), "the interpretation request");
+        await page.idle();
+        const posted = page.requestsSince(recordMark).find((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [derivedMeasurementInterpretationPath(ORG, measurementId), 200]);
+        assert.deepEqual(JSON.parse(posted.postData), { indicator_label: semantics.indicator_label, meaning_text: semantics.meaning_text, score_direction: "not_established", evidence_basis: "self_reported" });
+        const recordedBody = (await page.responseBody(posted)).data;
+        const [adminUser] = await query("SELECT user_id::text FROM kai.users WHERE legacy_public_userdata_id = $1", [USERS.clientAdmin]);
+        const history = await query(`SELECT interpretation_id::text, indicator_label, meaning_text, score_direction, evidence_basis, interpretation_status, created_by::text, created_by_type
+            FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid`, [measurementId]);
+        assert.equal(history.length, 1);
+        assert.deepEqual(history[0], { interpretation_id: recordedBody.interpretation.interpretation_id, indicator_label: semantics.indicator_label, meaning_text: semantics.meaning_text,
+          score_direction: "not_established", evidence_basis: "self_reported", interpretation_status: "human_stated", created_by: adminUser.user_id, created_by_type: "human" }, "human-stated, by the administrator");
+        // Numbers and the earlier claim are not rewritten; the earlier claim is no longer current.
+        const [afterRow] = (await derivedRows(state.workbook.sourceVersionId)).filter((row) => row.source_derived_measurement_id === measurementId);
+        assert.deepEqual(afterRow, derived.paired_field_7.row, "arithmetic unchanged");
+        const [oldClaim] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
+        assert.equal(oldClaim.statement, field7.statement, "the earlier claim keeps its wording");
+        const stale = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+        assert.equal(stale.status, 409);
+        assert.ok(J(stale.body).includes("derived_measurement_interpretation_superseded"));
+        const notice = await page.textOf(`${clientPanel} [data-client-measured-claim-meaning-recorded]`);
+        capture("state-b-notice", notice);
+        assert.match(notice, /The numbers are unchanged/);
+        assert.match(notice, /This claim keeps its wording and is no longer current/);
+        // A claim from the measurement's current evidence, through the existing proposal route.
+        const newEvidenceItemId = recordedBody.evidenceItem.evidence_item_id;
+        const proposeMark = page.mark();
+        await page.clickVisible(`${clientPanel} [data-client-measured-claim-propose-current="${newEvidenceItemId}"]`, "Propose a claim from the current evidence");
+        await page.waitFor(() => page.requestsSince(proposeMark).some((r) => r.method === "POST" && r.done), "the claim proposal");
+        await page.idle();
+        const proposal = page.requestsSince(proposeMark).find((r) => r.method === "POST");
+        assert.equal(new URL(proposal.url).pathname, claimProposalPath(ORG, newEvidenceItemId));
+        assert.ok([200, 201].includes(proposal.status));
+        const newClaimId = (await page.responseBody(proposal)).data.claim.claim_id;
+        scenario.state_b = { interpretation: history[0], new_evidence_item_id: newEvidenceItemId, new_claim_id: newClaimId, notice };
+        // Reopen the factual review for the current finding.
+        await openStudio();
+        const reopened = await openClientReview(newClaimId);
+        const currentText = await page.textOf(`[data-client-measured-claim-review="${newClaimId}"]`);
+        capture("state-b-client", currentText);
+        scenario.state_b.client_text = currentText;
+        const current = reopened.body.data;
+        assert.deepEqual(current.derived_measurement.interpretation, { interpretation_id: history[0].interpretation_id, indicator_label: semantics.indicator_label,
+          meaning_text: semantics.meaning_text, score_direction: "not_established", evidence_basis: "self_reported" });
+        assert.equal(current.derived_measurement.evidence_item_id, newEvidenceItemId);
+        assert.equal(current.internal_eligibility.eligible, false, "no review is copied to the new claim");
+        assert.deepEqual([current.evidence_review.decision_outcome, current.claim_review.decision_outcome], [null, null], "no approval is manufactured");
+        assert.equal(await page.attrOf(`[data-client-measured-claim-review="${newClaimId}"] [data-factual-review-paired]`, "data-factual-review-meaning-state"), "recorded");
+        assert.match(currentText, /^Employment readiness$/m);
+        assert.ok(currentText.includes(RESULT), "the numbers are unchanged");
+        assert.ok(currentText.includes(`What this measures, as stated by your organization (not verified by KAI): ${semantics.meaning_text}`));
+        assert.match(currentText, /Whether a higher value is better has not been stated, so a higher follow-up value is not presented as a better result\./);
+        assert.match(currentText, /self-reported by the people recorded and were not independently verified/);
+        assert.doesNotMatch(currentText, /\bfield_\d+\b|\bsheet_\d+\b|\bimproved\b/);
+        assert.deepEqual([...page.exceptions, ...gkPage.exceptions], []);
+      } finally {
+        await page.close().catch(() => {});
+        await gkPage.close().catch(() => {});
+        await browser.close();
+      }
     });
 
     await test("11b: an authorized person records synthetic meaning and units; arithmetic is unchanged and approvals are not copied", async () => {
@@ -3394,11 +3589,13 @@ async function runCedarBridgeAcceptance() {
 // ---------------------------------------------------------------------------
 
 async function launchChrome() {
-  const profileDir = join(WORKDIR, "chrome-profile-cedar");
+  // One profile per launch: two browser tests in this run must never share a
+  // profile (Chrome's single-instance lock, a stale DevToolsActivePort).
+  const profileDir = join(WORKDIR, `chrome-profile-cedar-${randomUUID()}`);
   mkdirSync(profileDir, { recursive: true });
+  const portFile = join(profileDir, "DevToolsActivePort");
   const child = spawn(CHROME, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profileDir}`, "--no-first-run",
     "--no-default-browser-check", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "about:blank"], { stdio: "ignore" });
-  const portFile = join(profileDir, "DevToolsActivePort");
   for (let attempt = 0; attempt < 100 && !existsSync(portFile); attempt += 1) await new Promise((r) => setTimeout(r, 100));
   const [port] = readFileSync(portFile, "utf8").split("\n");
   const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
@@ -3427,9 +3624,12 @@ async function launchChrome() {
     send,
     listeners,
     async close() {
-      try { await send("Browser.close"); } catch { /* closing */ }
+      try { await Promise.race([send("Browser.close"), new Promise((r) => setTimeout(r, 3000))]); } catch { /* closing */ }
       socket.close();
+      const exited = child.exitCode !== null ? Promise.resolve() : new Promise((r) => child.once("exit", r));
       child.kill("SIGKILL");
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+      rmSync(profileDir, { recursive: true, force: true });
     },
   };
 }

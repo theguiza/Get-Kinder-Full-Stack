@@ -46,6 +46,49 @@ function projectDecision(dto) {
   };
 }
 
+// The paired baseline/follow-up outcome the server persisted and returned as
+// derived_measurement (record-count measurements stay in `measurement`).
+// Exactly the served fields; nothing is recalculated here.
+function projectDerivedMeasurement(derived) {
+  if (!derived || typeof derived !== "object") return null;
+  const interpretation = derived.interpretation && typeof derived.interpretation === "object"
+    ? {
+      interpretationId: derived.interpretation.interpretation_id ?? null,
+      indicatorLabel: derived.interpretation.indicator_label ?? null,
+      meaningText: derived.interpretation.meaning_text ?? null,
+      scoreDirection: derived.interpretation.score_direction ?? "not_established",
+      evidenceBasis: derived.interpretation.evidence_basis ?? "not_established",
+    }
+    : null;
+  return {
+    measurementType: derived.measurement_type ?? null,
+    sourceDerivedMeasurementId: derived.source_derived_measurement_id ?? null,
+    evidenceItemId: derived.evidence_item_id ?? null,
+    sourceVersionId: derived.source_version_id ?? null,
+    isCurrent: derived.is_current === true,
+    worksheetKey: derived.worksheet_key ?? null,
+    outcomeFieldKey: derived.outcome_field_key ?? null,
+    calculationMethod: derived.calculation_method ?? null,
+    numerator: derived.numerator ?? null,
+    denominator: derived.denominator ?? null,
+    percentage: derived.percentage ?? null,
+    increasedCount: derived.increased_count ?? null,
+    unchangedCount: derived.unchanged_count ?? null,
+    decreasedCount: derived.decreased_count ?? null,
+    participantCount: derived.participant_count ?? null,
+    comparablePairCount: derived.comparable_pair_count ?? null,
+    excludedParticipantCount: derived.excluded_participant_count ?? null,
+    exclusions: {
+      participants: asArray(derived.exclusions?.participants).map((row) => ({ reason: row.reason, participantCount: row.participant_count })),
+      rows: asArray(derived.exclusions?.rows).map((row) => ({ reason: row.reason, rowCount: row.row_count })),
+    },
+    interpretation,
+    // The server's own value: "not_established" unless a current interpretation states one.
+    scoreDirection: derived.score_direction ?? interpretation?.scoreDirection ?? "not_established",
+    reportingPeriod: derived.reporting_period ?? null,
+  };
+}
+
 export function projectOrganizationFactualReview(dto) {
   return {
     claimId: dto?.claim_id ?? null,
@@ -74,6 +117,7 @@ export function projectOrganizationFactualReview(dto) {
         exclusionRule: dto.measurement.exclusion_rule,
       }
       : null,
+    derivedMeasurement: projectDerivedMeasurement(dto?.derived_measurement),
     limitations: asArray(dto?.limitations).map((row) => ({ code: row.code, description: row.description || row.code })),
     evidenceReview: projectDecision(dto?.evidence_review),
     claimReview: projectDecision(dto?.claim_review),
@@ -121,6 +165,7 @@ const CALCULATION_METHOD_TEXT = Object.freeze({
   p1_csv_profile_data_records_excluding_blank_v1: "CSV data records after the header row, blank records excluded",
   p1_xlsx_single_worksheet_data_rows_excluding_blank_v1: "data rows after the header row of the only worksheet, blank rows excluded",
   p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1: "data rows after the header row of the one selected worksheet, blank rows excluded; worksheets are never combined",
+  p1_xlsx_paired_baseline_followup_numeric_change_v1: "each participant's baseline value compared with the same participant's follow-up value in one worksheet; participants without a comparable pair are excluded and counted",
 });
 
 export function calculationMethodText(calculationMethod) {
@@ -278,11 +323,17 @@ export const COVERAGE_DIMENSION_LABELS = Object.freeze({
   coverage_gaps: "Field coverage",
 });
 
-export function measuredClaimReviewStepLabel(step) {
+// What the review is about, in the panel's wording: a record count, or the
+// result of a derived (paired baseline/follow-up) measurement.
+export function measurementReviewNoun(review) {
+  return review?.derivedMeasurement ? "result" : "count";
+}
+
+export function measuredClaimReviewStepLabel(step, noun = "count") {
   if (step.kind === "evidence") {
     return {
-      supported: "Evidence review: the count is supported by the source",
-      not_supported: "Evidence review: the count is not supported by the source",
+      supported: `Evidence review: the ${noun} is supported by the source`,
+      not_supported: `Evidence review: the ${noun} is not supported by the source`,
       needs_more_information: "Evidence review: more information is needed",
     }[step.decision];
   }
@@ -336,8 +387,95 @@ export function eligibilityBlockerText(code) {
   return BLOCKER_TEXT[code] || code.replace(/_/g, " ");
 }
 
-export function measuredClaimReviewFailureMessage(step, result) {
+export function measuredClaimReviewFailureMessage(step, result, noun = "count") {
   const reasons = asArray(result?.body?.blockers).map((blocker) => blocker?.blocking_reason).filter(Boolean);
   const detail = reasons.length > 0 ? reasons.map(reviewReasonText).join(" ") : errorText(result);
-  return `${measuredClaimReviewStepLabel(step)} was not recorded. ${detail}`;
+  return `${measuredClaimReviewStepLabel(step, noun)} was not recorded. ${detail}`;
+}
+
+const PAIRED_EXCLUSION_TEXT = Object.freeze({
+  no_baseline_observation: "with no baseline observation",
+  no_followup_observation: "with no follow-up observation",
+  instrument_version_mismatch: "whose baseline and follow-up used different instrument versions",
+  missing_baseline_value: "with a missing baseline value",
+  missing_followup_value: "with a missing follow-up value",
+});
+const PAIRED_ROW_EXCLUSION_TEXT = Object.freeze({
+  blank_participant_identifier: "without a participant identifier",
+});
+
+function exclusionReasonText(table, reason) {
+  return table[reason] || `excluded as ${String(reason || "not comparable").replace(/_/g, " ")}`;
+}
+
+const DIRECTION_TEXT = Object.freeze({
+  higher_is_better: (who) => `${who} states that a higher value is better.`,
+  lower_is_better: (who) => `${who} states that a lower value is better.`,
+});
+const BASIS_TEXT = Object.freeze({
+  self_reported: "The values are self-reported by the people recorded and were not independently verified.",
+  organization_record: "The values are the organization's own records and were not independently verified.",
+});
+
+/**
+ * The customer-facing reading of one paired baseline/follow-up outcome, from
+ * the persisted values only (never recalculated). "Higher" is never called
+ * improved and "lower" never worsened unless a current recorded
+ * interpretation states the direction, and then only as the organization's
+ * statement. The internal worksheet and column keys are source details, not
+ * the heading. `audience` "organization" addresses the administrator as
+ * "your organization"; any other value (Get Kinder) says "the organization".
+ */
+export function pairedOutcomeReviewText(derived, { audience = "organization" } = {}) {
+  const own = audience === "organization";
+  const who = own ? "Your organization" : "The organization";
+  const whose = own ? "your organization" : "the organization";
+  const interpretation = derived.interpretation;
+  const label = typeof interpretation?.indicatorLabel === "string" && interpretation.indicatorLabel.trim() ? interpretation.indicatorLabel.trim() : null;
+  const known = (value) => Number.isInteger(value);
+  const result = [derived.comparablePairCount, derived.increasedCount, derived.unchangedCount, derived.decreasedCount].every(known)
+    ? `Among ${derived.comparablePairCount} participants with comparable baseline and follow-up values, ${derived.increasedCount}`
+      + `${derived.percentage ? ` (${derived.percentage}%)` : ""} had a higher follow-up value, ${derived.unchangedCount} were unchanged`
+      + ` and ${derived.decreasedCount} had a lower follow-up value.`
+    : "The paired result is not available.";
+  const breakdown = [
+    ...derived.exclusions.participants.filter((row) => known(row.participantCount) && row.participantCount > 0)
+      .map((row) => `${row.participantCount} ${exclusionReasonText(PAIRED_EXCLUSION_TEXT, row.reason)}`),
+    ...derived.exclusions.rows.filter((row) => known(row.rowCount) && row.rowCount > 0)
+      .map((row) => `${row.rowCount} ${row.rowCount === 1 ? "record" : "records"} ${exclusionReasonText(PAIRED_ROW_EXCLUSION_TEXT, row.reason)}`),
+  ];
+  const population = known(derived.excludedParticipantCount) && known(derived.participantCount)
+    ? `${derived.excludedParticipantCount} of ${derived.participantCount} participants were excluded because they had no comparable baseline and follow-up pair`
+      + `${breakdown.length ? `: ${breakdown.join("; ")}` : ""}. The result covers the ${derived.comparablePairCount ?? "comparable"} comparable participants only, not everyone served.`
+    : "The result covers only participants with a comparable baseline and follow-up value, not everyone served.";
+  const meaning = [];
+  if (!interpretation) {
+    meaning.push(`What this measures has not been recorded: ${whose} has not stated what these values represent or whether a higher value is better.`);
+    meaning.push("Whether these changes indicate improvement depends on that statement, so a higher value is not presented as an improvement and a lower value is not presented as a decline.");
+  } else {
+    meaning.push(`What this measures, as stated by ${whose} (not verified by KAI): ${interpretation.meaningText || "no description recorded."}`);
+    meaning.push(DIRECTION_TEXT[derived.scoreDirection]?.(who)
+      || "Whether a higher value is better has not been stated, so a higher follow-up value is not presented as a better result.");
+    meaning.push(BASIS_TEXT[interpretation.evidenceBasis] || "Where the values come from has not been stated.");
+  }
+  return {
+    heading: label || "Paired baseline/follow-up outcome",
+    subheading: label ? "Paired baseline/follow-up outcome" : null,
+    meaningRecorded: Boolean(interpretation),
+    result,
+    population,
+    meaning,
+    // Only the "no period" state is served today; a period is never assumed from the Project.
+    period: derived.reportingPeriod
+      ? "A reporting period is recorded for this measurement."
+      : "No reporting period was applied to this measurement; the Project's reporting period is not assumed.",
+    method: `Method: ${calculationMethodText(derived.calculationMethod)}.`,
+    currentness: derived.isCurrent ? "Calculated from the current source version." : "Not calculated from the current source version.",
+    sourceDetails: [
+      derived.worksheetKey ? `Worksheet key: ${derived.worksheetKey}` : null,
+      derived.outcomeFieldKey ? `Outcome column key: ${derived.outcomeFieldKey}` : null,
+      derived.sourceVersionId ? `Source version: ${derived.sourceVersionId}` : null,
+      derived.evidenceItemId ? `Evidence item: ${derived.evidenceItemId}` : null,
+    ].filter(Boolean),
+  };
 }

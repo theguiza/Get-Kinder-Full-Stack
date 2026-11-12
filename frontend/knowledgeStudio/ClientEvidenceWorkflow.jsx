@@ -895,7 +895,7 @@ export default function ClientEvidenceWorkflow({
       {openReview ? (
         // Outside the list, so the list's own refresh after a decision does not unmount it.
         <ClientMeasuredClaimReviewPanel key={`${contextKey}:${openReview}`} organizationId={organizationId} claimId={openReview}
-          onClose={() => setReviewing(null)} onRecorded={refresh} />
+          onClose={() => setReviewing(null)} onRecorded={refresh} canProposeClaim={access.proposeClaim === true} />
       ) : null}
     </div>
   );

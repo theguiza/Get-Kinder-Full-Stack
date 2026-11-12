@@ -13,6 +13,7 @@ import {
   reviewQueueStateText,
   reviewRequirementText,
 } from "./knowledgeStudio/clientMeasuredClaimReviewLogic.js";
+import FactualReviewPairedOutcome from "./knowledgeStudio/FactualReviewPairedOutcome.jsx";
 
 const APPROVED_CLAIM_OUTCOMES = new Set(["approved", "approved_with_limitation"]);
 
@@ -31,6 +32,10 @@ const APPROVED_CLAIM_OUTCOMES = new Set(["approved", "approved_with_limitation"]
  * coverage route, once the claim review is approved; the server re-checks
  * every request. `reloadKey` changes whenever the parent re-reads the
  * claim's traceability (after any decision), so this view re-reads too.
+ *
+ * A paired baseline/follow-up outcome is shown exactly as the organization
+ * administrator sees it (FactualReviewPairedOutcome): its persisted
+ * breakdown and meaning state. Only the organization records its meaning.
  */
 export default function GkFindingReviewPanel({ organizationId, claimId, reloadKey, canAcceptCoverage, onRecorded }) {
   const [state, setState] = useState({ status: "loading", review: null, error: "" });
@@ -72,7 +77,14 @@ export default function GkFindingReviewPanel({ organizationId, claimId, reloadKe
       {state.status === "error" ? <div className="alert alert-warning py-2 small mb-0">The finding could not be loaded. {state.error}</div> : null}
       {review ? (
         <div className="small">
-          <div className="text-break" data-gk-finding-claim="">{review.claimStatement}</div>
+          {review.derivedMeasurement ? (
+            <>
+              <FactualReviewPairedOutcome review={review} audience="get_kinder" />
+              {!review.derivedMeasurement.interpretation ? (
+                <div className="text-muted mt-1" data-gk-finding-meaning-owner="">Only the organization can record what this measures.</div>
+              ) : null}
+            </>
+          ) : <div className="text-break" data-gk-finding-claim="">{review.claimStatement}</div>}
           {review.measurement ? (
             <div className="mt-1" data-gk-finding-measurement="">
               <div><span className="fw-semibold">Counted:</span> {review.measurement.measuredValue} {review.measurement.unitLabel}</div>

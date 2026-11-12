@@ -2772,12 +2772,16 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
 }
 
 // Whether the GK Claims list offers "Review finding" for this claim: a
-// measured finding (P2-01M record-count evidence) and an actor whose access
-// capabilities admit recording this organization's evidence review. It grants
-// nothing; every decision is re-authorized by the server.
+// measured finding (P2-01M record-count evidence, or a source-derived
+// measurement such as a paired baseline/follow-up outcome; the finding-review
+// read serves both) and an actor whose access capabilities admit recording
+// this organization's evidence review. It grants nothing; every decision is
+// re-authorized by the server.
+const REVIEWABLE_MEASURED_EVIDENCE_TYPES = new Set(["source_record_count_measurement", "source_derived_measurement"]);
+
 export function canReviewMeasuredFinding(claim, workflowOperations) {
   return workflowOperations?.recordEvidenceReview === true
-    && claim?.evidenceType === "source_record_count_measurement"
+    && REVIEWABLE_MEASURED_EVIDENCE_TYPES.has(claim?.evidenceType)
     && isRouteUuid(claim?.claimId);
 }
 
