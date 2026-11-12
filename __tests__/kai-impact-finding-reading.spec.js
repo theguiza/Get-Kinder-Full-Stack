@@ -202,3 +202,51 @@ test("an unresolved outcome is never called an improvement anywhere in the compo
   assert.doesNotMatch(text, /\bimprov(?:ed|ement|ing)\b|favourable|Working well/);
   assert.match(text, /Clarification needed/);
 });
+
+test("reach without any outcome measure: the assessment names the outcome-evidence gap instead of treating reach as a result for participants", () => {
+  // A linked-reach finding as the Project B measurement states it (190
+  // encounters, 67 distinct people); the reading is the composed shape.
+  const reach = {
+    claimId: "39000000-0000-4000-8000-000000000009", evidenceItemId: "36000000-0000-4000-8000-000000000019",
+    claimStatement: "People served: 67 distinct register participants served, each counted once, among 190 eligible encounters.",
+    evidenceType: D.DERIVED_MEASUREMENT_EVIDENCE_TYPE, claimType: "finding",
+    limitationCodes: ["derived.cross_source_linked", "derived.each_identifier_counted_once", "derived.meaning_human_stated", "derived.values_not_verified"],
+    plainReading: "People served: 67 distinct people on the participant register received at least one completed service in the reporting period 2024-04-01 to 2025-03-31, across 190 eligible service encounters.",
+    impactReading: { kind: "reach", signal: "descriptive", headline: "People served: 67 distinct people received at least one completed service in the reporting period 2024-04-01 to 2025-03-31" },
+  };
+  const composed = composeFreeImpactAssessmentBlocks({
+    modelBlocks: [
+      { ordinal: 1, text: W("executive_snapshot", "The organization reached people on its participant register."), citations: cite(reach) },
+      { ordinal: 2, text: W("evidence_findings", reach.plainReading), citations: cite(reach) },
+      { ordinal: 3, text: W("impact_stories", "No participant account is stated beyond the cited findings."), citations: cite(reach) },
+    ],
+    claims: [reach],
+  });
+  assert.equal(composed.ok, true, composed.reason);
+  const gaps = parseFreeImpactAssessment(composed.blocks).find((s) => s.key === "gaps_opportunities").blocks.map((b) => b.body).join("\n");
+  assert.match(gaps, /No baseline and follow-up outcome measure is among the selected evidence, so these results show the organization's activity and reach, not yet what changed for the people it served\./);
+  assert.doesNotMatch(gaps, /Working well|favourable/);
+});
+
+test("a record count whose exact-duplicate rows equal its measured value: the server's own count-only finding is not read as a contradicted unit", () => {
+  // Captured from the customer measured-report browser acceptance (story
+  // source, 2 rows, 2 in exact-duplicate groups): before, the assessment was
+  // refused VAL-GEN-008 limitation_contradicted on the server's own text.
+  const id = "39000000-0000-4000-8000-000000000021";
+  const evidence = "36000000-0000-4000-8000-000000000021";
+  const serverFinding = "2 nonblank data rows were counted in the CSV data records of the cited source version, with 0 blank rows excluded and 2 exact-duplicate rows included in the count. This is a count of data records in that source version only: what one record represents is human-defined by the organization and was not verified by KAI, so the number is a row count and nothing more. The reporting period 2026-09-01 to 2026-09-30 is attested in that definition and was not verified against dates in the rows. Any coverage limitations recorded for the claim apply and are listed with the report's limitations.";
+  const claim = {
+    claimId: id, evidenceItemId: evidence, claimType: "finding", evidenceType: "source_record_count_measurement",
+    claimStatement: "The promoted source has 2 source records (record count: one record per CSV data record; 0 blank records excluded; 2 in exact-duplicate groups (1 excess copy), not removed). Not applied by KAI: the organization's description of each record as one record, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.",
+    modelClaimStatement: serverFinding,
+    limitationCodes: ["coverage.conflicting_source_indicators.unresolved", "coverage.duplicates.resolved_risk_flagged", "coverage.requirement_alignment.unresolved",
+      "coverage.time_period_clarity.resolved_risk_flagged", "measurement.duplicate_records_included", "measurement.period_human_attested_not_row_verified", "measurement.record_meaning_human_defined"],
+    requestedAudience: "internal", revalidatedForGeneration: true, audienceAuthority: { internal: true },
+  };
+  const disclosed = composeEvidenceSummaryMeasurementDisclosures({ blocks: [{ ordinal: 1, text: W("evidence_findings", serverFinding), citations: cite(claim) }], claims: [claim], measuredValueByClaimId: new Map([[id, 2]]) });
+  assert.equal(disclosed.ok, true);
+  assert.equal(validate(disclosed.blocks, [claim]).ok, true, JSON.stringify(validate(disclosed.blocks, [claim]).blockers));
+  // Model wording that re-counts the 2 as something else is still refused.
+  const modelText = composeEvidenceSummaryMeasurementDisclosures({ blocks: [{ ordinal: 1, text: W("evidence_findings", "The programme delivered 2 sessions."), citations: cite(claim) }], claims: [claim], measuredValueByClaimId: new Map([[id, 2]]) });
+  assert.equal(validate(modelText.blocks, [claim]).ok, false);
+});

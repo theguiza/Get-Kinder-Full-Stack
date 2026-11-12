@@ -2,6 +2,7 @@ import { withTransaction } from "../db/kaiDb.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
 import {
+  PACKET_RECORDED_REVIEW_REJECTION,
   evaluateExportReviewRequestStateInTransaction,
   evaluateGeneratedDraftReviewPacketInTransaction,
 } from "./postgresGeneratedContentRepository.js";
@@ -9,6 +10,7 @@ import {
   HIGH_RISK_SENSITIVITY_FIELDS,
   classifySourceDecision,
   classifySourceVersionInTransaction,
+  traceabilityRecordsReviewRejection,
 } from "./postgresOrdinaryInternalFactAuthority.js";
 
 // The source classification is shared with P2-06's ordinary internal factual
@@ -166,18 +168,35 @@ async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
 const SENSITIVITY_INFORMATION_REASONS = new Set(Object.values(HIGH_RISK_SENSITIVITY_FIELDS));
 const PROVISIONAL_REPORT_INFORMATION_REASONS = new Set(["cited_claims_not_currently_eligible"]);
 
+// Whether a cited claim carries a recorded review rejection (a GK or
+// administrator "not supported" / "rejected" decision). Unreviewed is
+// provisional information; a recorded rejection is not (owner direction
+// 2026-11-11: "Legitimate recorded rejection must not be silently
+// disregarded", matching generation's own refusal).
+async function citesRejectedClaim(tx, { organizationId, packet }) {
+  if (typeof packet[PACKET_RECORDED_REVIEW_REJECTION] === "boolean") return packet[PACKET_RECORDED_REVIEW_REJECTION];
+  const claimIds = [...new Set((packet.blocks || []).flatMap((block) => (block?.citations || []).map((citation) => citation.claimId)))];
+  for (const claimId of claimIds) {
+    const result = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId, requestedAudience: "internal" });
+    if (result?.ok && traceabilityRecordsReviewRejection(result.data)) return true;
+  }
+  return false;
+}
+
 export async function evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }) {
   const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
+  const rejected = evaluation.blockedReasons.includes("cited_claims_not_currently_eligible") && await citesRejectedClaim(tx, { organizationId, packet });
+  const informational = (reason) => PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason) && !rejected;
   const getKinderReviewReasons = evaluation.getKinderReviewReasons
     .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType))
     .filter((reason) => !SENSITIVITY_INFORMATION_REASONS.has(reason));
   const blockedReasons = [
-    ...evaluation.blockedReasons.filter((reason) => !PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason)),
+    ...evaluation.blockedReasons.filter((reason) => !informational(reason)),
     ...(await citesOnlyStructuralFacts(tx, { organizationId, packet }) ? [STRUCTURAL_FACTS_ONLY_REASON] : []),
   ];
   const informationReasons = [
     ...evaluation.getKinderReviewReasons.filter((reason) => SENSITIVITY_INFORMATION_REASONS.has(reason)),
-    ...evaluation.blockedReasons.filter((reason) => PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason)),
+    ...evaluation.blockedReasons.filter(informational),
   ];
   return {
     getKinderReviewReasons,

@@ -265,6 +265,9 @@ export const GENERATOR_RESULT_REASONS = Object.freeze({
 // result are byte-for-byte unchanged whether or not the tag is present -
 // only classifyGeneratorResult below ever reads it.
 export const GENERATOR_RESULT_REASON = Symbol("kai.generatorResultReason");
+// Owner direction 2026-11-11: a review packet's recorded-rejection fact, for
+// internal report availability, without a second traceability evaluation.
+export const PACKET_RECORDED_REVIEW_REJECTION = Symbol("kai.packetRecordedReviewRejection");
 
 function stageBlocker(validatorKey, blockingReason) {
   return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
@@ -668,6 +671,11 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
     // have no reading and are never affected.
     const citedClaims = (block.citations || []).map((citation) => byId.get(citation.claimId));
     if (INTERNAL_KEY_PATTERN.test(parsed.body) && citedClaims.length > 0 && citedClaims.every((claim) => claim?.plainReading)) refused.add(block.ordinal);
+    // A record count is stated in the findings only as the server's
+    // count-only finding (owner Package 1): a findings block citing one in
+    // other words, which may assert the organization's unit label as
+    // counted, is restated.
+    if (parsed.sectionKey === "evidence_findings" && citedClaims.some((claim) => claim?.modelClaimStatement && !parsed.body.includes(claim.modelClaimStatement))) refused.add(block.ordinal);
     sectioned.push(block);
   }
   if (refused.size === 0 && composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections }).ok) {
@@ -1405,6 +1413,9 @@ async function toReviewPacket(tx, state, input, validation, evaluator, { boardRe
     exportReviewQueueStatus: state.exportReviewQueues[0]?.queue_status ?? null,
     exportReviewStatus: state.exportReviewQueues[0]?.review_status ?? null,
     blocks,
+    // Server-only (never serialized): whether a cited claim carries a
+    // recorded review rejection, from the same fresh evaluations above.
+    [PACKET_RECORDED_REVIEW_REJECTION]: [...evaluatedByClaim.values()].some((evaluated) => traceabilityRecordsReviewRejection(evaluated)),
   });
 }
 
@@ -1936,116 +1947,140 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         assessmentModelAttempts += 1;
         generatorInput = assessment ? assessmentCorrectionInput(generatorInput, generatorResult, modelProjections, assessmentModelAttempts) : null;
       }
-      let assessmentRestated = [];
-      if (assessment && modelProjections.length > 0) {
-        const restated = restateAssessmentModelBlocks(generatorResult, modelProjections);
-        generatorResult = { blocks: restated.blocks };
-        assessmentRestated = restated.restated;
-      }
-      const assessmentWordingFallback = assessment && (assessmentRestated === "all" || assessmentRestated.length > 0)
-        ? { model_generation_attempts: assessmentModelAttempts, restated_model_block_ordinals: assessmentRestated }
-        : null;
-      // Free Impact Assessment: the model's section blocks pass the result
-      // contract, then the server adds the composed sections (story
-      // evidence, documented gaps, three proposed improvements, next steps)
-      // from the same projections. Disclosures, the combined result contract
-      // and every validator below then run on the whole assessment.
-      if (assessment && modelProjections.length > 0) {
-        const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
-        if (!composedAssessment.ok) {
-          rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
+      // Assembly after the model call: the assessment's restatement and
+      // composed sections, disclosures, selection notes and every validator.
+      const rawModelResult = generatorResult;
+      const assemble = (modelResult) => {
+        let generatorResult = modelResult;
+        let assessmentRestated = [];
+        if (assessment && modelProjections.length > 0) {
+          const restated = restateAssessmentModelBlocks(generatorResult, modelProjections);
+          generatorResult = { blocks: restated.blocks };
+          assessmentRestated = restated.restated;
         }
-        generatorResult = { blocks: composedAssessment.blocks };
-      }
-      // An Evidence Summary block citing an ordinary measured claim carries
-      // that claim's server-composed disclosure after the model's own text
-      // (composeEvidenceSummaryMeasurementDisclosures). The model result
-      // passes the result contract first; the combined result passes it
-      // again below, so a disclosure that does not fit is refused, never
-      // truncated, and the validators then run on exactly what persists.
-      // Owner direction 2026-11-10: in an Evidence Summary the model's
-      // wording never fails the request on its own. Refused blocks (or an
-      // unusable result) are restated from the cited claims' own governed
-      // text with their disclosures; every validator still runs on the
-      // whole draft below, and a non-wording refusal is never repaired.
-      let wordingFallback = null;
-      let composedWithDisclosures = false;
-      if (contentType === CONTENT_TYPE && !assessment && modelProjections.length > 0) {
-        const validationClaims = projections.map((projection) => ({
-          ...projection,
-          revalidatedForGeneration: true,
-          currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-        }));
-        const repaired = composeEvidenceSummaryWithWordingFallback({
-          modelBlocks: generatorResult?.blocks,
-          modelResultUsable: classifyGeneratorResult(generatorResult).ok,
-          claims: modelProjections,
-          measuredValueByClaimId,
-          blockFits: (block) => classifyGeneratorResult({ blocks: [{ ...block, ordinal: 1 }] }).ok,
-          resultFits: (blocks) => classifyGeneratorResult({ blocks }).ok,
-          validate: (blocks) => validateGeneratedContentDraft({
-            requestedAudience: input.requestedAudience,
-            generationClaims: validationClaims,
-            blocks,
-            draftAudience: input.requestedAudience,
-            contentType,
-          }),
-        });
-        if (repaired.ok && classifyGeneratorResult({ blocks: repaired.blocks }).ok) {
-          generatorResult = { blocks: repaired.blocks };
-          composedWithDisclosures = true;
-          if (repaired.evidence.fallback_block_count > 0) wordingFallback = repaired.evidence;
+        const assessmentWordingFallback = assessment && (assessmentRestated === "all" || assessmentRestated.length > 0)
+          ? { model_generation_attempts: assessmentModelAttempts, restated_model_block_ordinals: assessmentRestated }
+          : null;
+        // Free Impact Assessment: the model's section blocks pass the result
+        // contract, then the server adds the composed sections (story
+        // evidence, documented gaps, three proposed improvements, next steps)
+        // from the same projections. Disclosures, the combined result contract
+        // and every validator below then run on the whole assessment.
+        if (assessment && modelProjections.length > 0) {
+          const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
+          if (!composedAssessment.ok) {
+            rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
+          }
+          generatorResult = { blocks: composedAssessment.blocks };
         }
-      }
-      if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0 && !composedWithDisclosures) {
-        const modelClassification = classifyGeneratorResult(generatorResult);
-        if (!modelClassification.ok) {
-          rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+        // An Evidence Summary block citing an ordinary measured claim carries
+        // that claim's server-composed disclosure after the model's own text
+        // (composeEvidenceSummaryMeasurementDisclosures). The model result
+        // passes the result contract first; the combined result passes it
+        // again below, so a disclosure that does not fit is refused, never
+        // truncated, and the validators then run on exactly what persists.
+        // Owner direction 2026-11-10: in an Evidence Summary the model's
+        // wording never fails the request on its own. Refused blocks (or an
+        // unusable result) are restated from the cited claims' own governed
+        // text with their disclosures; every validator still runs on the
+        // whole draft below, and a non-wording refusal is never repaired.
+        let wordingFallback = null;
+        let composedWithDisclosures = false;
+        if (contentType === CONTENT_TYPE && !assessment && modelProjections.length > 0) {
+          const validationClaims = projections.map((projection) => ({
+            ...projection,
+            revalidatedForGeneration: true,
+            currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+          }));
+          const repaired = composeEvidenceSummaryWithWordingFallback({
+            modelBlocks: generatorResult?.blocks,
+            modelResultUsable: classifyGeneratorResult(generatorResult).ok,
+            claims: modelProjections,
+            measuredValueByClaimId,
+            blockFits: (block) => classifyGeneratorResult({ blocks: [{ ...block, ordinal: 1 }] }).ok,
+            resultFits: (blocks) => classifyGeneratorResult({ blocks }).ok,
+            validate: (blocks) => validateGeneratedContentDraft({
+              requestedAudience: input.requestedAudience,
+              generationClaims: validationClaims,
+              blocks,
+              draftAudience: input.requestedAudience,
+              contentType,
+            }),
+          });
+          if (repaired.ok && classifyGeneratorResult({ blocks: repaired.blocks }).ok) {
+            generatorResult = { blocks: repaired.blocks };
+            composedWithDisclosures = true;
+            if (repaired.evidence.fallback_block_count > 0) wordingFallback = repaired.evidence;
+          }
         }
-        // A Free Impact Assessment discloses each measured claim once, in the
-        // findings block that states it (every selected claim has one; see
-        // composeFreeImpactAssessmentBlocks); summary blocks are not repeated.
-        const disclosed = assessment ? generatorResult.blocks.filter(isAssessmentFindingsBlock) : generatorResult.blocks;
-        const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: disclosed, claims: modelProjections, measuredValueByClaimId });
-        if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
-        const byOrdinal = new Map(composed.blocks.map((block) => [block.ordinal, block]));
-        generatorResult = { blocks: generatorResult.blocks.map((block) => byOrdinal.get(block.ordinal) ?? block) };
-      }
-      if (assessment && excludedClaims.length > 0) {
-        const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
-        gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
-      }
-      // Claims left out for their source's processing permission are
-      // disclosed in the saved content (never cited) and in the results.
-      if (permissionExcluded.length > 0) {
-        const note = permissionExclusionNote(permissionExcluded);
-        const target = assessment
-          ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
-          : generatorResult.blocks[generatorResult.blocks.length - 1];
-        target.text += ` ${note}`;
-      }
-      const generatorResultClassification = classifyGeneratorResult(generatorResult);
-      if (!generatorResultClassification.ok) {
-        rollbackFailure(
-          "validation_blocker",
-          stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, generatorResultClassification.reason),
-        );
-      }
+        if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0 && !composedWithDisclosures) {
+          const modelClassification = classifyGeneratorResult(generatorResult);
+          if (!modelClassification.ok) {
+            rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+          }
+          // A Free Impact Assessment discloses each measured claim once, in the
+          // findings block that states it (every selected claim has one; see
+          // composeFreeImpactAssessmentBlocks); summary blocks are not repeated.
+          const disclosed = assessment ? generatorResult.blocks.filter(isAssessmentFindingsBlock) : generatorResult.blocks;
+          const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: disclosed, claims: modelProjections, measuredValueByClaimId });
+          if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
+          const byOrdinal = new Map(composed.blocks.map((block) => [block.ordinal, block]));
+          generatorResult = { blocks: generatorResult.blocks.map((block) => byOrdinal.get(block.ordinal) ?? block) };
+        }
+        if (assessment && excludedClaims.length > 0) {
+          const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
+          gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
+        }
+        // Claims left out for their source's processing permission are
+        // disclosed in the saved content (never cited) and in the results.
+        if (permissionExcluded.length > 0) {
+          const note = permissionExclusionNote(permissionExcluded);
+          const target = assessment
+            ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
+            : generatorResult.blocks[generatorResult.blocks.length - 1];
+          target.text += ` ${note}`;
+        }
+        const generatorResultClassification = classifyGeneratorResult(generatorResult);
+        if (!generatorResultClassification.ok) {
+          rollbackFailure(
+            "validation_blocker",
+            stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, generatorResultClassification.reason),
+          );
+        }
 
-      let validation = validateGeneratedContentDraft({
-        requestedAudience: input.requestedAudience,
-        generationClaims: projections.map((projection) => ({
-          ...projection,
-          revalidatedForGeneration: true,
-          currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-        })),
-        blocks: generatorResult.blocks,
-        draftAudience: input.requestedAudience,
-        contentType,
-        authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
-          ? dependencies.authoritativeDataGaps
-          : dependencies.authoritativeReadiness,
-      });
+        const validation = validateGeneratedContentDraft({
+          requestedAudience: input.requestedAudience,
+          generationClaims: projections.map((projection) => ({
+            ...projection,
+            revalidatedForGeneration: true,
+            currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+          })),
+          blocks: generatorResult.blocks,
+          draftAudience: input.requestedAudience,
+          contentType,
+          authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+            ? dependencies.authoritativeDataGaps
+            : dependencies.authoritativeReadiness,
+        });
+        return { generatorResult, validation, assessmentRestated, assessmentWordingFallback, wordingFallback };
+      };
+      let assembled = assemble(rawModelResult);
+      // Owner direction 2026-11-11: a Free Impact Assessment is not refused for
+      // the model's wording. When the assembled draft is refused only for a
+      // wording rule (an undisclosed or contradicted limitation, VAL-GEN-008,
+      // or an ungrounded quotation, VAL-GEN-010), every model section is
+      // restated from the claims' own readings and governed text, which the
+      // validators accept by construction, and the whole draft is validated
+      // again. Nothing refused is saved; any other refusal stands.
+      if (assessment && modelProjections.length > 0 && !assembled.validation.ok
+        && assembled.validation.blockers.every((item) => ["VAL-GEN-008", "VAL-GEN-010"].includes(item.validator_key))) {
+        assembled = assemble({ blocks: [] });
+      }
+      generatorResult = assembled.generatorResult;
+      let validation = assembled.validation;
+      let wordingFallback = assembled.wordingFallback;
+      const assessmentRestated = assembled.assessmentRestated;
+      const assessmentWordingFallback = assembled.assessmentWordingFallback;
       if (!validation.ok) {
         // The model text already passed VAL-GEN-004 on its own, so a
         // VAL-GEN-004 refusal of the assembled assessment is in

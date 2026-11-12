@@ -359,3 +359,20 @@ test("the correction contract refuses anything beyond bounded block diagnostics"
     assert.ok(block.unsupportedTerms.every((term) => !CLAIMS.some((c) => c.claimStatement.includes(term) && term.length > 5)), "no claim text is echoed");
   }
 });
+
+test("workflow: model wording that contradicts a limitation (VAL-GEN-008) restates the model sections instead of refusing the assessment, and is never saved", async () => {
+  // Owner direction 2026-11-11: before, this 422'd the whole assessment
+  // (VAL-GEN-008 limitation_contradicted), because the wording fallback
+  // covered only VAL-GEN-004.
+  const CONTRADICTING = CLEAN_MODEL.map((block) => (block.ordinal === 1
+    ? { ...block, text: W("executive_snapshot", "These figures were verified by staff against every participant record.") }
+    : block));
+  const run = await generate([CONTRADICTING, CONTRADICTING]);
+  assert.equal(run.result.ok, true, JSON.stringify(run.result.blockers));
+  const saved = run.store.blocks.map((block) => block.text).join("\n");
+  assert.doesNotMatch(saved, /verified by staff/);
+  assert.ok(parseFreeImpactAssessment(run.result.data.blocks), "still a six-section assessment");
+  const fallback = run.store.drafts[0].validator_results.find((r) => r.validator_key === "KAI-GEN-WORDING-FALLBACK-001");
+  assert.equal(fallback.evidence.restated_model_block_ordinals, "all");
+  assert.ok(run.store.drafts[0].validator_results.some((r) => r.validator_key === "VAL-GEN-008" && r.severity === "pass"));
+});

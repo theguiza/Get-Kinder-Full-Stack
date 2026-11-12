@@ -310,6 +310,11 @@ function modelAuthoredText(text, citedClaims) {
   for (const claim of citedClaims) {
     const body = measuredClaimDisclosure(claim);
     if (body) model = model.split(body).join(" ");
+    // The server's own count-only finding for a record count
+    // (composeCountOnlyFindingText) is authoritative composed text, not a
+    // model assertion: "2 exact-duplicate rows" in it is never a claim that
+    // the measured 2 counts something else (owner direction 2026-11-11).
+    if (typeof claim.modelClaimStatement === "string" && claim.modelClaimStatement.length > 0) model = model.split(claim.modelClaimStatement).join(" ");
   }
   return model.replace(DISCLOSURE_PREFIX_PATTERN, " ");
 }
