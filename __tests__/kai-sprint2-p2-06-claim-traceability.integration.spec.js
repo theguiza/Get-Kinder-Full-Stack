@@ -552,13 +552,25 @@ async function runP206IntegrationSuite() {
       );
     }
     const [currentHead] = await query(
-      `SELECT d.decision_id
+      `SELECT d.decision_id, d.reviewed_public_use_allowed, d.reviewed_llm_processing_allowed
          FROM kai.intake_sensitivity_review_decisions d
         WHERE d.organization_id = $1::uuid
           AND d.intake_sensitivity_profile_id = $2::uuid
           AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
       [ORG, intakeSensitivityProfileId],
     );
+    // 7e8247f8 binds each accepted small-cell limitation to the sensitivity
+    // decision it was reviewed under, so superseding the head with an
+    // identical public/AI authority would silently invalidate earlier claims'
+    // accepted limitations. Only record a new decision when the authority
+    // this helper sets actually changes.
+    if (
+      currentHead
+      && currentHead.reviewed_public_use_allowed === publicUseAllowed
+      && currentHead.reviewed_llm_processing_allowed === aiProcessingAllowed
+    ) {
+      return;
+    }
     await pool.query(
       `INSERT INTO kai.intake_sensitivity_review_decisions (
          organization_id, intake_sensitivity_profile_id, review_queue_item_id,
@@ -920,7 +932,16 @@ async function runP206IntegrationSuite() {
     assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
     assert.ok(result.data.blockerCodes.includes("audience_gate_closed"));
     assert.ok(result.data.blockerCodes.includes("requirement_authority_absent"));
-    assert.ok(!result.data.blockerCodes.includes("coverage_dimension_unresolved"), "the coverage-dimension carve-out remains satisfied - only the independent audience-authority verdict fails");
+    // 7e8247f8: an accepted small-cell limitation is bound to the sensitivity
+    // decision it was reviewed under, so revoking Phase-5 public authority (a
+    // new sensitivity decision) retires only that one acceptance. Every other
+    // dimension's public acceptance remains current.
+    const lostAcceptance = Object.entries(result.data.dimensions)
+      .filter(([key]) => before.data.dimensions[key]?.public_limitation_accepted === true)
+      .filter(([, value]) => value.public_limitation_accepted !== true)
+      .map(([key]) => key)
+      .sort();
+    assert.deepEqual(lostAcceptance.filter((key) => key !== "small_cell_risk"), [], "only the small-cell acceptance is bound to the superseded sensitivity decision");
     assert.equal(result.data.eligible, false);
   });
 

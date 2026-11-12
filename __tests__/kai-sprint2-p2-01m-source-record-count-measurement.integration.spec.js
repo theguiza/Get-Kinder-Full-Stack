@@ -94,6 +94,8 @@ async function runSuite() {
   const { createPostgresClientReleasedReportRepository } = await import("../Backend/kai/dictionary/postgresClientReleasedReportRepository.js");
   const { readGeneratedDraftEngagementId } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
   const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
+  const { getScopedEvidenceMeasurementByEvidenceItemId } = await import("../Backend/kai/db/kaiIntakeQueries.js");
+  const { composeCountOnlyFindingText } = await import("../Backend/kai/validators/kaiGeneratedContentValidators.js");
 
   const ENV = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
   const ORG = "0e000000-0000-4000-8000-000000000a01";
@@ -1698,7 +1700,13 @@ async function runSuite() {
     assert.deepEqual([sent.contentType, sent.requestedAudience, sent.claims.length], ["evidence_summary", "internal", 1]);
     const [claim] = sent.claims;
     assert.deepEqual([claim.claimId, claim.evidenceItemId, claim.sourceVersionId], [ids.measurementClaimId, ids.measurementEvidenceId, ids.main.sourceVersionId]);
-    assert.match(claim.claimStatement, /^The promoted source has 5 source records \(record count: one record per CSV data record; 1 blank record excluded; 2 in exact-duplicate groups \(1 excess copy\), not removed\)\. Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules\.$/);
+    // 594411bb: the model input for every source-presence row count is the
+    // server-composed count-only finding from the cited measurement row; the
+    // human unit label is not presented as what a counted row represents.
+    const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId: ORG, evidenceItemId: ids.measurementEvidenceId }, pool);
+    assert.equal(claim.claimStatement, composeCountOnlyFindingText(measurementRow));
+    assert.match(claim.claimStatement, /^5 nonblank data rows were counted /);
+    assert.doesNotMatch(claim.claimStatement, /programme session/);
     assert.deepEqual(claim.limitationCodes, MEASURED_LIMITATION_CODES);
     ids.generatorClaimStatement = claim.claimStatement;
     assert.equal(payload.system.startsWith(LEGACY_SYSTEM_PROMPT), true, "the existing instructions are kept");
@@ -1844,20 +1852,26 @@ async function runSuite() {
     assert.deepEqual(await generationCounts(), before);
   });
 
-  test("generation: an unreviewed or rejected measured claim is refused before the provider; GK review authority is unchanged", async () => {
+  test("generation: an unreviewed intact measured claim yields a provisional internal draft; a rejected one is refused before the provider; GK review authority is unchanged", async () => {
     const before = await generationCounts();
     const seeded = await seedPromotedSource({ profile: ids.profile });
     const recorded = await record(seeded.sourceVersionId);
     const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
     const claimId = proposal.data.claim.claim_id;
     const evidenceItemId = recorded.data.evidenceItem.evidence_item_id;
-    // Unreviewed: unlike an internal field-presence claim (Package 14-05), a
-    // count is never summarized before it is eligible.
+    // 6f56e744 (draft-first): an unreviewed measured claim whose measurement
+    // still matches its own basis reaches one provisional internal draft that
+    // stays in GK review; review remains a carried limitation, not a refusal.
     const unreviewedProvider = replying(measuredBlock(COMPLIANT_TEXT, claimId, evidenceItemId));
     const unreviewed = await generate([claimId], unreviewedProvider);
-    assert.deepEqual([unreviewed.ok, unreviewed.error?.code], [false, "validation_blocker"], JSON.stringify(unreviewed));
-    assert.deepEqual(unreviewed.blockers.map((item) => [item.validator_key, item.blocking_reason]), [["VAL-GEN-MEASURED-P2-01M-001", "measured_claim_not_currently_eligible"]]);
-    assert.equal(unreviewedProvider.calls.length, 0);
+    assert.equal(unreviewed.ok, true, JSON.stringify(unreviewed));
+    assert.equal(unreviewedProvider.calls.length, 1);
+    assert.deepEqual([unreviewed.data.requestedAudience, unreviewed.data.reviewStatus], ["internal", "needs_gk_review"]);
+    assert.deepEqual(unreviewed.data.blocks.flatMap((block) => block.citations.map((citation) => [citation.claimId, citation.evidenceItemId])), [[claimId, evidenceItemId]]);
+    const afterProvisional = await generationCounts();
+    assert.deepEqual(afterProvisional, {
+      runs: before.runs + 1, drafts: before.drafts + 1, blocks: before.blocks + 1, citations: before.citations + 1,
+    });
     // The organization administrator who requests drafts cannot review the
     // claim; a GK reviewer supports the evidence, then rejects the claim.
     const humanReviewRepository = createPostgresHumanReviewRepository({ runInTransaction: withTx });
@@ -1894,7 +1908,8 @@ async function runSuite() {
     const refused = await generate([claimId], rejectedProvider);
     assert.deepEqual([refused.ok, refused.error?.code], [false, "claim_reviewed_not_supported"], JSON.stringify(refused));
     assert.equal(rejectedProvider.calls.length, 0);
-    assert.deepEqual(await generationCounts(), before);
+    // The recorded rejection persists nothing beyond the earlier provisional draft.
+    assert.deepEqual(await generationCounts(), afterProvisional);
   });
 
   test("generation: a field-presence claim keeps today's internal generation exactly (prompt, limitation codes, validators)", async () => {

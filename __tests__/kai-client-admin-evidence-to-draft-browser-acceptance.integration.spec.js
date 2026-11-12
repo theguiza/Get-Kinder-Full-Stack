@@ -536,7 +536,8 @@ async function runBrowserAcceptance() {
       assert.deepEqual(await query("SELECT organization_id FROM kai.organization_memberships WHERE user_id = $1::uuid", [mapped.user_id]), [], "no stored membership");
       // Four-view Knowledge Studio (owner direction 2026-11-06): the workflow is
       // one controller presenting Impact, Evidence, Sources and Drafts.
-      assert.deepEqual(await adminPage.tabLabels(), ["Impact", "Evidence", "Sources", "Drafts"]);
+      // 58c4e0d9: Knowledge Studio is Sources-first (Impact stays the default view).
+      assert.deepEqual(await adminPage.tabLabels(), ["Sources", "Impact", "Evidence", "Drafts"]);
       assert.equal(await adminPage.evaluate(`Boolean(document.querySelector("[data-client-evidence-workflow]"))`), true, "the workflow is offered to client_admin");
       await adminPage.clickTab("Sources");
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-source-version="${ids.x.sourceVersionId}"]'))`), "the source version listed");
@@ -642,12 +643,17 @@ async function runBrowserAcceptance() {
       }
       assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.usableClaimId}"] input'))`), false, "no selection control");
       const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
-      assert.deepEqual([diagnostic.status, diagnostic.body.data], [409, { traceability_conflict_reason: "gap_dimension_requires_missing_p204_state" }]);
+      // c1feab49: the missing P2-04 state is read (200) as not eligible with
+      // p204_evaluation_required, rather than refused with a 409.
+      assert.equal(diagnostic.status, 200, JSON.stringify(diagnostic.body));
+      assert.deepEqual([diagnostic.body.data.view, diagnostic.body.data.eligible, diagnostic.body.data.traceability_conflict_reason],
+        ["organization_internal_traceability_diagnostic", false, null]);
+      assert.ok(diagnostic.body.data.blocker_codes.includes("p204_evaluation_required"), JSON.stringify(diagnostic.body.data.blocker_codes));
       await adminPage.idle();
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET"), [], "nothing is sent");
       assert.equal(modelCalls.length, 0, "no generator call");
       assert.deepEqual(await counts(ORG_X), before);
-      results.b5a = "PASS: structural claim not offered (no_measured_claim, generate disabled); diagnostic 409 missing P2-04; nothing written";
+      results.b5a = "PASS: structural claim not offered (no_measured_claim, generate disabled); diagnostic 200 p204_evaluation_required; nothing written";
     });
 
     await test("B5b (refused P2-04): a synthetic gap-insert fault returns a real 422 the UI explains, and writes nothing", async () => {
@@ -1006,7 +1012,8 @@ async function runBrowserAcceptance() {
       const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
       if (diagnostic.status === 200) {
         assert.equal(diagnostic.body.data.view, "organization_internal_traceability_diagnostic", JSON.stringify(diagnostic.body));
-        assert.deepEqual(Object.keys(diagnostic.body.data).sort(), ["blocked", "blocker_codes", "claim_id", "eligible", "requested_audience", "traceability_conflict_reason", "traceability_passed", "view"]);
+        // 1ffaca77: the diagnostic also exposes the server's provisional internal draft admission.
+        assert.deepEqual(Object.keys(diagnostic.body.data).sort(), ["blocked", "blocker_codes", "claim_id", "eligible", "provisional_internal_draft", "requested_audience", "traceability_conflict_reason", "traceability_passed", "view"]);
       } else {
         assert.equal(diagnostic.status, 409, JSON.stringify(diagnostic.body));
         assert.deepEqual(Object.keys(diagnostic.body.data || {}), ["traceability_conflict_reason"]);

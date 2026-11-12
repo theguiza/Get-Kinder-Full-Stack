@@ -329,6 +329,7 @@ async function runBrowserAcceptance() {
     claimReviewCompletePath,
     claimReviewDecisionBody,
     claimTraceabilityPath,
+    clientInternalDraftPath,
     clientReleasedReportMarkdownPath,
     coverageInternalAcceptancePath,
     evidenceReviewCompletePath,
@@ -338,6 +339,11 @@ async function runBrowserAcceptance() {
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
+  // 8bca1055 (kept by e4b93fe3): the release-state block is rendered only for
+  // a draft whose internal report is unavailable or that is released, so the
+  // pre-release and revoked states of an AVAILABLE report are read from the
+  // server's client draft response the UI renders from.
+  const STORY_SOURCE_NOTE_TEXT = (await import("../shared/kaiStorySourceInformation.js")).STORY_SOURCE_NOTE;
   const ENV = { KAI_SPRINT2_ENABLED: "true" };
   const noAudit = () => ({ prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } });
 
@@ -672,8 +678,12 @@ async function runBrowserAcceptance() {
       const [draft] = await query("SELECT generated_content_draft_id::text, draft_status, review_status FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]);
       assert.deepEqual([draft.draft_status, draft.review_status], ["draft", "needs_gk_review"]);
       ids.draftId = draft.generated_content_draft_id;
-      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-release-state]`)) !== null, "release state");
-      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-internal-draft-release-state]").getAttribute("data-client-internal-draft-release-state")`), "awaiting_get_kinder_review");
+      // 8bca1055: the eligible measured draft is an available internal report at
+      // once; its Get Kinder release state is the server's, not a UI block.
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-report="available"]`)) !== null, "the available internal report");
+      const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.draftId));
+      assert.equal(detail.status, 200, JSON.stringify(detail.body));
+      assert.equal(detail.body.data.release.state, "awaiting_get_kinder_review");
       assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "nothing to open before review");
     });
 
@@ -687,7 +697,11 @@ async function runBrowserAcceptance() {
       const completed = await gkReviewerPage.api("POST", generatedContentReviewCompletePath(ORG_X, ids.draftId, inProgress.review_queue_item_id), { expected_updated_at: new Date(inProgress.updated_at).toISOString() });
       assert.equal(completed.status, 200, JSON.stringify(completed.body));
       await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitForText("Reviewed; awaiting Get Kinder release");
+      // 8bca1055: the available report shows no release-state block; the
+      // server's release state says the review is done and release awaits Get Kinder.
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-report="available"]`)) !== null, "the available internal report");
+      const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.draftId));
+      assert.equal(detail.body.data.release.state, "awaiting_get_kinder_release");
       assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "no enabled action before release");
     });
 
@@ -757,7 +771,11 @@ async function runBrowserAcceptance() {
       for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
       assert.match(shown, /Missing values: a known limitation of this source, recorded and not removed\./);
       assert.match(shown, /not of distinct events/);
-      assert.doesNotMatch(shown.split("## Citation Appendix")[0], /\b(participants?|attendees|rate|outcomes?|because|caused?|improv\w*|impact\w*)\b|%/i);
+      // 594411bb: every manifest carries the fixed story-source information note
+      // (shared/kaiStorySourceInformation.js); the generated content itself
+      // still names no participants, rates, outcomes or causes.
+      assert.ok(shown.includes(STORY_SOURCE_NOTE_TEXT), "the fixed story-source note");
+      assert.doesNotMatch(shown.split("## Citation Appendix")[0].replace(STORY_SOURCE_NOTE_TEXT, ""), /\b(participants?|attendees|rate|outcomes?|because|caused?|improv\w*|impact\w*)\b|%/i);
       assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
       results.e = { status: 200, bytes: shown.length };
     });
@@ -786,7 +804,11 @@ async function runBrowserAcceptance() {
       const afterRevoke = await fetchText(adminPage, clientPath);
       assert.equal(afterRevoke.status, 409, afterRevoke.body);
       await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitForText("Released earlier; no longer available");
+      // 8bca1055: the revoked release of an available report is the server's
+      // release state; the UI offers no released-report action for it.
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-report="available"]`)) !== null, "the available internal report");
+      const revokedDetail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.draftId));
+      assert.equal(revokedDetail.body.data.release.state, "release_no_longer_valid");
       assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "no enabled action for a revoked release");
       const regranted = await gkAdminPage.api("POST", authorityPath, { requested_audience: "internal", decision_action: "grant" });
       created(regranted, "re-grant");

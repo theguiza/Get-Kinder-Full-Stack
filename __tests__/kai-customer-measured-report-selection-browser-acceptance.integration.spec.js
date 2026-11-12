@@ -386,6 +386,11 @@ async function runBrowserAcceptance() {
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
     + "Internal limitations: conflicting source indicators and requirement alignment are unresolved and carried with the count for internal use only.";
+  // 594411bb + 7603dc07: the model input for a record count is the
+  // server-composed count-only finding, and model wording that states more
+  // (here the human-defined unit) is replaced by that finding in the draft.
+  const COUNT_ONLY_FINDING_TEXT = "5 nonblank data rows were counted in the CSV data records of the cited source version, "
+    + "with 1 blank rows excluded and 2 exact-duplicate rows included in the count.";
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
     modelCalls.push({ system: payload.system, claims: requestBody.claims, assessment: requestBody.assessment });
@@ -647,7 +652,10 @@ async function runBrowserAcceptance() {
     "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
     [ORG_X, queueType, targetId]))[0];
   // Knowledge Studio > Data Sources for the Project, as the existing client acceptance opens it.
-  const openDataSources = async (engagementId = PROJECT_X) => {
+  // 6f56e744: a selected Project shows only its own files and findings by
+  // default; every synthetic file here belongs to PROJECT_X, so a view of
+  // another Project widens to the organization library as a person would.
+  const openDataSources = async (engagementId = PROJECT_X, { includeOrganizationLibrary = false } = {}) => {
     await adminPage.goto("/impact-library");
     await adminPage.waitForText("Knowledge Studio");
     await adminPage.clickNav("Knowledge Studio");
@@ -657,6 +665,10 @@ async function runBrowserAcceptance() {
     await adminPage.idle();
     if (engagementId !== null) await adminPage.selectProject(engagementId);
     await adminPage.idle();
+    if (includeOrganizationLibrary) {
+      await adminPage.clickIn("[data-client-include-organization-library]", "Include evidence from other Projects");
+      await adminPage.idle();
+    }
   };
   const created = (response, label) => assert.ok([200, 201].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
   const results = {};
@@ -701,18 +713,22 @@ async function runBrowserAcceptance() {
     assert.ok(shown.startsWith(heading), shown.slice(0, 80));
     assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);
     assert.ok(shown.includes(`**Project / engagement:** \`${projectCode}\``), "the report's own Project");
-    assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independentRecordCount(CSV));
-    assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
+    // 594411bb (on the f580d6e8 / 44950111 count-only wording): every record
+    // count is reported as the rows counted; the human-defined unit, period and
+    // definition text are stated as human-defined and not applied by KAI.
+    assert.equal(Number((/\*\*(\d+) nonblank data rows were counted in /.exec(shown) || [])[1]), independentRecordCount(CSV));
+    assert.match(shown, /The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\./);
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
-    assert.match(shown, /\*\*What one record represents:\*\* one programme session, as defined by a person at the organization\./, "counted unit");
-    assert.match(shown, /\*\*Definition:\*\* Each row of the session log records one delivered programme session\./);
+    assert.match(shown, /\*\*What one record represents \(human-defined, not verified\):\*\* one `programme session`, as defined by a person at the organization; KAI counted rows only\./, "counted unit");
+    assert.match(shown, /\*\*Definition, inclusion and exclusion text:\*\* not reproduced\./);
+    assert.doesNotMatch(shown, /Each row of the session log records one delivered programme session/, "the human definition text is not reproduced");
     assert.match(shown, /The period is stated in the organization's recorded definition; it was not checked against dates in the records\./, "human-attested period");
     assert.match(shown, /\| CIT-001 \| `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \| `[0-9a-f]{64}` `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \(/, "claim / evidence / source / version lineage");
     assert.match(shown, /2 counted records in exact-duplicate groups \(1 excess copy\)\. The record count removes no duplicate: every one of them stays in the count of 5, not removed or merged/);
     assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*caused any result/);
     for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
     assert.ok(shown.includes(`\`${ids.claimId}\``) && shown.includes(`\`${ids.evidenceItemId}\``) && shown.includes(`\`${ids.sourceVersionId}\``), "traceability");
-    assert.ok(shown.includes(COMPLIANT_TEXT), "the validated generated text");
+    assert.ok(shown.includes(COUNT_ONLY_FINDING_TEXT), "the validated generated text (server-composed count-only finding)");
     assert.doesNotMatch(shown, /field_\d|attribute_\d/, "never a field-presence claim in place of the measured result");
     assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
     assert.doesNotMatch(shown, /unique participants?|distinct participants? (were|was) served|improv(ed|es)|because of the programme/i, "no unsupported conclusion");
@@ -1192,8 +1208,8 @@ async function runBrowserAcceptance() {
       }
     });
 
-    await test("Scenario C: an ordinary measured claim beside genuinely restricted ones: generation, internal-report availability and the next actions each follow their own rule, and nothing ineligible becomes report-usable", async () => {
-      await openDataSources(PROJECT_X2);
+    await test("Scenario C: an ordinary measured claim beside genuinely restricted ones: generation, internal-report availability and the next actions each follow their own rule, and nothing not yet established is presented as more than provisional", async () => {
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       const row = `[data-client-claim="${ids.claimId}"]`;
       const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
       await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-internal-use")) === "not_usable", "the restricted claim's condition");
@@ -1206,20 +1222,23 @@ async function runBrowserAcceptance() {
       assert.doesNotMatch(riskText, /needs_gk_review/);
       const before = await approvalCounts();
       const draftsBefore = await projectDraftCount(PROJECT_X2);
-      // C1 generation rule: a measured claim is drafted from only while eligible (VAL-GEN-MEASURED-P2-01M-001), said before any request.
+      // C1 generation rule (6f56e744, draft first): an intact measured claim that is not yet established for final internal use
+      // is admitted to a PROVISIONAL internal draft, said before any request; strict internal use stays "not usable".
+      assert.equal(await attr(adminPage, riskRow, "data-client-claim-provisional-draft"), "admitted");
       await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
       await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
       await adminPage.idle();
-      assert.equal(await attr(adminPage, "[data-client-draft-readiness]", "data-client-draft-readiness"), "measured_claim_not_usable");
-      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /deselect it to draft from the others/);
-      assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === "Generate internal evidence summary").disabled`), true);
-      const refusedGeneration = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+      assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null);
+      assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "provisional");
+      assert.match(await textOf(adminPage, "[data-client-draft-selection-usability]"), /are provisional[\s\S]*generating it approves nothing and grants no funder or public use/);
+      assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === "Generate internal evidence summary").disabled`), false);
+      const provisionalGeneration = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
         claim_ids: [ids.claimId, ids.riskClaimId].sort(), idempotency_key: "customer-mixed-restricted-0001", engagement_id: PROJECT_X2,
       });
-      assert.equal(refusedGeneration.status, 422);
-      assert.deepEqual(refusedGeneration.body.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]),
-        [["VAL-GEN-MEASURED-P2-01M-001", "measured_claim_not_currently_eligible"]]);
-      assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore, "the refused request wrote nothing");
+      assert.equal(provisionalGeneration.status, 201, JSON.stringify(provisionalGeneration.body));
+      assert.deepEqual([provisionalGeneration.body.data.requestedAudience, provisionalGeneration.body.data.reviewStatus], ["internal", "needs_gk_review"]);
+      assert.deepEqual([...new Set((await draftState(provisionalGeneration.body.data.generatedContentDraftId)).cited_claim_ids)].sort(), [ids.claimId, ids.riskClaimId].sort());
+      assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore + 1, "one provisional draft");
       await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Drop the restricted claim");
       await adminPage.idle();
       // C2 when the claim's condition cannot be read here, the server's refusal is explained, not shown as a bare validation error.
@@ -1227,47 +1246,55 @@ async function runBrowserAcceptance() {
       await adminPage.intercept([{ urlPattern: `*/claims/${ids.riskClaimId}/traceability*`, requestStage: "Request" }],
         () => ({ status: 503, json: { ok: false, error: { code: "system_error" } } }));
       try {
-        await openDataSources(PROJECT_X2);
-        // The complete impact-facts read still says it is not usable; only the reason is unavailable.
-        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)), "the impact-facts answer");
+        await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
+        // The complete impact-facts read still says it is not usable for final use; without its own diagnosis the
+        // provisional admission is unknown (6f56e744), so the claim says so and is never shown as admitted or refused.
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${riskRow} [data-client-claim-use-unknown]`)), "the impact-facts answer");
         await adminPage.idle();
-        assert.equal((await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)).trim(), "Not usable in internal reports now.");
+        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
+        assert.equal(await attr(adminPage, riskRow, "data-client-claim-provisional-draft"), "unknown");
         await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
         await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
         await adminPage.idle();
         assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null, "without a determinate evaluation the server decides");
-        assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "not_usable");
+        assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "unknown");
         const warning = await textOf(adminPage, "[data-client-draft-selection-usability]");
-        assert.match(warning, /this request will be refused unless that has changed/);
-        assert.doesNotMatch(warning, /will be prepared/, "a measured finding that is not usable is never promised a draft");
-        await adminPage.clickButton("Generate internal evidence summary");
-        await adminPage.waitForText("A selected measured finding is not usable in internal reports now, so no draft was created.");
-        await adminPage.idle();
-        assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore, "still nothing written");
+        assert.match(warning, /KAI checks them when the draft is generated, and the saved draft says whether it is usable/);
+        assert.doesNotMatch(warning, /will be refused|are provisional/, "an unconfirmed claim is neither refused nor promised here");
+        // The server decides at generation: the same rule as C1 admits it to one more provisional draft.
+        const [decided, ...extraDecided] = await generateInUi("Generate internal evidence summary", "Internal evidence summary created");
+        assert.ok(decided);
+        assert.deepEqual(extraDecided, []);
+        assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore + 2, "the server's own decision wrote one draft");
       } finally {
         await adminPage.stopIntercepting();
       }
-      // C3 availability rule: a draft prepared from a usable measured claim and an unreviewed structural one (generation admits
-      // the structural claim) is saved, and is not an internal report until every cited claim is usable.
+      // C3 availability rule (6f56e744): a draft prepared from a usable measured claim and an unreviewed structural one
+      // (generation admits the structural claim) is saved as a PROVISIONAL internal report: the cited claim that is not yet
+      // usable for final use is information shown with it, not a blocker.
       const prepared = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
         claim_ids: [ids.claimId, ids.legacyClaimId].sort(), idempotency_key: "customer-mixed-structural-0001", engagement_id: PROJECT_X2,
       });
       created(prepared, "prepared mixed draft");
       const preparedId = prepared.body.data.generatedContentDraftId;
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await adminPage.waitFor(async () => (await listedDraftIds()).includes(preparedId), "the prepared draft is listed");
-      assert.equal(await attr(adminPage, `[data-client-internal-draft="${preparedId}"] [data-client-internal-draft-report-available]`, "data-client-internal-draft-report-available"), "false");
+      assert.equal(await attr(adminPage, `[data-client-internal-draft="${preparedId}"] [data-client-internal-draft-report-available]`, "data-client-internal-draft-report-available"), "true");
       await adminPage.clickIn(`[data-client-internal-draft="${preparedId}"] button`, "Read the prepared draft");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${preparedId}"]`)), "the prepared draft opens");
       await adminPage.idle();
       const detail = await textOf(adminPage, `[data-client-internal-draft-detail="${preparedId}"]`);
-      assert.equal(await textOf(adminPage, `[data-client-open-internal-report="${preparedId}"]`), null, "not immediately usable");
-      assert.match(detail, /At least one cited claim is not currently eligible for internal use/);
-      assert.match(detail, /A new draft from claims marked "Usable in internal reports now" is usable immediately/);
+      assert.ok(await textOf(adminPage, `[data-client-open-internal-report="${preparedId}"]`), "a provisional internal report");
+      assert.equal(await attr(adminPage, '[data-client-internal-report="available"]', "data-client-internal-report-provisional"), "true");
+      assert.match(detail, /This is your organization's provisional internal report/);
+      assert.match(detail, /it is not reviewed, verified or released/);
       assert.doesNotMatch(detail, /Ask Get Kinder to review the cited claims|Structural facts only|needs_gk_review/, "a mixed draft is not structural-only, and no blanket review request");
-      const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, preparedId));
-      assert.equal(refused.status, 422, refused.body);
-      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible"]);
+      const preparedDetail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, preparedId));
+      assert.deepEqual(preparedDetail.body.data.internalReport,
+        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: ["cited_claims_not_currently_eligible"] });
+      const provisionalReport = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, preparedId));
+      assert.equal(provisionalReport.status, 200, provisionalReport.body);
+      assert.match(provisionalReport.body, /\*\*Status:\*\* Provisional internal draft\./);
       // C4 the usable claim alone: an internal report at once.
       await adminPage.waitFor(async () => (await textOf(adminPage, `${row} input[type=checkbox]`)) !== null, "the measured claim");
       await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
@@ -1279,7 +1306,7 @@ async function runBrowserAcceptance() {
       const after = await approvalCounts();
       assert.deepEqual(after, before, "no decision was recorded for any of it");
       assert.deepEqual(after, NO_APPROVALS);
-      results.c = { restrictedGeneration: 422, preparedMixed: "saved, not a report (422)", usable: 200, riskBlockers: ids.riskBlockers };
+      results.c = { restrictedGeneration: "provisional draft (201)", preparedMixed: "provisional internal report (200)", usable: 200, riskBlockers: ids.riskBlockers };
     });
 
     await test("Scenario D: with 100 earlier drafts in the Project, a report generated in the UI outside the first server page is opened and downloaded by its generated id; the list pages truthfully and a reload never swaps the open draft", async () => {
@@ -1306,13 +1333,18 @@ async function runBrowserAcceptance() {
       assert.ok(outside, `a generated draft fell outside the first page within ${attempts} attempts`);
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${outside}"]`)), "the exact generated draft opens");
       await adminPage.idle();
-      assert.equal((await listedDraftIds()).includes(outside), false, "opened by its id although no loaded list page includes it");
-      assert.match(await textOf(adminPage, "[data-client-internal-drafts-incomplete]"), /This Project has more saved drafts/);
       assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
       const shown = await openOpenReport(outside, "the generated report");
       assertSubstantiveReport(shown, "# Internal Evidence Summary");
       assert.ok(shown.includes(`draft \`${outside}\``), "the Markdown is that draft's own report");
-      // Every older page loads from the server's cursor; the open draft stays open.
+      // 20346906: the focused reader replaces the list while a draft is open;
+      // "Back to drafts" shows the first server page, which does not include it.
+      await adminPage.clickIn("[data-client-internal-draft-back]", "Back to drafts");
+      await adminPage.waitFor(async () => (await listedDraftIds()).length > 0, "the first page of drafts");
+      await adminPage.idle();
+      assert.equal((await listedDraftIds()).includes(outside), false, "it was opened by its id although no loaded list page includes it");
+      assert.match(await textOf(adminPage, "[data-client-internal-drafts-incomplete]"), /This Project has more saved drafts/);
+      // Every older page loads from the server's cursor.
       while (await textOf(adminPage, "[data-client-internal-drafts-load-more]")) {
         await adminPage.clickIn("[data-client-internal-drafts-load-more]", "Load more drafts");
         await adminPage.idle();
@@ -1322,7 +1354,9 @@ async function runBrowserAcceptance() {
       assert.equal(listed.length, await projectDraftCount(PROJECT_X), "every saved draft of the Project is listed once all pages are loaded");
       assert.ok(listed.includes(outside) && listed.includes(ids.historicalDraftId));
       assert.equal(listed.at(-1), ids.historicalDraftId, "the oldest (historical field_2) draft is last");
-      assert.ok(await textOf(adminPage, `[data-client-internal-draft-detail="${outside}"]`), "loading pages never replaces the open draft");
+      // Reading it from the fully loaded list opens that same draft, never another.
+      await adminPage.clickIn(`[data-client-internal-draft="${outside}"] button`, "Read the generated draft again");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${outside}"]`)), "the same draft reopens");
       assert.equal(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`), null);
       assert.deepEqual(await approvalCounts(), NO_APPROVALS);
       results.d = { earlierDrafts: 100, attempts, listed: listed.length };
@@ -1368,7 +1402,8 @@ async function runBrowserAcceptance() {
       }
       const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.historicalDraftId));
       assert.equal(refused.status, 422);
-      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible", "structural_facts_only"]);
+      // 6f56e744: cited_claims_not_currently_eligible is information; structural-only alone withholds the report.
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["structural_facts_only"]);
       assert.deepEqual(await draftState(ids.historicalDraftId), ids.historicalState, "content, citations and status unchanged");
       assert.deepEqual(await reviewRows(), reviewsBefore, "its review records unchanged");
       assert.equal(await auditRows(), auditBefore, "no audit written by reading it");
@@ -1390,8 +1425,11 @@ async function runBrowserAcceptance() {
       });
       created(combined, "measured plus structural narrative");
       const combinedId = combined.body.data.generatedContentDraftId;
-      assert.equal((await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId))).body.data.internalReport.available, false,
-        "unavailable while the structural claim is not eligible");
+      // 6f56e744 (draft first): while the structural claim is not yet eligible the measured narrative is a provisional
+      // internal report; the not-yet-eligible citation is information, not a blocker.
+      assert.deepEqual((await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId))).body.data.internalReport,
+        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: ["cited_claims_not_currently_eligible"] },
+        "provisional while the structural claim is not eligible");
       // Legitimate Get Kinder review: evidence and claim decisions, internal coverage acceptance, and the follow-ups completed.
       const evidenceQueue = await queueOf("evidence_review", wide.evidence_item_id);
       created(await gkReviewerPage.api("POST", evidenceReviewCompletePath(ORG_X, wide.evidence_item_id, evidenceQueue.review_queue_item_id),
@@ -1414,7 +1452,7 @@ async function runBrowserAcceptance() {
       const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, structuralOnlyId));
       assert.equal(detail.status, 200);
       assert.equal(detail.body.data.citedClaimsCurrentlyEligible, true, "every cited claim is eligible");
-      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["structural_facts_only"] });
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["structural_facts_only"], informationReasons: [] });
       const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, structuralOnlyId));
       assert.equal(refused.status, 422);
       assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["structural_facts_only"]);
@@ -1422,7 +1460,7 @@ async function runBrowserAcceptance() {
       assert.equal(list.body.data.items.find((item) => item.generatedContentDraftId === structuralOnlyId)?.internalReportAvailable, false);
       // A measured result alongside the reviewed structural fact keeps the report usable.
       const combinedDetail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId));
-      assert.deepEqual(combinedDetail.body.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+      assert.deepEqual(combinedDetail.body.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] });
       assert.equal((await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, combinedId))).status, 200);
       // Get Kinder's own review packet of the structural-only draft still reads it.
       const packet = await gkReviewerPage.api("GET", generatedDraftReviewPacketPath(ORG_X, structuralOnlyId));
@@ -1513,7 +1551,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual(ordinaryInternalAuthorityOf(authority.data), { basis: "all_sensitive_categories_absent", reliedOn: true });
       assert.equal(authority.data.eligible, true);
       const selected = [ids.claimId, docClaimId, countClaimId].sort();
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.claimId}"] input[type=checkbox]'))`), "the existing claim selection");
       const group = await adminPage.evaluate(`(() => {
         const buttons = [...document.querySelectorAll("button")];
@@ -1543,17 +1581,21 @@ async function runBrowserAcceptance() {
       assert.match(body.idempotency_key, /^client-free_impact_assessment-/);
       assert.equal(modelCalls.length, callsBefore + 1);
       assert.equal(modelCalls.at(-1).assessment.composition, "free_impact_assessment");
-      assert.deepEqual(modelCalls.at(-1).claims.map((claim) => claim.claimId).sort(), [ids.claimId, countClaimId].sort());
+      // 6f56e744 (draft first): an assessment leaves out only a recorded
+      // rejection or a measurement that no longer matches its basis; the
+      // unreviewed document claim is a provisional finding and is used.
+      assert.deepEqual(modelCalls.at(-1).claims.map((claim) => claim.claimId).sort(), [ids.claimId, countClaimId, docClaimId].sort());
       const saved = await draftState(draftId);
       const [run] = await query("SELECT r.engagement_id::text FROM kai.generation_runs r JOIN kai.generated_content_drafts d ON d.generation_run_id = r.generation_run_id WHERE d.generated_content_draft_id = $1::uuid", [draftId]);
       assert.equal(run.engagement_id, PROJECT_X2);
       assert.equal(saved.content_type, "evidence_summary");
-      assert.deepEqual([...new Set(saved.cited_claim_ids)].sort(), [ids.claimId, countClaimId].sort());
+      assert.deepEqual([...new Set(saved.cited_claim_ids)].sort(), [ids.claimId, countClaimId, docClaimId].sort());
       assert.match(saved.text, /2 nonblank data rows/);
-      assert.match(saved.text, /Selection note: selected evidence with unresolved limitations was excluded from assertions/);
-      assert.doesNotMatch(saved.text, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
-      assert.doesNotMatch(JSON.stringify(modelCalls.slice(callsBefore)), /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
-      assert.match(await textOf(adminPage, "[data-client-workflow-notice]"), /was not used as an assertion/);
+      assert.doesNotMatch(saved.text, /Selection note:/, "nothing selected was left out");
+      // Story rows never reach the model or the draft; the document statement is source-reported.
+      assert.doesNotMatch(saved.text, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL/);
+      assert.doesNotMatch(JSON.stringify(modelCalls.slice(callsBefore)), /STORY-SENTINEL|STORY-DEFINITION-SENTINEL/);
+      assert.match(saved.text, /Source-reported, not independently verified \(line 1\): "Follow-up information remains incomplete/);
       const after = await docState();
       assert.ok(after[0].gaps > 0, "generation reconciled the fresh document claim");
       const docAfter = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"));
@@ -1586,7 +1628,7 @@ async function runBrowserAcceptance() {
       assert.equal(p204Audits[0].metadata.metadata_only, true);
       const [outcome] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
       const excluded = outcome.validator_results.find((result) => result.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.excluded_claims;
-      assert.deepEqual(excluded, [{ claimId: docClaimId, blockerCodes: docAfter.body.data.blockerCodes }]);
+      assert.deepEqual(excluded, []);
       const beforeReplay = await docState();
       const replay = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, body);
       created(replay, "assessment retry");
@@ -1599,26 +1641,41 @@ async function runBrowserAcceptance() {
         claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "count-only-six-section-assessment",
       });
       created(countOnlyAssessment, "count-only assessment");
-      assert.equal(modelCalls.length, callsAfterMixed + 1, "all counts use the normal generation path");
+      // a30e24a0: one model call, plus at most the single bounded correction.
+      const countOnlyCalls = modelCalls.length - callsAfterMixed;
+      assert.ok(countOnlyCalls >= 1 && countOnlyCalls <= 2, `all counts use the normal generation path (${countOnlyCalls} calls)`);
       const { parseFreeImpactAssessment } = await import("../Backend/kai/services/kaiFreeImpactAssessmentComposition.js");
       assert.equal(parseFreeImpactAssessment(countOnlyAssessment.body.data.blocks).length, 6);
       const refusedNarrative = await adminPage.api("POST", createImpactNarrativePath(ORG_X), {
         claim_ids: [countClaimId], engagement_id: PROJECT_X2, idempotency_key: "story-source-narrative-available",
       });
       created(refusedNarrative, "story source Impact Narrative");
-      const nonqualifying = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
-        claim_ids: [ids.riskClaimId], engagement_id: PROJECT_X2, idempotency_key: "nonqualifying-assessment-still-refused",
+      // 6f56e744 (owner direction 2026-11-06, flags inform, never block): the
+      // small-cell-risk claim alone is admitted provisionally (as Scenario C
+      // drafts it), with its open review carried as a limitation.
+      const callsBeforeRisk = modelCalls.length;
+      const riskOnly = await adminPage.api("POST", `${orgPath}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: [ids.riskClaimId], engagement_id: PROJECT_X2, idempotency_key: "risk-only-provisional-assessment",
       });
-      assert.equal(nonqualifying.status, 422);
-      assert.equal(nonqualifying.body.blockers[0].blocking_reason, "assessment_no_eligible_evidence");
-      assert.equal(modelCalls.length, callsAfterMixed + 2);
+      created(riskOnly, "small-cell-risk provisional assessment");
+      assert.equal(riskOnly.body.data.reviewStatus, "needs_gk_review");
+      assert.deepEqual(riskOnly.body.data.excludedClaims, []);
+      assert.ok(modelCalls.length - callsBeforeRisk >= 1 && modelCalls.length - callsBeforeRisk <= 2);
       // Existing GK review/release actions, through the real authenticated routes.
       // This is API-boundary release proof, not a claim that the GK buttons were clicked.
-      const draftPath = `${orgPath}/generated-content-drafts/${draftId}`;
-      const gkPacket = await gkReviewerPage.api("GET", generatedDraftReviewPacketPath(ORG_X, draftId));
+      // Release still requires reviewed, eligible claims (draft first applies
+      // to provisional internal use only): the mixed draft, which cites the
+      // unreviewed document claim, is not admitted to export review.
+      await gkAdminPage.api("POST", `${orgPath}/generated-content-drafts/${draftId}/export-review-request`, { requested_export_audience: "internal" });
+      assert.equal(await queueOf("export_review", draftId), undefined, "a draft citing an unreviewed claim is not admitted to release");
+      // The release path is proven on the count-only assessment, whose cited
+      // claim is currently eligible.
+      const releaseDraftId = countOnlyAssessment.body.data.generatedContentDraftId;
+      const draftPath = `${orgPath}/generated-content-drafts/${releaseDraftId}`;
+      const gkPacket = await gkReviewerPage.api("GET", generatedDraftReviewPacketPath(ORG_X, releaseDraftId));
       assert.equal(gkPacket.status, 200);
       for (const step of ["start", "complete"]) {
-        const queue = await queueOf("generated_content_review", draftId);
+        const queue = await queueOf("generated_content_review", releaseDraftId);
         const result = await gkReviewerPage.api("POST", `${draftPath}/generated-content-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
         assert.equal(result.status, 200, JSON.stringify(result.body));
         if (step === "start") {
@@ -1628,32 +1685,32 @@ async function runBrowserAcceptance() {
       }
       created(await gkAdminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" }), "export review request");
       for (const step of ["start", "complete"]) {
-        const queue = await queueOf("export_review", draftId);
+        const queue = await queueOf("export_review", releaseDraftId);
         const result = await gkAdminPage.api("POST", `${draftPath}/export-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() });
         assert.equal(result.status, 200, JSON.stringify(result.body));
       }
       created(await gkReviewerPage.api("POST", `${draftPath}/limitation-snapshot`, {}), "snapshot");
       created(await gkAdminPage.api("POST", `${draftPath}/export-candidates`, {}), "candidate");
-      const [candidate] = await query("SELECT export_candidate_id::text AS id FROM kai.export_candidates WHERE generated_content_draft_id = $1::uuid", [draftId]);
+      const [candidate] = await query("SELECT export_candidate_id::text AS id FROM kai.export_candidates WHERE generated_content_draft_id = $1::uuid", [releaseDraftId]);
       created(await gkAdminPage.api("POST", `${orgPath}/export-candidates/${candidate.id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" }), "authority");
-      const exportQueue = await queueOf("export_review", draftId);
+      const exportQueue = await queueOf("export_review", releaseDraftId);
       created(await gkAdminPage.api("POST", `${orgPath}/export-candidates/${candidate.id}/export-manifests`, { export_review_queue_item_id: exportQueue.review_queue_item_id }), "manifest");
       const [manifest] = await query("SELECT export_manifest_id::text AS id FROM kai.export_manifests WHERE export_candidate_id = $1::uuid", [candidate.id]);
       // Reload the actual client page; repeat traceability and saved-report reads.
       const beforeReload = await docState();
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       assert.equal((await adminPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"))).status, 200);
       assert.deepEqual(await docState(), beforeReload, "reload and reads create no state or audit loop");
-      await adminPage.clickIn(`[data-client-internal-draft="${draftId}"] button`, "Read the released assessment");
+      await adminPage.clickIn(`[data-client-internal-draft="${releaseDraftId}"] button`, "Read the released assessment");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-released-report="${manifest.id}"]`)), "the existing released-report control");
       const download = await attr(adminPage, `[data-client-download-released-report="${manifest.id}"]`, "href");
       await adminPage.clickIn(`[data-client-open-released-report="${manifest.id}"]`, "Open released report");
       await adminPage.waitFor(async () => (await textOf(adminPage, "[data-client-released-report-markdown]"))?.startsWith("# Free Impact Assessment"), "the released assessment");
       const released = await textOf(adminPage, "[data-client-released-report-markdown]");
       assert.equal((await fetchText(adminPage, download)).body, released);
-      assert.doesNotMatch(released, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL|Follow-up information remains incomplete/);
+      assert.doesNotMatch(released, /STORY-SENTINEL|STORY-DEFINITION-SENTINEL/);
       assert.match(released, /2 nonblank data rows/);
-      assert.match(released, /selected evidence with unresolved limitations was excluded from assertions/);
+      assert.doesNotMatch(released, /Follow-up information remains incomplete/, "the released count-only assessment cites only the count");
       await adminPage.evaluate(`document.querySelector("[data-client-released-report-markdown]").scrollIntoView({ block: "start" })`);
       await adminPage.screenshot(join(proofDir, "03-released-assessment.png"));
       const pdf = await gkAdminPage.evaluate(`(async () => {
@@ -1685,7 +1742,7 @@ async function runBrowserAcceptance() {
       assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [ids.sourceVersionId]))[0].is_current, true);
       // Keep a valid selection open while another authorized operation replaces
       // its source. The subsequent write must diagnose the read/write race.
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${ids.claimId}"] input[type=checkbox]`)) !== null, "the current original claim");
       await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Select before source replacement");
       const draftsBeforeRace = await draftIds();
@@ -1724,7 +1781,7 @@ async function runBrowserAcceptance() {
       const beforeReads = await auditCount();
       for (let reload = 0; reload < 2; reload++) {
         const mark = adminPage.mark();
-        await openDataSources(PROJECT_X2);
+        await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
         await adminPage.waitFor(async () => Boolean(await textOf(adminPage, row)), "the retained claim");
         await adminPage.idle();
         assert.match(await textOf(adminPage, row), /recorded as non-current/);
@@ -1744,7 +1801,7 @@ async function runBrowserAcceptance() {
       const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, measurement.evidence_item_id), {});
       created(proposed, "current-version claim");
       const currentClaimId = proposed.body.data.claim.claim_id;
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${currentClaimId}"] input[type=checkbox]`)) !== null, "the current finding");
       await adminPage.clickIn(`[data-client-claim="${currentClaimId}"] input[type=checkbox]`, "Select the current finding");
       const mark = adminPage.mark();
@@ -1833,6 +1890,9 @@ async function runBrowserAcceptance() {
       const oldRow = `[data-client-claim="${historicalClaimId}"]`;
       const openRecovery = async () => {
         await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-recover-current-count="${historicalClaimId}"]`)) !== null, "the historical finding's current-version recovery control");
+        // 20346906 / 58c4e0d9: the recovery control is on the finding in the Evidence view; it opens Count records in Sources.
+        await adminPage.clickTab("Evidence");
+        await adminPage.idle();
         await adminPage.clickControl(`[data-client-recover-current-count="${historicalClaimId}"]`);
         const panel = `[data-client-source-measurement="${current.source_version_id}"]`;
         await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-worksheet-select]`)) !== null, "the current workbook worksheet selector");
@@ -1851,9 +1911,16 @@ async function runBrowserAcceptance() {
       const generationButtons = () => adminPage.evaluate(`[...document.querySelectorAll("button")]
         .filter((el) => /^Generate (Free Impact Assessment|internal evidence summary|internal impact narrative)$/.test(el.innerText.trim()))
         .map((el) => ({ label: el.innerText.trim(), disabled: el.disabled }))`);
+      // 20346906 / 58c4e0d9 (four views): the recovery control is in Evidence, Count records and Extract evidence in Sources;
+      // each is read in the view a person would open for it.
+      await adminPage.clickTab("Evidence");
+      await adminPage.waitFor(async () => (await buttonState(`[data-client-recover-current-count="${historicalClaimId}"]`))?.visible === true, "the recovery control in Evidence");
+      const recoveryControl = await buttonState(`[data-client-recover-current-count="${historicalClaimId}"]`);
+      await adminPage.clickTab("Sources");
+      await adminPage.idle();
       const initialControls = {
         project: await adminPage.evaluate(`(() => { const el = document.getElementById("gk-shell-project-select"); return { value: el.value, disabled: el.disabled, label: el.selectedOptions[0].text }; })()`),
-        recovery: await buttonState(`[data-client-recover-current-count="${historicalClaimId}"]`),
+        recovery: recoveryControl,
         count: await buttonState(`[data-client-open-source-measurement="${current.source_version_id}"]`),
         extraction: await buttonState(`[data-client-extract-evidence="${current.source_version_id}"]`),
         generation: await generationButtons(),
@@ -1866,7 +1933,7 @@ async function runBrowserAcceptance() {
       assert.equal(initialControls.generation.length, 3);
       assert.ok(initialControls.generation.every((control) => control.disabled));
       assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /Select a Project above/);
-      assert.match(await adminPage.text(), /0\/20 claims selected/);
+      assert.match(await textOf(adminPage, "[data-client-draft-selection-count]"), /0\/20 claims selected/);
       await adminPage.screenshot(join(proofDir, "initial-controls.png"));
       // Identify the exact emitter with an explicit Extract evidence click.
       // This is a replay, not a measurement and not necessary for recovery.
@@ -1915,7 +1982,7 @@ async function runBrowserAcceptance() {
       assert.equal(recordedRows.length, 1);
       // Cover the production possibility that measurement already exists but
       // proposal was not done: close/reload and reuse that exact evidence.
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await openRecovery();
       assert.equal(await textOf(adminPage, `${panel} [data-client-source-measurement-submit]`), null);
       await adminPage.clickControl(`${panel} [data-client-source-measurement-propose-claim="${currentEvidenceId}"]`);
@@ -1935,6 +2002,12 @@ async function runBrowserAcceptance() {
       assert.equal(await adminPage.evaluate(`document.getElementById("gk-shell-project-select").value`), PROJECT_X2);
       assert.ok((await generationButtons()).every((control) => control.disabled), "a Project alone does not select a claim");
       assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /Select at least one claim/);
+      // 6f56e744: the workbook is a PROJECT_X file, so the Project view widens to the organization library.
+      await adminPage.clickIn("[data-client-include-organization-library]", "Include evidence from other Projects");
+      await adminPage.idle();
+      // Four views (20346906): findings are selected in Evidence and the assessment is generated in Drafts.
+      await adminPage.clickTab("Evidence");
+      await adminPage.idle();
       for (const id of [currentClaimId, ...derivedClaimIds]) {
         await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${id}"] input[type=checkbox]`)) !== null, "the explicit current selection");
         await adminPage.clickControl(`[data-client-claim="${id}"] input[type=checkbox]`);
@@ -1942,21 +2015,27 @@ async function runBrowserAcceptance() {
       assert.equal((await generationButtons()).find((control) => control.label === "Generate Free Impact Assessment").disabled, false);
       await adminPage.screenshot(join(proofDir, "ready-for-assessment.png"));
       const callsBefore = modelCalls.length;
-      const [draftId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created", () => adminPage.clickControl(null, "Generate Free Impact Assessment"));
-      const state = await draftState(draftId);
+      await adminPage.clickTab("Drafts");
+      await adminPage.idle();
+      const [provisionalId] = await generateInUi("Generate Free Impact Assessment", "Free Impact Assessment created", () => adminPage.clickControl(null, "Generate Free Impact Assessment"));
+      const state = await draftState(provisionalId);
       assert.equal(modelCalls.length, callsBefore + 1, "source flags do not select a special generation path");
-      assert.deepEqual([...new Set(state.cited_claim_ids)], [currentClaimId]);
+      // 6f56e744 (draft first): an assessment leaves out only a claim a recorded review rejected or a measurement that no
+      // longer matches its basis; the intact, unreviewed derived findings are stated provisionally with their limitations.
+      assert.deepEqual([...new Set(state.cited_claim_ids)].sort(), [currentClaimId, ...derivedClaimIds].sort());
       for (const section of ["executive_snapshot", "evidence_findings", "impact_stories", "gaps_opportunities", "recommended_improvements", "next_steps"]) assert.ok(state.text.includes(`[[assessment:${section}]]`), section);
-      assert.match(state.text, /5 nonblank data rows/);
-      assert.match(state.text, /selected evidence with unresolved limitations was excluded from assertions/);
-      const [validation] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
-      const excluded = validation.validator_results.find((result) => result.validator_key === "VAL-GEN-ASSESSMENT-001").evidence.excluded_claims;
-      assert.deepEqual(excluded.map((entry) => entry.claimId).sort(), [...derivedClaimIds].sort());
-      const derivedStates = await query("SELECT statement, claim_review_status, claim_strength FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = ANY($2::uuid[])", [ORG_X, derivedClaimIds]);
-      for (const row of derivedStates) {
-        assert.deepEqual([row.claim_review_status, row.claim_strength], ["needs_gk_review", "unassessed"]);
-        assert.equal(state.text.includes(row.statement), false, "excluded derived findings are not assessment assertions");
-      }
+      assert.match(state.text, /Measurement disclosure for the cited count of 5:/, "the current count is stated with its server disclosure");
+      assert.doesNotMatch(state.text, /Selection note:/, "nothing was left out");
+      assert.equal(state.review_status, "needs_gk_review");
+      const derivedStates = await query("SELECT claim_review_status, claim_strength FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = ANY($2::uuid[])", [ORG_X, derivedClaimIds]);
+      for (const row of derivedStates) assert.deepEqual([row.claim_review_status, row.claim_strength], ["needs_gk_review", "unassessed"], "drafting approves nothing");
+      // The release proof uses an explicit selection of the recovered current count only.
+      const currentOnly = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/free-impact-assessment`, {
+        claim_ids: [currentClaimId], engagement_id: PROJECT_X2, idempotency_key: "recovered-current-count-assessment",
+      });
+      created(currentOnly, "current-count assessment");
+      const draftId = currentOnly.body.data.generatedContentDraftId;
+      assert.deepEqual([...new Set((await draftState(draftId)).cited_claim_ids)], [currentClaimId]);
       const path = `${orgPath()}/generated-content-drafts/${draftId}`;
       for (const step of ["start", "complete"]) {
         const queue = await queueOf("generated_content_review", draftId);
@@ -1974,7 +2053,7 @@ async function runBrowserAcceptance() {
       const exportQueue = await queueOf("export_review", draftId);
       created(await gkAdminPage.api("POST", `${orgPath()}/export-candidates/${candidate.id}/export-manifests`, { export_review_queue_item_id: exportQueue.review_queue_item_id }), "manifest");
       const [manifest] = await query("SELECT export_manifest_id::text AS id FROM kai.export_manifests WHERE export_candidate_id = $1::uuid", [candidate.id]);
-      await openDataSources(PROJECT_X2);
+      await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft="${draftId}"]`)) !== null, "the saved recovered assessment");
       await adminPage.clickIn(`[data-client-internal-draft="${draftId}"] button`, "Open recovered assessment");
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-open-released-report="${manifest.id}"]`)) !== null, "the released report control");

@@ -304,7 +304,16 @@ async function runBrowserAcceptance() {
     + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
-    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment are unresolved and carried with the count for internal use only.";
+    // 7e8247f8 (as reconciled in the customer spec by 059e17ba): the fixture's
+    // reviewed small-cell "absent" resolves that dimension, so it is not an
+    // unresolved limitation.
+    + "Internal limitations: conflicting source indicators and requirement alignment are unresolved and carried with the count for internal use only.";
+  // 594411bb + 7603dc07: the model input for a record count is the
+  // server-composed count-only finding, and model wording that states more
+  // (here the human-defined unit) is replaced by that finding, so the saved
+  // text begins with it.
+  const COUNT_ONLY_FINDING_TEXT = "5 nonblank data rows were counted in the CSV data records of the cited source version, "
+    + "with 1 blank rows excluded and 2 exact-duplicate rows included in the count.";
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
     modelCalls.push({ system: payload.system, claims: requestBody.claims });
@@ -385,7 +394,7 @@ async function runBrowserAcceptance() {
     "coverage.duplicates.resolved_risk_flagged",
     "coverage.missingness.resolved_risk_flagged",
     "coverage.requirement_alignment.unresolved",
-    "coverage.small_cell_risk.unresolved",
+    // 7e8247f8: the reviewed small-cell "absent" resolves coverage.small_cell_risk.
     "coverage.time_period_clarity.resolved_risk_flagged",
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
@@ -631,8 +640,11 @@ async function runBrowserAcceptance() {
       created(proposed, "legacy field-presence claim proposal");
       ids.legacyClaimId = proposed.body.data.claim.claim_id;
       const traceability = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.legacyClaimId, "internal"));
-      assert.equal(traceability.status, 409);
-      assert.equal(traceability.body.data.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+      // c1feab49: a claim with no P2-04 state is read (200) as not eligible,
+      // naming p204_evaluation_required, rather than refused with a 409.
+      assert.equal(traceability.status, 200, JSON.stringify(traceability.body));
+      assert.equal(traceability.body.data.eligible, false);
+      assert.ok(traceability.body.data.blockerCodes.includes("p204_evaluation_required"), JSON.stringify(traceability.body.data.blockerCodes));
       const [state] = await query(
         `SELECT (SELECT count(*) FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid)::int AS gaps,
                 (SELECT count(*) FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid)::int AS followups`,
@@ -730,7 +742,9 @@ async function runBrowserAcceptance() {
       assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
       assert.ok(await textOf(adminPage, '[data-client-internal-report="available"]'), "the internal report is available");
       const detailText = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`);
-      assert.ok(detailText.includes(COMPLIANT_TEXT), "the draft's actual text");
+      const [savedBlock] = await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal LIMIT 1", [ids.draftId]);
+      assert.ok(savedBlock.text.startsWith(COUNT_ONLY_FINDING_TEXT), savedBlock.text);
+      assert.ok(detailText.includes(savedBlock.text), "the draft's actual text");
       assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /The promoted source has 5 source records/);
       assert.doesNotMatch(await textOf(adminPage, "[data-client-internal-draft-limitations]"), /factual review/i);
       for (const selector of ["[data-client-factual-review-action]", "[data-client-factual-review-approve]", "[data-client-internal-release-action]",
@@ -786,19 +800,23 @@ async function runBrowserAcceptance() {
       const blockedDetail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`);
       assert.doesNotMatch(blockedDetail, /Provisional internal draft/i);
       assert.match(blockedDetail, /Not yet usable for internal reports/);
-      assert.match(blockedDetail, /At least one cited claim is not currently eligible for internal use/);
+      // 6f56e744: a cited claim that is not currently eligible is information
+      // (a draft limitation), not a blocker; structural-only still withholds it.
+      assert.match(blockedDetail, /At least one cited claim is not usable for internal use now/);
       assert.match(await textOf(adminPage, "[data-client-internal-draft-metadata-only]"), /^Structural facts only/);
       assert.doesNotMatch(blockedDetail, /Ask Get Kinder to review the cited claims/, "the next step is a new draft from a measured finding");
       assert.doesNotMatch(blockedDetail, /Approve factual content|Release internal report|factual review is completed before/i);
       assert.equal(await textOf(adminPage, '[data-client-internal-report="available"]'), null);
       const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));
       // Owner prompt 2026-10-26: the server also names the structural-only citation set.
-      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible", "structural_facts_only"] });
+      // 6f56e744: cited_claims_not_currently_eligible moved to informationReasons.
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["structural_facts_only"], informationReasons: ["cited_claims_not_currently_eligible"] });
       assert.equal(detail.body.data.factualReview.actorMayApprove, false);
       const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.blockedDraftId));
       assert.equal(refused.status, 422, refused.body);
-      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible", "structural_facts_only"]);
-      results.c2 = { available: false, blocker: "cited_claims_not_currently_eligible", download: 422 };
+      // 6f56e744: only the structural-only reason withholds the Markdown.
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["structural_facts_only"]);
+      results.c2 = { available: false, blocker: "structural_facts_only", download: 422 };
     });
 
     await test("C3: the authorized administrator's factual approval cannot make the ineligible structural-only draft usable: the route refuses it in its transaction and nothing is written", async () => {
@@ -811,7 +829,8 @@ async function runBrowserAcceptance() {
       assert.deepEqual(await approvalCounts(), NO_APPROVALS);
       const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));
       assert.equal(detail.body.data.reviewState, "awaiting_organization_review");
-      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible", "structural_facts_only"] });
+      // 6f56e744: cited_claims_not_currently_eligible is information; structural-only withholds.
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["structural_facts_only"], informationReasons: ["cited_claims_not_currently_eligible"] });
       assert.equal((await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.blockedDraftId))).status, 422);
       results.c3 = { approval: 422, blocker: "cited_claims_not_currently_eligible", written: 0 };
     });
@@ -865,15 +884,17 @@ async function runBrowserAcceptance() {
       for (const shown of Object.values(reports)) {
         assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);
         assert.match(shown, /\*\*Project \/ engagement:\*\* `Session Programme 2026`/);
-        assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independentRecordCount(CSV));
-        assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
+        // 594411bb (f580d6e8 / 44950111 wording): every record count is reported as the rows counted.
+        assert.equal(Number((/\*\*(\d+) nonblank data rows were counted in /.exec(shown) || [])[1]), independentRecordCount(CSV));
+        assert.match(shown, /The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\./);
         assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
         assert.match(shown, /2 counted records in exact-duplicate groups \(1 excess copy\)\. The record count removes no duplicate: every one of them stays in the count of 5, not removed or merged/);
         assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*caused any result/);
-        assert.match(shown, /## Conclusion\n\nOn the available evidence, the organization's promoted source records 5 programme sessions for 2026-09-01 to 2026-09-30\./);
+        // 594411bb: the conclusion states the row count, not the human-defined unit.
+        assert.match(shown, /## Conclusion\n\nOn the available evidence, the promoted source contains 5 nonblank data rows in the source version's CSV data records\./);
         for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
         assert.ok(shown.includes(`\`${ids.claimId}\``) && shown.includes(`\`${ids.evidenceItemId}\``) && shown.includes(`\`${ids.sourceVersionId}\``), "traceability");
-        assert.ok(shown.includes(COMPLIANT_TEXT), "the validated generated text");
+        assert.ok(shown.includes(COUNT_ONLY_FINDING_TEXT), "the validated generated text (server-composed count-only finding, 594411bb + 7603dc07)");
         assert.match(shown, /no further approval is required for internal use/);
         assert.doesNotMatch(shown, /field_\d/, "never a field-presence claim in place of the measured result");
         assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
