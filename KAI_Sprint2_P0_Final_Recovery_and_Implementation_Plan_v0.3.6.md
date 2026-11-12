@@ -47553,3 +47553,59 @@ Backend generation, P2-06, the resolver's reference-version coverage and the pro
 **NOT_CONFIRMED:** real-model wording and fallback rate (no authorized provider path; dummy key); production and the deployed revision; human usability.
 
 **Status:** INTERPRETATION_VALIDATION_GAP_CLOSED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Fix the uninterpreted paired-outcome factual-review UI (2026-11-12)
+
+**Owner direction (USER_CONFIRMED):** implement the factual-review correction for the Cedar paired outcome (Employment readiness, `interpretation: null`). This is local synthetic work only: no push, deployment, schema change, production access or real client data. The work started at `c159e88d` on `main` with a clean tree.
+
+**Root cause (TOOL_VERIFIED):**
+- The server was already correct. `readFactualReviewMeasurementsInTransaction` (`postgresOrganizationFactualReviewRepository.js`, repaired in `73211a38`) returns `measurement: null` and a populated `derived_measurement`.
+- The shared adapter `projectOrganizationFactualReview` (`clientMeasuredClaimReviewLogic.js`) copied only `measurement`, so `derived_measurement` was dropped.
+- `ClientMeasuredClaimReviewPanel` therefore showed only the raw claim (`Numeric outcome field_7 ... sheet_1 ...`) under record-count wording.
+- `GkFindingReviewPanel` was never mounted for the claim, because `canReviewMeasuredFinding` admitted only `source_record_count_measurement`.
+- The missing interpretation is a separate state. Nothing in the review UI linked to the existing interpretation route (`POST .../derived-measurements/:id/interpretations`, used by "Clarify meaning" in Count records).
+
+**Reproduced before the fix (TOOL_VERIFIED):** a new Cedar test, "11a (browser)", ran in real Chrome on the unchanged bundle (`eed90bbd…`) in a HEAD worktree.
+- The API returned 40/23/13/4, 57.50%, 62/22 excluded, `interpretation: null` and internal eligibility.
+- The projection dropped `derived_measurement` (assertion failed).
+- The client panel showed only the raw claim and limitations.
+- Get Kinder was not offered "Review finding".
+- The new unit test of the adapter also fails on the unchanged adapter.
+
+**Correction (frontend only, smallest coherent):**
+- The adapter now projects `derivedMeasurement` with exactly the served fields. Record-count `measurement` is unchanged.
+- `pairedOutcomeReviewText` reads only persisted values. It states the breakdown, the exclusions by reason, the meaning state, the "no reporting period" state (the Project period is never assumed), the method and currentness. It never says "improved" or "worsened". A recorded direction appears only as the organization's statement.
+- The new shared `FactualReviewPairedOutcome.jsx` is used by both panels. The worksheet key, column key, source version, evidence item and recorded claim wording appear only under "Source details".
+- Paired results use the word "result" instead of "count" in judgments and steps, and the "recorded definition" sentence is no longer shown for them.
+- `canReviewMeasuredFinding` now also admits `source_derived_measurement`.
+- For the administrator only, a "Record what this measures" control in the review panel uses the existing interpretation route. It is followed by "Propose a claim from the current evidence", which uses the existing claim proposal route.
+- No backend, schema or interpretation lifecycle changed.
+
+**After (TOOL_VERIFIED, Cedar 11a (browser), real Chrome, fresh bundle sha256 `55040d93…`):**
+- **State A, nothing preloaded:** both panels read "Among 40 participants with comparable baseline and follow-up values, 23 (57.50%) had a higher follow-up value, 13 were unchanged and 4 had a lower follow-up value." They also read "22 of 62 participants were excluded ...: 5 with no baseline observation; 7 with no follow-up observation; 8 whose baseline and follow-up used different instrument versions; 2 with a missing baseline value." Both state that the meaning and direction have not been recorded and that no reporting period was applied. No `field_N` or `sheet_N` text is visible until "Source details" is opened, which then shows the keys, the source version and the recorded claim. The view is identical after a reload. Get Kinder sees "Only the organization can record what this measures."
+- **State B, recorded in the browser:**
+  - The administrator recorded the meaning with the synthetic values that 11b states first. The POST returned 200. The row is `human_stated`, `created_by` is the administrator and `created_by_type` is `human`.
+  - The arithmetic row is byte-identical. The earlier claim keeps its wording, and its traceability now returns 409 `derived_measurement_interpretation_superseded`.
+  - A claim proposed from the new current evidence opens with the heading "Employment readiness", the stated meaning, "Whether a higher value is better has not been stated ..." and the self-reported basis, with the same numbers.
+  - No review was copied to it: it is not eligible, and both decisions are null.
+  - 11b then replays that meaning unchanged.
+
+**Harness fixes:** each Cedar Chrome launch now uses its own profile directory, and `close()` waits for Chrome to exit. With two browser tests in one run, F3 previously read a stale `DevToolsActivePort`.
+
+**Verification (TOOL_VERIFIED, sentinel `DATABASE_URL`):**
+- New `kai-paired-outcome-factual-review-ui.spec.js`: 8/8.
+- Focused factual-review specs: 85/85. Other specs reading the changed files: 98/98.
+- `npm test`: 6240 / 6111 / 0 / 129.
+- Cedar six-source with PDFs: 48/48, including 11a (browser) and F3.
+- Project B document-evidence + outcomes: 20/20. Package 3: 19/19.
+- Customer XLSX browser acceptance: 14 pass / 16 fail / 1 skip. The same 16 failures, with identical error texts, occur at unchanged HEAD (`eed90bbd…`), so this is a pre-existing baseline and not this change. Its H3 GK "Review finding" record-count path is therefore not browser-proven here.
+- `git diff --check`: clean.
+
+**Remaining limitations:**
+- The derived-measurement gate also opens "Review finding" for non-paired derived families. For those, the server returns neither `measurement` nor `derived_measurement`, so the panel shows only the claim, source, rule, decisions and eligibility.
+- No source-backed label is proposed, because no approved read path maps the Project Context self-rating to `field_7`.
+- The backend reason text "Only a record-count measurement can be reviewed here ..." is unchanged.
+
+**NOT_CONFIRMED:** production and deployed behaviour; independent human usability.
+
+**Status:** PAIRED_OUTCOME_FACTUAL_REVIEW_UI_CORRECTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
