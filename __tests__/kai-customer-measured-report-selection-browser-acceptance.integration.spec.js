@@ -1661,6 +1661,11 @@ async function runBrowserAcceptance() {
       assert.equal(riskOnly.body.data.reviewStatus, "needs_gk_review");
       assert.deepEqual(riskOnly.body.data.excludedClaims, []);
       assert.ok(modelCalls.length - callsBeforeRisk >= 1 && modelCalls.length - callsBeforeRisk <= 2);
+      // The flag informs: the small-cell limitation travels with the claim to
+      // the provider and is disclosed in the saved assessment.
+      const riskSent = modelCalls.at(-1).claims.find((claim) => claim.claimId === ids.riskClaimId);
+      assert.ok(riskSent.limitationCodes.some((code) => code.startsWith("coverage.small_cell_risk.")), JSON.stringify(riskSent.limitationCodes));
+      assert.match(riskOnly.body.data.blocks.map((block) => block.text).join("\n"), /small[- ]cell/i, "the small-cell limitation is disclosed in the saved text");
       // Existing GK review/release actions, through the real authenticated routes.
       // This is API-boundary release proof, not a claim that the GK buttons were clicked.
       // Release still requires reviewed, eligible claims (draft first applies

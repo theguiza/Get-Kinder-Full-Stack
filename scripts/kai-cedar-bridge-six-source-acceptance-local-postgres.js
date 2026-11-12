@@ -266,6 +266,10 @@ try {
       KAI_CEDAR_ACCEPTANCE_DATABASE_URL: targetUrl,
       KAI_CEDAR_ACCEPTANCE_DATABASE_NAME: dbName,
       ...(projectBPackage ? { KAI_COMMUNITY_PROJECT_B_PACKAGE: projectBPackage } : { KAI_CEDAR_BRIDGE_PACKAGE: cedarPackage }),
+      // Owner direction 2026-11-11: the Cedar assessment is also opened through
+      // the real client UI when a local Chrome and the built bundle exist.
+      ...(!projectBPackage && existsSync(chromePath) && existsSync(join(repoRoot, "public", "js", "bundles", "entry.js"))
+        ? { KAI_CEDAR_CHROME: chromePath, KAI_CEDAR_WORKDIR: workDir } : {}),
       ...(documentEvidence ? { KAI_PROJECT_B_DOCUMENT_EVIDENCE: "true", KAI_P3_CHROME: chromePath, KAI_P3_WORKDIR: workDir } : {}),
       ...(provisionalDraft ? {
         KAI_PROJECT_B_PROVISIONAL_DRAFT: "true",

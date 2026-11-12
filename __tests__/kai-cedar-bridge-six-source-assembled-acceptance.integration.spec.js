@@ -2,7 +2,8 @@ import test from "node:test";
 import * as DOCUMENT_EVIDENCE from "../Backend/kai/validators/kaiDocumentEvidenceValidators.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -43,6 +44,9 @@ const RUNNER_DATABASE_URL = process.env.KAI_CEDAR_ACCEPTANCE_DATABASE_URL;
 const RUNNER_DATABASE_NAME = process.env.KAI_CEDAR_ACCEPTANCE_DATABASE_NAME;
 const PACKAGE = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
 const REPORT_PATH = process.env.KAI_CEDAR_BRIDGE_REPORT;
+// Set by the runner when a local Chrome and the built bundle exist.
+const CHROME = process.env.KAI_CEDAR_CHROME;
+const WORKDIR = process.env.KAI_CEDAR_WORKDIR;
 
 function assertLoopbackDatabaseUrl(urlString) {
   const host = new URL(urlString).hostname.toLowerCase();
@@ -308,6 +312,13 @@ async function runCedarBridgeAcceptance() {
   app.use(express.json());
   app.use(harnessSession);
   app.use("/api/kai/sprint2/intake", config.requireKaiSprint2Enabled, auth.requireKaiSprint2Authenticated, router);
+  // The real client page and built bundle, for the browser acceptance (F3).
+  const publicDir = new URL("../public/", import.meta.url).pathname;
+  app.get("/impact-library", (_req, res) => res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><title>Impact Library</title>
+    <link rel="stylesheet" href="/css/style.css" /><link rel="stylesheet" href="/css/gk-design-tokens.css" /></head>
+    <body><div id="impact-evidence-library-root"></div><script src="/js/bundles/entry.js"></script>
+    <script>window.renderImpactEvidenceLibrary();</script></body></html>`));
+  app.use(express.static(publicDir));
   const server = await new Promise((resolve) => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 
@@ -3213,7 +3224,9 @@ async function runCedarBridgeAcceptance() {
       const pdfDocument = mupdf.Document.openDocument(pdf, "application/pdf");
       assert.equal(pdfDocument.countPages(), pages);
       const pdfPages = Array.from({ length: pages }, (_, index) => pdfDocument.loadPage(index).toStructuredText().asText());
-      const normalizeText = (text) => text.normalize("NFKC").replace(/(\p{L})-\s*\n\s*(?=\p{L})/gu, "$1-").replace(/\s+/g, " ").trim();
+      // A line wrapped after a hyphen, slash or dash is the PDF layout, not a
+      // space in the text ("story/\nquote" is "story/quote").
+      const normalizeText = (text) => text.normalize("NFKC").replace(/(\p{L})([-/\u2013\u2014])\s*\n\s*(?=\p{L})/gu, "$1$2").replace(/\s+/g, " ").trim();
       const pdfText = normalizeText(pdfPages.join("\n"));
       const savedBlocks = await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal", [assessmentState.draftId]);
       for (const block of savedBlocks) {
@@ -3264,6 +3277,106 @@ async function runCedarBridgeAcceptance() {
       }
       assessmentState.refusals = outcomes;
     });
+
+    // -------------------------------------------------------------------------
+    // Stage F3 (owner direction 2026-11-11): the organization administrator,
+    // through the real client page and built bundle, selects the measured
+    // outcomes whose meaning the organization stated, the linked reach and
+    // the self-reported follow-up result, generates the Free Impact
+    // Assessment, reads the saved draft and its internal report, and reopens
+    // the same saved assessment after a reload. Nothing is seeded: the
+    // findings are the library's own; the provider is the deterministic stub.
+    await test("F3 (browser): the administrator generates, reads and reopens a meaning-led Free Impact Assessment through Knowledge Studio", { skip: !SURVEY_PDF || !CHROME || !WORKDIR ? "survey PDF, Chrome or the built bundle not available" : false }, async () => {
+      const library = assessmentState.generation?.claim_ids || [];
+      assert.ok(library.length > 0, "F1 listed the library");
+      const outcomeRows = await query(`SELECT c.claim_id::text, i.indicator_label, i.score_direction FROM kai.claims c
+          JOIN kai.evidence_derived_measurements l ON l.evidence_item_id = c.evidence_item_id
+          JOIN kai.source_derived_measurement_interpretations i ON i.interpretation_id = l.interpretation_id
+         WHERE c.claim_id = ANY($1::uuid[]) AND i.indicator_label IN ('Digital confidence', 'Employment readiness')`, [library]);
+      const outcomes = Object.fromEntries(outcomeRows.map((row) => [row.indicator_label, row]));
+      assert.equal(outcomes["Digital confidence"]?.score_direction, "higher_is_better", J(outcomeRows));
+      const [paidWork] = await query("SELECT claim_id::text FROM kai.claims WHERE claim_id = ANY($1::uuid[]) AND statement LIKE 'Self-reported paid work (%'", [library]);
+      const selected = [outcomes["Digital confidence"].claim_id, outcomes["Employment readiness"].claim_id, correctedClaims.reach_people, paidWork.claim_id];
+      const browser = await launchChrome();
+      const page = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
+      const openStudio = async (view) => {
+        await page.goto("/impact-library");
+        await page.clickNav("Knowledge Studio");
+        await page.waitFor(() => page.visible("#gk-shell-project-select"), "the Project selector");
+        await page.idle();
+        await page.selectProject(PROJECT);
+        await page.idle();
+        await page.clickTab(view);
+        await page.idle();
+      };
+      try {
+        await openStudio("Evidence");
+        assert.equal(page.requests().find((r) => new URL(r.url).pathname === "/js/bundles/entry.js")?.status, 200, "the page ran the built bundle");
+        for (const claimId of selected) {
+          const row = `[data-client-claim="${claimId}"]`;
+          await page.waitFor(async () => (await page.attrOf(row, "data-client-claim-provisional-draft")) === "admitted", `${claimId}: admitted for a provisional internal draft`, { timeout: 30000 });
+          await page.clickVisible(`[data-client-select-claim="${claimId}"]`, `${claimId}: Use in an internal draft`);
+          await page.waitFor(() => page.evaluate(`document.querySelector('[data-client-select-claim="${claimId}"]').checked === true`), `${claimId} selected`);
+        }
+        await page.clickTab("Drafts");
+        await page.idle();
+        const calls = modelCalls.length;
+        const mark = page.mark();
+        await page.clickButton("Generate Free Impact Assessment");
+        await page.waitFor(() => page.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the generation request", { timeout: 60000 });
+        await page.idle();
+        const posted = page.requestsSince(mark).find((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [`${orgPath}/generated-content-drafts/free-impact-assessment`, 201]);
+        assert.deepEqual([...JSON.parse(posted.postData).claim_ids].sort(), [...selected].sort(), "exactly the visible selection");
+        const draftId = (await page.responseBody(posted)).data.generatedContentDraftId;
+        // The provider received the organization's meaning with each outcome.
+        const call = modelCalls.slice(calls).at(-1);
+        const confidence = call.claims.find((claim) => claim.claimId === outcomes["Digital confidence"].claim_id);
+        assert.match(confidence.plainReading, /self-rated digital confidence on a 1 to 5 scale/);
+        assert.match(confidence.plainReading, /The organization states that a higher value is better/);
+        // The saved draft, opened from the server by its own id.
+        await page.waitFor(() => page.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment opened", { timeout: 30000 });
+        const detail = await page.textOf(`[data-client-internal-draft-detail="${draftId}"]`);
+        for (const claimId of selected) assert.ok(await page.textOf(`[data-client-internal-draft-detail="${draftId}"] [data-client-internal-draft-citation="${claimId}"]`), `${claimId} cited`);
+        for (const heading of ASSESSMENT_TITLES) assert.ok(detail.includes(heading) || (heading === "Three Recommended Improvements" && detail.includes("Recommended Improvements")), heading);
+        assert.match(detail, /Digital confidence: .*self-rated digital confidence on a 1 to 5 scale/);
+        assert.match(detail, /a favourable observed change on this outcome/);
+        assert.match(detail, /participants' own answers \(self-reported\), not an independent assessment/);
+        assert.match(detail, /What the results suggest:/);
+        assert.match(detail, /Working well: Digital confidence/);
+        assert.match(detail, /Build on the outcome that is moving in the right direction/);
+        assert.match(detail, /80 distinct people on the participant register received at least one completed service/);
+        assert.doesNotMatch(detail, /\bfield_\d+\b|\[\[assessment:|CB0\d\d|FU0\d\d/);
+        // Its internal report, through the visible Open report control.
+        const reportMark = page.mark();
+        await page.clickVisible(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+        await page.waitFor(() => page.visible("[data-client-internal-report-markdown]"), "the internal report", { timeout: 30000 });
+        await page.idle();
+        assert.equal(page.requestsSince(reportMark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(ORG, PROJECT, draftId))?.status, 200);
+        const markdown = await page.textOf("[data-client-internal-report-markdown]");
+        assert.match(markdown, /Provisional internal draft/);
+        assert.ok(markdown.indexOf("Impact assessment") >= 0 && markdown.indexOf("Impact assessment") < markdown.indexOf("Supporting evidence and method"), "the assessment leads the report");
+        assert.match(markdown, /Limitations of the figures/);
+        assert.match(markdown, /a favourable observed change on this outcome/);
+        assert.doesNotMatch(markdown, /\[\[assessment:/);
+        // Reload the page and reopen the same saved assessment from the Drafts list.
+        await openStudio("Drafts");
+        await page.clickVisible(`[data-client-internal-draft="${draftId}"] button`, "Read the saved assessment");
+        await page.waitFor(() => page.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment reopened", { timeout: 30000 });
+        assert.equal(await page.textOf(`[data-client-internal-draft-detail="${draftId}"]`), detail, "the reopened assessment is the same saved content");
+        const [saved] = await query("SELECT draft_status, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+        assert.deepEqual([saved.draft_status, saved.review_status], ["draft", "needs_gk_review"], "provisional; no review or release manufactured");
+        assert.deepEqual(page.exceptions, []);
+        assessmentState.browser = { draft_id: draftId, selected, generation: [new URL(posted.url).pathname, posted.status], internal_report_characters: markdown.length };
+        if (REPORT_PATH) {
+          writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".browser-assessment.txt", detail);
+          writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".browser-internal-report.md", markdown);
+        }
+      } finally {
+        await page.close().catch(() => {});
+        await browser.close();
+      }
+    });
   } finally {
     if (REPORT_PATH) writeFileSync(REPORT_PATH, `${J(report, null, 2)}\n`);
     restoreRuntime();
@@ -3271,4 +3384,167 @@ async function runCedarBridgeAcceptance() {
     await seedPool.end();
     await ambientPool.end();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Minimal Chrome DevTools protocol client (verbatim from the Package 3 and 4
+// acceptances). Controls are found and activated only while visible and
+// enabled; a mounted view or disclosure is revealed only by clicking its own
+// visible tab or toggle.
+// ---------------------------------------------------------------------------
+
+async function launchChrome() {
+  const profileDir = join(WORKDIR, "chrome-profile-cedar");
+  mkdirSync(profileDir, { recursive: true });
+  const child = spawn(CHROME, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profileDir}`, "--no-first-run",
+    "--no-default-browser-check", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "about:blank"], { stdio: "ignore" });
+  const portFile = join(profileDir, "DevToolsActivePort");
+  for (let attempt = 0; attempt < 100 && !existsSync(portFile); attempt += 1) await new Promise((r) => setTimeout(r, 100));
+  const [port] = readFileSync(portFile, "utf8").split("\n");
+  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+  const socket = new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
+  let nextId = 1;
+  const pending = new Map();
+  const listeners = new Set();
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data);
+    if (message.id && pending.has(message.id)) {
+      const { resolve, reject } = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) reject(new Error(`${message.error.message}`));
+      else resolve(message.result);
+      return;
+    }
+    for (const listener of listeners) listener(message);
+  });
+  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+  });
+  return {
+    send,
+    listeners,
+    async close() {
+      try { await send("Browser.close"); } catch { /* closing */ }
+      socket.close();
+      child.kill("SIGKILL");
+    },
+  };
+}
+
+async function openPage(browser, { baseUrl, legacyUserId }) {
+  const { browserContextId } = await browser.send("Target.createBrowserContext", { disposeOnDetach: true });
+  const { targetId } = await browser.send("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await browser.send("Target.attachToTarget", { targetId, flatten: true });
+  const requests = [];
+  const byId = new Map();
+  const exceptions = [];
+  const listener = (message) => {
+    if (message.sessionId !== sessionId) return;
+    const { method, params } = message;
+    if (method === "Network.requestWillBeSent" && params.type !== "Document" && /\/api\/|\/js\/bundles\//.test(params.request.url)) {
+      const entry = { url: params.request.url, method: params.request.method, status: null, done: false, requestId: params.requestId, postData: params.request.postData ?? null };
+      requests.push(entry);
+      byId.set(params.requestId, entry);
+    } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
+      byId.get(params.requestId).status = params.response.status;
+    } else if ((method === "Network.loadingFinished" || method === "Network.loadingFailed") && byId.has(params.requestId)) {
+      byId.get(params.requestId).done = true;
+    } else if (method === "Runtime.exceptionThrown") {
+      exceptions.push(params.exceptionDetails?.exception?.description || params.exceptionDetails?.text);
+    }
+  };
+  browser.listeners.add(listener);
+  for (const domain of ["Page", "Network", "Runtime"]) await browser.send(`${domain}.enable`, {}, sessionId);
+  await browser.send("Network.setCookie", { name: "kai_harness_user", value: String(legacyUserId), url: baseUrl }, sessionId);
+  const evaluate = async (expression) => {
+    const result = await browser.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
+    if (result.exceptionDetails) throw new Error(`evaluate failed: ${result.exceptionDetails.text} ${expression.slice(0, 160)}`);
+    return result.result.value;
+  };
+  const text = () => evaluate("document.body ? document.body.innerText : ''");
+  const idle = async () => {
+    let quietSince = Date.now();
+    for (let i = 0; i < 600; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+      if (requests.some((request) => !request.done)) quietSince = Date.now();
+      else if (Date.now() - quietSince > 500) return;
+    }
+    throw new Error("network never went idle");
+  };
+  const waitFor = async (predicate, description, { timeout = 20000 } = {}) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await predicate()) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`timed out waiting for ${description}\n--- page ---\n${(await text()).slice(0, 4000)}`);
+  };
+  // Reveal an element by clicking the visible tab of the mounted view, or the
+  // visible toggle of the disclosure list, that holds it (as a person would).
+  const REVEAL = `function reveal(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (!node.hidden) continue;
+      if (node.dataset.knowledgeStudioView) document.querySelector('[data-knowledge-studio-tab="' + node.dataset.knowledgeStudioView + '"]')?.click();
+      else if (node.dataset.knowledgeStudioReveal) document.querySelector('[data-knowledge-studio-reveal-toggle="' + node.dataset.knowledgeStudioReveal + '"]')?.click();
+    }
+  }`;
+  const visible = (selector) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return Boolean(el && el.offsetParent !== null); })()`);
+  const clickVisible = async (selector, description) => {
+    await evaluate(`(() => { ${REVEAL} const el = document.querySelector(${JSON.stringify(selector)}); if (el && el.offsetParent === null) reveal(el); return true; })()`);
+    await waitFor(() => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return Boolean(el && el.offsetParent !== null && !el.disabled); })()`), description, { timeout: 30000 });
+    const clicked = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el || el.offsetParent === null || el.disabled) return false; el.click(); return true; })()`);
+    if (!clicked) throw new Error(`no visible enabled control: ${description}`);
+  };
+  const clickButton = async (label) => {
+    await waitFor(() => evaluate(`[...document.querySelectorAll("button")].some((el) => el.offsetParent !== null && !el.disabled && el.innerText.trim() === ${JSON.stringify(label)})`), `button ${label}`);
+    const clicked = await evaluate(`(() => { const el = [...document.querySelectorAll("button")].find((b) => b.offsetParent !== null && !b.disabled && b.innerText.trim() === ${JSON.stringify(label)}); if (!el) return false; el.click(); return true; })()`);
+    if (!clicked) throw new Error(`no visible enabled button: ${label}`);
+  };
+  const clickNav = async (label) => {
+    await waitFor(() => evaluate(`[...document.querySelectorAll("[role=button], a, button")].some((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(label)})`), `nav ${label}`);
+    await evaluate(`[...document.querySelectorAll("[role=button], a, button")].find((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(label)}).click()`);
+  };
+  const clickTab = async (label) => {
+    await waitFor(() => evaluate(`[...document.querySelectorAll(".nav-tabs button")].some((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(label)})`), `tab ${label}`);
+    await evaluate(`[...document.querySelectorAll(".nav-tabs button")].find((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(label)}).click()`);
+  };
+  // A person's choice in a visible <select> (the option must be listed).
+  const choose = (selector, value) => evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el || el.offsetParent === null || el.disabled || ![...el.options].some((option) => option.value === ${JSON.stringify(value)})) return false;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  // A person's typing in a visible input.
+  const type = (selector, value) => evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el || el.offsetParent === null || el.disabled) return false;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  const textOf = (selector) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.innerText : null; })()`);
+  const attrOf = (selector, name) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.getAttribute(${JSON.stringify(name)}) : null; })()`);
+  const responseBody = async (entry) => {
+    const { body, base64Encoded } = await browser.send("Network.getResponseBody", { requestId: entry.requestId }, sessionId);
+    const raw = base64Encoded ? Buffer.from(body, "base64").toString("utf8") : body;
+    try { return JSON.parse(raw); } catch { return raw; }
+  };
+  // Same-origin JSON request from the signed-in page, exactly as the bundle makes it.
+  const api = (method, path, body) => evaluate(`(async () => {
+    const response = await fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" }, ${body === undefined ? "" : `body: ${JSON.stringify(JSON.stringify(body))},`} });
+    return { status: response.status, body: await response.json() };
+  })()`);
+  return {
+    requests: () => requests.slice(), mark: () => requests.length, requestsSince: (mark) => requests.slice(mark), exceptions,
+    evaluate, text, idle, waitFor, visible, clickVisible, clickButton, clickNav, clickTab, choose, type, textOf, attrOf, responseBody, api,
+    async selectProject(engagementId) { assert.ok(await choose("#gk-shell-project-select", engagementId), "the Project selector lists the Project"); },
+    async goto(path) { await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId); await idle(); },
+    async close() { browser.listeners.delete(listener); await browser.send("Target.closeTarget", { targetId }); },
+  };
 }
