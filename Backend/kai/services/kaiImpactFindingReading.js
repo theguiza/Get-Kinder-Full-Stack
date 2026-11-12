@@ -146,7 +146,7 @@ function pairedReading(row, interpretation) {
       clarification,
     ].filter(Boolean).join(" ");
     return Object.freeze({
-      kind: "paired_outcome", indicator: name, directionKnown: false, signal: "unresolved",
+      kind: "paired_outcome", indicator: name, directionKnown: false, direction: null, signal: "unresolved", split: Object.freeze({ ...split }),
       headline: nobodyChanged
         ? `${label || `The numeric outcome in column ${d.outcome_column}`}: no comparable participant's value changed between baseline and follow-up`
         : `${label || `The numeric outcome in column ${d.outcome_column}`}: values changed between baseline and follow-up for some comparable participants, but whether a higher value is better has not been stated yet`,
@@ -208,7 +208,7 @@ function pairedReading(row, interpretation) {
       : signal === "mixed"
         ? nobodyChanged ? `${name}: no comparable participant's value changed between baseline and follow-up` : `${name}: no overall direction is evident between baseline and follow-up`
         : `${name}: more participants moved in the worse direction than the better, which needs attention`;
-  return Object.freeze({ kind: "paired_outcome", indicator: name, directionKnown: true, signal, headline, clarification: null, text });
+  return Object.freeze({ kind: "paired_outcome", indicator: name, directionKnown: true, direction, signal, split: Object.freeze({ ...split }), headline, clarification: null, text });
 }
 
 // ---------------------------------------------------------------------------

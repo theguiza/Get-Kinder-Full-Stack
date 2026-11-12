@@ -305,7 +305,9 @@ test("workflow: a model slip gets exactly one correction with block-level diagno
   assert.equal(run.calls.length, 2);
   assert.deepEqual(run.calls[1].user.correction, {
     reason: "unsupported_numeric_or_causal_assertion",
-    blocks: [{ block: 1, section: "executive_snapshot", assertionClasses: ["causal_language", "numeric_literal"], unsupportedTerms: ["66%", "58%", "impact", "improve"] }],
+    // Owner direction 2026-11-12: "a positive impact" for outcomes whose
+    // better direction is not stated is also named (outcome_interpretation).
+    blocks: [{ block: 1, section: "executive_snapshot", assertionClasses: ["causal_language", "numeric_literal", "outcome_interpretation"], unsupportedTerms: ["66%", "58%", "impact", "improve", "positive"] }],
   });
   // The correction call is the same governed input plus the correction only.
   const { correction, ...rest } = run.calls[1].user;

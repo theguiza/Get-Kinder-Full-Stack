@@ -20,6 +20,7 @@ import {
   isDerivedLimitationCode,
 } from "./kaiDerivedMeasurementValidators.js";
 import { documentEstimateQuantities, excerptFromDocumentClaimStatement, statedQuantities } from "./kaiDocumentEvidenceValidators.js";
+import { citedPairedOutcomes, outcomeInterpretationViolations } from "./kaiOutcomeInterpretationValidators.js";
 
 // A record-count (measurement./coverage.) or source-derived (derived.) code:
 // either makes a claim a measured claim for VAL-GEN-008.
@@ -594,14 +595,43 @@ export function unsupportedAssertionViolations({ blocks, generationClaims } = {}
     const marker = ASSESSMENT_BLOCK_MARKER.exec(text);
     const section = marker ? marker[1] : null;
     const allowedNumbers = new Set(citedStatements.flatMap((statement) => literals(statement, NUMERIC_LITERAL_PATTERN)).map(canonicalNumericLiteral));
+    // Owner direction 2026-11-12: what the block's own wording says a cited
+    // paired outcome shows (share, comparison, count, direction, programme
+    // causation) must agree with that outcome's governed split and recorded
+    // direction. The cited claims' governed text is not the block's own
+    // assertion. A count for a derived group verified here ("21 of 36 did
+    // not report an increase" = unchanged + lower) is a supported number.
+    const citedClaims = unique((block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean));
+    const outcomes = citedPairedOutcomes(citedClaims);
+    let interpretation = null;
+    if (outcomes.length > 0) {
+      let own = marker ? text.slice(marker[0].length) : text;
+      for (const claim of citedClaims) {
+        for (const governed of [claim.plainReading, claim.claimStatement, claim.modelClaimStatement]) {
+          if (typeof governed === "string" && governed.length > 0) own = own.split(expandShortYearRanges(governed)).join("\n");
+        }
+        const disclosure = (claim.limitationCodes || []).some(isMeasuredClaimCode) ? measuredClaimDisclosure(claim) : null;
+        if (disclosure) own = own.split(disclosure).join("\n");
+      }
+      own = own.replace(DISCLOSURE_PREFIX_PATTERN, "\n");
+      const otherLabels = citedClaims.filter((claim) => claim.impactReading && claim.impactReading.kind !== "paired_outcome").map((claim) => claim.impactReading.indicator).filter(Boolean);
+      interpretation = outcomeInterpretationViolations({ text: own, outcomes, otherLabels });
+      for (const value of interpretation.supportedLiterals) allowedNumbers.add(canonicalNumericLiteral(value));
+    }
     for (const numericLiteral of unique(literals(text, NUMERIC_LITERAL_PATTERN))) {
       if (!allowedNumbers.has(canonicalNumericLiteral(numericLiteral))) {
         violations.push({ type: "numeric_literal", block_ordinal: block.ordinal, section, literal: numericLiteral });
       }
     }
-    const causalText = marker ? text.replace(ASSESSMENT_REPORT_TERMINOLOGY, " ") : text;
+    let causalText = marker ? text.replace(ASSESSMENT_REPORT_TERMINOLOGY, " ") : text;
+    // A negated group phrase verified against the cited split above ("did
+    // not report an increase") is a description of the numbers, not a cause.
+    for (const { clause, text: phrase } of interpretation?.verifiedPhrases || []) causalText = causalText.split(clause).join(clause.split(phrase).join(" "));
     for (const causalLiteral of unique(literals(causalText, CAUSAL_PATTERN))) {
       if (!citedText.includes(causalLiteral)) violations.push({ type: "causal_language", block_ordinal: block.ordinal, section, literal: causalLiteral });
+    }
+    for (const violation of interpretation?.violations || []) {
+      violations.push({ type: "outcome_interpretation", block_ordinal: block.ordinal, section, literal: violation.literal, reason: violation.reason });
     }
   }
   return violations;

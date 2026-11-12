@@ -264,9 +264,20 @@ async function runPackage4Acceptance() {
   const messagesPrototype = Object.getPrototypeOf(new Anthropic({ apiKey: "sk-ant-test-unused-dummy-key" }).messages);
   const modelCalls = [];
   let respond = null;
+  // Scenario O interpretation tests (owner direction 2026-11-12, "Close the
+  // remaining impact-interpretation integrity gap"): a test may set
+  // `assessmentRespond(requestBody)` to return independently authored,
+  // model-style assessment blocks (never a copy of plainReading). The exact
+  // text returned is recorded with the call.
+  let assessmentRespond = null;
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
-    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, assessment: requestBody.assessment ?? null, system: payload.system, serialized: J(payload) });
+    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, assessment: requestBody.assessment ?? null, correction: requestBody.correction ?? null, system: payload.system, serialized: J(payload) });
+    if (requestBody.assessment && assessmentRespond) {
+      const blocks = assessmentRespond(requestBody);
+      modelCalls.at(-1).responseBlocks = blocks;
+      return { content: [{ type: "text", text: J({ blocks }) }] };
+    }
     // A Free Impact Assessment request (scenario O): sections, written the way
     // the prompt asks - each finding from KAI's plainReading where it has one,
     // the document statements as the source states them. No intelligence: the
@@ -297,7 +308,7 @@ async function runPackage4Acceptance() {
   const DOC = await import("../Backend/kai/validators/kaiDocumentEvidenceValidators.js");
   const {
     BASE_PATH, claimProposalPath, claimTraceabilityPath, clientInternalDraftPath, clientInternalDraftsPath, clientInternalReportMarkdownPath,
-    createEvidenceSummaryPath, errorText, evidenceExtractionPath, sourceCandidateDecisionPath,
+    createEvidenceSummaryPath, createFreeImpactAssessmentPath, errorText, evidenceExtractionPath, sourceCandidateDecisionPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { claimUseDiagnosis, claimDraftAdmission, provisionalDraftRefusalMessage } = await import("../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js");
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
@@ -1147,6 +1158,34 @@ async function runPackage4Acceptance() {
       const selected = [O.claims.encounters.claimId, O.claims.people.claimId, O.outcomes.connection.claimId, O.outcomes.navigation.claimId,
         O.rates.response.claimId, O.rates.joined.claimId, O.rates.support.claimId, O.docs.C.claimId];
       const approvalsBefore = await counts(O.organizationId);
+      // The provider interprets both outcomes in its own words (owner direction
+      // 2026-11-12), never by copying plainReading. Its first answer overstates
+      // the unchanged share; given the server's one correction it answers
+      // accurately. Other findings and the document account are written as before.
+      const cc = EXPECTED_OUTCOMES.connection;
+      const ra = EXPECTED_OUTCOMES.navigation;
+      assert.deepEqual([cc.pairs, cc.higher, cc.same, cc.lower, ra.pairs, ra.higher, ra.same, ra.lower], [36, 15, 18, 3, 37, 15, 17, 5], "the model wording below is authored for this split");
+      const CC_OWN = `Community-connection confidence: participants rated themselves on the brief's five-point self-report scale (1 = very low, 5 = very high). Of the ${cc.pairs} comparable participants, ${cc.higher} (${cc.percentage}%) gave a higher rating at follow-up, ${cc.same} the same rating and ${cc.lower} a lower rating.`;
+      const CC_FALSE = "Most comparable participants did not report a change.";
+      const CC_ACCURATE = [
+        "Exactly half of the 36 comparable participants had unchanged Community-connection confidence scores.",
+        "More participants reported higher scores than lower scores, but fewer than half reported higher scores.",
+        "A majority, 21 of 36, did not report an increase in Community-connection confidence.",
+        "This is some progress for the participants who moved, not an overall favourable change, and without a comparison group it does not show what the programme contributed.",
+      ];
+      const RA_OWN = `Resource-navigation confidence was also self-rated at both points. Of the ${ra.pairs} comparable participants, ${ra.higher} (${ra.percentage}%) gave a higher rating at follow-up, ${ra.same} the same rating and ${ra.lower} a lower rating. The largest Resource-navigation group was unchanged: 17 of 37, fewer than half of comparable participants. The organization has not yet said whether a higher rating is better, so this is a numerical change, not progress or decline.`;
+      assessmentRespond = (requestBody) => {
+        const citeOne = (claim) => [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }];
+        const documents = requestBody.claims.filter((claim) => claim.limitationCodes.some((code) => code.startsWith("document.")));
+        const findings = requestBody.claims.filter((claim) => !documents.includes(claim));
+        const own = (claim) => (claim.claimId === O.outcomes.connection.claimId ? `${CC_OWN} ${requestBody.correction ? CC_ACCURATE.join(" ") : CC_FALSE}`
+          : claim.claimId === O.outcomes.navigation.claimId ? RA_OWN : claim.plainReading || claim.claimStatement);
+        return [
+          { section: "executive_snapshot", text: "This assessment brings together the people the programme reached and the participant ratings the organization recorded at baseline and follow-up.", citations: citeOne(requestBody.claims[0]) },
+          ...findings.map((claim) => ({ section: "evidence_findings", text: own(claim), citations: citeOne(claim) })),
+          { section: "impact_stories", text: documents.map((claim) => claim.claimStatement).join(" "), citations: documents.flatMap(citeOne) },
+        ];
+      };
       try {
         await openStudioO("Evidence");
         for (const claimId of selected) {
@@ -1167,8 +1206,16 @@ async function runPackage4Acceptance() {
         assert.deepEqual([...JSON.parse(posted.postData).claim_ids].sort(), [...selected].sort(), "exactly the visible selection");
         const draftId = (await pageO.responseBody(posted)).data.generatedContentDraftId;
 
+        // The provider's first wording was refused for its interpretation and
+        // corrected once; the false sentence was named, never saved.
+        const generationCalls = modelCalls.slice(calls);
+        assert.equal(generationCalls.length, 2, "one bounded correction");
+        assert.equal(generationCalls[0].correction, null);
+        assert.ok(J(generationCalls[1].correction).includes("outcome_interpretation"), J(generationCalls[1].correction));
+        report.outcomes.browserCorrection = { first_attempt: generationCalls[0].responseBlocks.map((block) => `[${block.section}] ${block.text}`), correction: generationCalls[1].correction,
+          second_attempt: generationCalls[1].responseBlocks.map((block) => `[${block.section}] ${block.text}`) };
         // What the provider received: the permitted measurements, their meanings and limitations; no identifier or raw row.
-        const call = modelCalls.slice(calls).at(-1);
+        const call = generationCalls.at(-1);
         assert.ok(call.assessment, "a Free Impact Assessment request");
         assert.deepEqual(call.claims.map((claim) => claim.claimId).sort(), [...selected].sort());
         const sent = (claimId) => call.claims.find((claim) => claim.claimId === claimId);
@@ -1183,26 +1230,18 @@ async function runPackage4Acceptance() {
         await pageO.waitFor(() => pageO.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment opened", { timeout: 30000 });
         const detail = await pageO.textOf(`[data-client-internal-draft-detail="${draftId}"]`);
         for (const claimId of selected) assert.ok(await pageO.textOf(`[data-client-internal-draft-detail="${draftId}"] [data-client-internal-draft-citation="${claimId}"]`), `${claimId} cited`);
-        const cc = EXPECTED_OUTCOMES.connection;
-        const ra = EXPECTED_OUTCOMES.navigation;
         // Who we reached.
         assert.match(detail, new RegExp(`${EXPECTED.people} distinct people on the participant register received at least one completed service`));
         assert.match(detail, new RegExp(`${EXPECTED.eligible} completed service encounters`));
         // What changed, in the organization's terms.
+        // The provider's own accurate interpretation is what the customer reads.
         assert.match(detail, /Community-connection confidence: .*five-point self-report scale \(1 = very low, 5 = very high\)/);
-        assert.ok(detail.includes(`Among the ${cc.pairs} participants with a comparable baseline and follow-up value, ${cc.higher} (${cc.percentage}%) had a higher value at follow-up, ${cc.same} had the same value and ${cc.lower} had a lower value.`), "community connection, as calculated");
-        assert.ok(detail.includes(`Among the ${ra.pairs} participants with a comparable baseline and follow-up value, ${ra.higher} (${ra.percentage}%) had a higher value at follow-up, ${ra.same} had the same value and ${ra.lower} had a lower value.`), "resource navigation, as calculated");
-        assert.match(detail, /Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\./);
+        assert.ok(detail.includes(CC_OWN), "community connection, as calculated, in the model's words");
+        for (const sentence of CC_ACCURATE) assert.ok(detail.includes(sentence), sentence);
+        assert.ok(!detail.includes(CC_FALSE), "the refused reading is not saved");
+        assert.ok(detail.includes(RA_OWN), "resource navigation, as calculated, with its direction unresolved");
         assert.match(detail, /Clarification needed: confirm whether a higher Resource-navigation confidence value is better\./);
-        // What the results suggest, from the calculated split (never hardcoded).
         const majority = cc.higher * 2 > cc.pairs;
-        assert.match(detail, majority ? /a favourable observed change on this outcome/ : /there is some movement in the direction the organization is working towards on Community-connection confidence, but (?:fewer than|exactly) half of the comparable participants moved that way/);
-        // The unchanged share in exact words, from the workbook recompute
-        // (owner direction 2026-11-12: 18 of 36 is exactly half, never "most").
-        const unchangedWords = (o) => (o.same * 2 > o.pairs ? `Most comparable participants, ${o.same} of ${o.pairs}, had the same value at follow-up.`
-          : o.same * 2 === o.pairs ? `Exactly half of the comparable participants, ${o.same} of ${o.pairs}, had the same value at follow-up.`
-            : o.same > o.higher && o.same > o.lower ? `The largest group, ${o.same} participants, had the same value at follow-up, although they are fewer than half of the comparable participants.` : null);
-        for (const o of [cc, ra]) if (unchangedWords(o)) assert.ok(detail.includes(unchangedWords(o)), unchangedWords(o));
         if (cc.same * 2 <= cc.pairs) {
           assert.doesNotMatch(detail, /\bmost\b[^.\n]*(?:same value|no change|not report a change)/i, "the unchanged group is not called most");
         }
@@ -1245,6 +1284,14 @@ async function runPackage4Acceptance() {
           ? /[Ff]or Community-connection confidence, [^\n]*on that basis this is a favourable observed change\./
           : new RegExp(`[Ff]or Community-connection confidence, [^\\n]*on that basis this is some progress rather than an overall favourable change: more participants moved in the better direction than the worse, but ${cc.higher * 2 === cc.pairs ? "exactly" : "fewer than"} half of the comparable participants did so\\.`));
         if (!majority) assert.doesNotMatch(markdown, /modestly favourable|Working well: Community-connection/);
+        // Each qualification is attached to the outcome it concerns (owner
+        // direction 2026-11-12): only Resource-navigation confidence lacks a
+        // stated direction, so the closing caveat names it, and community
+        // connection's stated direction is not covered by it.
+        const conclusion = markdown.slice(markdown.indexOf("## Conclusion"), markdown.indexOf("## References"));
+        assert.doesNotMatch(conclusion, /the beneficial direction of the measured change is not established/);
+        assert.match(conclusion, /[Ii]n the baseline and follow-up comparison for Resource-navigation confidence, [^\n]*Whether a higher value is better has not been established for Resource-navigation confidence, so this is an observed numerical change/);
+        assert.match(conclusion, /They do not establish that the programme caused any change: no comparison with people who did not take part is cited, and whether a higher value is better has not been established for Resource-navigation confidence \[CIT-\d+\] \(the organization has stated it for the other measured outcome\)\./);
         assert.doesNotMatch(markdown, /\[\[assessment:/);
 
         // Reload the page and reopen the same saved assessment.
@@ -1264,8 +1311,109 @@ async function runPackage4Acceptance() {
           writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".outcome-internal-report.md", markdown);
         }
       } finally {
+        assessmentRespond = null;
         await pageO.close().catch(() => {});
       }
+    });
+
+    // O5 (owner direction 2026-11-12, "Close the remaining impact-interpretation
+    // integrity gap"): the provider writes its own interpretation of the same two
+    // outcome measurements - never a copy of plainReading - and the real route,
+    // validators, correction, restatement, composition and persistence decide
+    // what is saved. Each case's sentence is placed in the block that cites the
+    // outcome it concerns; the provider repeats it on the correction attempt (a
+    // model that does not fix it), so the saved result shows the fallback.
+    await test("O5 (API): independently worded provider interpretations: false readings of the outcome results never reach the saved assessment or report; accurate ones are kept", async () => {
+      const cc = EXPECTED_OUTCOMES.connection;
+      const ra = EXPECTED_OUTCOMES.navigation;
+      // The case sentences are authored for the workbook's own split (O2 recomputes it).
+      assert.deepEqual([cc.pairs, cc.higher, cc.same, cc.lower], [36, 15, 18, 3]);
+      assert.deepEqual([ra.pairs, ra.higher, ra.same, ra.lower], [37, 15, 17, 5]);
+      const CC = O.outcomes.connection;
+      const RA = O.outcomes.navigation;
+      const cite = (...entries) => entries.map((entry) => ({ claimId: entry.claimId, evidenceItemId: entry.evidenceItemId }));
+      // Model-style findings for each outcome, in the provider's own words.
+      const ccFacts = `Community-connection confidence was self-rated on the brief's five-point scale at baseline and follow-up. Of the ${cc.pairs} comparable participants, ${cc.higher} (${cc.percentage}%) rated themselves higher at follow-up, ${cc.same} gave the same rating and ${cc.lower} rated themselves lower.`;
+      const raFacts = `Resource-navigation confidence was also self-rated at both points. Of the ${ra.pairs} comparable participants, ${ra.higher} (${ra.percentage}%) gave a higher rating at follow-up, ${ra.same} the same rating and ${ra.lower} a lower rating; the organization has not yet said whether a higher rating is better.`;
+      const CASES = [
+        { key: "F1", target: "connection", expect: "refused", sentence: "Most comparable participants did not report a change." },
+        { key: "F2", target: "connection", expect: "refused", sentence: "A majority of participants improved their Community-connection confidence." },
+        { key: "F3", target: "connection", expect: "refused", sentence: "The programme produced an overall favourable improvement in Community-connection confidence." },
+        { key: "F4", target: "navigation", expect: "refused", sentence: "Resource-navigation confidence improved for participants." },
+        { key: "F5", target: "snapshot", expect: "refused", sentence: "Both measured outcomes show that the programme improved participant outcomes." },
+        { key: "A1", target: "connection", expect: "kept", sentence: "Exactly half of the 36 comparable participants had unchanged Community-connection confidence scores." },
+        { key: "A2", target: "connection", expect: "kept", sentence: "More participants reported higher scores than lower scores, but fewer than half reported higher scores." },
+        { key: "A3", target: "connection", expect: "kept", sentence: "A majority, 21 of 36, did not report an increase in Community-connection confidence." },
+        { key: "A4", target: "navigation", expect: "kept", sentence: "The largest Resource-navigation group was unchanged: 17 of 37, fewer than half of comparable participants." },
+      ];
+      const SNAPSHOT = "This assessment covers two participant self-ratings recorded at baseline and follow-up.";
+      const selected = [CC.claimId, RA.claimId];
+      const blocksOf = (sql, draftId) => query(sql, [draftId]);
+      report.outcomes.interpretation = {};
+      const failures = [];
+      try {
+        for (const testCase of CASES) {
+          const add = (target, text) => (testCase.target === target ? `${text} ${testCase.sentence}` : text);
+          assessmentRespond = () => [
+            { section: "executive_snapshot", text: add("snapshot", SNAPSHOT), citations: cite(CC, RA) },
+            { section: "evidence_findings", text: add("connection", ccFacts), citations: cite(CC) },
+            { section: "evidence_findings", text: add("navigation", raFacts), citations: cite(RA) },
+            { section: "impact_stories", text: "No participant account is stated beyond the cited findings.", citations: cite(CC) },
+          ];
+          const calls = modelCalls.length;
+          const created = await O.api("POST", createFreeImpactAssessmentPath(O.organizationId), { claim_ids: selected, idempotency_key: `o5-${testCase.key}-${randomUUID()}`, engagement_id: O.projectId });
+          const sent = modelCalls.slice(calls);
+          assert.equal(created.status, 201, `${testCase.key}: ${J(created.body)}`);
+          const draftId = created.body.data.generatedContentDraftId;
+          const [{ validator_results: results }] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+          const saved = await blocksOf(`SELECT b.ordinal, b.text, array_agg(c.claim_id::text ORDER BY c.claim_id) AS claim_ids FROM kai.generated_content_blocks b
+            JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id WHERE b.generated_content_draft_id = $1::uuid GROUP BY b.ordinal, b.text ORDER BY b.ordinal`, draftId);
+          const savedText = saved.map((block) => block.text).join("\n");
+          const reads = await clientReads(O, draftId);
+          const detail = await O.api("GET", clientInternalDraftPath(O.organizationId, O.projectId, draftId));
+          const detailText = J(detail.body);
+          const [status] = await query("SELECT draft_status, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+          const entry = {
+            target: testCase.target, sentence: testCase.sentence, expected: testCase.expect,
+            provider_calls: sent.length,
+            provider_text: sent.map((call) => call.responseBlocks?.map((block) => `[${block.section}] ${block.text}`)),
+            correction: sent.map((call) => call.correction).filter(Boolean),
+            fallback: (results || []).filter((result) => ["KAI-GEN-WORDING-FALLBACK-001", "VAL-GEN-ASSESSMENT-001"].includes(result.validator_key)).map((result) => ({ key: result.validator_key, evidence: result.evidence })),
+            saved_blocks: saved.map((block) => ({ ordinal: block.ordinal, claims: block.claim_ids.map((id) => (id === CC.claimId ? "CC" : id === RA.claimId ? "RA" : id)), text: block.text })),
+            report_markdown_status: reads.markdown, draft: status,
+          };
+          report.outcomes.interpretation[testCase.key] = entry;
+          if (REPORT_PATH) writeFileSync(REPORT_PATH.replace(/\.json$/, "") + `.o5-${testCase.key}.md`, reads.markdownText ?? "");
+          entry.saved_contains_sentence = savedText.includes(testCase.sentence);
+          entry.report_contains_sentence = (reads.markdownText || "").includes(testCase.sentence);
+          try {
+          assert.deepEqual([status.draft_status, status.review_status], ["draft", "needs_gk_review"], testCase.key);
+          assert.equal(reads.markdown, 200, testCase.key);
+          if (testCase.expect === "refused") {
+            assert.ok(!savedText.includes(testCase.sentence), `${testCase.key}: the false reading is not saved: ${J(entry)}`);
+            assert.ok(!detailText.includes(testCase.sentence), `${testCase.key}: not shown to the customer`);
+            assert.ok(!(reads.markdownText || "").includes(testCase.sentence), `${testCase.key}: not in the report`);
+            assert.equal(sent.length, 2, `${testCase.key}: one bounded correction was asked for`);
+            assert.ok(J(sent[1].correction).includes("outcome_interpretation"), `${testCase.key}: the correction names the refused interpretation: ${J(sent[1].correction)}`);
+            // The useful, accurate reading survives the fallback: each outcome's
+            // finding is still stated with its counts, unchanged share and direction status.
+            assert.ok(savedText.includes(`Exactly half of the comparable participants, ${cc.same} of ${cc.pairs}, had the same value at follow-up.`) || savedText.includes(ccFacts), `${testCase.key}: CC finding kept`);
+            assert.ok(savedText.includes("Whether a higher value is better has not been stated") || savedText.includes(raFacts), `${testCase.key}: RA direction status kept`);
+            assert.ok(savedText.includes(`${cc.higher} (${cc.percentage}%)`) && savedText.includes(`${ra.higher} (${ra.percentage}%)`), `${testCase.key}: both results kept`);
+          } else {
+            assert.ok(savedText.includes(testCase.sentence), `${testCase.key}: the accurate reading is kept: ${J(entry)}`);
+            assert.ok((reads.markdownText || "").includes(testCase.sentence), `${testCase.key}: and reaches the report`);
+            assert.equal(sent.length, 1, `${testCase.key}: no correction was needed`);
+          }
+          } catch (error) {
+            failures.push(`${testCase.key}: ${error.message.slice(0, 300)}`);
+          }
+        }
+      } finally {
+        assessmentRespond = null;
+      }
+      // Every case is run and recorded before any is reported.
+      assert.deepEqual(failures, [], J(Object.fromEntries(Object.entries(report.outcomes.interpretation).map(([key, entry]) => [key, { expected: entry.expected, saved: entry.saved_contains_sentence, report: entry.report_contains_sentence, provider_calls: entry.provider_calls }]))));
     });
 
     await test("agreement: for every admission-governed generation attempt the server's admission predicted whether the provider was called", () => {

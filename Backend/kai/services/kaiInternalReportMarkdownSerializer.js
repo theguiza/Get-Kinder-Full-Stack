@@ -160,10 +160,36 @@ function pairedCoverage(p) {
   return `${p.excluded_participant_count} of ${p.participant_count} participants lacked comparable baseline and follow-up observations and are not included`;
 }
 
-function directionText(fact) {
+function directionText(fact, name = null) {
   return directionNotEstablished(fact)
-    ? "Whether a higher value is better has not been established, so this is an observed numerical change, not an established improvement."
+    ? `Whether a higher value is better has not been established${name ? ` for ${name}` : ""}, so this is an observed numerical change, not an established improvement.`
     : "The organization states which direction of the value is better; KAI did not verify that.";
+}
+
+// The outcome a paired fact measures, by its reading's indicator, when the
+// report cites several paired outcomes (owner direction 2026-11-12: each
+// qualification is attached to the outcome it concerns). With one paired
+// outcome "the measured change" is unambiguous and the wording is unchanged.
+function pairedName(fact, paired) {
+  return paired.length > 1 && readingOf(fact)?.indicator ? text(readingOf(fact).indicator) : null;
+}
+
+function listWords(items) {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+// The unresolved-direction qualification for the paired outcomes it applies
+// to: "the measured change" for one; each unresolved outcome by name (and
+// citation) when several are cited, so an outcome whose direction the
+// organization stated is never covered by it.
+function unresolvedDirectionClause(paired) {
+  const unresolved = paired.filter(directionNotEstablished);
+  if (unresolved.length === 0) return "";
+  if (paired.length === 1) return ", and the beneficial direction of the measured change is not established";
+  const named = unresolved.map((fact) => `${pairedName(fact, paired) ?? "the measured change"} ${refs(fact.citationRefs)}`);
+  const stated = paired.length - unresolved.length;
+  return `, and whether a higher value is better has not been established for ${listWords(named)}`
+    + (stated > 0 ? ` (the organization has stated it for the other measured outcome${stated === 1 ? "" : "s"})` : "");
 }
 
 // The quoted source text of a document statement claim, or the whole claim.
@@ -455,7 +481,7 @@ function analysisLines(model) {
   }
   if (documents.length > 0 && paired.length > 0) {
     lines.push(`- The source-reported observation ${citedRefs(documents)} and the numerical change ${citedRefs(paired)} are separate pieces of evidence about participants. `
-      + `The observation is an unmeasured account${paired.some(directionNotEstablished) ? ", and the beneficial direction of the measured change is not established" : ""}; `
+      + `The observation is an unmeasured account${unresolvedDirectionClause(paired)}; `
       + "they are relevant to the same question, but neither confirms the other.");
   }
   return lines;
@@ -521,8 +547,9 @@ function substantiveConclusion(model) {
         + `and on that basis this is ${pairedConclusion(reading.signal, p)}.`);
       continue;
     }
-    parts.push(`${parts.length > 1 ? "In" : "in"} the baseline and follow-up comparison, ${pairedResult(p)} ${refs(fact.citationRefs)}; `
-      + `${pairedCoverage(p)}. ${directionText(fact)}`);
+    const name = pairedName(fact, paired);
+    parts.push(`${parts.length > 1 ? "In" : "in"} the baseline and follow-up comparison${name ? ` for ${name}` : ""}, ${pairedResult(p)} ${refs(fact.citationRefs)}; `
+      + `${pairedCoverage(p)}. ${directionText(fact, name)}`);
   }
   for (const fact of otherDerived) {
     parts.push(`${parts.length > 1 ? "The" : "the"} cited derived measurement records: ${text(fact.claimStatement)} ${refs(fact.citationRefs)}`);
@@ -538,7 +565,7 @@ function substantiveConclusion(model) {
     parts.push(`${substantive === 1 ? "This finding is" : "Taken together, these findings are"} relevant to the programme's potential impact and may be used internally as qualified evidence of it, `
       + `with the limitations above kept with ${substantive === 1 ? "it" : "them"}. `
       + `${substantive === 1 ? "It does" : "They do"} not establish that the programme caused any change: no comparison with people who did not take part is cited`
-      + `${paired.some(directionNotEstablished) ? ", and the beneficial direction of the measured change is not established" : ""}.`);
+      + `${unresolvedDirectionClause(paired)}.`);
   } else {
     parts.push("These figures may be reported internally with their recorded limitations kept with them. They do not establish that the programme caused any result.");
   }
@@ -745,4 +772,4 @@ export function serializeInternalReportToMarkdown(model) {
   return `${lines.join("\n")}\n`;
 }
 
-export const __internalReportMarkdownSerializerTestables = Object.freeze({ MARKDOWN_CONTRACT_VERSION, REPORT_TITLES, pairedConclusion });
+export const __internalReportMarkdownSerializerTestables = Object.freeze({ MARKDOWN_CONTRACT_VERSION, REPORT_TITLES, pairedConclusion, unresolvedDirectionClause });

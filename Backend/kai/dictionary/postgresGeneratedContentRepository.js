@@ -565,7 +565,7 @@ function validateCompleteReviewInput(input) {
 const ASSESSMENT_MODEL_ATTEMPTS = 2;
 const CORRECTION_MAX_TERMS = 10;
 const CORRECTION_TERM_MAX_LENGTH = 40;
-const ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language"]);
+const ASSERTION_CLASSES = new Set(["numeric_literal", "causal_language", "outcome_interpretation"]);
 
 function isAssessmentCorrection(correction) {
   return Boolean(correction) && typeof correction === "object" && !Array.isArray(correction)
