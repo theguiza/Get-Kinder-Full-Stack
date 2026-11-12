@@ -47609,3 +47609,41 @@ Backend generation, P2-06, the resolver's reference-version coverage and the pro
 **NOT_CONFIRMED:** production and deployed behaviour; independent human usability.
 
 **Status:** PAIRED_OUTCOME_FACTUAL_REVIEW_UI_CORRECTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Close the factual-review entry-point mismatch (2026-11-12)
+
+**Owner direction (USER_CONFIRMED):** offer Get Kinder's "Review finding" only where the factual-review read presents a structured measurement. Clarify the customer-facing review reason without changing any code or authorization. Local synthetic work only. Start: `68a93ab4`, `main`, clean.
+
+**Mismatch (TOOL_VERIFIED):** `canReviewMeasuredFinding` admitted every `source_derived_measurement` claim. `readFactualReviewMeasurementsInTransaction`, however, serves `measurement` only for record counts and `derived_measurement` only for paired outcomes. Tabular counts, tabular rates and cross-source reach were therefore offered a "Review finding" panel that could show only the claim text. The GK claim-library read had no measurement family to tell them apart. A new regression test failed on the old gate (`tabular_count` was offered).
+
+**Correction:**
+- **Claim-library read:** `listClaimLibraryReviewCandidates` now attaches the recorded family. It reuses the Evidence Library's existing `withDerivedMeasurementFamilies` (exported), which reads derived tables only when a derived claim is listed and is organization-scoped.
+- **Service and projection:** `kaiClaimLibraryService` validates `measurementFamily` and returns it, and `projectCandidateClaims` projects it.
+- **Gate:** `canReviewMeasuredFinding` now admits a record count, or a derived claim whose family is `paired_outcome_change`.
+- **Review reason:** `reviewReasonText(reason, { derived })` words `evidence_type_requires_get_kinder_review` for a paired result. All other evidence keeps the original wording.
+- No schema, authorization, decision contract or currentness rule changed. The Traceability decision forms were never gated by this function and are untouched.
+
+**Browser check (TOOL_VERIFIED; new Cedar test "19 (browser)", real Chrome, bundle `a326556f…`).** The claim library returned the recorded family for each claim, and the entry point followed it:
+
+| Claim (family) | "Review finding" offered | Shown |
+|---|---|---|
+| Record count (null) | yes | "Counted: 80 participant register records …" |
+| Paired outcome (`paired_outcome_change`) | yes | "Digital confidence" with 25/10/3 of 38 and the organization's stated direction |
+| `tabular_count` | no | Traceability still shows "Evidence review decision supported" |
+| `tabular_rate` | no | same |
+| `cross_source_reach` | no | same |
+
+Cedar 11a (browser) also confirms that the organization panel shows the new reason, keeps the code attribute, and offers no organization review action. The State B meaning lifecycle and its currentness behaviour are unchanged: the superseded claim returns 409, and nothing is copied or approved.
+
+**Verification (TOOL_VERIFIED, sentinel `DATABASE_URL`):**
+- `kai-paired-outcome-factual-review-ui.spec.js`: 11/11.
+- Focused factual-review plus claim/evidence-library specs: 471/471.
+- `npm test`: 6243 / 6114 / 0 / 129.
+- Cedar with PDFs: 49/49.
+- Project B document-evidence + outcomes: 20/20. Package 3: 19/19.
+- Customer XLSX: 14 / 16 fail / 1 skip. These are the same 16 tests with an identical error signature as at unchanged `c159e88d`, so the failures are pre-existing and not fixed here.
+- `git diff --check`: clean.
+
+**Notes:** the client-scoped claim-library response also carries `measurementFamily`; it is display metadata only. Real-model behaviour and production are NOT_CONFIRMED.
+
+**Status:** GK_ENTRY_POINT_MISMATCH_CLOSED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
