@@ -13,6 +13,7 @@ import {
   projectClientInternalDraft,
   projectClientInternalDraftList,
 } from "../impactEvidenceLibraryLogic.js";
+import { citedFindingDisplay } from "./knowledgeStudioViewsLogic.js";
 import {
   INTERNAL_DRAFT_LIMITATION_MESSAGES,
   INTERNAL_DRAFT_RELEASED_BY_LABELS,
@@ -297,10 +298,17 @@ export default function ClientInternalDrafts({
                 <ul className="mb-0">
                   {block.supportingClaimIds.map((claimId) => {
                     const claim = claimById.get(claimId);
+                    const cited = claim ? citedFindingDisplay(claim.claimStatement || claim.evidenceStatement || "Claim") : null;
                     return (
                       <li key={claimId} data-client-internal-draft-citation={claimId}>
-                        {claim ? (claim.claimStatement || claim.evidenceStatement || "Claim") : "A claim of this organization"}
+                        {cited ? cited.text : "A claim of this organization"}
                         {claim && CITED_CLAIM_KIND_LABELS[claimKind(claim)] ? ` (${CITED_CLAIM_KIND_LABELS[claimKind(claim)]})` : ""}
+                        {cited?.hasFull ? (
+                          <details className="d-inline-block ms-1" data-client-internal-draft-citation-full={claimId}>
+                            <summary>Full recorded statement</summary>
+                            {cited.full}
+                          </details>
+                        ) : null}
                       </li>
                     );
                   })}

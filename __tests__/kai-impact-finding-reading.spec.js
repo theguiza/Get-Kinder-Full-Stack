@@ -250,3 +250,30 @@ test("a record count whose exact-duplicate rows equal its measured value: the se
   const modelText = composeEvidenceSummaryMeasurementDisclosures({ blocks: [{ ordinal: 1, text: W("evidence_findings", "The programme delivered 2 sessions."), citations: cite(claim) }], claims: [claim], measuredValueByClaimId: new Map([[id, 2]]) });
   assert.equal(validate(modelText.blocks, [claim]).ok, false);
 });
+
+test("monthly activity and recorded minutes read in plain language, without the register version identifier, and pass the validators", () => {
+  const base = {
+    organization_id: ORG, source_version_id: VERSION, measurement_source_version_id: VERSION, measurement_family: D.DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
+    worksheet_key: null, profile_canonical_sha256: "c".repeat(64), interpretation_id: "38000000-0000-4000-8000-000000000031", current_interpretation_id: "38000000-0000-4000-8000-000000000031",
+    contributing_sources: [], score_direction: null, evidence_basis: "organization_record", meaning_text: "recorded service activity in the reporting period",
+  };
+  const period = { period_start: "2025-04-01", period_end: "2026-03-31" };
+  const reference = "3c000000-0000-4000-8000-000000000001";
+  const monthly = composeImpactFindingReading({ ...base, indicator_label: "Monthly eligible encounters", measured_value: 223,
+    definition: { metric: "monthly_eligible_encounters", period, reference_source_version_id: reference },
+    component_counts: { eligible_encounter_count: 223, monthly_activity: [{ month: "2025-04", encounter_count: 20 }, { month: "2025-05", encounter_count: 203 }] } });
+  assert.equal(monthly.text, "Monthly eligible encounters: 223 completed service encounters in the reporting period 2025-04-01 to 2026-03-31, by the month they took place: 2025-04 20, 2025-05 203. These are encounters, not people.");
+  const minutes = composeImpactFindingReading({ ...base, indicator_label: "Known recorded minutes", measured_value: 16815,
+    definition: { metric: "known_recorded_service_minutes", period, reference_source_version_id: reference },
+    component_counts: { known_recorded_minutes: 16815, duration_known_count: 220, eligible_encounter_count: 223, duration_missing_count: 3, duration_invalid_count: 0 } });
+  assert.equal(minutes.text, "Known recorded minutes: 16815 minutes of service time are recorded for 220 of the 223 eligible encounters in the reporting period 2025-04-01 to 2026-03-31; 3 have no duration and 0 an invalid or conflicting one, so this is a known subtotal, not the complete service time.");
+  for (const reading of [monthly, minutes]) {
+    assert.doesNotMatch(reading.text, new RegExp(reference));
+    assert.deepEqual(unsupportedAssertionViolations({ blocks: [{ ordinal: 1, text: reading.text, citations: [{ claimId: "c1", evidenceItemId: "e1" }] }],
+      generationClaims: [{ claimId: "c1", evidenceItemId: "e1", claimStatement: "statement", plainReading: reading.text, limitationCodes: [] }] }), []);
+  }
+  // The subtotal is never presented as the complete service time.
+  const rule = D.DERIVED_DISCLOSURE_RULES.find((entry) => entry.code === D.DERIVED_LIMITATION_CODES.RECORDED_MINUTES_SUBTOTAL);
+  assert.ok(rule.requires.test(minutes.text));
+  assert.ok(!rule.forbids.test(minutes.text));
+});

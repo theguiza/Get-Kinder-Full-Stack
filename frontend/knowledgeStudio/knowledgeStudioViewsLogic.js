@@ -310,6 +310,17 @@ export function findingDisplay(statement) {
   return { headline: label, summary: capitalize(result), note, location: "", full, neutral: false };
 }
 
+// A cited finding as the saved draft lists it (owner direction 2026-11-11):
+// its label and readable result, never internal field or worksheet keys; the
+// exact recorded statement stays available on request.
+export function citedFindingDisplay(statement) {
+  const full = String(statement || "").trim();
+  const shown = findingDisplay(full);
+  const label = [shown.headline, shown.neutral ? "" : shown.summary].filter(Boolean).join(" — ");
+  const text = label || (hasTechnicalText(full) ? "Recorded finding" : full);
+  return { text, full, hasFull: Boolean(full) && text !== full };
+}
+
 // Whether a claim restates its evidence (the same words apart from the
 // recorded prefix, case and punctuation): such a claim's wording is not shown
 // again; a materially different wording stays available on request.

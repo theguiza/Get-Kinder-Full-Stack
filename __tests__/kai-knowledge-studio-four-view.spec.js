@@ -578,3 +578,16 @@ test("wording: system-determined internal use is not presented as a human review
   assert.match(kai, /<label className="form-label small fw-semibold mb-1" htmlFor=\{inputId\}>/);
   assert.match(kai, /id=\{inputId\}\s+aria-describedby=\{scopeId\}/);
 });
+
+test("a saved draft's citation shows the finding's label and readable result, never internal field or worksheet keys; the recorded statement stays available", async () => {
+  const { citedFindingDisplay } = await import("../frontend/knowledgeStudio/knowledgeStudioViewsLogic.js");
+  const paired = "Digital confidence (meaning stated by the organization; values self-reported): numeric outcome field_6 (column F), in selected worksheet sheet_1, baseline to follow-up, no reporting period: 25 of 38 comparable participant pairs (65.79%) have a numerically higher follow-up value, 10 the same, 3 lower; the organization states higher is better. Pairs need the same participant and instrument version; 24 of 62 participants excluded as not comparable.";
+  const shown = citedFindingDisplay(paired);
+  assert.match(shown.text, /^Digital confidence — Baseline to follow-up: 25 of 38 comparable participant pairs \(65\.79%\)/);
+  assert.doesNotMatch(shown.text, /field_\d|sheet_\d/);
+  assert.deepEqual([shown.full, shown.hasFull], [paired, true]);
+  const reach = citedFindingDisplay("People served (meaning stated by the organization; values are organization records): 80 distinct register participants served, each counted once, among 223 eligible encounters: field_1 events, field_6 = completed.");
+  assert.deepEqual([reach.text, reach.hasFull], ["People served", true]);
+  const quote = 'Source-reported, not independently verified (line 1): "Follow-up information remains incomplete."';
+  assert.deepEqual(citedFindingDisplay(quote), { text: quote, full: quote, hasFull: false });
+});

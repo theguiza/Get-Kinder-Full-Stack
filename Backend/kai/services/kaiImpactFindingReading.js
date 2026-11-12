@@ -218,9 +218,20 @@ function crossSourceReading(row, interpretation) {
         kind: "reach", indicator: label || "People in more than one programme", directionKnown: null, signal: "descriptive", clarification: null, headline: null,
         text: `${lead}${row.measured_value} people on the participant register took part in more than one programme group in ${period}, each counted once.`,
       });
-    case CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY:
+    case CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY: {
+      const months = (c.monthly_activity || []).map((item) => `${item.month} ${item.encounter_count}`).join(", ");
+      return Object.freeze({
+        kind: "activity", indicator: label || "Monthly activity", directionKnown: null, signal: "descriptive", clarification: null, headline: null,
+        text: `${lead}${c.eligible_encounter_count} completed service encounters in ${period}${months ? `, by the month they took place: ${months}` : ""}. These are encounters, not people.`,
+      });
+    }
     case CROSS_SOURCE_METRICS.RECORDED_DURATION:
-      return null;
+      return Object.freeze({
+        kind: "activity", indicator: label || "Recorded service time", directionKnown: null, signal: "descriptive", clarification: null, headline: null,
+        text: c.duration_known_count
+          ? `${lead}${c.known_recorded_minutes} minutes of service time are recorded for ${c.duration_known_count} of the ${c.eligible_encounter_count} eligible encounters in ${period}; ${c.duration_missing_count} have no duration and ${c.duration_invalid_count} an invalid or conflicting one, so this is a known subtotal, not the complete service time.`
+          : `${lead}no service time can be summed for ${period}: none of the ${c.eligible_encounter_count} eligible encounters has a usable duration, so no subtotal is available.`,
+      });
     default: {
       const among = d.group ? c.group_encounter_count : c.eligible_encounter_count;
       const overlap = d.group ? "" : ` ${c.multi_group_person_count} of them took part in more than one programme group and are counted once.`;

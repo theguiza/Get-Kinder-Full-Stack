@@ -745,7 +745,9 @@ async function runBrowserAcceptance() {
       const [savedBlock] = await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal LIMIT 1", [ids.draftId]);
       assert.ok(savedBlock.text.startsWith(COUNT_ONLY_FINDING_TEXT), savedBlock.text);
       assert.ok(detailText.includes(savedBlock.text), "the draft's actual text");
-      assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /The promoted source has 5 source records/);
+      // Owner direction 2026-11-11: a citation shows its readable result; the
+      // exact recorded statement is one click away.
+      assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /5 source records/);
       assert.doesNotMatch(await textOf(adminPage, "[data-client-internal-draft-limitations]"), /factual review/i);
       for (const selector of ["[data-client-factual-review-action]", "[data-client-factual-review-approve]", "[data-client-internal-release-action]",
         "[data-client-internal-release-submit]", "[data-client-internal-draft-release-state]"]) {
