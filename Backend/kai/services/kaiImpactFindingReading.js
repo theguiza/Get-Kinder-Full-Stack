@@ -74,11 +74,38 @@ function meaningSentence(label, interpretation) {
   return meaning ? `The organization describes ${label ? `${label} as` : "this measure as"}: ${lowerFirst(meaning)}.` : "";
 }
 
+// The exact share a group is of the whole, in words: a majority is "more
+// than half" (and only a majority is ever "most"), exactly half is "exactly
+// half", anything less is "fewer than half". Decided by the counts alone.
 function proportionWord(part, whole) {
   if (!(whole > 0)) return null;
   if (part * 2 > whole) return "more than half";
-  if (part * 2 === whole) return "half";
+  if (part * 2 === whole) return "exactly half";
   return "fewer than half";
+}
+
+// What the paired split says about the participants whose value stayed the
+// same, decided by the counts: "most" only for a majority, "exactly half"
+// for half, "the largest group" only when strictly larger than both other
+// groups (a tie is not a largest group), otherwise nothing beyond the
+// result sentence's own counts.
+function unchangedShare({ same, higher, lower, pairs }) {
+  if (!(same > 0) || !(pairs > 0)) return null;
+  if (same === pairs) return "all";
+  if (same * 2 > pairs) return "majority";
+  if (same * 2 === pairs) return "half";
+  if (same > higher && same > lower) return "largest";
+  return null;
+}
+
+function unchangedSentence(split) {
+  switch (unchangedShare(split)) {
+    case "all": return `All ${split.pairs} comparable participants had the same value at follow-up.`;
+    case "majority": return `Most comparable participants, ${split.same} of ${split.pairs}, had the same value at follow-up.`;
+    case "half": return `Exactly half of the comparable participants, ${split.same} of ${split.pairs}, had the same value at follow-up.`;
+    case "largest": return `The largest group, ${split.same} participants, had the same value at follow-up, although they are fewer than half of the comparable participants.`;
+    default: return "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -96,10 +123,11 @@ function pairedReading(row, interpretation) {
   const direction = DIRECTIONS.includes(interpretation?.score_direction) ? interpretation.score_direction : null;
   const result = `Among the ${pairs} participants with a comparable baseline and follow-up value, ${higher} (${row.percentage}%) had a higher value at follow-up, ${same} had the same value and ${lower} had a lower value.`;
   const coverage = `${c.excluded_participant_count} of ${c.participant_count} participants had no comparable pair and are not included, and no reporting period is applied.`;
-  // When "the same" is the largest group, a reader needs to know it: most
-  // comparable participants did not move either way.
-  const unchangedLargest = same > 0 && same >= higher && same >= lower;
-  const unchangedNote = unchangedLargest ? `The largest group, ${same} participants, had the same value at follow-up.` : "";
+  // How many stayed the same, in exact proportion words (owner direction
+  // 2026-11-12: 18 of 36 is exactly half, never "most").
+  const split = { same, higher, lower, pairs };
+  const unchangedNote = unchangedSentence(split);
+  const nobodyChanged = higher === 0 && lower === 0;
   const measured = label
     ? sentence(`${label}: ${meaningSentence(label, interpretation) ? meaningSentence(label, interpretation).replace(/^The organization describes .*? as: /, "") : "an outcome measure recorded at baseline and follow-up"}`)
     : `${name[0].toUpperCase()}${name.slice(1)}, recorded at baseline and at follow-up. What it measures has not yet been stated by the organization.`;
@@ -119,7 +147,9 @@ function pairedReading(row, interpretation) {
     ].filter(Boolean).join(" ");
     return Object.freeze({
       kind: "paired_outcome", indicator: name, directionKnown: false, signal: "unresolved",
-      headline: `${label || `The numeric outcome in column ${d.outcome_column}`}: values changed between baseline and follow-up for some comparable participants, but whether a higher value is better has not been stated yet`,
+      headline: nobodyChanged
+        ? `${label || `The numeric outcome in column ${d.outcome_column}`}: no comparable participant's value changed between baseline and follow-up`
+        : `${label || `The numeric outcome in column ${d.outcome_column}`}: values changed between baseline and follow-up for some comparable participants, but whether a higher value is better has not been stated yet`,
       clarification, text,
     });
   }
@@ -138,15 +168,22 @@ function pairedReading(row, interpretation) {
     reading = `The organization states that a ${directionWord} value is better, so more participants moved in the better direction (${better}) than in the worse direction (${worse}), although ${share} of the comparable participants did so.`;
   } else if (better === worse) {
     signal = "mixed";
-    reading = `The organization states that a ${directionWord} value is better; as many participants moved in the better direction as in the worse direction (${better}), so no overall direction is evident.`;
+    reading = nobodyChanged
+      ? `The organization states that a ${directionWord} value is better; no comparable participant's value changed between baseline and follow-up, so no movement in either direction is evident.`
+      : `The organization states that a ${directionWord} value is better; as many participants moved in the better direction as in the worse direction (${better}), so no overall direction is evident.`;
   } else {
     signal = "unfavourable";
     reading = `The organization states that a ${directionWord} value is better, so more participants moved in the worse direction (${worse}) than in the better direction (${better}): an unfavourable observed change that needs attention.`;
   }
-  const implication = signal === "favourable_minority" && unchangedLargest
-    ? `What this suggests: there is some movement in the direction the organization is working towards on ${label || "this outcome"}, but most comparable participants did not report a change. It is worth asking participants at follow-up what would help them move further, and what was different for the ${worse} whose value moved the other way.`
-    : signal === "favourable" || signal === "favourable_minority"
-    ? `What this suggests: this is an encouraging signal for ${label || "this outcome"}, consistent with what the organization is working towards. It is worth continuing to collect baseline and follow-up values the same way, and asking what was different for the ${worse} participants whose value moved the other way.`
+  const unchanged = unchangedShare(split);
+  const askOtherWay = worse > 0 ? `, and what was different for the ${worse} whose value moved the other way` : "";
+  // A minority (or exactly half) moving in the better direction is some
+  // progress, never an encouraging overall result; how many stayed the same
+  // is stated in exact proportion words only.
+  const implication = signal === "favourable_minority"
+    ? `What this suggests: there is some movement in the direction the organization is working towards on ${label || "this outcome"}, but ${share} of the comparable participants moved that way${unchanged === "majority" ? " and most did not report a change" : unchanged === "half" ? " and exactly half did not report a change" : ""}. It is worth asking participants at follow-up what would help them move further${askOtherWay}.`
+    : signal === "favourable"
+    ? `What this suggests: this is an encouraging signal for ${label || "this outcome"}, consistent with what the organization is working towards. It is worth continuing to collect baseline and follow-up values the same way${worse > 0 ? `, and asking what was different for the ${worse} participants whose value moved the other way` : ""}.`
     : signal === "mixed"
       ? `What this suggests: the result does not yet show a clear direction for ${label || "this outcome"}; collecting comparable follow-up values for more participants would show whether a pattern emerges.`
       : `What this suggests: ${label || "this outcome"} needs a closer look; review what participants whose value moved in the worse direction experienced, and whether the follow-up timing or questions changed.`;
@@ -163,9 +200,13 @@ function pairedReading(row, interpretation) {
   const headline = signal === "favourable"
     ? `${name}: ${share} of participants with comparable values had a better value at follow-up, in the direction the organization states is better`
     : signal === "favourable_minority"
-      ? `${name}: more participants moved in the better direction than the worse, though ${unchangedLargest ? "the largest group reported no change" : `${share} of comparable participants did so`}`
+      ? `${name}: more participants moved in the better direction than the worse, though ${
+        unchanged === "majority" ? "most comparable participants reported no change"
+          : unchanged === "half" ? "exactly half of comparable participants reported no change"
+            : unchanged === "largest" ? "the largest group reported no change"
+              : `${share} of comparable participants did so`}`
       : signal === "mixed"
-        ? `${name}: no overall direction is evident between baseline and follow-up`
+        ? nobodyChanged ? `${name}: no comparable participant's value changed between baseline and follow-up` : `${name}: no overall direction is evident between baseline and follow-up`
         : `${name}: more participants moved in the worse direction than the better, which needs attention`;
   return Object.freeze({ kind: "paired_outcome", indicator: name, directionKnown: true, signal, headline, clarification: null, text });
 }

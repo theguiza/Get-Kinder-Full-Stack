@@ -137,6 +137,25 @@ function pairedResult(p) {
     + `recorded a numerically higher follow-up value than baseline, ${p.unchanged_count} the same and ${p.decreased_count} lower`;
 }
 
+// The conclusion for a paired outcome whose better direction the
+// organization stated (owner direction 2026-11-12): "favourable" only when
+// more than half of the comparable participants moved in the better
+// direction (the reading's own rule); a minority or exactly half moving that
+// way is some progress, stated with its exact share. In a minority-favourable
+// reading the better-direction count is the larger of higher and lower.
+function pairedConclusion(signal, p) {
+  if (signal === "favourable") return "a favourable observed change";
+  if (signal === "favourable_minority") {
+    const better = Math.max(p.increased_count, p.decreased_count);
+    const share = better * 2 === p.comparable_pair_count ? "exactly half" : "fewer than half";
+    return `some progress rather than an overall favourable change: more participants moved in the better direction than the worse, but ${share} of the comparable participants did so`;
+  }
+  if (signal === "mixed") {
+    return p.increased_count === 0 && p.decreased_count === 0 ? "no change in either direction" : "a mixed result, with as many participants moving in the better direction as in the worse";
+  }
+  return "an unfavourable observed change";
+}
+
 function pairedCoverage(p) {
   return `${p.excluded_participant_count} of ${p.participant_count} participants lacked comparable baseline and follow-up observations and are not included`;
 }
@@ -499,7 +518,7 @@ function substantiveConclusion(model) {
     const reading = readingOf(fact);
     if (reading?.directionKnown) {
       parts.push(`${parts.length > 1 ? "For" : "for"} ${text(reading.indicator)}, ${pairedResult(p)} ${refs(fact.citationRefs)}; the organization states which direction is better, `
-        + `and on that basis this is ${reading.signal === "favourable" ? "a favourable observed change" : reading.signal === "favourable_minority" ? "a modestly favourable observed change" : reading.signal === "mixed" ? "a mixed result" : "an unfavourable observed change"}.`);
+        + `and on that basis this is ${pairedConclusion(reading.signal, p)}.`);
       continue;
     }
     parts.push(`${parts.length > 1 ? "In" : "in"} the baseline and follow-up comparison, ${pairedResult(p)} ${refs(fact.citationRefs)}; `
@@ -726,4 +745,4 @@ export function serializeInternalReportToMarkdown(model) {
   return `${lines.join("\n")}\n`;
 }
 
-export const __internalReportMarkdownSerializerTestables = Object.freeze({ MARKDOWN_CONTRACT_VERSION, REPORT_TITLES });
+export const __internalReportMarkdownSerializerTestables = Object.freeze({ MARKDOWN_CONTRACT_VERSION, REPORT_TITLES, pairedConclusion });

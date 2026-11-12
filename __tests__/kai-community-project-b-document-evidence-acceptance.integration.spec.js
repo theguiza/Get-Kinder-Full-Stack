@@ -1196,8 +1196,20 @@ async function runPackage4Acceptance() {
         assert.match(detail, /Clarification needed: confirm whether a higher Resource-navigation confidence value is better\./);
         // What the results suggest, from the calculated split (never hardcoded).
         const majority = cc.higher * 2 > cc.pairs;
-        assert.match(detail, majority ? /a favourable observed change on this outcome/ : /most comparable participants did not report a change/);
-        if (cc.same >= cc.higher && cc.same >= cc.lower) assert.ok(detail.includes(`The largest group, ${cc.same} participants, had the same value at follow-up.`));
+        assert.match(detail, majority ? /a favourable observed change on this outcome/ : /there is some movement in the direction the organization is working towards on Community-connection confidence, but (?:fewer than|exactly) half of the comparable participants moved that way/);
+        // The unchanged share in exact words, from the workbook recompute
+        // (owner direction 2026-11-12: 18 of 36 is exactly half, never "most").
+        const unchangedWords = (o) => (o.same * 2 > o.pairs ? `Most comparable participants, ${o.same} of ${o.pairs}, had the same value at follow-up.`
+          : o.same * 2 === o.pairs ? `Exactly half of the comparable participants, ${o.same} of ${o.pairs}, had the same value at follow-up.`
+            : o.same > o.higher && o.same > o.lower ? `The largest group, ${o.same} participants, had the same value at follow-up, although they are fewer than half of the comparable participants.` : null);
+        for (const o of [cc, ra]) if (unchangedWords(o)) assert.ok(detail.includes(unchangedWords(o)), unchangedWords(o));
+        if (cc.same * 2 <= cc.pairs) {
+          assert.doesNotMatch(detail, /\bmost\b[^.\n]*(?:same value|no change|not report a change)/i, "the unchanged group is not called most");
+        }
+        // Each follow-up observation keeps its own respondent denominator.
+        for (const [label, rate] of [["Follow-up response rate", EXPECTED_RATES.response], ["Accessed local support \\(self-reported\\)", EXPECTED_RATES.support]]) {
+          assert.match(detail, new RegExp(`${label}: ${rate.numerator} of ${rate.denominator} \\(`));
+        }
         assert.match(detail, /What the results suggest:/);
         assert.match(detail, majority ? /Working well: Community-connection confidence/ : /Some progress: Community-connection confidence/);
         if (!majority) assert.doesNotMatch(detail, /Working well: Community-connection confidence/, "a minority result is not presented as working well");
@@ -1227,6 +1239,12 @@ async function runPackage4Acceptance() {
         assert.match(markdown, /Provisional internal draft/);
         assert.ok(markdown.indexOf("Impact assessment") >= 0 && markdown.indexOf("Impact assessment") < markdown.indexOf("Supporting evidence and method"), "the assessment leads the report");
         assert.ok(markdown.includes(`${cc.higher} (${cc.percentage}%) had a higher value at follow-up`));
+        if (cc.same * 2 <= cc.pairs) assert.doesNotMatch(markdown, /\bmost\b[^.\n]*(?:same value|no change|not report a change)/i, "the report does not call the unchanged group most");
+        // The report's conclusion agrees with the assessment: favourable only for a majority in the better direction.
+        assert.match(markdown, majority
+          ? /[Ff]or Community-connection confidence, [^\n]*on that basis this is a favourable observed change\./
+          : new RegExp(`[Ff]or Community-connection confidence, [^\\n]*on that basis this is some progress rather than an overall favourable change: more participants moved in the better direction than the worse, but ${cc.higher * 2 === cc.pairs ? "exactly" : "fewer than"} half of the comparable participants did so\\.`));
+        if (!majority) assert.doesNotMatch(markdown, /modestly favourable|Working well: Community-connection/);
         assert.doesNotMatch(markdown, /\[\[assessment:/);
 
         // Reload the page and reopen the same saved assessment.

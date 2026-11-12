@@ -147,8 +147,11 @@ const GAP_CATALOGUE = Object.freeze([
   Object.freeze({
     key: "outcome_movement_limited",
     readingSignals: ["favourable_minority", "mixed"],
-    gap: "For at least one outcome measure, fewer than half of the comparable participants moved in the direction the organization states is better, and many reported no change.",
-    recommendation: "Ask participants at the follow-up rating what would help them move further on that outcome, and review with programme staff which parts of the programme could do more for participants whose rating did not change.",
+    // Holds for every split these signals cover (a minority or exactly half
+    // moving in the better direction, or no overall direction): it claims no
+    // share for the unchanged group, which the finding states exactly.
+    gap: "For at least one outcome measure, no more than half of the comparable participants moved in the direction the organization states is better; the others had the same value at follow-up or moved the other way.",
+    recommendation: "Ask participants at the follow-up rating what would help them move further on that outcome, and review with programme staff which parts of the programme could do more for participants whose rating stayed the same or moved the other way.",
     nextStep: "add a short follow-up question asking participants what would help them move further",
   }),
   Object.freeze({
@@ -379,8 +382,9 @@ function resultsAnalysis(claims) {
   const outcomes = list.filter((claim) => readingOf(claim)?.kind === "paired_outcome");
   for (const claim of outcomes) {
     const reading = readingOf(claim);
-    // "Working well" only when most comparable participants moved in the
-    // stated direction; a minority result is some progress, not success.
+    // "Working well" only when more than half of the comparable participants
+    // moved in the stated direction; a minority (or exactly half) is some
+    // progress, not success.
     if (reading.signal === "favourable") add(claim, `Working well: ${reading.headline}.`);
     if (reading.signal === "favourable_minority") add(claim, `Some progress: ${reading.headline}.`);
   }
