@@ -145,6 +145,13 @@ const GAP_CATALOGUE = Object.freeze([
     nextStep: "agree the fixed follow-up point and who will review the outcome ratings each quarter",
   }),
   Object.freeze({
+    key: "outcome_movement_limited",
+    readingSignals: ["favourable_minority", "mixed"],
+    gap: "For at least one outcome measure, fewer than half of the comparable participants moved in the direction the organization states is better, and many reported no change.",
+    recommendation: "Ask participants at the follow-up rating what would help them move further on that outcome, and review with programme staff which parts of the programme could do more for participants whose rating did not change.",
+    nextStep: "add a short follow-up question asking participants what would help them move further",
+  }),
+  Object.freeze({
     key: "recorded_duration_incomplete",
     codes: ["derived.known_recorded_minutes_subtotal"],
     documentPattern: /\b(?:duration|minutes)\b/i,
@@ -372,7 +379,10 @@ function resultsAnalysis(claims) {
   const outcomes = list.filter((claim) => readingOf(claim)?.kind === "paired_outcome");
   for (const claim of outcomes) {
     const reading = readingOf(claim);
-    if (reading.signal === "favourable" || reading.signal === "favourable_minority") add(claim, `Working well: ${reading.headline}.`);
+    // "Working well" only when most comparable participants moved in the
+    // stated direction; a minority result is some progress, not success.
+    if (reading.signal === "favourable") add(claim, `Working well: ${reading.headline}.`);
+    if (reading.signal === "favourable_minority") add(claim, `Some progress: ${reading.headline}.`);
   }
   for (const claim of outcomes) {
     const reading = readingOf(claim);

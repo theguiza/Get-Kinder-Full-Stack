@@ -591,3 +591,16 @@ test("a saved draft's citation shows the finding's label and readable result, ne
   const quote = 'Source-reported, not independently verified (line 1): "Follow-up information remains incomplete."';
   assert.deepEqual(citedFindingDisplay(quote), { text: quote, full: quote, hasFull: false });
 });
+
+test("a saved assessment shows each section title once and its measurement disclosure apart, without losing any text", async () => {
+  const { assessmentBlockParts } = await import("../frontend/impactEvidenceLibraryLogic.js");
+  const first = "[[assessment:evidence_findings]]\nPeople served: 67 distinct people. Measurement disclosure for the cited measurement: KAI did not check the recorded values against any other source.";
+  const second = "[[assessment:evidence_findings]]\nCommunity-connection confidence: 36 comparable participants.";
+  const third = "[[assessment:impact_stories]]\nNo participant account is stated beyond the cited findings.";
+  assert.deepEqual(assessmentBlockParts(first, null), { heading: "What Your Evidence Tells Us", prose: "People served: 67 distinct people.",
+    disclosure: "Measurement disclosure for the cited measurement: KAI did not check the recorded values against any other source." });
+  assert.deepEqual(assessmentBlockParts(second, first), { heading: null, prose: "Community-connection confidence: 36 comparable participants.", disclosure: null });
+  assert.equal(assessmentBlockParts(third, second).heading, "Impact Stories");
+  // An ordinary (non-assessment) block is unchanged.
+  assert.deepEqual(assessmentBlockParts("Plain summary text.", null), { heading: null, prose: "Plain summary text.", disclosure: null });
+});

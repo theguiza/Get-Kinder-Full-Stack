@@ -744,7 +744,15 @@ async function runBrowserAcceptance() {
       const detailText = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`);
       const [savedBlock] = await query("SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal LIMIT 1", [ids.draftId]);
       assert.ok(savedBlock.text.startsWith(COUNT_ONLY_FINDING_TEXT), savedBlock.text);
-      assert.ok(detailText.includes(savedBlock.text), "the draft's actual text");
+      // Owner direction 2026-11-12: the finding is shown first and its
+      // server-composed measurement disclosure sits behind "Limitations of
+      // these figures"; together they are exactly the saved block text.
+      const [prose, disclosure] = savedBlock.text.split(/\s*(?=Measurement disclosure for )/);
+      assert.ok(detailText.includes(prose), "the draft's actual text");
+      if (disclosure) {
+        const shownDisclosure = await adminPage.evaluate(`document.querySelector('[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-draft-disclosure]')?.textContent ?? ""`);
+        assert.ok(shownDisclosure.includes(disclosure), "the complete disclosure is available behind its toggle");
+      }
       // Owner direction 2026-11-11: a citation shows its readable result; the
       // exact recorded statement is one click away.
       assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.claimId}"]`), /5 source records/);

@@ -96,6 +96,10 @@ function pairedReading(row, interpretation) {
   const direction = DIRECTIONS.includes(interpretation?.score_direction) ? interpretation.score_direction : null;
   const result = `Among the ${pairs} participants with a comparable baseline and follow-up value, ${higher} (${row.percentage}%) had a higher value at follow-up, ${same} had the same value and ${lower} had a lower value.`;
   const coverage = `${c.excluded_participant_count} of ${c.participant_count} participants had no comparable pair and are not included, and no reporting period is applied.`;
+  // When "the same" is the largest group, a reader needs to know it: most
+  // comparable participants did not move either way.
+  const unchangedLargest = same > 0 && same >= higher && same >= lower;
+  const unchangedNote = unchangedLargest ? `The largest group, ${same} participants, had the same value at follow-up.` : "";
   const measured = label
     ? sentence(`${label}: ${meaningSentence(label, interpretation) ? meaningSentence(label, interpretation).replace(/^The organization describes .*? as: /, "") : "an outcome measure recorded at baseline and follow-up"}`)
     : `${name[0].toUpperCase()}${name.slice(1)}, recorded at baseline and at follow-up. What it measures has not yet been stated by the organization.`;
@@ -107,6 +111,7 @@ function pairedReading(row, interpretation) {
     const text = [
       measured,
       result,
+      unchangedNote,
       "Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline.",
       basisSentence(interpretation),
       coverage,
@@ -138,7 +143,9 @@ function pairedReading(row, interpretation) {
     signal = "unfavourable";
     reading = `The organization states that a ${directionWord} value is better, so more participants moved in the worse direction (${worse}) than in the better direction (${better}): an unfavourable observed change that needs attention.`;
   }
-  const implication = signal === "favourable" || signal === "favourable_minority"
+  const implication = signal === "favourable_minority" && unchangedLargest
+    ? `What this suggests: there is some movement in the direction the organization is working towards on ${label || "this outcome"}, but most comparable participants did not report a change. It is worth asking participants at follow-up what would help them move further, and what was different for the ${worse} whose value moved the other way.`
+    : signal === "favourable" || signal === "favourable_minority"
     ? `What this suggests: this is an encouraging signal for ${label || "this outcome"}, consistent with what the organization is working towards. It is worth continuing to collect baseline and follow-up values the same way, and asking what was different for the ${worse} participants whose value moved the other way.`
     : signal === "mixed"
       ? `What this suggests: the result does not yet show a clear direction for ${label || "this outcome"}; collecting comparable follow-up values for more participants would show whether a pattern emerges.`
@@ -147,6 +154,7 @@ function pairedReading(row, interpretation) {
     measured,
     result,
     reading,
+    unchangedNote,
     basisSentence(interpretation),
     coverage,
     "No comparison group is cited, so this observed change does not by itself show that the programme was responsible for it.",
@@ -155,7 +163,7 @@ function pairedReading(row, interpretation) {
   const headline = signal === "favourable"
     ? `${name}: ${share} of participants with comparable values had a better value at follow-up, in the direction the organization states is better`
     : signal === "favourable_minority"
-      ? `${name}: more participants moved in the better direction than the worse, though ${share} of comparable participants did so`
+      ? `${name}: more participants moved in the better direction than the worse, though ${unchangedLargest ? "the largest group reported no change" : `${share} of comparable participants did so`}`
       : signal === "mixed"
         ? `${name}: no overall direction is evident between baseline and follow-up`
         : `${name}: more participants moved in the worse direction than the better, which needs attention`;

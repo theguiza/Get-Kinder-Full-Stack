@@ -255,7 +255,10 @@ test("existing client and GK controls connect to the assessment route, and revie
     assert.match(source, /20 claims selected/);
   }
   for (const file of ["frontend/ImpactEvidenceLibrary.jsx", "frontend/gkExportReviewDetail.jsx", "frontend/knowledgeStudio/ClientInternalDrafts.jsx", "frontend/knowledgeStudio/ClientGeneratedDrafts.jsx"]) {
-    assert.match(readFileSync(file, "utf8"), /assessmentBlockDisplay\(block.text\)/);
+    // ClientInternalDrafts shows each section title once and the disclosure
+    // apart (assessmentBlockParts, owner direction 2026-11-12); it is built on
+    // the same section titles as assessmentBlockDisplay.
+    assert.match(readFileSync(file, "utf8"), file.endsWith("ClientInternalDrafts.jsx") ? /assessmentBlockParts\(block.text, / : /assessmentBlockDisplay\(block.text\)/);
   }
   assert.equal(assessmentBlockDisplay("[[assessment:evidence_findings]]\n223 encounters. [CIT-001]"), "What Your Evidence Tells Us\n223 encounters. [CIT-001]");
   assert.equal(assessmentBlockDisplay("Plain block."), "Plain block.");

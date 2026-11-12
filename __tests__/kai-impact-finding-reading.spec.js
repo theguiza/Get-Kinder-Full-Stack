@@ -277,3 +277,33 @@ test("monthly activity and recorded minutes read in plain language, without the 
   assert.ok(rule.requires.test(minutes.text));
   assert.ok(!rule.forbids.test(minutes.text));
 });
+
+test("a minority moved in the better direction and most stayed the same: the reading and the assessment say so, and propose asking what would help", () => {
+  const row = { ...pairedRow(true, CONFIDENCE), numerator: 15, measured_value: 15, denominator: 36, percentage: "41.67",
+    component_counts: { participant_count: 59, comparable_pair_count: 36, increased_count: 15, unchanged_count: 18, decreased_count: 3, excluded_participant_count: 23 } };
+  const claim = claimOf(row, 5);
+  assert.equal(claim.impactReading.signal, "favourable_minority");
+  assert.match(claim.plainReading, /15 \(41\.67%\) had a higher value at follow-up, 18 had the same value and 3 had a lower value/);
+  assert.match(claim.plainReading, /The largest group, 18 participants, had the same value at follow-up\./);
+  assert.match(claim.plainReading, /most comparable participants did not report a change/);
+  assert.doesNotMatch(claim.plainReading, /a favourable observed change/);
+  assert.match(claim.impactReading.headline, /though the largest group reported no change$/);
+  const composed = composeFreeImpactAssessmentBlocks({
+    modelBlocks: [
+      { ordinal: 1, text: W("executive_snapshot", "Digital confidence ratings were compared at baseline and follow-up."), citations: cite(claim) },
+      { ordinal: 2, text: W("evidence_findings", claim.plainReading), citations: cite(claim) },
+      { ordinal: 3, text: W("impact_stories", "No participant account is stated beyond the cited findings."), citations: cite(claim) },
+    ],
+    claims: [claim],
+  });
+  assert.equal(composed.ok, true, composed.reason);
+  const recommendations = parseFreeImpactAssessment(composed.blocks).find((s) => s.key === "recommended_improvements").blocks.map((b) => b.body);
+  assert.ok(recommendations.some((body) => body.startsWith("Proposed change: Ask participants at the follow-up rating what would help them move further")), recommendations.join("\n"));
+  assert.ok(!recommendations.some((body) => body.includes("Build on the outcome")), "a minority result is not presented as a favourable outcome to build on");
+  const analysis = parseFreeImpactAssessment(composed.blocks).find((s) => s.key === "gaps_opportunities").blocks.map((b) => b.body).join("\n");
+  assert.match(analysis, /- Some progress: Digital confidence: more participants moved in the better direction than the worse, though the largest group reported no change\./);
+  assert.doesNotMatch(analysis, /Working well/);
+  const disclosed = composeEvidenceSummaryMeasurementDisclosures({ blocks: composed.blocks.filter((b) => b.text.startsWith("[[assessment:evidence_findings]]")), claims: [claim], measuredValueByClaimId: new Map([[claim.claimId, 15]]) });
+  const byOrdinal = new Map(disclosed.blocks.map((b) => [b.ordinal, b]));
+  assert.equal(validate(composed.blocks.map((b) => byOrdinal.get(b.ordinal) ?? b), [claim]).ok, true);
+});

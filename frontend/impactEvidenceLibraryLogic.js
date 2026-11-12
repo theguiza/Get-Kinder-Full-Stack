@@ -634,6 +634,29 @@ export function createFreeImpactAssessmentPath(organizationId) {
 }
 
 // Display only: persisted text and review decisions retain their original form.
+// A saved draft block as the organization reads it (owner direction
+// 2026-11-12): an assessment section's title once, where the section begins
+// (not above every block), the block's prose, and the server-composed
+// measurement disclosure apart, so the finding is read first. Nothing is
+// removed: the disclosure text is returned whole.
+const ASSESSMENT_MARKER = /^\[\[assessment:([a-z_]+)\]\]\n/;
+const MEASUREMENT_DISCLOSURE = /\s*(Measurement disclosure for [\s\S]*)$/;
+export function assessmentBlockParts(text, previousText = null) {
+  const raw = String(text ?? "");
+  const section = ASSESSMENT_MARKER.exec(raw)?.[1] ?? null;
+  const previous = previousText === null ? null : ASSESSMENT_MARKER.exec(String(previousText))?.[1] ?? null;
+  const shown = assessmentBlockDisplay(raw);
+  const titled = section && shown !== raw;
+  const heading = titled && section !== previous ? shown.slice(0, shown.indexOf("\n")) : null;
+  const body = titled ? shown.slice(shown.indexOf("\n") + 1) : raw;
+  const match = MEASUREMENT_DISCLOSURE.exec(body);
+  return {
+    heading,
+    prose: match ? body.slice(0, match.index).trim() : body,
+    disclosure: match ? match[1].trim() : null,
+  };
+}
+
 export function assessmentBlockDisplay(text) {
   const titles = {
     executive_snapshot: "Executive Impact Snapshot",

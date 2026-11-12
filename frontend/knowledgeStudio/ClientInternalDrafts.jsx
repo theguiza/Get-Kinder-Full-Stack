@@ -1,6 +1,6 @@
 import StorySourceInformation from "../StorySourceInformation.js";
 import ReportInformation from "../ReportInformation.js";
-import { assessmentBlockDisplay } from "../impactEvidenceLibraryLogic.js";
+import { assessmentBlockParts } from "../impactEvidenceLibraryLogic.js";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
@@ -290,9 +290,18 @@ export default function ClientInternalDrafts({
           <ul className="small mb-2" data-client-internal-draft-limitations="">
             {draft.limitations.map((code) => <li key={code}>{INTERNAL_DRAFT_LIMITATION_MESSAGES[code]}</li>)}
           </ul>
-          {draft.blocks.map((block) => (
+          {draft.blocks.map((block, index) => {
+            const parts = assessmentBlockParts(block.text, index > 0 ? draft.blocks[index - 1].text : null);
+            return (
             <div key={block.ordinal} className="mb-2" data-client-internal-draft-block={block.ordinal}>
-              <p className="mb-1" style={{ whiteSpace: "pre-wrap" }}>{assessmentBlockDisplay(block.text)}</p>
+              {parts.heading ? <h6 className="mt-3 mb-1" data-client-internal-draft-section="">{parts.heading}</h6> : null}
+              <p className="mb-1" style={{ whiteSpace: "pre-wrap" }}>{parts.prose}</p>
+              {parts.disclosure ? (
+                <details className="small mb-1" data-client-internal-draft-disclosure={block.ordinal}>
+                  <summary>Limitations of these figures</summary>
+                  {parts.disclosure}
+                </details>
+              ) : null}
               <div className="small text-muted">
                 Cites:
                 <ul className="mb-0">
@@ -315,7 +324,8 @@ export default function ClientInternalDrafts({
                 </ul>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
     </div>
