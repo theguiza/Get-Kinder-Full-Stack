@@ -368,8 +368,18 @@ const REASON_TEXT = Object.freeze({
   factual_review_not_supported: "Limitations can be accepted only after the measurement and claim are reviewed as supported.",
 });
 
-export function reviewReasonText(reason) {
-  return REASON_TEXT[reason] || reason;
+// The same reason, worded for a derived (paired baseline/follow-up) result:
+// viewing it, recording its meaning and recording its review are different
+// things, and only the review decisions are Get Kinder's. Codes and server
+// authorization are unchanged.
+const DERIVED_REASON_TEXT = Object.freeze({
+  evidence_type_requires_get_kinder_review: "You can view this result here, and your organization's administrator can record what it measures; "
+    + "recording a meaning is not a review. The evidence and claim review decisions for this kind of measurement are recorded by Get Kinder, "
+    + "not by your organization.",
+});
+
+export function reviewReasonText(reason, { derived = false } = {}) {
+  return (derived && DERIVED_REASON_TEXT[reason]) || REASON_TEXT[reason] || reason;
 }
 
 const BLOCKER_TEXT = Object.freeze({
@@ -389,7 +399,7 @@ export function eligibilityBlockerText(code) {
 
 export function measuredClaimReviewFailureMessage(step, result, noun = "count") {
   const reasons = asArray(result?.body?.blockers).map((blocker) => blocker?.blocking_reason).filter(Boolean);
-  const detail = reasons.length > 0 ? reasons.map(reviewReasonText).join(" ") : errorText(result);
+  const detail = reasons.length > 0 ? reasons.map((reason) => reviewReasonText(reason)).join(" ") : errorText(result);
   return `${measuredClaimReviewStepLabel(step, noun)} was not recorded. ${detail}`;
 }
 

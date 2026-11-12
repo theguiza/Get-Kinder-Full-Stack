@@ -1,5 +1,6 @@
 import pool from "./kaiDb.js";
 import { projectEvidenceScopeSql } from "./kaiProjectEvidenceScope.js";
+import { withDerivedMeasurementFamilies } from "./kaiEvidenceLibraryReadModels.js";
 
 /**
  * Read-only Impact Evidence Library claim index.
@@ -84,5 +85,8 @@ export async function listClaimLibraryReviewCandidates(
       LIMIT $2::int`,
     params,
   );
-  return rows;
+  // The recorded derived-measurement family of each claim's evidence (the
+  // Evidence Library's own read; derived tables are read only when a derived
+  // claim is listed). Display/entry-point metadata only.
+  return withDerivedMeasurementFamilies(organizationId, rows, db);
 }

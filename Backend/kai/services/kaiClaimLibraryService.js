@@ -115,6 +115,7 @@ function responseClaimCandidate(row, organizationId, { clientProjection = false 
     || !isOptionalStatement(row.claim_statement ?? null)
     || !isOptionalStatement(row.evidence_statement ?? null)
     || !isOptionalMachineToken(row.evidence_type ?? null)
+    || !isOptionalMachineToken(row.measurement_family ?? null)
     || !isOptionalMachineToken(row.evidence_support_strength ?? null)
     || !isOptionalMachineToken(row.evidence_review_status ?? null)
     || !isOptionalUuid(row.evidence_source_id ?? null)
@@ -146,6 +147,9 @@ function responseClaimCandidate(row, organizationId, { clientProjection = false 
     // (source_record_count_measurement) or structural metadata
     // (dictionary_field_presence_fact), so a client can tell them apart.
     evidenceType: row.evidence_type ?? null,
+    // The recorded derived-measurement family (paired_outcome_change,
+    // tabular_count, ...) of source_derived_measurement evidence, else null.
+    measurementFamily: row.measurement_family ?? null,
     evidenceSupportStrength: row.evidence_support_strength ?? null,
     evidenceReviewStatus: row.evidence_review_status ?? null,
     evidenceSourceId: row.evidence_source_id ?? null,

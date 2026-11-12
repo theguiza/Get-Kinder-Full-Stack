@@ -108,7 +108,7 @@ const DERIVED_MEASUREMENT_EVIDENCE_TYPE = "source_derived_measurement";
  * uninterpreted statement once a meaning is recorded) is not presented as a
  * finding. Display only: eligibility stays with the validators.
  */
-async function withDerivedMeasurementFamilies(organizationId, rows, db) {
+export async function withDerivedMeasurementFamilies(organizationId, rows, db) {
   const derivedIds = rows.filter((row) => row.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id);
   if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null, measurement_evidence_current: null }));
   const { rows: families } = await db.query(

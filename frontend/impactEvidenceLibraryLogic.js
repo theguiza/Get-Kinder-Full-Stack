@@ -2720,6 +2720,7 @@ export function projectCandidateClaims(dto) {
     // status/source lineage/use-authority) - never a claim field relabeled.
     evidenceStatement: claim.evidenceStatement ?? null,
     evidenceType: claim.evidenceType ?? null,
+    measurementFamily: typeof claim.measurementFamily === "string" ? claim.measurementFamily : null,
     evidenceSupportStrength: claim.evidenceSupportStrength ?? null,
     evidenceReviewStatus: claim.evidenceReviewStatus ?? null,
     evidenceSourceId: claim.evidenceSourceId ?? null,
@@ -2772,17 +2773,19 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
 }
 
 // Whether the GK Claims list offers "Review finding" for this claim: a
-// measured finding (P2-01M record-count evidence, or a source-derived
-// measurement such as a paired baseline/follow-up outcome; the finding-review
-// read serves both) and an actor whose access capabilities admit recording
-// this organization's evidence review. It grants nothing; every decision is
-// re-authorized by the server.
-const REVIEWABLE_MEASURED_EVIDENCE_TYPES = new Set(["source_record_count_measurement", "source_derived_measurement"]);
-
+// measured finding the finding-review read presents as a structured
+// measurement - P2-01M record-count evidence (`measurement`) or a paired
+// baseline/follow-up outcome (`derived_measurement`), by the recorded family
+// the claim library returns - and an actor whose access capabilities admit
+// recording this organization's evidence review. Other derived families
+// (tabular counts and rates, cross-source reach) get no structured view, so
+// they are not offered it; their evidence and claim review decisions stay in
+// the Traceability panel. It grants nothing; every decision is re-authorized
+// by the server.
 export function canReviewMeasuredFinding(claim, workflowOperations) {
-  return workflowOperations?.recordEvidenceReview === true
-    && REVIEWABLE_MEASURED_EVIDENCE_TYPES.has(claim?.evidenceType)
-    && isRouteUuid(claim?.claimId);
+  const structured = claim?.evidenceType === "source_record_count_measurement"
+    || (claim?.evidenceType === "source_derived_measurement" && claim?.measurementFamily === "paired_outcome_change");
+  return workflowOperations?.recordEvidenceReview === true && structured && isRouteUuid(claim?.claimId);
 }
 
 // Package 14-05: internal evidence-summary draft generation is gated on

@@ -176,12 +176,22 @@ test("labels: the paired review speaks of a result, not a count; record-count wo
     "each participant's baseline value compared with the same participant's follow-up value in one worksheet; participants without a comparable pair are excluded and counted");
 });
 
-test("Get Kinder's Review finding is offered for derived measured claims as for record counts, and nothing else", () => {
+// Owner prompt 2026-11-12 (entry-point mismatch): "Review finding" opens the
+// structured measured-finding view, which the server serves only for a record
+// count (measurement) and a paired outcome (derived_measurement). Tabular
+// counts and rates and cross-source reach get neither, so they are not offered
+// it; their evidence and claim review stays in the Traceability decision forms.
+test("Get Kinder's Review finding is offered exactly where the server serves a structured measurement", () => {
   const claim = { claimId: "24000000-0000-4000-8000-000000000001", evidenceType: "source_derived_measurement" };
-  assert.equal(canReviewMeasuredFinding(claim, { recordEvidenceReview: true }), true);
-  assert.equal(canReviewMeasuredFinding({ ...claim, evidenceType: "source_record_count_measurement" }, { recordEvidenceReview: true }), true);
-  assert.equal(canReviewMeasuredFinding({ ...claim, evidenceType: "document_statement" }, { recordEvidenceReview: true }), false);
-  assert.equal(canReviewMeasuredFinding(claim, { recordEvidenceReview: false }), false);
+  const ops = { recordEvidenceReview: true };
+  assert.equal(canReviewMeasuredFinding({ ...claim, evidenceType: "source_record_count_measurement", measurementFamily: null }, ops), true, "record count");
+  assert.equal(canReviewMeasuredFinding({ ...claim, measurementFamily: "paired_outcome_change" }, ops), true, "paired outcome");
+  for (const family of ["tabular_count", "tabular_rate", "cross_source_reach", null, undefined]) {
+    assert.equal(canReviewMeasuredFinding({ ...claim, measurementFamily: family }, ops), false, `derived ${family}: no structured view is served`);
+  }
+  assert.equal(canReviewMeasuredFinding({ ...claim, evidenceType: "document_statement" }, ops), false);
+  assert.equal(canReviewMeasuredFinding({ ...claim, measurementFamily: "paired_outcome_change" }, { recordEvidenceReview: false }), false, "authority unchanged");
+  assert.equal(canReviewMeasuredFinding({ ...claim, claimId: "not-a-uuid", measurementFamily: "paired_outcome_change" }, ops), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -230,4 +240,74 @@ test("both panels render the shared paired view and drop record-count wording fo
   assert.doesNotMatch(gk, /derivedMeasurementInterpretationPath|interpretationBody/, "Get Kinder never records the organization's meaning");
   // The record-count definition sentence is reserved for record counts.
   assert.match(client, /derived\s*\?\s*"No evidence, claim or limitation review is required for internal use: the result was calculated from the authorized source/);
+});
+
+// ---------------------------------------------------------------------------
+// The claim library carries the recorded family the entry point needs.
+// ---------------------------------------------------------------------------
+test("claim library read: each derived claim gets its recorded family, scoped to the organization; record-count lists never read derived tables", async () => {
+  const { listClaimLibraryReviewCandidates } = await import("../Backend/kai/db/kaiClaimLibraryReadModels.js");
+  const ids = { rc: "31000000-0000-4000-8000-000000000001", paired: "31000000-0000-4000-8000-000000000002", rate: "31000000-0000-4000-8000-000000000003", reach: "31000000-0000-4000-8000-000000000004" };
+  const row = (evidenceItemId, evidenceType) => ({ claim_id: `4${evidenceItemId.slice(1)}`, organization_id: ORG, evidence_item_id: evidenceItemId, evidence_type: evidenceType, review_queue_items: [] });
+  const calls = [];
+  const db = { async query(sql, params) {
+    calls.push({ sql, params });
+    assert.match(sql.trim(), /^SELECT\b/);
+    assert.equal(params[0], ORG, "organization scoped");
+    if (/FROM kai\.claims c/.test(sql)) return { rows: this.claimRows };
+    if (/FROM kai\.evidence_derived_measurements edm/.test(sql)) {
+      return { rows: [
+        { evidence_item_id: ids.paired, measurement_family: "paired_outcome_change", measurement_evidence_current: true },
+        { evidence_item_id: ids.rate, measurement_family: "tabular_rate", measurement_evidence_current: true },
+        { evidence_item_id: ids.reach, measurement_family: "cross_source_reach", measurement_evidence_current: true },
+      ].filter((r) => params[1].includes(r.evidence_item_id)) };
+    }
+    assert.fail(sql);
+  } };
+  db.claimRows = [row(ids.rc, "source_record_count_measurement"), row(ids.paired, "source_derived_measurement"), row(ids.rate, "source_derived_measurement"), row(ids.reach, "source_derived_measurement")];
+  const rows = await listClaimLibraryReviewCandidates(ORG, { limit: 25 }, db);
+  assert.deepEqual(rows.map((r) => [r.evidence_item_id, r.measurement_family]),
+    [[ids.rc, null], [ids.paired, "paired_outcome_change"], [ids.rate, "tabular_rate"], [ids.reach, "cross_source_reach"]]);
+  assert.deepEqual(calls[1].params[1], [ids.paired, ids.rate, ids.reach], "only derived evidence is looked up");
+  calls.length = 0;
+  db.claimRows = [row(ids.rc, "source_record_count_measurement")];
+  const recordOnly = await listClaimLibraryReviewCandidates(ORG, { limit: 25 }, db);
+  assert.equal(calls.length, 1, "no derived-table read without a derived claim");
+  assert.equal(recordOnly[0].measurement_family, null);
+});
+
+test("claim library service and projection: measurementFamily reaches the GK claim; the entry point follows it", async () => {
+  const { listClaimLibraryCandidates } = await import("../Backend/kai/services/kaiClaimLibraryService.js");
+  const { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } = await import("../Backend/kai/auth/kaiOrganizationMembershipSource.js");
+  const { projectCandidateClaims } = await import("../frontend/impactEvidenceLibraryLogic.js");
+  const actorContext = { actorType: "human", actorUserId: "19000000-0000-4000-8000-000000000001", kaiRoles: [], platformSuperuser: false,
+    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin", source: STORED_ORGANIZATION_MEMBERSHIP_SOURCE }] };
+  const families = { "51000000-0000-4000-8000-000000000001": "paired_outcome_change", "51000000-0000-4000-8000-000000000002": "tabular_count", "51000000-0000-4000-8000-000000000003": null };
+  const rows = Object.entries(families).map(([evidenceItemId, family], index) => ({
+    claim_id: `5200000${index}-0000-4000-8000-000000000001`, organization_id: ORG, evidence_item_id: evidenceItemId, claim_type: "finding", claim_status: "proposed",
+    claim_review_status: "needs_gk_review", claim_strength: "unassessed", review_queue_items: [],
+    evidence_type: family ? "source_derived_measurement" : "source_record_count_measurement", measurement_family: family,
+  }));
+  const result = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => rows });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const { items } = result.data;
+  assert.deepEqual(items.map((c) => c.measurementFamily), ["paired_outcome_change", "tabular_count", null]);
+  const projected = projectCandidateClaims({ items });
+  assert.deepEqual(projected.map((c) => c.measurementFamily), ["paired_outcome_change", "tabular_count", null]);
+  assert.deepEqual(projected.map((c) => canReviewMeasuredFinding(c, { recordEvidenceReview: true })), [true, false, true]);
+});
+
+test("review reason: a derived result separates viewing, recording meaning and Get Kinder's review decisions; codes unchanged", () => {
+  const derivedText = L.reviewReasonText("evidence_type_requires_get_kinder_review", { derived: true });
+  assert.equal(derivedText, "You can view this result here, and your organization's administrator can record what it measures; recording a meaning is not a review. "
+    + "The evidence and claim review decisions for this kind of measurement are recorded by Get Kinder, not by your organization.");
+  assert.doesNotMatch(derivedText, /Only a record-count measurement/);
+  assert.equal(L.reviewReasonText("evidence_type_requires_get_kinder_review"), "Only a record-count measurement can be reviewed here; Get Kinder reviews other evidence.", "other evidence keeps its wording");
+  assert.equal(L.reviewReasonText("get_kinder_decision_recorded", { derived: true }), "Get Kinder has already recorded this decision; only Get Kinder can change it.");
+  assert.equal(L.reviewReasonText("unknown_code", { derived: true }), "unknown_code");
+  // The organization's plan still records nothing for a paired claim it may not decide.
+  const review = { evidenceReview: { organizationMayDecide: false, decisionOutcome: null }, claimReview: { organizationMayDecide: false, decisionOutcome: null },
+    coverageLimitations: [], internalEligibility: { eligible: false } };
+  for (const judgment of ["supported", "not_supported", "needs_more_information"]) assert.deepEqual(L.measuredClaimReviewPlan(review, judgment), [], judgment);
 });

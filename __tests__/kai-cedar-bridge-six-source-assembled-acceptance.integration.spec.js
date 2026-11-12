@@ -1168,6 +1168,12 @@ async function runCedarBridgeAcceptance() {
           assert.doesNotMatch(text, /recorded definition:|under your organization's recorded definition|as defined by the organization|One record is|records in the file|Counting method|the count is supported|\bimproved\b|\bworsened\b|2025-04-01/i, who);
         };
         assertReadable(clientText, "client panel");
+        // Viewing, recording meaning and Get Kinder's review decisions are told apart (reason code unchanged).
+        assert.ok(clientText.includes("You can view this result here, and your organization's administrator can record what it measures; recording a meaning is not a review. "
+          + "The evidence and claim review decisions for this kind of measurement are recorded by Get Kinder, not by your organization."), clientText);
+        assert.doesNotMatch(clientText, /Only a record-count measurement can be reviewed here/);
+        assert.equal(await page.attrOf(`${clientPanel} [data-client-measured-claim-review-reason="evidence_type_requires_get_kinder_review"]`, "data-client-measured-claim-review-reason"), "evidence_type_requires_get_kinder_review");
+        assert.equal(await page.evaluate(`document.querySelectorAll(${J(`${clientPanel} [data-client-measured-claim-judgment]`)}).length`), 0, "no organization review action is offered");
         assert.equal(await page.attrOf(`${clientPanel} [data-factual-review-paired]`, "data-factual-review-meaning-state"), "not_recorded");
         assert.ok(offered, "Get Kinder's reviewer is offered Review finding for the paired claim");
         assertReadable(gkText, "GK panel");
@@ -2025,6 +2031,96 @@ async function runCedarBridgeAcceptance() {
       }
       // The existing single-source and paired claims are unchanged and still eligible.
       for (const label of DERIVED_CLAIM_LABELS) assert.equal((await trace(derivedClaims[label])).eligible, true, label);
+    });
+
+    // Owner prompt 2026-11-12 (entry-point mismatch): Get Kinder's "Review
+    // finding" is offered exactly for the measurement types the finding-review
+    // read presents as structured measurements (record count, paired outcome);
+    // tabular counts and rates and cross-source reach keep their review in the
+    // Traceability panel.
+    await test("19 (browser): Get Kinder's Review finding follows the recorded measurement family; other derived claims keep their Traceability review", { skip: !CHROME || !WORKDIR ? "Chrome or the built bundle not available" : false }, async () => {
+      const targets = {
+        record_count: state.register.claimId,
+        paired_outcome: derivedClaims.paired_field_6,
+        tabular_count: derivedClaims.events_distinct,
+        tabular_rate: derivedClaims.followups_response_rate,
+        cross_source: crossClaims.reach_people,
+      };
+      const familyRows = await query(`SELECT c.claim_id::text, e.evidence_type, dm.measurement_family
+          FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
+          LEFT JOIN kai.evidence_derived_measurements edm ON edm.evidence_item_id = e.evidence_item_id
+          LEFT JOIN kai.source_derived_measurements dm ON dm.source_derived_measurement_id = edm.source_derived_measurement_id
+         WHERE c.claim_id = ANY($1::uuid[])`, [Object.values(targets)]);
+      const recorded = Object.fromEntries(familyRows.map((row) => [row.claim_id, row]));
+      assert.deepEqual(Object.values(targets).map((id) => recorded[id]?.measurement_family ?? null),
+        [null, "paired_outcome_change", "tabular_count", "tabular_rate", "cross_source_reach"], J(familyRows));
+      const [{ n: claimCount }] = await query("SELECT count(*)::int AS n FROM kai.claims WHERE organization_id = $1::uuid", [ORG]);
+      assert.ok(claimCount <= 25, `every claim is on the library's first page (${claimCount})`);
+      const expectedOffer = { record_count: true, paired_outcome: true, tabular_count: false, tabular_rate: false, cross_source: false };
+      const scenario = { targets, families: Object.fromEntries(Object.entries(targets).map(([k, id]) => [k, recorded[id].measurement_family])) };
+      report.gk_review_finding_entry_point = scenario;
+
+      const browser = await launchChrome();
+      const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
+      try {
+        const mark = gkPage.mark();
+        await gkPage.goto("/impact-library");
+        await gkPage.clickNav("Knowledge Studio");
+        await gkPage.idle();
+        assert.ok((await gkPage.text()).includes(ORG_NAME));
+        await gkPage.clickTab("Evidence");
+        await gkPage.idle();
+        const libraryRead = gkPage.requestsSince(mark).filter((r) => r.method === "GET" && new URL(r.url).pathname.endsWith("/claim-library/candidates")).at(-1);
+        assert.equal(libraryRead?.status, 200);
+        const listed = (await gkPage.responseBody(libraryRead)).data.items;
+        const byId = Object.fromEntries(listed.map((item) => [item.claimId, item]));
+        const exists = (selector) => gkPage.evaluate(`Boolean(document.querySelector(${J(selector)}))`);
+        await gkPage.waitFor(() => exists(`[data-gk-review-finding="${targets.record_count}"]`), "the claim list");
+        scenario.offered = {};
+        for (const [kind, claimId] of Object.entries(targets)) {
+          // The claim library returns the recorded family; the entry point follows it.
+          assert.equal(byId[claimId]?.measurementFamily ?? null, recorded[claimId].measurement_family, `${kind}: measurementFamily as recorded`);
+          scenario.offered[kind] = await exists(`[data-gk-review-finding="${claimId}"]`);
+          assert.equal(scenario.offered[kind], expectedOffer[kind], `${kind}: Review finding offered = ${expectedOffer[kind]}`);
+          assert.ok(await exists(`span[title="${claimId}"]`), `${kind}: the claim is listed`);
+        }
+
+        // Record count: the structured record-count view.
+        const openFinding = async (claimId, pattern) => {
+          await gkPage.clickVisible(`[data-gk-review-finding="${claimId}"]`, "Review finding");
+          const panel = `[data-gk-finding-review="${claimId}"]`;
+          await gkPage.waitFor(async () => pattern.test((await gkPage.textOf(panel)) || ""), `${claimId}: the finding`, { timeout: 30000 });
+          await gkPage.idle();
+          return gkPage.textOf(panel);
+        };
+        const recordText = await openFinding(targets.record_count, /Counted: \d+/);
+        scenario.record_count_text = recordText;
+        assert.match(recordText, /Counted: 80 participant register records/);
+        assert.match(recordText, /Meaning, as defined by the organization \(not verified by KAI\): one record is one/);
+        assert.equal(await exists(`[data-gk-finding-review="${targets.record_count}"] [data-factual-review-paired]`), false);
+        // Paired outcome: the structured paired view with the organization's recorded meaning.
+        const pairedText = await openFinding(targets.paired_outcome, /Among \d+ participants/);
+        scenario.paired_outcome_text = pairedText;
+        assert.match(pairedText, /^Digital confidence$/m);
+        assert.ok(pairedText.includes("Among 38 participants with comparable baseline and follow-up values, 25 (65.79%) had a higher follow-up value, 10 were unchanged and 3 had a lower follow-up value."));
+        assert.match(pairedText, /The organization states that a higher value is better\./);
+        assert.doesNotMatch(pairedText, /\bfield_\d+\b|\bsheet_\d+\b/);
+        // Other derived families: no structured view is offered, and the claim's own Traceability review is still there.
+        for (const kind of ["tabular_count", "tabular_rate", "cross_source"]) {
+          const claimId = targets[kind];
+          await gkPage.evaluate(`document.querySelector(${J(`span[title="${claimId}"]`)}).closest("button").click()`);
+          await gkPage.idle();
+          await gkPage.waitFor(() => gkPage.evaluate(`document.querySelector(${J(`span[title="${claimId}"]`)}).closest("button").classList.contains("active")`), `${kind}: selected`);
+          await gkPage.waitFor(async () => Boolean(await gkPage.textOf("[data-gk-traceability-summary]")) && !/Loading traceability/.test(await gkPage.text()), `${kind}: Traceability`, { timeout: 30000 });
+          assert.equal(await exists(`[data-gk-finding-review="${claimId}"]`), false, `${kind}: no structured finding panel`);
+          const page = await gkPage.text();
+          assert.match(page, /Evidence review decision\s*supported/, `${kind}: the recorded evidence review stays visible`);
+        }
+        assert.deepEqual(gkPage.exceptions, []);
+      } finally {
+        await gkPage.close().catch(() => {});
+        await browser.close();
+      }
     });
 
     let crossDraftId = null;
