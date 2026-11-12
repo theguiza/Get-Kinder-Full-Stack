@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { inflateRawSync } from "node:zlib";
 
 /**
  * Owner Package 4 (2026-11-10): preserve document evidence meaning through
@@ -265,7 +266,24 @@ async function runPackage4Acceptance() {
   let respond = null;
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
-    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, system: payload.system, serialized: J(payload) });
+    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, assessment: requestBody.assessment ?? null, system: payload.system, serialized: J(payload) });
+    // A Free Impact Assessment request (scenario O): sections, written the way
+    // the prompt asks - each finding from KAI's plainReading where it has one,
+    // the document statements as the source states them. No intelligence: the
+    // text is copied, never paraphrased.
+    if (requestBody.assessment) {
+      const cite = (claim) => [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }];
+      const documents = requestBody.claims.filter((claim) => claim.limitationCodes.some((code) => code.startsWith("document.")));
+      const findings = requestBody.claims.filter((claim) => !documents.includes(claim)).slice(0, 9);
+      const blocks = [
+        { section: "executive_snapshot", text: "This assessment brings together the people the programme reached and the participant ratings the organization recorded at baseline and follow-up.", citations: cite(requestBody.claims[0]) },
+        ...findings.map((claim) => ({ section: "evidence_findings", text: claim.plainReading || claim.claimStatement, citations: cite(claim) })),
+        documents.length > 0
+          ? { section: "impact_stories", text: documents.map((claim) => claim.claimStatement).join(" "), citations: documents.flatMap(cite) }
+          : { section: "impact_stories", text: "No participant account is stated beyond the cited findings.", citations: cite(requestBody.claims[0]) },
+      ];
+      return { content: [{ type: "text", text: J({ blocks }) }] };
+    }
     return { content: [{ type: "text", text: J({ approved: true, draftStatus: "released",
       blocks: requestBody.claims.map((claim) => ({ text: (respond && respond(claim)) || claim.claimStatement, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })) }) }] };
   };
@@ -285,6 +303,7 @@ async function runPackage4Acceptance() {
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const {
     crossSourceMeasurementsPath, crossSourceReconciliationJobPath, derivedMeasurementBasisPath, derivedMeasurementInterpretationPath,
+    pairedOutcomeMeasurementsPath, tabularMeasurementPath,
   } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const router = (await import("../Backend/kai/routes/sprint2IntakeApi.js")).default;
   const config = await import("../Backend/kai/config/kaiSprint2Config.js");
@@ -308,6 +327,8 @@ async function runPackage4Acceptance() {
     events: fileOf("events", "03_Community_Service_Log.csv", ".csv", "text/csv"),
     notes: fileOf("notes", "05_Programme_Coordination_Notes.txt", ".txt", "text/plain"),
     review: fileOf("review", "06_Community_Review.pdf", ".pdf", "application/pdf"),
+    // Outcome scenario O (owner direction 2026-11-12): the original assessment workbook.
+    workbook: fileOf("workbook", "04_Connection_Assessments.xlsx", ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
   };
 
   // Truthful synthetic classifications: the CSVs carry pseudonymous
@@ -323,10 +344,11 @@ async function runPackage4Acceptance() {
   const DECISIONS = Object.freeze({
     roster: { ...ABSENT, reviewed_personal_data_status: "present" }, events: { ...ABSENT, reviewed_personal_data_status: "present" },
     notes: { ...ABSENT, reviewed_staff_notes_status: "present" }, review: ABSENT,
+    workbook: { ...ABSENT, reviewed_personal_data_status: "present" },
   });
 
   // --- organizations (one per scenario) --------------------------------------
-  const ORGS = Object.fromEntries(["P", "D", "R"].map((key, index) => [key, {
+  const ORGS = Object.fromEntries(["P", "D", "R", "O"].map((key, index) => [key, {
     key, organizationId: `0d000000-0000-4000-8000-0000000000${String(index + 1).padStart(2, "0")}`,
     projectId: `7d000000-0000-4000-8000-0000000000${String(index + 1).padStart(2, "0")}`, adminUserId: 2001 + index * 2,
   }]));
@@ -581,7 +603,7 @@ async function runPackage4Acceptance() {
   const P = ORGS.P;
 
   try {
-    await test("0: the four original upload files match the package checksum manifest; nothing from the answer-key folder is a source; the tested bundle is the built one", async () => {
+    await test("0: the original upload files match the package checksum manifest; nothing from the answer-key folder is a source; the tested bundle is the built one", async () => {
       const manifest = JSON.parse(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "Community_File_Checksums.json"), "utf8"));
       for (const file of Object.values(FILES)) {
         const entry = manifest.find((candidate) => candidate.relative_path === `01_UPLOAD_TO_KAI/${file.name}`);
@@ -984,6 +1006,250 @@ async function runPackage4Acceptance() {
       recordRow("R roster AI withdrawn", { claims: "190 + 67", operation: "generate internal evidence summary", http: measured.status, provider_invoked: false, draft: "refused", provisional_admitted: false });
     });
 
+    // ---- Outcome scenario O (owner direction 2026-11-12) --------------------
+    // The same Project B, with its original assessment workbook: what changed
+    // for participants, measured by the existing paired-outcome and tabular
+    // methods, interpreted with the meaning the organization's own brief gives,
+    // and assessed beside the established reach.
+    const O = ORGS.O;
+    report.outcomes = {};
+    const ASSESSMENTS = worksheetRows(FILES.workbook.bytes, 1);
+    const FOLLOWUPS = worksheetRows(FILES.workbook.bytes, 2);
+    const EXPECTED_OUTCOMES = {
+      connection: independentPairs(ASSESSMENTS, "community_connection_score_1_to_5"),
+      navigation: independentPairs(ASSESSMENTS, "resource_navigation_score_1_to_5"),
+    };
+    const EXPECTED_RATES = {
+      response: independentRate(FOLLOWUPS, { condition: ["response_status", "answered"], population: ["contact_attempted", "yes"] }),
+      joined: independentRate(FOLLOWUPS, { condition: ["self_reported_next_step", "joined_community_activity"], population: ["response_status", "answered"] }),
+      support: independentRate(FOLLOWUPS, { condition: ["self_reported_next_step", "accessed_local_support"], population: ["response_status", "answered"] }),
+    };
+    // The organization's meaning, from its own project brief (01_Connection_Project_Brief.md,
+    // section 2), recorded by its administrator through the supported route. The
+    // brief gives community connection's scale and direction; for resource
+    // navigation it gives what the question asks but not its anchors or which end
+    // is better, so no direction is recorded for it.
+    const OUTCOME_MEANINGS = {
+      connection: { indicator_label: "Community-connection confidence", score_direction: "higher_is_better", evidence_basis: "self_reported",
+        meaning_text: "From the project brief: the participant's community-connection confidence on a five-point self-report scale (1 = very low, 5 = very high); a higher follow-up score means the person reported more confidence" },
+      navigation: { indicator_label: "Resource-navigation confidence", score_direction: "not_established", evidence_basis: "self_reported",
+        meaning_text: "From the project brief: a five-point self-report question asking how ready the respondent feels to find relevant assistance" },
+    };
+
+    await test("O1 (fixture, API): the original assessment workbook is uploaded, profiled and promoted beside the reach sources; the established 190 contacts / 67 people are unchanged", async () => {
+      await buildMeasured(O);
+      O.workbook = await uploadAndPromote(O, FILES.workbook);
+      O.review = await uploadAndPromote(O, FILES.review);
+      await extract(O, O.review);
+      O.docs = { C: await proposeCase(O, "C") };
+      assert.deepEqual([O.cross.encounters.measured_value, O.cross.people.measured_value], [EXPECTED.eligible, EXPECTED.people]);
+      const basis = await O.api("GET", derivedMeasurementBasisPath(O.organizationId, O.workbook.sourceVersionId, "sheet_1"));
+      assert.equal(basis.status, 200, J(basis.body));
+      assert.doesNotMatch(J(basis.body.data), RAW_IDENTIFIER, "no participant identifier is exposed by the basis");
+      report.outcomes.sources = { workbook_source_version: O.workbook.sourceVersionId, review_source_version: O.review.sourceVersionId,
+        independent: { outcomes: EXPECTED_OUTCOMES, rates: EXPECTED_RATES } };
+    });
+
+    await test("O2: the existing paired-outcome method calculates both self-ratings exactly as the brief's pairing rule gives them, with exclusions and lineage", async () => {
+      const recorded = await O.api("POST", pairedOutcomeMeasurementsPath(O.organizationId, O.workbook.sourceVersionId, "sheet_1"), {});
+      assert.equal(recorded.status, 200, J(recorded.body));
+      const rows = await query(`SELECT source_derived_measurement_id::text, source_version_id::text, worksheet_key, calculation_method, definition, field_keys,
+          numerator::int, denominator::int, percentage::text, component_counts, exclusions FROM kai.source_derived_measurements
+         WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_family = 'paired_outcome_change'`, [O.organizationId, O.workbook.sourceVersionId]);
+      assert.equal(rows.length, 2, J(rows.map((row) => row.definition)));
+      O.outcomes = {};
+      for (const [key, expected] of Object.entries(EXPECTED_OUTCOMES)) {
+        const row = rows.find((candidate) => candidate.definition.outcome_column === expected.column);
+        assert.ok(row, `${key}: measured from column ${expected.column}`);
+        const c = row.component_counts;
+        assert.deepEqual([row.denominator, row.numerator, c.unchanged_count, c.decreased_count, row.percentage, c.participant_count, c.excluded_participant_count],
+          [expected.pairs, expected.higher, expected.same, expected.lower, expected.percentage, expected.participants, expected.excluded], `${key}: ${J(row.component_counts)}`);
+        assert.deepEqual([row.calculation_method, row.worksheet_key, row.source_version_id], ["p1_xlsx_paired_baseline_followup_numeric_change_v1", "sheet_1", O.workbook.sourceVersionId]);
+        assert.ok(row.definition.instrument_version_field_key, `${key}: pairs require the same tool version`);
+        const [evidence] = await query(`SELECT e.evidence_item_id::text, e.source_version_id::text, e.evidence_type, l.locator_type, l.coordinates FROM kai.evidence_derived_measurements d
+            JOIN kai.evidence_items e ON e.evidence_item_id = d.evidence_item_id JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+           WHERE d.source_derived_measurement_id = $1::uuid AND d.interpretation_id IS NULL`, [row.source_derived_measurement_id]);
+        assert.deepEqual([evidence.evidence_type, evidence.source_version_id, evidence.locator_type, evidence.coordinates.sheet_key], ["source_derived_measurement", O.workbook.sourceVersionId, "source_derived_measurement_fields", "sheet_1"]);
+        O.outcomes[key] = { measurementId: row.source_derived_measurement_id, row,
+          exclusions: Object.fromEntries((row.exclusions.participants || []).map((entry) => [entry.reason, entry.participant_count])) };
+        assert.equal(Object.values(O.outcomes[key].exclusions).reduce((a, b) => a + b, 0), expected.excluded, `${key}: every excluded participant has a recorded reason`);
+      }
+      report.outcomes.paired = Object.fromEntries(Object.entries(O.outcomes).map(([key, entry]) => [key, { column: entry.row.definition.outcome_column, pairs: entry.row.denominator,
+        higher: entry.row.numerator, same: entry.row.component_counts.unchanged_count, lower: entry.row.component_counts.decreased_count, percentage: entry.row.percentage,
+        participants: entry.row.component_counts.participant_count, exclusions: entry.exclusions, measurement_id: entry.measurementId }]));
+    });
+
+    await test("O3: the organization's meaning from its brief is recorded; follow-up rates are measured; every outcome claim traces to the workbook version and is admitted provisionally", async () => {
+      for (const key of ["connection", "navigation"]) {
+        const stated = await O.api("POST", derivedMeasurementInterpretationPath(O.organizationId, O.outcomes[key].measurementId), OUTCOME_MEANINGS[key]);
+        assert.equal(stated.status, 200, J(stated.body));
+        const proposed = await O.api("POST", claimProposalPath(O.organizationId, stated.body.data.evidenceItem.evidence_item_id), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        Object.assign(O.outcomes[key], { claimId: proposed.body.data.claim.claim_id, evidenceItemId: stated.body.data.evidenceItem.evidence_item_id, statement: proposed.body.data.claim.statement });
+      }
+      assert.match(O.outcomes.connection.statement, /^Community-connection confidence \(meaning stated by the organization; values self-reported\): .* the organization states higher is better\./);
+      assert.match(O.outcomes.navigation.statement, /whether higher is better is not established/);
+      // Follow-up results (self-reported next steps; the response rate is the organization's record).
+      const followups = await O.api("GET", derivedMeasurementBasisPath(O.organizationId, O.workbook.sourceVersionId, "sheet_2"));
+      assert.equal(followups.status, 200, J(followups.body));
+      const fields = followups.body.data.tabular.fields;
+      const header = FOLLOWUPS[0];
+      const fieldFor = (name) => fields.find((field) => field.column_position === Object.keys(header).indexOf(columnOf(header, name)) + 1);
+      const valueOf = (name, label) => {
+        const field = fieldFor(name);
+        const value = field?.values?.find((candidate) => candidate.label === label);
+        assert.ok(value, `${name} lists ${label}`);
+        return { kind: "category", field_key: field.field_key, value_key: value.value_key };
+      };
+      const RATES = {
+        response: { definition: { operation: "rate", conditions: [valueOf("response_status", "answered")], population: [valueOf("contact_attempted", "yes")] },
+          interpretation: { indicator_label: "Follow-up response rate", meaning_text: "Attempted follow-up contacts that were answered", evidence_basis: "organization_record" } },
+        joined: { definition: { operation: "rate", conditions: [valueOf("self_reported_next_step", "joined_community_activity")], population: [valueOf("response_status", "answered")] },
+          interpretation: { indicator_label: "Joined a community activity (self-reported)", meaning_text: "Answered follow-ups in which the participant reported joining a community activity; not independently verified", evidence_basis: "self_reported" } },
+        support: { definition: { operation: "rate", conditions: [valueOf("self_reported_next_step", "accessed_local_support")], population: [valueOf("response_status", "answered")] },
+          interpretation: { indicator_label: "Accessed local support (self-reported)", meaning_text: "Answered follow-ups in which the participant reported accessing local support; not independently verified", evidence_basis: "self_reported" } },
+      };
+      O.rates = {};
+      for (const [key, body] of Object.entries(RATES)) {
+        const recorded = await O.api("POST", tabularMeasurementPath(O.organizationId, O.workbook.sourceVersionId, "sheet_2"), body);
+        assert.equal(recorded.status, 200, `${key}: ${J(recorded.body)}`);
+        const { measurement, evidenceItem } = recorded.body.data;
+        assert.deepEqual([measurement.numerator, measurement.denominator, String(measurement.percentage)], [EXPECTED_RATES[key].numerator, EXPECTED_RATES[key].denominator, EXPECTED_RATES[key].percentage], key);
+        const proposed = await O.api("POST", claimProposalPath(O.organizationId, evidenceItem.evidence_item_id), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        O.rates[key] = { claimId: proposed.body.data.claim.claim_id, evidenceItemId: evidenceItem.evidence_item_id, measurementId: measurement.source_derived_measurement_id };
+      }
+      // Lineage: every outcome and follow-up claim -> evidence -> the workbook source version.
+      const outcomeClaims = [...Object.values(O.outcomes), ...Object.values(O.rates)].map((entry) => entry.claimId);
+      const lineage = await query(`SELECT c.claim_id::text, e.evidence_item_id::text, e.source_version_id::text, e.evidence_type FROM kai.claims c
+          JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE c.claim_id = ANY($1::uuid[])`, [outcomeClaims]);
+      assert.equal(lineage.length, outcomeClaims.length);
+      for (const row of lineage) assert.deepEqual([row.source_version_id, row.evidence_type], [O.workbook.sourceVersionId, "source_derived_measurement"], J(row));
+      for (const claimId of [O.claims.encounters.claimId, O.claims.people.claimId, ...outcomeClaims, O.docs.C.claimId]) {
+        assert.equal((await diagnose(O, claimId)).provisional?.admitted, true, `${claimId}: admitted to a provisional internal draft`);
+      }
+      report.outcomes.claims = { connection: O.outcomes.connection.statement, navigation: O.outcomes.navigation.statement, lineage,
+        rates: Object.fromEntries(Object.entries(O.rates).map(([key, entry]) => [key, { claim_id: entry.claimId, ...EXPECTED_RATES[key] }])) };
+    });
+
+    await test("O4 (browser): the administrator selects reach, outcomes, follow-up results and the qualified estimate, generates the Free Impact Assessment, reads it and its report, and reopens it after a reload", async () => {
+      const pageO = await openPage(browser, { baseUrl, legacyUserId: O.adminUserId });
+      const openStudioO = async (view) => {
+        await pageO.goto("/impact-library");
+        await pageO.clickNav("Knowledge Studio");
+        await pageO.waitFor(() => pageO.visible("#gk-shell-project-select"), "the Project selector");
+        await pageO.idle();
+        await pageO.selectProject(O.projectId);
+        await pageO.idle();
+        await pageO.clickTab(view);
+        await pageO.idle();
+      };
+      const selected = [O.claims.encounters.claimId, O.claims.people.claimId, O.outcomes.connection.claimId, O.outcomes.navigation.claimId,
+        O.rates.response.claimId, O.rates.joined.claimId, O.rates.support.claimId, O.docs.C.claimId];
+      const approvalsBefore = await counts(O.organizationId);
+      try {
+        await openStudioO("Evidence");
+        for (const claimId of selected) {
+          const row = `[data-client-claim="${claimId}"]`;
+          await pageO.waitFor(async () => (await pageO.attrOf(row, "data-client-claim-provisional-draft")) === "admitted", `${claimId}: admitted`, { timeout: 30000 });
+          await pageO.clickVisible(`[data-client-select-claim="${claimId}"]`, `${claimId}: Use in an internal draft`);
+          await pageO.waitFor(() => pageO.evaluate(`document.querySelector('[data-client-select-claim="${claimId}"]').checked === true`), `${claimId} selected`);
+        }
+        await pageO.clickTab("Drafts");
+        await pageO.idle();
+        const calls = modelCalls.length;
+        const mark = pageO.mark();
+        await pageO.clickButton("Generate Free Impact Assessment");
+        await pageO.waitFor(() => pageO.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the generation request", { timeout: 60000 });
+        await pageO.idle();
+        const posted = pageO.requestsSince(mark).find((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [`${orgPath(O.organizationId)}/generated-content-drafts/free-impact-assessment`, 201]);
+        assert.deepEqual([...JSON.parse(posted.postData).claim_ids].sort(), [...selected].sort(), "exactly the visible selection");
+        const draftId = (await pageO.responseBody(posted)).data.generatedContentDraftId;
+
+        // What the provider received: the permitted measurements, their meanings and limitations; no identifier or raw row.
+        const call = modelCalls.slice(calls).at(-1);
+        assert.ok(call.assessment, "a Free Impact Assessment request");
+        assert.deepEqual(call.claims.map((claim) => claim.claimId).sort(), [...selected].sort());
+        const sent = (claimId) => call.claims.find((claim) => claim.claimId === claimId);
+        assert.match(sent(O.outcomes.connection.claimId).plainReading, /five-point self-report scale \(1 = very low, 5 = very high\)/);
+        assert.match(sent(O.outcomes.connection.claimId).plainReading, /The organization states that a higher value is better/);
+        assert.match(sent(O.outcomes.navigation.claimId).plainReading, /Whether a higher value is better has not been stated/);
+        assert.ok(sent(O.outcomes.connection.claimId).limitationCodes.includes("derived.self_reported"));
+        assert.ok(sent(O.docs.C.claimId).limitationCodes.includes("document.source_estimate"));
+        assert.doesNotMatch(call.serialized, RAW_IDENTIFIER, "no participant or event identifier reaches the model");
+
+        // The saved assessment, opened from the server by its own id.
+        await pageO.waitFor(() => pageO.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment opened", { timeout: 30000 });
+        const detail = await pageO.textOf(`[data-client-internal-draft-detail="${draftId}"]`);
+        for (const claimId of selected) assert.ok(await pageO.textOf(`[data-client-internal-draft-detail="${draftId}"] [data-client-internal-draft-citation="${claimId}"]`), `${claimId} cited`);
+        const cc = EXPECTED_OUTCOMES.connection;
+        const ra = EXPECTED_OUTCOMES.navigation;
+        // Who we reached.
+        assert.match(detail, new RegExp(`${EXPECTED.people} distinct people on the participant register received at least one completed service`));
+        assert.match(detail, new RegExp(`${EXPECTED.eligible} completed service encounters`));
+        // What changed, in the organization's terms.
+        assert.match(detail, /Community-connection confidence: .*five-point self-report scale \(1 = very low, 5 = very high\)/);
+        assert.ok(detail.includes(`Among the ${cc.pairs} participants with a comparable baseline and follow-up value, ${cc.higher} (${cc.percentage}%) had a higher value at follow-up, ${cc.same} had the same value and ${cc.lower} had a lower value.`), "community connection, as calculated");
+        assert.ok(detail.includes(`Among the ${ra.pairs} participants with a comparable baseline and follow-up value, ${ra.higher} (${ra.percentage}%) had a higher value at follow-up, ${ra.same} had the same value and ${ra.lower} had a lower value.`), "resource navigation, as calculated");
+        assert.match(detail, /Whether a higher value is better has not been stated, so this is reported as an observed numerical change, not as progress or decline\./);
+        assert.match(detail, /Clarification needed: confirm whether a higher Resource-navigation confidence value is better\./);
+        // What the results suggest, from the calculated split (never hardcoded).
+        const majority = cc.higher * 2 > cc.pairs;
+        assert.match(detail, majority ? /a favourable observed change on this outcome/ : /most comparable participants did not report a change/);
+        if (cc.same >= cc.higher && cc.same >= cc.lower) assert.ok(detail.includes(`The largest group, ${cc.same} participants, had the same value at follow-up.`));
+        assert.match(detail, /What the results suggest:/);
+        assert.match(detail, majority ? /Working well: Community-connection confidence/ : /Some progress: Community-connection confidence/);
+        if (!majority) assert.doesNotMatch(detail, /Working well: Community-connection confidence/, "a minority result is not presented as working well");
+        assert.match(detail, /Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better/);
+        assert.match(detail, majority ? /Proposed change: Build on the outcome that is moving in the right direction/ : /Proposed change: Ask participants at the follow-up rating what would help them move further/);
+        // Follow-up results stay self-reported; the estimate stays a qualified source estimate.
+        assert.match(detail, new RegExp(`Joined a community activity \\(self-reported\\): ${EXPECTED_RATES.joined.numerator} of ${EXPECTED_RATES.joined.denominator}`));
+        assert.match(detail, /not independently verified/);
+        assert.match(detail, /Source-reported, not independently verified \(page \d+[^)]*\): ".*at least 90 different people/);
+        assert.doesNotMatch(detail, /KAI (?:calculated|established|verified)[^.]*\b90\b/i);
+        // Readable: each section title once, disclosures behind their toggle, no internal keys or identifiers.
+        for (const title of ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Your Next Steps"]) {
+          assert.equal(detail.split(`\n${title}\n`).length - 1, 1, `${title} appears once`);
+        }
+        assert.doesNotMatch(detail, /Measurement disclosure for/, "disclosures are behind 'Limitations of these figures'");
+        assert.ok(await pageO.evaluate(`document.querySelectorAll('[data-client-internal-draft-detail="${draftId}"] [data-client-internal-draft-disclosure]').length > 0`));
+        assert.doesNotMatch(detail, /\bfield_\d+\b|\bsheet_\d+\b|\[\[assessment:/);
+        assert.doesNotMatch(detail, RAW_IDENTIFIER);
+
+        // Its internal report, through the visible Open report control.
+        const reportMark = pageO.mark();
+        await pageO.clickVisible(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+        await pageO.waitFor(() => pageO.visible("[data-client-internal-report-markdown]"), "the internal report", { timeout: 30000 });
+        await pageO.idle();
+        assert.equal(pageO.requestsSince(reportMark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(O.organizationId, O.projectId, draftId))?.status, 200);
+        const markdown = await pageO.textOf("[data-client-internal-report-markdown]");
+        assert.match(markdown, /Provisional internal draft/);
+        assert.ok(markdown.indexOf("Impact assessment") >= 0 && markdown.indexOf("Impact assessment") < markdown.indexOf("Supporting evidence and method"), "the assessment leads the report");
+        assert.ok(markdown.includes(`${cc.higher} (${cc.percentage}%) had a higher value at follow-up`));
+        assert.doesNotMatch(markdown, /\[\[assessment:/);
+
+        // Reload the page and reopen the same saved assessment.
+        await openStudioO("Drafts");
+        await pageO.clickVisible(`[data-client-internal-draft="${draftId}"] button`, "Read the saved assessment");
+        await pageO.waitFor(() => pageO.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment reopened", { timeout: 30000 });
+        assert.equal(await pageO.textOf(`[data-client-internal-draft-detail="${draftId}"]`), detail, "the reopened assessment is the same saved content");
+
+        // No review, release or other authority was manufactured.
+        const [saved] = await query("SELECT draft_status, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+        assert.deepEqual([saved.draft_status, saved.review_status], ["draft", "needs_gk_review"]);
+        assert.deepEqual(await counts(O.organizationId), { ...approvalsBefore, drafts: approvalsBefore.drafts + 1 }, "only the draft was written");
+        assert.deepEqual(pageO.exceptions, []);
+        report.outcomes.browser = { draft_id: draftId, selected, generation: [new URL(posted.url).pathname, posted.status], detail_characters: detail.length };
+        if (REPORT_PATH) {
+          writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".outcome-assessment.txt", detail);
+          writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".outcome-internal-report.md", markdown);
+        }
+      } finally {
+        await pageO.close().catch(() => {});
+      }
+    });
+
     await test("agreement: for every admission-governed generation attempt the server's admission predicted whether the provider was called", () => {
       const generations = MATRIX.filter((row) => typeof row.provisional_admitted === "boolean");
       assert.ok(generations.length >= 6);
@@ -998,4 +1264,85 @@ async function runPackage4Acceptance() {
     await seedPool.end();
     await ambientPool.end();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Independent recomputation for scenario O (owner direction 2026-11-12): the
+// test reads the original workbook itself (ZIP central directory + sheet XML,
+// none of KAI's parsing code) and applies the project brief's own pairing
+// rule, so no outcome figure is hardcoded and KAI's result is checked against
+// the source, not against itself.
+// ---------------------------------------------------------------------------
+
+function zipEntryText(buffer, name) {
+  let eocd = buffer.length - 22;
+  while (eocd >= 0 && buffer.readUInt32LE(eocd) !== 0x06054b50) eocd -= 1;
+  let offset = buffer.readUInt32LE(eocd + 16);
+  for (let index = 0; index < buffer.readUInt16LE(eocd + 10); index += 1) {
+    const method = buffer.readUInt16LE(offset + 10);
+    const size = buffer.readUInt32LE(offset + 20);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const local = buffer.readUInt32LE(offset + 42);
+    if (buffer.toString("utf8", offset + 46, offset + 46 + nameLength) === name) {
+      const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28);
+      const data = buffer.subarray(start, start + size);
+      return (method === 8 ? inflateRawSync(data) : data).toString("utf8");
+    }
+    offset += 46 + nameLength + buffer.readUInt16LE(offset + 30) + buffer.readUInt16LE(offset + 32);
+  }
+  return null;
+}
+
+function worksheetRows(bytes, sheetNumber) {
+  const decode = (text) => text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  const sharedXml = zipEntryText(bytes, "xl/sharedStrings.xml");
+  const shared = sharedXml ? [...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => decode([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join(""))) : [];
+  const xml = zipEntryText(bytes, `xl/worksheets/sheet${sheetNumber}.xml`);
+  return [...xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map((row) => {
+    const cells = {};
+    for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const column = /r="([A-Z]+)\d+"/.exec(cell[1])[1];
+      const type = /t="([^"]+)"/.exec(cell[1])?.[1];
+      const inner = cell[2] || "";
+      const raw = type === "inlineStr" ? [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join("") : /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1] ?? "";
+      cells[column] = type === "s" ? shared[Number(raw)] : decode(raw);
+    }
+    return cells;
+  });
+}
+
+function columnOf(header, name) {
+  const column = Object.keys(header).find((key) => header[key] === name);
+  assert.ok(column, `the workbook has a ${name} column`);
+  return column;
+}
+
+// The brief: "Scores can be compared only when the same person completed both
+// stages using the same tool_version and both values for the particular
+// measure are present." Missing values are never zero.
+function independentPairs(rows, scoreHeader) {
+  const [header, ...data] = rows;
+  const [person, stage, version, score] = ["participant_id", "stage", "tool_version", scoreHeader].map((name) => columnOf(header, name));
+  const byPerson = new Map();
+  for (const row of data) if (row[person]) byPerson.set(row[person], [...(byPerson.get(row[person]) || []), row]);
+  let higher = 0; let same = 0; let lower = 0;
+  for (const observations of byPerson.values()) {
+    const baseline = observations.filter((row) => row[stage] === "baseline");
+    const followup = observations.filter((row) => row[stage] === "followup");
+    if (baseline.length !== 1 || followup.length !== 1 || baseline[0][version] !== followup[0][version]) continue;
+    if (!baseline[0][score] || !followup[0][score]) continue;
+    const change = Number(followup[0][score]) - Number(baseline[0][score]);
+    if (change > 0) higher += 1; else if (change < 0) lower += 1; else same += 1;
+  }
+  const pairs = higher + same + lower;
+  return { column: score, participants: byPerson.size, pairs, higher, same, lower, excluded: byPerson.size - pairs,
+    percentage: (Math.round((higher * 10000) / pairs) / 100).toFixed(2) };
+}
+
+function independentRate(rows, { condition, population }) {
+  const [header, ...data] = rows;
+  const [conditionColumn, populationColumn] = [condition[0], population[0]].map((name) => columnOf(header, name));
+  const measured = data.filter((row) => row[populationColumn] === population[1]);
+  const numerator = measured.filter((row) => row[conditionColumn] === condition[1]).length;
+  return { numerator, denominator: measured.length, percentage: (Math.round((numerator * 10000) / measured.length) / 100).toFixed(2) };
 }
