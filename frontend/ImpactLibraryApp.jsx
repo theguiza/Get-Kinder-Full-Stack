@@ -516,7 +516,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     await refetchEngagements(selectedOrganizationId, { preserveSelection: true });
     const createdEngagementId = result.body.data?.engagement_id;
     if (createdEngagementId) setSelectedEngagementId(createdEngagementId);
-    return { ok: true };
+    return { ok: true, engagementId: createdEngagementId };
   }, [selectedOrganizationId, refetchEngagements]);
 
   // Package G2: Improvement Plan over the new kai.improvement_practices
@@ -972,6 +972,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   } else if (activeSection === "projects") {
     sectionContent = (
       <ProjectsView
+        key={selectedOrganizationId}
         engagements={engagements}
         engagementsLoaded={engagementsLoaded}
         selectedEngagementId={selectedEngagementId}
@@ -980,6 +981,11 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         creating={creatingEngagement}
         createError={createEngagementError}
         canCreate={canManageProjects}
+        onAddInformation={(engagementId) => {
+          setSelectedEngagementId(engagementId);
+          setKnowledgeStudioInitialView("sources");
+          setActiveSection("knowledgeStudio");
+        }}
       />
     );
   } else if (activeSection === "needsAttention") {

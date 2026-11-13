@@ -15,7 +15,7 @@ test("Projects consumes the same shared engagements list/selection ImpactLibrary
   assert.match(appSource, /import ProjectsView from "\.\/projects\/ProjectsView\.jsx";/);
   assert.match(
     appSource,
-    /<ProjectsView\s*\n\s*engagements=\{engagements\}\s*\n\s*engagementsLoaded=\{engagementsLoaded\}\s*\n\s*selectedEngagementId=\{selectedEngagementId\}\s*\n\s*onSelectEngagement=\{setSelectedEngagementId\}/,
+    /<ProjectsView\s*\n\s*key=\{selectedOrganizationId\}\s*\n\s*engagements=\{engagements\}\s*\n\s*engagementsLoaded=\{engagementsLoaded\}\s*\n\s*selectedEngagementId=\{selectedEngagementId\}\s*\n\s*onSelectEngagement=\{setSelectedEngagementId\}/,
   );
   assert.doesNotMatch(projectsViewSource, /useEffect|getJson\(engagementsPath/);
 });

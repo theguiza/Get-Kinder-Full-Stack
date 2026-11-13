@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import ProjectCreatedDialog from "./ProjectCreatedDialog.jsx";
 
 const COLORS = Object.freeze({
   coral: "#FF5656",
@@ -35,7 +36,10 @@ export default function ProjectsView({
   onCreateEngagement,
   creating,
   createError,
+  onAddInformation,
 }) {
+  const newProjectButtonRef = useRef(null);
+  const [createdProject, setCreatedProject] = useState(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState("");
@@ -44,13 +48,14 @@ export default function ProjectsView({
   const handleCreate = async (event) => {
     event.preventDefault();
     const name = newProjectName.trim();
-    if (!name) return;
+    if (!name || creating) return;
     const result = await onCreateEngagement(name, newProjectType.trim() || undefined, newProjectUseCase.trim() || undefined);
     if (result?.ok) {
       setNewProjectName("");
       setNewProjectType("");
       setNewProjectUseCase("");
       setShowCreateForm(false);
+      if (result.engagementId) setCreatedProject({ engagementId: result.engagementId, name });
     }
   };
 
@@ -65,6 +70,7 @@ export default function ProjectsView({
         </div>
         {canCreate ? (
           <button
+            ref={newProjectButtonRef}
             type="button"
             onClick={() => setShowCreateForm((open) => !open)}
             style={{
@@ -183,6 +189,14 @@ export default function ProjectsView({
           );
         })}
       </div>
+      {createdProject ? (
+        <ProjectCreatedDialog
+          projectName={createdProject.name}
+          returnFocusRef={newProjectButtonRef}
+          onDismiss={() => setCreatedProject(null)}
+          onAddInformation={() => onAddInformation(createdProject.engagementId)}
+        />
+      ) : null}
     </div>
   );
 }

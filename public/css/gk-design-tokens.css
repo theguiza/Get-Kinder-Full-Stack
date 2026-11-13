@@ -1147,3 +1147,43 @@ a.gk-shell-org-switcher-option:hover { color: #2C2E3A; text-decoration: none; }
 .gk-organization-join-result-meta { display: block; color: #8890A0; font-size: 12px; font-weight: 400; margin-top: 2px; }
 .gk-organization-join-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .gk-organization-join-review-actions .gk-organization-join-close { min-height: 36px; }
+
+/* Projects: offer the next step after successful creation. */
+.gk-project-created-dialog {
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 28px;
+  border: 1px solid rgba(69,90,124,0.14);
+  border-radius: 16px;
+  background: #FFFFFF;
+  color: #2C2E3A;
+  font-family: "Work Sans", sans-serif;
+  box-shadow: 0 24px 80px rgba(44,46,58,0.22);
+  overflow-y: auto;
+}
+.gk-project-created-dialog::backdrop { background: rgba(44,46,58,0.48); }
+.gk-project-created-dialog-status { color: #455A7C; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.gk-project-created-dialog h2 { font-size: 23px; font-weight: 700; line-height: 1.25; margin: 0 0 12px; }
+.gk-project-created-dialog p { color: #5B6478; font-size: 14px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.gk-project-created-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.gk-project-created-dialog-actions button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid rgba(69,90,124,0.25);
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #455A7C;
+  font: 600 14px "Work Sans", sans-serif;
+  cursor: pointer;
+}
+.gk-project-created-dialog-actions button:hover { background: #F7F3ED; }
+.gk-project-created-dialog-actions .gk-project-created-dialog-primary { background: #FF5656; border-color: #FF5656; color: #FFFFFF; }
+.gk-project-created-dialog-actions .gk-project-created-dialog-primary:hover { background: #E84545; border-color: #E84545; }
+.gk-project-created-dialog-actions button:focus-visible { outline: 2px solid #455A7C; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .gk-project-created-dialog { padding: 22px; }
+  .gk-project-created-dialog-actions button { flex: 1 1 100%; }
+  .gk-project-created-dialog-actions .gk-project-created-dialog-primary { order: -1; }
+}
