@@ -47751,3 +47751,47 @@ None of the 9 was visible, including "KAI did not check the recorded values agai
 **NOT_CONFIRMED:** production and deployed behaviour; real-model wording; independent human usability.
 
 **Status:** GUIDED_INTERPRETATION_AND_LIBRARY_REPORT_REUSE_PROVEN_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Source-attributed measurement meaning suggestions (2026-11-13)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI — Implement Source-Attributed Measurement Meaning Suggestions". It authorizes a bounded local implementation and local commits: KAI derives a safe, non-authoritative short name from a numeric outcome column's heading, the organization confirms or corrects meaning through the existing interpretation form, and nothing is recorded automatically. Excluded: schema/migrations, new roles, approvals or queues, AI inference, Markdown semantic extraction, reprocessing historical uploads, production, cloud, flags, credentials, tenants, pushes, deployment, real client data and `00_KAI_CURRENT_STATE.md`. Start: `21f446e1`, `main`, clean. Implementation commit: `2353499c`. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command; runners used their own disposable loopback clusters.
+
+**Redaction determination: case A (TOOL_VERIFIED).**
+- The Backend Storage and Validator Implementation Contract lists "headers" (CSV) and "headers per sheet" (XLSX) among MVP parser outputs (§12). VAL-INT-004 blocks parser/profile output that is marked approved, opens LLM/public/funder/product-learning gates, or includes unredacted raw rows or PII samples. VAL-INT-005 blocks claims, evidence items and report/funder/public text created directly from intake/profile/parser output. The P0 dictionary rule forbids AI-generated business meaning as approved text.
+- The `field_1..n` header redaction is an implementation convention of the P1 kernel (`redactedName`, recorded at P1-01A as "no raw scalar, PII ... in tested results") and of later packages ("Identifiers, headers and free text are still not stored"). No accepted clause prohibits a screened, derived, non-authoritative hint.
+- The Threat Model T1 control (uploaded content is data only; nothing uploaded becomes an instruction or approves anything) and the Operating Model §7/§14 (processing permitted; avoid unnecessary identifiable duplication) are met: the raw heading is still never stored, the screen refuses instructions and identifiers, and the suggestion approves nothing and reaches no model, claim or report.
+- The worksheet-name sanitizer was not reused; a heading-specific screen was written.
+
+**Fixture (TOOL_VERIFIED):** `04_Assessments_and_Followups.xlsx` (sha256 `23d00f79…c705`), worksheet "Assessments", G1 = `employment_readiness_score_1_to_5`, F1 = `digital_confidence_score_1_to_5`, read directly from the workbook XML.
+
+**Implemented (`2353499c`):**
+- `Backend/kai/profiling/outcomeHeadingSuggestion.js` (new, pure). `suggestOutcomeHeading` screens one heading, in memory:
+  - ASCII letters, digits, space, `_ - . /` and parentheses only; the profile metadata-only CHECK words and the statement unsafe-text words refuse it.
+  - Digits only as one trailing ascending range, kept as "(1-5)" (an ASCII hyphen, because the existing indicator-label rule refuses an en dash). The range is something the heading states, not a verified scale.
+  - Words of 2–24 letters in one consistent style; a capitalized word inside an otherwise lower-case heading is treated as a possible name. Person, contact, identifier, free-text, secret and instruction words refuse it. Social-impact topics (housing, mental wellbeing, income, substance use ...) are kept.
+  - At least one score word and one other descriptive word; at most 8 words; output at most 60 characters and must satisfy the existing indicator-label rule.
+  - `summarizeOutcomeHeadingSuggestions` withholds both suggestions when two fields of one worksheet would get the same one. `committedOutcomeHeadingSuggestion` serves `{suggested_label, derived_from: "spreadsheet_column_heading"}` only for a numeric outcome candidate of that worksheet and re-applies the screen on read.
+- `pairedOutcomeBasis.js`: additive `outcome_heading_suggestions` (field key → short name) on proposed and role-selection bases. `basis_version` is unchanged; the arithmetic is untouched. Earlier profiles are not retrofitted and nothing re-reads raw bytes.
+- Reads: the derived-measurement basis read adds `source_heading_suggestion` to each recorded paired measurement whose profile hash equals the version's profile. The paired factual-review DTO adds it through the new tenant-scoped, read-only `getScopedProfilePairedOutcomeSheet` (matched by the measurement's `profile_canonical_sha256`). The P2-06 traceability DTO is unchanged.
+- UI: `MeaningQuestionsForm` shows "Suggested from the spreadsheet column heading", the short name, and "This description comes from the source heading. Your organization has not yet confirmed what the measurement represents." "Use this name" only copies it into the short-name field. Meaning, direction and basis stay as they are, a correction stays prefilled, and with no suggestion the neutral form is unchanged. Both callers (review panel and Count records) pass it for paired measurements only. No new POST, status, role or approval.
+
+**Proof (TOOL_VERIFIED):**
+- Cedar profile: field_6 "Digital confidence score (1-5)", field_7 "Employment readiness score (1-5)". Counts unchanged (38/25/10/3 and 40/23/13/4; 112 assessment rows). The committed profile has no `employment_readiness`, `digital_confidence` or `_score_1_to_5`.
+- Cedar test 11 (real HTTP, disposable PostgreSQL): the scoped read serves both suggestions bound to the version's profile hash. No interpretation is implied, no original heading is served, the stored profile text has no original heading, and the read changed no row counts.
+- Cedar 11a (browser) State B: the factual-review DTO serves the field_7 suggestion. It is absent from the GK panel and from the panel before the form opens. Opening the form shows the suggestion and leaves all four fields empty or not established. "Use this name" fills only the short name, sends no non-GET request, leaves submit disabled, and leaves 0 interpretation rows. The administrator then edits the name to "Employment readiness", states the meaning and submits through the existing route. The rest of State B/C is unchanged (human_stated, attributed, arithmetic identical, earlier claim 409, nothing copied).
+- Cedar 14a (browser): the saved internal report contains "Employment readiness" and neither suggestion nor any original heading. Library retrieval, citations, limitations and superseded-claim exclusion are unchanged.
+- Negative cases (unit): individual identifiers (mixed-case name, participant code, phone, email, "name", "address", "recorded by"), embedded instructions, secrets/links/paths, empty or score-only headings, an over-long heading, ambiguous duplicates, similar fields on different worksheets, an earlier profile, a non-candidate field, and a tampered stored value. Each gives none; legitimate sensitive-topic headings are kept.
+
+**Verification (TOOL_VERIFIED):**
+- Focused: paired outcome 13/13 with the Cedar workbook (12 + 1 skipped without it); review projection 15/15; guided interpretation 10/10; factual-review UI 11/11 (its pinned adapter shape gained `sourceHeadingSuggestion: null`).
+- `npm test`: 6264 total, 6135 pass, 0 fail, 129 skipped. The first run had 1 failure, that pinned adapter shape, repaired.
+- Cedar with PDFs and Chrome: 51/51, 0 skipped. Project B Package 3: 19/19. Document evidence + outcomes: 20/20.
+- `npm run build`: OK, bundle byte-stable on rebuild. `git diff --check`: clean.
+
+**Limitations:** the screen is lexical. A Title Case heading made only of a person's name and a score word ("Jane Doe Readiness Score") is not detected, and it is shown only to the uploading organization's administrator as unconfirmed context. Acronyms and non-ASCII headings give no suggestion (fail closed). Suggestions exist only for XLSX paired outcomes profiled from this revision on.
+
+**Remaining capability:** general AI interpretation of organizational documents (for example, linking Cedar's Project Context to field_7's meaning) remains separate and is not implemented or tested.
+
+**NOT_CONFIRMED:** production and deployed behaviour; independent human usability.
+
+**Status:** SOURCE_HEADING_SUGGESTION_IMPLEMENTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
