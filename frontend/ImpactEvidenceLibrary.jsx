@@ -213,6 +213,7 @@ export default function ImpactEvidenceLibrary({
   workflowOperations: parentWorkflowOperations,
   // The selected Project's display label from the shell (page identity).
   projectName = "",
+  initialView = DEFAULT_KNOWLEDGE_STUDIO_VIEW,
   // KAI Impact Library redesign, Package C0 (shared Project/Engagement
   // context): when a parent (frontend/ImpactLibraryApp.jsx) supplies these,
   // they are the one authoritative organization/engagement for the whole
@@ -306,7 +307,7 @@ export default function ImpactEvidenceLibrary({
   // always visible below the tab content: their eventual destination is
   // not yet decided by any accepted package, so they stay reachable rather
   // than being hidden or removed.
-  const [knowledgeStudioTab, setKnowledgeStudioTab] = useState(DEFAULT_KNOWLEDGE_STUDIO_VIEW);
+  const [knowledgeStudioTab, setKnowledgeStudioTab] = useState(initialView);
   // Organization-wide review work (Review Queue, Gaps and Risks) is shown in
   // Evidence on request, labelled as organization-wide, never as the Project's.
   const [showOrganizationReviewWork, setShowOrganizationReviewWork] = useState(false);

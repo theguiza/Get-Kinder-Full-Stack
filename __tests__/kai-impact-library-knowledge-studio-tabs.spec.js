@@ -23,7 +23,8 @@ const viewsLogicSource = readFileSync("frontend/knowledgeStudio/knowledgeStudioV
 test("1: exactly four views, Impact by default, driven by one piece of state", () => {
   assert.match(viewsLogicSource, /export const KNOWLEDGE_STUDIO_VIEWS = Object\.freeze\(\[\s*\["sources", "Sources"\],\s*\["impact", "Impact"\],\s*\["evidence", "Evidence"\],\s*\["drafts", "Drafts"\],\s*\]\);/);
   assert.match(viewsLogicSource, /export const DEFAULT_KNOWLEDGE_STUDIO_VIEW = "impact";/);
-  assert.match(libSource, /const \[knowledgeStudioTab, setKnowledgeStudioTab\] = useState\(DEFAULT_KNOWLEDGE_STUDIO_VIEW\);/);
+  assert.match(libSource, /initialView = DEFAULT_KNOWLEDGE_STUDIO_VIEW,/);
+  assert.match(libSource, /const \[knowledgeStudioTab, setKnowledgeStudioTab\] = useState\(initialView\);/);
   assert.match(libSource, /<KnowledgeStudioNav view=\{knowledgeStudioTab\} onSelect=\{setKnowledgeStudioTab\} idPrefix="ks-gk" singlePanelId="ks-gk-panel" \/>/);
   for (const old of ["files", "processing", "gaps", "reviews"]) {
     assert.doesNotMatch(libSource, new RegExp(`knowledgeStudioTab === "${old}"`), `no ${old} tab remains`);

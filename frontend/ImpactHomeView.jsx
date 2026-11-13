@@ -67,7 +67,7 @@ function reviewQueueItemLabel(item) {
  * fabricated Recent Activity, per owner decision. Home is organization-wide:
  * none of its reads are gated on an engagement/Project.
  */
-export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, onGoToImprovementPlan }) {
+export default function ImpactHomeView({ organizationId, onAddInformation, onGoToKnowledgeStudio, onGoToImprovementPlan }) {
   // Client-safe summary: the governed Impact Fact count, client-actionable
   // follow-ups, and whether this actor may use the internal Review Queue.
   // Home never reads the GK-internal claim-library index.
@@ -207,7 +207,7 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
         </p>
         <button
           type="button"
-          onClick={onGoToKnowledgeStudio}
+          onClick={onAddInformation}
           style={{
             fontFamily: "'Work Sans', sans-serif",
             fontWeight: 600,

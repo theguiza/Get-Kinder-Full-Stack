@@ -221,6 +221,7 @@ function JoinRequestNotices({ view }) {
  */
 export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const [activeSection, setActiveSection] = useState(initialSection);
+  const [knowledgeStudioInitialView, setKnowledgeStudioInitialView] = useState(undefined);
   const [organizations, setOrganizations] = useState([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   // Keyed by organization_id, so the org switcher never has to fall back to
@@ -894,6 +895,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         facts={clientFactsForOrganization}
         onRefreshFacts={refreshClientImpactFacts}
         onViewImpactLibrary={() => setActiveSection("impactLibrary")}
+        initialView={knowledgeStudioInitialView}
       />
     );
   } else if (activeSection === "impactLibrary" && !internalKnowledgeWorkspace) {
@@ -916,13 +918,25 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         organizationName={organizationName}
         workflowOperations={accessCapabilities.data?.workflowOperations}
         onAddImprovementPractice={createImprovementPractice}
+        initialView={knowledgeStudioInitialView}
       />
     );
   } else if (activeSection === "home") {
     sectionContent = (
       <ImpactHomeView
         organizationId={selectedOrganizationId}
-        onGoToKnowledgeStudio={() => setActiveSection("knowledgeStudio")}
+        onAddInformation={() => {
+          if (!selectedProject) {
+            setActiveSection("projects");
+            return;
+          }
+          setKnowledgeStudioInitialView("sources");
+          setActiveSection("knowledgeStudio");
+        }}
+        onGoToKnowledgeStudio={() => {
+          setKnowledgeStudioInitialView(undefined);
+          setActiveSection("knowledgeStudio");
+        }}
         onGoToImprovementPlan={() => setActiveSection("improvementPlan")}
       />
     );
@@ -986,7 +1000,10 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   return (
     <ImpactLibraryShell
       activeSection={activeSection}
-      onNavigate={setActiveSection}
+      onNavigate={(section) => {
+        setKnowledgeStudioInitialView(undefined);
+        setActiveSection(section);
+      }}
       organizationName={hasAuthorizedOrganizations ? organizationName : "KAI setup"}
       organizationLogoUrl={organizationLogoUrl}
       organizations={organizationsForSwitcher}

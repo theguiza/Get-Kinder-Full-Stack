@@ -136,11 +136,12 @@ export default function ClientKnowledgeStudio({
   onRefreshFacts,
   onViewImpactLibrary,
   projectName = "",
+  initialView = DEFAULT_KNOWLEDGE_STUDIO_VIEW,
 }) {
-  const [tab, setTab] = useState(DEFAULT_KNOWLEDGE_STUDIO_VIEW);
+  const [tab, setTab] = useState(initialView);
   // Views are mounted on first visit and kept (hidden) afterwards, so an open
   // panel, an upload or an in-progress form survives switching views.
-  const [visitedViews, setVisitedViews] = useState([DEFAULT_KNOWLEDGE_STUDIO_VIEW]);
+  const [visitedViews, setVisitedViews] = useState([initialView]);
   // Files persistence/rehydration: the selected intake batch is retained here
   // (re-validated by KaiWebIntake against a fresh server read) and cleared
   // whenever the organization or Project changes.

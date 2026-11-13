@@ -47838,3 +47838,13 @@ The leak was wider than the reported Title Case example.
 - Profiles created locally at `2353499c` may hold an earlier suggestion. It is not served (re-screened on read), and no such profile exists outside disposable test clusters.
 
 **Status:** HEADING_SUGGESTION_NAME_LEAK_CLOSED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Impact Home Add information destination (2026-11-13)
+
+**Owner authorization / package boundary (USER_CONFIRMED):** fix Home's "Add information" destination, incorporating the owner's clarification that a Project is required before adding files. This package covers only local frontend navigation, the existing affected tests, the generated bundle, this evidence record and a coherent local commit. No database/cloud access, push, deployment, flags, credentials, production configuration or Current State update. Start: `bf77f60e`, `main`, clean. Stop after this correction.
+
+**Implemented:** the welcome CTA has its own `onAddInformation` callback. Without a selected Project from the existing shared list, it opens Projects so the user can create or select one. With a selected Project, it opens Knowledge Studio directly on Sources. Both client and GK workspaces accept an optional initial view; the client's initially mounted pane follows that view. Ordinary sidebar navigation and Home's separate review-work links retain the existing default Impact entry. Project creation, upload workflow, permissions and read contracts are unchanged.
+
+**Verification (TOOL_VERIFIED):** every Node/npm command used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`. Focused existing Impact Library/Home/four-view tests: 208/208. An in-memory invocation of the actual CTA callback verified Projects without a selected Project and Sources with one; static rendering of both actual client/GK components verified Sources entry and the default Impact entry (including mounting the client's Sources pane). `npm test`: 6266 total, 6137 pass, 0 fail, 129 skipped. `npm run build`: OK; tracked bundle rebuilt. `git diff --check`: clean. Source, existing test adjustment and generated changes reviewed before the local commit. No database or browser acceptance runner was used.
+
+**Status:** ADD_INFORMATION_PROJECT_OR_SOURCES_NAVIGATION_CORRECTED_LOCALLY. Production and browser interaction remain NOT_CONFIRMED; no deployment performed. Stop here.
