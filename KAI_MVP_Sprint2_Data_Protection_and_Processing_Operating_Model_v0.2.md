@@ -178,7 +178,7 @@ KAI does not require a separate consent decision for each of these processing st
 
 ### 7.2 Release review
 
-GK review is required before release where the proposed output materially involves:
+GK review is required before an actual external release where the proposed output materially involves:
 
 - public story/testimonial use;
 - directly identifying participant information;
@@ -189,6 +189,8 @@ GK review is required before release where the proposed output materially involv
 KAI should still generate the proposed output immediately.
 
 The control applies to release, not drafting or analysis.
+
+Owner clarification, 2026-11-13: apply this control to the specific proposed disclosure or unsupported assertion. A source's subject matter, an unknown classification, incomplete evidence/claim review, or a generic coverage warning does not by itself establish that the proposed output requires GK release review. Generating a funder/public-oriented draft and delivering a working report to its own organization do not automatically publish it externally. Ordinary reporting does not require independent verification or a sequence of evidence, claim, coverage and report approvals. Actual processing permissions and disclosure/consent restrictions continue to govern the specific operation.
 
 ---
 
@@ -275,7 +277,9 @@ GK owns KAI review during the MVP, with one owner-accepted, organization-scoped 
 
 Second owner-accepted, organization-scoped exception (2026-10-23, `USER_CONFIRMED`, submitted by the owner in the "KAI Revised Plan A: Complete Organization-Owned Internal Evidence Summary Review and Release" execution prompt): an authenticated, active `client_admin` may be the accountable human reviewer and final-release decision-maker for a supported internal `evidence_summary` belonging to their own organization and engagement, provided the output satisfies the existing evidence, claim, audience, processing-permission, currentness and final-eligibility requirements. GK review and release authority remain required wherever the section 7.2 controls apply: sensitive disclosure, identifying participant information, public story/testimonial use, unresolved consent/governance issues, and materially unsupported or high-risk claims. The exception grants no GK role, cross-tenant authority, validator override, funder/public release authority, or unrestricted access to evidence. The owner also confirmed that a client administrator may receive an already valid, GK-released internal report for their organization through the read-only delivery operation.
 
-Implemented scope of the second exception (repository record, not a change of the policy above):
+**Current reporting policy — owner clarification, 2026-11-13:** the authorities above permit a review when it is useful or when section 7.2 applies; they do not make that review a prerequisite for ordinary reporting. Missing reviews, unassessed support and source limitations remain information. The organization can generate, read, revise and download its report without a mandatory factual-review/release ceremony. Intended funder/public audiences do not make drafting an external release. A specific unresolved external-disclosure issue is handled at the affected disclosure, while drafting and other permitted work continue. The local internal-report correction is recorded at `a72413e6`; remaining external-path implementation is identified in the active repository ExecPlan. Policy intent is not a claim that those remaining code paths are already corrected or deployed.
+
+**Historical implementation record of the second exception — superseded as an ordinary-reporting prerequisite:** the following bullets describe the earlier implementation. They preserve history and must not be used to reinstate blanket approval requirements, the all-categories-absent definition of ordinary reporting, or universal GK ownership of every report's completion.
 
 - **Factual review: implemented.** The administrator records the factual approval of an ordinary internal evidence summary through the existing generated-content review lifecycle. A draft is ordinary only when every cited claim is currently eligible for internal use and every cited source's current sensitivity decision is complete, permits the use and AI processing, and records personal information, minors, health/housing/justice/immigration information, Indigenous or governance-sensitive information, stories or testimonials, and small-cell risk as `absent`. `present` or `unknown` keeps GK review.
 - **Final release: implemented (local synthetic proof only; production schema not changed).** After the factual review, the administrator makes a separate, explicit release decision for an ordinary internal evidence summary, confirming its limitations. The existing release chain records it under the administrator's own identity: the export review, the limitation snapshot (`confirmed_by_role = client_admin`), the export candidate, the `export_authority_granted` grant (`decided_by_role = client_admin`) and the manifest. Each step re-checks, in its own transaction, that the draft is still ordinary. The migration `kai_sprint2_plan_a_organization_internal_release_authority` admits `client_admin` only for an internal `evidence_summary` snapshot or grant (owner authorization 2026-10-23, local synthetic databases only). Get Kinder releases everything else, keeps its own release routes, and may revoke an organization's release; only Get Kinder can re-grant a release it revoked. Releasing still depends on `KAI_PUBLIC_EXPORT_ENABLED`.
@@ -298,10 +302,10 @@ Preferred flow:
 4. KAI proposes claims.
 5. KAI identifies limitations/conflicts.
 6. KAI drafts output.
-7. GK reviews the relevant output/package.
-8. Release.
+7. The organization uses, revises and downloads its working report. Useful clarifications are optional and remain attached to the affected findings.
+8. For an actual external release, apply the proposed output's specific permissions and section 7.2 controls where applicable; a blanket evidence-quality approval chain is not required for every report.
 
-Earlier review should occur only when an actual blocker requires it.
+Earlier review should occur only when a specific permitted operation actually requires that decision. When a figure cannot be established, KAI explains that limit and continues with available information; it does not invent the figure, label it verified, or hold the entire report for general evidence certification.
 
 ---
 
@@ -421,7 +425,7 @@ Only genuinely missing conditions should be inspected or remediated.
 - **Long-term value:** prefer anonymization when identifiable information is no longer needed but analytical/program value remains.
 - **Audit:** metadata-only audit trail retained for 24 months.
 - **AI:** AI may process information needed for KAI; external foundation-model training is off by default; KAI/Get Kinder improvement is allowed under the applicable disclosures.
-- **Review:** GK owns review; client review only where materially useful or required; an organization's own administrator may review and release an ordinary internal evidence summary (section 11, 2026-10-23).
+- **Review:** ordinary reports need no mandatory evidence-quality approval chain. Client clarification is useful where material; GK review applies to the actual external-release cases in section 7.2. Earlier implementation records are not blanket reporting prerequisites (section 11, clarified 2026-11-13).
 - **Raw storage:** Canada.
 - **Application:** Render.
 - **Subprocessors:** lightweight register.
