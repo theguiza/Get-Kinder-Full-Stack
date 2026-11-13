@@ -124,6 +124,23 @@ const packetConstraintMd5Sql = `SELECT conname, md5(pg_get_constraintdef(oid)) A
       'evidence_items_p2_01m_type_class_pairing_check', 'source_locators_p2_01_locator_type_check', 'source_locators_p2_01_coordinates_check')
   ORDER BY conname`;
 
+// Run the owner's reporting-schema SELECT verbatim. Positive verification
+// runs inside READ ONLY; negative DDL is confined to this runner's new cluster
+// and rolled back in the same psql connection.
+function verifyReportingSchema(expectedStatus, { before = "BEGIN READ ONLY;", failedCheck = null } = {}) {
+  const out = run(psql, ["-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "\t",
+    "-c", before, "-f", "scripts/kai-reporting-schema-verify-read-only.sql", "-c", "ROLLBACK;"], { capture: true }).stdout.trim();
+  const rows = out.split("\n").map((line) => {
+    const [checkId, status, detail] = line.split("\t");
+    return { checkId, status, detail };
+  });
+  if (rows.find((r) => r.checkId === "OVERALL")?.status !== expectedStatus
+      || (failedCheck && !rows.some((r) => r.checkId === failedCheck && r.status === "FAIL"))) {
+    throw new Error(`reporting schema verifier expected ${expectedStatus}${failedCheck ? ` / ${failedCheck}` : ""}:\n${out}`);
+  }
+  console.log(`Reporting schema verifier: ${expectedStatus}${failedCheck ? ` / ${failedCheck}` : " in READ ONLY"}.`);
+}
+
 if (!cedarPackage || !existsSync(join(cedarPackage, "01_UPLOAD_TO_KAI")) || !surveyPdf || !existsSync(surveyPdf) || !originalPdf || !existsSync(originalPdf)) {
   throw new Error("document evidence runner requires KAI_CEDAR_BRIDGE_PACKAGE, KAI_CEDAR_BRIDGE_SURVEY_PDF and KAI_CEDAR_BRIDGE_ORIGINAL_PDF");
 }
@@ -191,9 +208,30 @@ try {
   }
   console.log("Document evidence: XLSX method and derived-measurement verifiers OVERALL PASS with the document-statement migration applied.");
   const afterDocument = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  verifyReportingSchema("PASS");
+  verifyReportingSchema("FAIL", {
+    before: "BEGIN; ALTER TABLE kai.cross_source_reconciliation_jobs RENAME TO reporting_schema_hidden_jobs;",
+    failedCheck: "table.cross_source_reconciliation_jobs",
+  });
+  verifyReportingSchema("FAIL", {
+    before: "BEGIN; ALTER TABLE kai.generation_runs RENAME COLUMN engagement_id TO reporting_schema_hidden_engagement;",
+    failedCheck: "columns.generation_runs",
+  });
+  verifyReportingSchema("FAIL", {
+    before: "BEGIN; ALTER TABLE kai.evidence_items DROP CONSTRAINT evidence_items_p2_01_data_class_check;"
+      + " ALTER TABLE kai.evidence_items ADD CONSTRAINT evidence_items_p2_01_data_class_check CHECK (data_class IN ('organization_committed_metadata', 'source_derived_aggregate', 'source_document_excerpt')) NOT VALID;",
+    failedCheck: "document.evidence_items_p2_01_data_class_check",
+  });
+  verifyReportingSchema("FAIL", {
+    before: "BEGIN; ALTER SCHEMA kai RENAME TO reporting_schema_hidden_kai;",
+    failedCheck: "table.evidence_items",
+  });
+  verifyReportingSchema("PASS");
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDocument) throw new Error("reporting schema verifier probes changed the schema");
   console.log(`Document evidence chain POST constraint md5: ${JSON.stringify(await catalog(packetConstraintMd5Sql))}`);
   if (afterDocument === beforeDocument) throw new Error(`${documentMigration} changed nothing`);
   psqlFile(`migrations/${documentMigration}.rollback.sql`);
+  verifyReportingSchema("FAIL", { failedCheck: "document.evidence_items_p2_01_evidence_type_check" });
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDocument) throw new Error(`${documentMigration} rollback did not restore the prior schema`);
   psqlFile(`migrations/${documentMigration}.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDocument) throw new Error(`${documentMigration} re-apply changed the schema`);
