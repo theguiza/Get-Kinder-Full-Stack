@@ -1609,6 +1609,37 @@ export async function getScopedProfileWorksheetName({ organizationId, sourceVers
 }
 
 /**
+ * The committed paired-outcome basis of one worksheet, read from the exact
+ * profile a measurement was calculated from (matched by its canonical hash),
+ * as a one-sheet profile for committedOutcomeHeadingSuggestion; null for a
+ * CSV, an unknown worksheet or a profile no longer bound to the version.
+ * Tenant-scoped, read-only. It carries field keys, counts and screened
+ * suggestions only; the profile never holds a heading.
+ */
+export async function getScopedProfilePairedOutcomeSheet({ organizationId, sourceVersionId, profileCanonicalSha256, worksheetKey }, db = pool) {
+  if (!worksheetKey || !profileCanonicalSha256) return null;
+  const { rows } = await db.query(
+    `SELECT sheet->'paired_outcome_basis' AS paired_outcome_basis
+       FROM kai.intake_file_profiles p
+       JOIN kai.intake_source_candidates c
+         ON c.organization_id = p.organization_id
+        AND c.file_profile_id = p.file_profile_id
+       JOIN kai.source_versions sv
+         ON sv.organization_id = c.organization_id
+        AND sv.intake_source_candidate_id = c.intake_source_candidate_id
+      CROSS JOIN LATERAL jsonb_array_elements(p.profile->'sheets') AS sheet
+      WHERE p.organization_id = $1::uuid
+        AND sv.source_version_id = $2::uuid
+        AND p.profile_canonical_sha256 = $3
+        AND sheet->>'sheet_key' = $4
+      LIMIT 1`,
+    [organizationId, sourceVersionId, profileCanonicalSha256, worksheetKey],
+  );
+  const basis = rows[0]?.paired_outcome_basis;
+  return basis && typeof basis === "object" ? { sheets: [{ sheet_key: worksheetKey, paired_outcome_basis: basis }] } : null;
+}
+
+/**
  * Every derived-measurement evidence row of one source version, including a
  * cross-source measurement that combines it as its reference version,
  * tenant-scoped. Read-only.

@@ -4,10 +4,12 @@ import {
   getScopedEvidenceItemById,
   getScopedEvidenceMeasurementByEvidenceItemId,
   getScopedDerivedMeasurementByEvidenceItemId,
+  getScopedProfilePairedOutcomeSheet,
   getScopedProfileWorksheetName,
   getScopedSourceLocatorById,
   getScopedSourceVersionById,
 } from "../db/kaiIntakeQueries.js";
+import { committedOutcomeHeadingSuggestion } from "../profiling/outcomeHeadingSuggestion.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import {
@@ -248,6 +250,12 @@ export async function readFactualReviewMeasurementsInTransaction(tx, {
     profileCanonicalSha256: derived.profile_canonical_sha256, worksheetKey: derived.worksheet_key,
   }, tx);
   const outcomeColumn = /^[A-Z]{1,3}$/.test(derived.definition.outcome_column ?? "") ? derived.definition.outcome_column : null;
+  // An unconfirmed short name suggested from the outcome column's heading,
+  // from the same bound profile; context for the meaning questions only.
+  const sourceHeadingSuggestion = committedOutcomeHeadingSuggestion(await getScopedProfilePairedOutcomeSheet({
+    organizationId, sourceVersionId: derived.source_version_id,
+    profileCanonicalSha256: derived.profile_canonical_sha256, worksheetKey: derived.worksheet_key,
+  }, tx), { worksheetKey: derived.worksheet_key, outcomeFieldKey: derived.definition.outcome_field_key });
   data.derived_measurement = {
     measurement_type: derived.measurement_family,
     source_derived_measurement_id: derived.source_derived_measurement_id,
@@ -258,6 +266,7 @@ export async function readFactualReviewMeasurementsInTransaction(tx, {
     worksheet_name: worksheetName,
     outcome_field_key: derived.definition.outcome_field_key,
     outcome_column: outcomeColumn,
+    source_heading_suggestion: sourceHeadingSuggestion,
     calculation_method: derived.calculation_method,
     numerator: derived.numerator,
     denominator: derived.denominator,

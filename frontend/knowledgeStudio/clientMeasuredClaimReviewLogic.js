@@ -70,6 +70,10 @@ function projectDerivedMeasurement(derived) {
     worksheetName: typeof derived.worksheet_name === "string" && derived.worksheet_name.trim() ? derived.worksheet_name : null,
     outcomeFieldKey: derived.outcome_field_key ?? null,
     outcomeColumn: typeof derived.outcome_column === "string" && /^[A-Z]{1,3}$/.test(derived.outcome_column) ? derived.outcome_column : null,
+    // Unconfirmed source context for the meaning questions; never a meaning.
+    sourceHeadingSuggestion: derived.source_heading_suggestion && typeof derived.source_heading_suggestion === "object"
+      ? { suggestedLabel: derived.source_heading_suggestion.suggested_label ?? null, derivedFrom: derived.source_heading_suggestion.derived_from ?? null }
+      : null,
     calculationMethod: derived.calculation_method ?? null,
     numerator: derived.numerator ?? null,
     denominator: derived.denominator ?? null,

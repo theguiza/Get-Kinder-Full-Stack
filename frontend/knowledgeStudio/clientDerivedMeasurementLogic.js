@@ -149,6 +149,18 @@ export function recordedMeasurementKnownLines(recorded) {
   return lines;
 }
 
+/**
+ * The unconfirmed short name the server suggested from a paired outcome's
+ * spreadsheet column heading (`source_heading_suggestion`), or null. Only a
+ * value the existing indicator-label rule accepts is offered; it is shown as
+ * source context and is never recorded unless a person submits it.
+ */
+export function sourceHeadingSuggestionOf(value) {
+  const label = value && typeof value === "object" ? value.suggested_label ?? value.suggestedLabel : null;
+  const from = value && typeof value === "object" ? value.derived_from ?? value.derivedFrom : null;
+  return from === "spreadsheet_column_heading" && typeof label === "string" && /^[A-Za-z][A-Za-z0-9 '()-]{0,59}$/.test(label) ? label : null;
+}
+
 /** The interpretation body, or null when no label and meaning are given. */
 export function interpretationBody(form, { paired }) {
   const label = form.indicatorLabel.trim();

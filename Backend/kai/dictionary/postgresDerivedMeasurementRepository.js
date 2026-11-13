@@ -7,6 +7,7 @@ import {
   listScopedDerivedMeasurementRowsBySourceVersion,
 } from "../db/kaiIntakeQueries.js";
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
+import { committedOutcomeHeadingSuggestion } from "../profiling/outcomeHeadingSuggestion.js";
 import { __evidenceLineageRepositorySharedWrites } from "./postgresEvidenceLineageRepository.js";
 import { __sourceMeasurementRepositoryShared } from "./postgresSourceMeasurementRepository.js";
 import {
@@ -542,6 +543,14 @@ export function createPostgresDerivedMeasurementRepository({
             exclusions: row.exclusions,
             contributing_sources: row.contributing_sources ?? [],
             current_interpretation_id: row.current_interpretation_id,
+            // An unconfirmed short name suggested from the outcome column's
+            // heading, from the exact profile this measurement was calculated
+            // from. It is context for the person answering; it is not a meaning.
+            source_heading_suggestion: row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME
+              && row.measurement_source_version_id === sourceVersionId
+              && row.profile_canonical_sha256 === fileProfileRow.profile_canonical_sha256
+              ? committedOutcomeHeadingSuggestion(profile, { worksheetKey: row.worksheet_key, outcomeFieldKey: row.definition?.outcome_field_key })
+              : null,
             ...(labelsAdmitted ? {} : { category_labels_withheld: true }),
             evidence: [],
           };

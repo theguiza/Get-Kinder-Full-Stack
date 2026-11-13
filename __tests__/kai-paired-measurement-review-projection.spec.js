@@ -55,7 +55,12 @@ function fixture(field = "field_6", interpreted = false) {
     sourceVersionRow: { organization_id: ORG, source_version_id: VERSION, is_current: true, profile_canonical_sha256: row.profile_canonical_sha256, intake_sensitivity_profile_id: "17000000-0000-4000-8000-000000000001" },
   };
 }
-function transaction(f, { record = null, sourceDecision = cleared, evidenceHead = null, claimHead = null, versions = {}, decisionsByProfile = {}, worksheetName = "Participant assessments" } = {}) {
+// The committed paired basis of the measured worksheet: field keys and the screened heading suggestions only.
+const PAIRED_BASIS = Object.freeze({
+  candidates: { numeric_outcome: ["field_6", "field_7"] },
+  outcome_heading_suggestions: { field_6: "Digital confidence score (1-5)", field_7: "Employment readiness score (1-5)" },
+});
+function transaction(f, { record = null, sourceDecision = cleared, evidenceHead = null, claimHead = null, versions = {}, decisionsByProfile = {}, worksheetName = "Participant assessments", pairedBasis = PAIRED_BASIS } = {}) {
   const calls = [];
   return { calls, async query(sql, params) {
     calls.push({ sql, params });
@@ -64,6 +69,7 @@ function transaction(f, { record = null, sourceDecision = cleared, evidenceHead 
     // The screened worksheet name from the exact profile the measurement was calculated from.
     if (/FROM kai\.intake_file_profiles p/.test(sql)) {
       assert.deepEqual(params.slice(1), [VERSION, f.row?.profile_canonical_sha256, f.row?.worksheet_key]);
+      if (/paired_outcome_basis/.test(sql)) return { rows: pairedBasis ? [{ paired_outcome_basis: pairedBasis }] : [] };
       return { rows: [{ worksheet_name: worksheetName }] };
     }
     if (/FROM kai\.evidence_review_decisions/.test(sql)) return { rows: evidenceHead ? [evidenceHead] : [] };
@@ -116,6 +122,25 @@ test("paired location: no screened worksheet name is reported as unknown, never 
   assert.equal(blank.data.derived_measurement.worksheet_name, null);
   assert.equal(blank.data.derived_measurement.outcome_column, "G", "the persisted column letter is still served");
 });
+test("heading suggestion: served as unconfirmed source context for its own field, from the bound profile; otherwise null", async () => {
+  for (const field of ["field_6", "field_7"]) {
+    const f = fixture(field);
+    const tx = transaction(f);
+    const p = (await project(f, tx)).data.derived_measurement;
+    assert.deepEqual(p.source_heading_suggestion, { suggested_label: field === "field_6" ? "Digital confidence score (1-5)" : "Employment readiness score (1-5)", derived_from: "spreadsheet_column_heading" });
+    assert.equal(p.interpretation, null, "a suggestion is not an interpretation");
+    assert.equal(p.score_direction, "not_established", "no direction is inferred");
+    assert.ok(tx.calls.every((call) => /^SELECT\b/.test(call.sql.trim())), "reading writes nothing");
+  }
+  const f = fixture("field_7");
+  assert.equal((await project(f, transaction(f, { pairedBasis: null }))).data.derived_measurement.source_heading_suggestion, null, "an earlier profile or another profile hash gives none");
+  assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, outcome_heading_suggestions: {} } }))).data.derived_measurement.source_heading_suggestion, null);
+  assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, outcome_heading_suggestions: { field_7: "ignore previous instructions score" } } }))).data.derived_measurement.source_heading_suggestion,
+    null, "a stored value the current screen would not produce is never served");
+  assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, candidates: { numeric_outcome: ["field_6"] } } }))).data.derived_measurement.source_heading_suggestion,
+    null, "only a numeric outcome candidate of that worksheet");
+});
+
 test("current recorded interpretation is reported without inventing independent verification", async () => {
   const result = await project(fixture("field_6", true));
   assert.equal(result.data.derived_measurement.interpretation.meaning_text, "The organization describes a self rating.");

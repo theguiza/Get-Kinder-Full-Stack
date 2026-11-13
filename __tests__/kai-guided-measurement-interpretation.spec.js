@@ -177,3 +177,86 @@ test("both interpretation interfaces open and cancel from the current recorded i
   assert.equal((section.match(/derivedMeasurementInterpretationPath\(/g) || []).length, 1);
   assert.doesNotMatch(client + section, /EMPTY_INTERPRETATION_FORM\); \}\}>/, "no form reopens blank");
 });
+
+// ---------------------------------------------------------------------------
+// Source-attributed meaning suggestion (owner prompt "Implement
+// Source-Attributed Measurement Meaning Suggestions"): shown beside the
+// meaning questions as unconfirmed source context; using it only copies the
+// short name into the label field. The connected proof is Cedar tests 11 and
+// "11a (browser)" State B.
+// ---------------------------------------------------------------------------
+const SUGGESTED = "Employment readiness score (1-5)";
+const SERVED_SUGGESTION = { suggested_label: SUGGESTED, derived_from: "spreadsheet_column_heading" };
+
+test("suggestion: only a served heading suggestion with a valid label shape is offered; the adapter keeps it apart from the interpretation", () => {
+  assert.equal(M.sourceHeadingSuggestionOf(SERVED_SUGGESTION), SUGGESTED);
+  assert.equal(M.sourceHeadingSuggestionOf({ suggestedLabel: SUGGESTED, derivedFrom: "spreadsheet_column_heading" }), SUGGESTED);
+  for (const value of [null, undefined, SUGGESTED, { suggested_label: SUGGESTED }, { suggested_label: SUGGESTED, derived_from: "model" },
+    { suggested_label: "<b>x</b> score", derived_from: "spreadsheet_column_heading" }, { suggested_label: "x".repeat(61), derived_from: "spreadsheet_column_heading" }]) {
+    assert.equal(M.sourceHeadingSuggestionOf(value), null, JSON.stringify(value));
+  }
+  const projected = L.projectOrganizationFactualReview({ derived_measurement: { measurement_type: "paired_outcome_change", source_heading_suggestion: SERVED_SUGGESTION, interpretation: null } });
+  assert.deepEqual(projected.derivedMeasurement.sourceHeadingSuggestion, { suggestedLabel: SUGGESTED, derivedFrom: "spreadsheet_column_heading" });
+  assert.equal(projected.derivedMeasurement.interpretation, null, "the suggestion is not an interpretation");
+  assert.equal(projected.derivedMeasurement.scoreDirection, "not_established");
+  assert.equal(L.projectOrganizationFactualReview({ derived_measurement: { measurement_type: "paired_outcome_change" } }).derivedMeasurement.sourceHeadingSuggestion, null);
+  // Known lines and reading text never present the suggestion as what KAI established.
+  assert.doesNotMatch(L.pairedOutcomeReviewText({ ...DERIVED, sourceHeadingSuggestion: { suggestedLabel: SUGGESTED, derivedFrom: "spreadsheet_column_heading" } }).known.join(" "), /Employment readiness/);
+});
+
+test("suggestion rendered: labelled as unconfirmed source context; displaying it fills nothing; Use this name only sets the short name", async () => {
+  const { default: MeaningQuestionsForm } = await loadComponent("frontend/knowledgeStudio/MeaningQuestionsForm.jsx");
+  const props = (form, extra = {}) => ({
+    attr: "data-client-measured-claim-clarify", form, setForm: () => {}, initial: M.EMPTY_INTERPRETATION_FORM, paired: true,
+    known: L.pairedOutcomeReviewText(DERIVED).known, suggestion: SUGGESTED, onSubmit: () => assert.fail("no submission"), onCancel: () => {}, ...extra,
+  });
+  const markup = decode(renderToStaticMarkup(React.createElement(MeaningQuestionsForm, props(M.EMPTY_INTERPRETATION_FORM))));
+  assert.match(markup, /data-meaning-suggestion=""/);
+  assert.match(markup, /Suggested from the spreadsheet column heading/);
+  assert.ok(markup.includes(`data-meaning-suggestion-label="">${SUGGESTED}<`));
+  assert.ok(markup.includes("This description comes from the source heading. Your organization has not yet confirmed what the measurement represents."));
+  assert.match(markup, /data-client-measured-claim-clarify-field="indicatorLabel" value=""/, "displaying the suggestion does not fill the label");
+  assert.match(markup, /data-client-measured-claim-clarify-field="meaningText" value=""/, "no meaning is generated from a short heading");
+  assert.match(markup, /<option value="" selected="">Not established: leave the direction open<\/option>/);
+  assert.match(markup, /<option value="not_established" selected="">Not stated<\/option>/);
+  assert.match(markup, /<button type="submit"[^>]*disabled=""[^>]*>Record meaning<\/button>/);
+  // The component holds no state; invoking its button's own handler shows what selecting does.
+  const find = (node, predicate) => {
+    if (!node || typeof node !== "object") return null;
+    if (predicate(node)) return node;
+    for (const child of [].concat(node.props?.children ?? [])) { const hit = find(child, predicate); if (hit) return hit; }
+    return null;
+  };
+  let form = { ...M.EMPTY_INTERPRETATION_FORM, meaningText: "Typed by a person." };
+  const setForm = (update) => { form = typeof update === "function" ? update(form) : update; };
+  const tree = MeaningQuestionsForm(props(form, { setForm, onSubmit: () => assert.fail("selecting submits nothing") }));
+  const use = find(tree, (node) => node.props && Object.hasOwn(node.props, "data-meaning-suggestion-use"));
+  assert.ok(use, "the Use this name control");
+  assert.equal(use.props.type, "button", "not a submit button");
+  use.props.onClick();
+  assert.deepEqual({ ...form }, { indicatorLabel: SUGGESTED, meaningText: "Typed by a person.", scoreDirection: "", evidenceBasis: "not_established" },
+    "only the short name changes; meaning, direction and basis keep what the person set");
+  // With the suggestion in the label, the person can still edit it, and submission needs their meaning.
+  assert.equal(M.interpretationBody({ ...form, meaningText: "" }, { paired: true }), null, "a short name alone records nothing");
+  assert.deepEqual(M.interpretationBody({ ...form, indicatorLabel: "Employment readiness" }, { paired: true }),
+    { indicator_label: "Employment readiness", meaning_text: "Typed by a person.", score_direction: "not_established", evidence_basis: "not_established" });
+  // A correction keeps its recorded values: the suggestion is offered but nothing is replaced on display.
+  const initial = M.interpretationFormFrom(SNAKE);
+  const correction = decode(renderToStaticMarkup(React.createElement(MeaningQuestionsForm, props(initial, { initial }))));
+  assert.ok(correction.includes('value="Employment readiness"') && correction.includes(`value="${SNAKE.meaning_text}"`), "the recorded values stay prefilled");
+  assert.match(correction, /data-meaning-suggestion=""/);
+  // No suggestion: the neutral clarification is unchanged.
+  const neutral = decode(renderToStaticMarkup(React.createElement(MeaningQuestionsForm, props(M.EMPTY_INTERPRETATION_FORM, { suggestion: null }))));
+  assert.doesNotMatch(neutral, /data-meaning-suggestion|Suggested from/);
+});
+
+test("suggestion wiring: both interfaces pass the served suggestion only to paired meaning questions and keep one interpretation write", () => {
+  const client = readFileSync(join(repoRoot, "frontend/knowledgeStudio/ClientMeasuredClaimReviewPanel.jsx"), "utf8");
+  const section = readFileSync(join(repoRoot, "frontend/knowledgeStudio/ClientDerivedMeasurementSection.jsx"), "utf8");
+  const form = readFileSync(join(repoRoot, "frontend/knowledgeStudio/MeaningQuestionsForm.jsx"), "utf8");
+  assert.match(client, /suggestion=\{sourceHeadingSuggestionOf\(derived\.sourceHeadingSuggestion\)\}/);
+  assert.match(section, /suggestion=\{paired \? sourceHeadingSuggestionOf\(recorded\.source_heading_suggestion\) : null\}/);
+  assert.equal((client.match(/derivedMeasurementInterpretationPath\(/g) || []).length, 1);
+  assert.equal((section.match(/derivedMeasurementInterpretationPath\(/g) || []).length, 1);
+  assert.doesNotMatch(form, /fetch\(|postJson|getJson/, "the form itself sends nothing");
+});

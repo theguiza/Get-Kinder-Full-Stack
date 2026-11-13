@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
-import { EMPTY_INTERPRETATION_FORM, derivedMeasurementInterpretationPath, interpretationBody, interpretationFormFrom } from "./clientDerivedMeasurementLogic.js";
+import {
+  EMPTY_INTERPRETATION_FORM, derivedMeasurementInterpretationPath, interpretationBody, interpretationFormFrom, sourceHeadingSuggestionOf,
+} from "./clientDerivedMeasurementLogic.js";
 import FactualReviewPairedOutcome from "./FactualReviewPairedOutcome.jsx";
 import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 import {
@@ -169,7 +171,8 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
               </button>
               {clarifying ? (
                 <MeaningQuestionsForm attr="data-client-measured-claim-clarify" form={clarifyForm} setForm={setClarifyForm} initial={recordedForm}
-                  paired known={pairedOutcomeReviewText(derived).known} pending={pending === "clarify"} onSubmit={recordMeaning} onCancel={closeMeaning}
+                  paired known={pairedOutcomeReviewText(derived).known} suggestion={sourceHeadingSuggestionOf(derived.sourceHeadingSuggestion)}
+                  pending={pending === "clarify"} onSubmit={recordMeaning} onCancel={closeMeaning}
                   note={"This claim keeps its wording, but once a meaning or a correction is recorded it is no longer current; a claim can then be proposed "
                     + "from the measurement's current evidence. Earlier review decisions are not copied to that claim."} />
               ) : null}

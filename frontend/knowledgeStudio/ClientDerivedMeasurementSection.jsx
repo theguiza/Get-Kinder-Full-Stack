@@ -16,6 +16,7 @@ import {
   interpretationFormFrom,
   recordedMeasurementKnownLines,
   measurementFamilyLabel,
+  sourceHeadingSuggestionOf,
   pairedOutcomeMeasurementsPath,
   tabularDefinitionBody,
   tabularFormProblem,
@@ -305,6 +306,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             {clarifying === recorded.source_derived_measurement_id ? (
               <MeaningQuestionsForm attr="data-client-derived-clarify" form={clarifyForm} setForm={setClarifyForm}
                 initial={interpretationFormFrom(current?.interpretation)} paired={paired} known={recordedMeasurementKnownLines(recorded)}
+                suggestion={paired ? sourceHeadingSuggestionOf(recorded.source_heading_suggestion) : null}
                 pending={pending === "clarify"} onSubmit={(event) => clarify(event, recorded)}
                 onCancel={() => { setClarifying(null); setClarifyForm(interpretationFormFrom(current?.interpretation)); }} />
             ) : null}

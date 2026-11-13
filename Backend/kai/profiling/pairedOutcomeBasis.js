@@ -2,7 +2,9 @@
  * KAI paired baseline/follow-up outcome basis for one worksheet (Measurement
  * MVP). The P1 profiler computes it from the cells it already holds in memory
  * for one call, beside the record-count basis. It stores no header text and
- * no cell value: only field keys, worksheet row numbers, and counts.
+ * no cell value: only field keys, worksheet row numbers, counts and, per
+ * numeric outcome field, at most one screened suggested short name derived
+ * from its heading (`outcome_heading_suggestions`, outcomeHeadingSuggestion.js).
  *
  * What it does:
  * - Proposes the participant identifier, stage (baseline/follow-up) and
@@ -21,6 +23,8 @@
  *   value excludes the participant only from that field's measurement; a
  *   repeated or version-mismatched observation is never paired by guesswork.
  */
+
+import { summarizeOutcomeHeadingSuggestions } from "./outcomeHeadingSuggestion.js";
 
 export const PAIRED_OUTCOME_BASIS_VERSION = "kai_xlsx_paired_outcome_basis_v1";
 export const PAIRED_OUTCOME_CALCULATION_METHOD = "p1_xlsx_paired_baseline_followup_numeric_change_v1";
@@ -260,7 +264,7 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
   const headers = [...headerRow.entries()]
     .filter(([, cell]) => cell.present)
     .sort(([a], [b]) => a - b)
-    .map(([position, cell]) => ({ position, tokens: headerTokens(cell.value) }));
+    .map(([position, cell]) => ({ position, heading: cell.value, tokens: headerTokens(cell.value) }));
   const columnCount = headers.reduce((maximum, header) => Math.max(maximum, header.position), 0);
   const records = [];
   for (let row = 2; row <= recordCountBasis.data_record_count + 1; row += 1) {
@@ -316,5 +320,10 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
     reason: null,
     candidates,
     alternatives: Object.freeze(alternatives),
+    // Suggested short names only, never the heading: a person may use one
+    // as the indicator label; it is not a meaning and records nothing.
+    outcome_heading_suggestions: summarizeOutcomeHeadingSuggestions(headers
+      .filter((header) => outcomes.includes(header.position))
+      .map((header) => ({ fieldKey: fieldKey(header.position), heading: header.heading }))),
   });
 }

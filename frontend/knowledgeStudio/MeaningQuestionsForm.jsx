@@ -10,14 +10,18 @@ import { interpretationBody, interpretationFormChanged } from "./clientDerivedMe
  * first (`known`), so the person answers only what KAI cannot tell from the
  * file. `initial` is the current recorded interpretation as a form (or the
  * empty form): a correction starts from it, "not established" stays the
- * default, and nothing is suggested from a label. Opening and cancelling
- * write nothing; only submitting posts, through the caller's existing
- * interpretation route. `attr` is the data-attribute prefix the caller's
+ * default, and nothing is inferred from a label. `suggestion` is an optional
+ * short name the server derived from the spreadsheet column heading: it is
+ * shown as unconfirmed source context, and "Use this name" only copies it
+ * into the short-name field for the person to keep, edit or replace. It
+ * never fills the meaning, direction or basis. Opening, cancelling and using
+ * the suggestion write nothing; only submitting posts, through the caller's
+ * existing interpretation route. `attr` is the data-attribute prefix the caller's
  * existing controls already use (`<attr>-form`, `<attr>-field`,
  * `<attr>-submit`, `<attr>-cancel`).
  */
 export default function MeaningQuestionsForm({
-  attr, form, setForm, initial, paired, known = [], note = null, pending = false, onSubmit, onCancel,
+  attr, form, setForm, initial, paired, known = [], suggestion = null, note = null, pending = false, onSubmit, onCancel,
 }) {
   const data = (suffix, value = "") => ({ [`${attr}-${suffix}`]: value });
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -45,6 +49,20 @@ export default function MeaningQuestionsForm({
       ) : null}
       <fieldset className="mb-2" data-meaning-question="represents">
         <legend className="fs-6 fw-semibold mb-1">1. What does this measured value represent?</legend>
+        {suggestion ? (
+          <div className="border rounded p-2 mb-1 bg-light" data-meaning-suggestion="">
+            <div className="fw-semibold">Suggested from the spreadsheet column heading</div>
+            <div data-meaning-suggestion-label="">{suggestion}</div>
+            <div className="text-muted" data-meaning-suggestion-note="">
+              This description comes from the source heading. Your organization has not yet confirmed what the measurement represents.
+            </div>
+            <button type="button" className="btn btn-sm btn-outline-secondary mt-1" data-meaning-suggestion-use=""
+              disabled={Boolean(pending) || form.indicatorLabel === suggestion}
+              onClick={() => setForm((current) => ({ ...current, indicatorLabel: suggestion }))}>
+              Use this name
+            </button>
+          </div>
+        ) : null}
         <label className="d-block">
           A short name for it
           <input className="form-control form-control-sm" value={form.indicatorLabel} {...data("field", "indicatorLabel")}

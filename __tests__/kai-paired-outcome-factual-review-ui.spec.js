@@ -90,7 +90,8 @@ test("adapter: a paired derived_measurement survives the projection when measure
   assert.ok(review.derivedMeasurement, "derived_measurement must reach the panels");
   assert.deepEqual(review.derivedMeasurement, {
     measurementType: "paired_outcome_change", sourceDerivedMeasurementId: MEASUREMENT, evidenceItemId: EVIDENCE, sourceVersionId: VERSION, isCurrent: true,
-    worksheetKey: "sheet_1", worksheetName: "Participant assessments", outcomeFieldKey: "field_7", outcomeColumn: "G", calculationMethod: D.DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME,
+    worksheetKey: "sheet_1", worksheetName: "Participant assessments", outcomeFieldKey: "field_7", outcomeColumn: "G",
+    sourceHeadingSuggestion: null, calculationMethod: D.DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME,
     numerator: 23, denominator: 40, percentage: "57.50", increasedCount: 23, unchangedCount: 13, decreasedCount: 4,
     participantCount: 62, comparablePairCount: 40, excludedParticipantCount: 22,
     exclusions: {

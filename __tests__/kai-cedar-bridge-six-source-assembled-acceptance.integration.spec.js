@@ -871,6 +871,10 @@ async function runCedarBridgeAcceptance() {
         meaning_text: "Human-supplied for this synthetic acceptance: the participant's self-rated employment readiness." },
     };
     report.human_supplied_semantics.paired = HUMAN_SEMANTICS;
+    // KAI's screened suggestions from the original column headings (F: digital_confidence_score_1_to_5,
+    // G: employment_readiness_score_1_to_5). Unconfirmed source context; never a recorded meaning.
+    const SUGGESTED_FIELD_6_LABEL = "Digital confidence score (1-5)";
+    const SUGGESTED_FIELD_7_LABEL = "Employment readiness score (1-5)";
 
     await test("11: Package A - KAI retains both paired outcomes without any human definition; a person's meaning then changes interpretation, never arithmetic", async () => {
       const sourceVersionId = state.workbook.sourceVersionId;
@@ -917,6 +921,27 @@ async function runCedarBridgeAcceptance() {
       assert.ok([15, 31, 61, 77].every((r) => rowsOf(byField.field_6, "missing_followup_value").includes(r)), J(byField.field_6.exclusions));
       assert.ok([18, 62].every((r) => rowsOf(byField.field_7, "missing_baseline_value").includes(r)), J(byField.field_7.exclusions));
       assert.deepEqual(await recordCountRow(state.assessments.evidenceItemId), assessmentsBefore, "the 112-row assessment record count is unchanged");
+
+      // Source-attributed suggestions through the existing scoped read: each bound to its own field of
+      // this version's profile and worksheet; reading them writes nothing and records no interpretation.
+      const suggestionMark = await writeCounts();
+      const basisRead = await adminApi("GET", derivedMeasurementBasisPath(ORG, sourceVersionId, "sheet_1"));
+      assert.equal(basisRead.status, 200, J(basisRead.body));
+      const suggestions = Object.fromEntries(basisRead.body.data.recorded.filter((entry) => entry.measurement_family === "paired_outcome_change")
+        .map((entry) => [entry.definition.outcome_field_key, entry.source_heading_suggestion]));
+      assert.deepEqual(suggestions, {
+        field_6: { suggested_label: SUGGESTED_FIELD_6_LABEL, derived_from: "spreadsheet_column_heading" },
+        field_7: { suggested_label: SUGGESTED_FIELD_7_LABEL, derived_from: "spreadsheet_column_heading" },
+      });
+      assert.equal(basisRead.body.data.lineage.profile_canonical_sha256, sha, "bound to the profile the measurements were calculated from");
+      assert.ok(basisRead.body.data.recorded.every((entry) => entry.evidence.every((item) => item.interpretation === null)), "no interpretation is implied");
+      assert.doesNotMatch(J(basisRead.body), /employment_readiness|digital_confidence|_score_1_to_5/, "the original headings are not served");
+      const [{ profile_text: profileText }] = await query(`SELECT p.profile::text AS profile_text FROM kai.intake_file_profiles p
+          WHERE p.organization_id = $1::uuid AND p.profile_canonical_sha256 = $2`, [ORG, sha]);
+      assert.doesNotMatch(profileText, /employment_readiness|digital_confidence|_score_1_to_5/, "the committed profile stores no original heading");
+      assert.ok(profileText.includes(SUGGESTED_FIELD_7_LABEL), "only the screened suggestion is committed");
+      assert.deepEqual(await writeCounts(), suggestionMark, "reading the suggestions writes nothing");
+      report.derived_measurements.heading_suggestions = suggestions;
 
       // Replay: zero writes and no audit.
       const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG, sourceVersionId, "sheet_1"), {});
@@ -1149,6 +1174,11 @@ async function runCedarBridgeAcceptance() {
         assert.deepEqual([p.measurement_type, p.comparable_pair_count, p.increased_count, p.unchanged_count, p.decreased_count, p.percentage, p.participant_count, p.excluded_participant_count],
           ["paired_outcome_change", 40, 23, 13, 4, "57.50", 62, 22], J(p));
         assert.deepEqual([p.interpretation, p.score_direction, p.reporting_period, p.source_derived_measurement_id], [null, "not_established", null, measurementId]);
+        // Source-attributed suggestion (owner prompt "Implement Source-Attributed Measurement Meaning
+        // Suggestions"): the original heading of column G is employment_readiness_score_1_to_5; only the
+        // screened short name is served, bound to this version's profile, worksheet and field.
+        assert.deepEqual(p.source_heading_suggestion, { suggested_label: SUGGESTED_FIELD_7_LABEL, derived_from: "spreadsheet_column_heading" });
+        assert.doesNotMatch(J(dto), /employment_readiness|_score_1_to_5/, "the original heading is not served");
         assert.equal(dto.internal_eligibility.eligible, true, "the reported state: internally eligible, meaning not recorded");
         assert.equal(dto.viewer, "organization_administrator");
         // Frontend projection keeps it.
@@ -1198,7 +1228,31 @@ async function runCedarBridgeAcceptance() {
 
         // --- State B: the administrator records the meaning through the panel's existing interpretation route ---
         const semantics = HUMAN_SEMANTICS.paired_field_7_first;
+        assert.ok(!gkText || !gkText.includes(SUGGESTED_FIELD_7_LABEL), "the suggestion is shown only beside the organization's meaning questions");
+        assert.ok(!clientText.includes(SUGGESTED_FIELD_7_LABEL), "nothing is suggested before the meaning questions are opened");
         await page.clickVisible(`${clientPanel} [data-client-measured-claim-clarify="${measurementId}"]`, "Record what this measures");
+        // The suggestion is shown as unconfirmed source context; using it only fills the short-name field.
+        await page.waitFor(() => page.visible(`${clientPanel} [data-meaning-suggestion]`), "the heading suggestion");
+        const suggestionText = await page.textOf(`${clientPanel} [data-meaning-suggestion]`);
+        capture("state-b-suggestion", suggestionText);
+        assert.match(suggestionText, /Suggested from the spreadsheet column heading/);
+        assert.equal((await page.textOf(`${clientPanel} [data-meaning-suggestion-label]`)).trim(), SUGGESTED_FIELD_7_LABEL);
+        assert.ok(suggestionText.includes("This description comes from the source heading. Your organization has not yet confirmed what the measurement represents."));
+        const fieldValue = (name) => page.evaluate(`document.querySelector(${J(`${clientPanel} [data-client-measured-claim-clarify-field="${name}"]`)}).value`);
+        assert.deepEqual([await fieldValue("indicatorLabel"), await fieldValue("meaningText"), await fieldValue("scoreDirection"), await fieldValue("evidenceBasis")],
+          ["", "", "", "not_established"], "displaying the suggestion fills nothing");
+        const useMark = page.mark();
+        await page.clickVisible(`${clientPanel} [data-meaning-suggestion-use]`, "Use this name");
+        await page.idle();
+        assert.equal(await fieldValue("indicatorLabel"), SUGGESTED_FIELD_7_LABEL, "the suggestion is inserted into the short-name field");
+        assert.deepEqual([await fieldValue("meaningText"), await fieldValue("scoreDirection"), await fieldValue("evidenceBasis")], ["", "", "not_established"],
+          "meaning, direction and basis stay unknown");
+        assert.equal(page.requestsSince(useMark).filter((r) => r.method !== "GET").length, 0, "selecting the suggestion sends no write");
+        assert.equal(await page.evaluate(`document.querySelector(${J(`${clientPanel} [data-client-measured-claim-clarify-submit]`)}).disabled`), true,
+          "a short name alone is not a meaning: nothing can be recorded yet");
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [measurementId]))[0].n, 0,
+          "no interpretation exists after displaying or selecting the suggestion");
+        // The person edits the suggested name and states the meaning the heading does not establish.
         assert.ok(await page.type(`${clientPanel} [data-client-measured-claim-clarify-field="indicatorLabel"]`, semantics.indicator_label));
         assert.ok(await page.type(`${clientPanel} [data-client-measured-claim-clarify-field="meaningText"]`, semantics.meaning_text));
         assert.equal(await page.attrOf(`${clientPanel} [data-client-measured-claim-clarify-field="scoreDirection"]`, "data-client-measured-claim-clarify-field"), "scoreDirection");
@@ -1806,6 +1860,9 @@ async function runCedarBridgeAcceptance() {
         capture("internal-report", markdown);
         assert.match(markdown, /57\.50%/);
         assert.match(markdown, /Employment readiness/);
+        // The report states the human-recorded meaning, never the unconfirmed heading suggestion.
+        assert.ok(!markdown.includes(SUGGESTED_FIELD_7_LABEL) && !markdown.includes(SUGGESTED_FIELD_6_LABEL), "no heading suggestion in the saved report");
+        assert.doesNotMatch(markdown, /employment_readiness|_score_1_to_5/, "no original heading in the saved report");
         // Causation appears only as KAI's own disclaimer, never as a claim.
         assert.match(markdown, /It does not establish that the programme caused any change/);
         const affirmativeCausal = markdown.split(/(?<=[.!?])\s+|\n+/).filter((sentence) => /\bcaus(e|ed|es|ing)\b/i.test(sentence) && !/\b(not|no|any)\b/i.test(sentence));
