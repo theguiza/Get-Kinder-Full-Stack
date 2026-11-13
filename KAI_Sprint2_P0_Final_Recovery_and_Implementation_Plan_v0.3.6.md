@@ -47701,3 +47701,53 @@ None of the 9 was visible, including "KAI did not check the recorded values agai
 - Independent human usability.
 
 **Status:** MATERIAL_REVIEW_CONTEXT_DEFECT_CORRECTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Guided measurement interpretation and reusable impact evidence (2026-11-13)
+
+**Owner direction (USER_CONFIRMED):** the Cedar measurement-to-impact-evidence journey runs from the measurement, through a clear clarification, to current interpreted evidence. That evidence is then retrieved from the Impact Evidence Library and used in a new, citation-backed report draft. Local synthetic work only. Start: `3afd34a4`, `main`, clean. Implementation commit: `763d91c6`.
+
+**Implemented:**
+- **Readable location (backend projection only).** The paired factual-review `derived_measurement` now also serves:
+  - `worksheet_name`: the screened `safe_sheet_name` from the exact P1 profile the measurement was calculated from, matched by `profile_canonical_sha256`. It is read by the new `getScopedProfileWorksheetName`, which is tenant-scoped and read-only.
+  - `outcome_column`: the column letter already persisted in the definition.
+  - No header names, cell values or participant rows are served. The traceability (P2-06) DTO and the arithmetic are unchanged.
+- **Paired reading.** The reading now leads with "Where KAI read the values: column G of the worksheet "Assessments"." It then shows three labelled groups:
+  - "Calculated by KAI": the result, the exclusions, the period and the method.
+  - "Found from the worksheet's layout": a structural statement that does not establish meaning, and the difference between a numerical increase and a favourable outcome.
+  - "Stated by the organization" or "Not yet stated".
+  - Internal keys stay under "Source details".
+- **Guided form.** The new shared `MeaningQuestionsForm.jsx` is used by both the review panel and Count records. It shows what KAI established first, then asks three questions: what the value represents, which direction is more favourable (paired only, default "not established"), and the source or basis of the values. It offers Cancel. An unchanged correction cannot be submitted. The POST contract is unchanged.
+- **Prefill.** A shared `interpretationFormFrom` initializes the form from the current interpretation, in either snake_case or camelCase. An unknown or unrecognized direction or basis stays not established, and nothing is inferred from the label.
+
+**Proof (TOOL_VERIFIED, real Chrome, disposable PostgreSQL, synthetic Cedar):**
+- **Scenario A (Cedar 11a (browser) State A, extended).** Both panels show 40/23/13/4, the 22 exclusions (5/7/8/2), the location, the structural statement and the distinction. They say no reporting period was applied. "Employment readiness" does not appear before a person states it. The existing 11a test still covers the descriptive provisional assessment and the absence of causal or period text.
+- **Scenario B (State B, existing, then the new State C):**
+  - The administrator records the first meaning (human_stated, attributed). The arithmetic is byte-identical, and the earlier claim returns 409 `derived_measurement_interpretation_superseded`.
+  - Reopening "Change what this measures" prefills all four values. Cancel, close and reopen of the panel, and the Count records "Change meaning" form (also prefilled), sent no non-GET request and changed no row counts.
+  - Changing only the direction to `higher_is_better` posts all four values. One interpretation is added that supersedes the first, plus one evidence item, with no measurement and no claim. The arithmetic is unchanged.
+  - State B's claim now returns 409. The corrected evidence has 0 review decisions and 0 claims: nothing is copied.
+  - 11b now reuses the browser correction (an API replay writes nothing) and keeps its API path when Chrome is absent. The synthetic correction now changes only the direction.
+- **Library reuse (new Cedar 14a (browser)).** The claim was reviewed through Get Kinder's established review in test 13; nothing was seeded.
+  - The administrator opens Knowledge Studio Impact. The current finding (evidence `cd4833f3…`) shows Employment readiness, 57.50% and source `04_assessments_and_followups.xlsx`. Earlier statements are not presented as current findings.
+  - "Evidence, definition and limitations" opens Evidence, where the claim (`5b998833…`) is "Usable in internal reports now". "View measurement" returns the current evidence and source-version identity, interpretation `40c990e3…`, worksheet "Assessments" and column G. It also returns 40/23/13/4, the 62/22 exclusions by reason, no period, eligible internal, evidence supported, claim approved, and 11 limitation codes (matched subset, exclusions, no period, values not verified, meaning and direction human-stated, self-reported, and coverage).
+  - Superseded claims are not selectable and not marked usable. No Count records or measurement route was requested, and no write occurred: all six row counts are unchanged.
+- **Report reuse (14a).**
+  - The claim was selected and "Generate internal evidence summary" was used: POST `…/evidence-summary` returned 201 with exactly this claim. The provider received only this claim and evidence.
+  - Every saved block cites this claim and its current evidence. The text contains "23 of 40 comparable participant pairs (57.50%)", "the organization states higher is better", "22 of 62 participants excluded as not comparable", "no reporting period" and "KAI did not check the recorded values against any other source."
+  - The internal report shows causation only as KAI's disclaimer ("It does not establish that the programme caused any change"), with no period dates.
+  - Reopening from Drafts after a reload shows identical content. No measurement, interpretation, evidence or claim was created, and only one draft was added. The draft is in state `draft` / `needs_gk_review` and was not released.
+
+**Verification (TOOL_VERIFIED, sentinel `DATABASE_URL`):**
+- New `kai-guided-measurement-interpretation.spec.js`: 7/7.
+- Projection spec: 14/14. Factual-review UI spec: 11/11.
+- Focused specs touching the changed modules: 555 total, 554 pass, 0 fail, 1 skipped.
+- `npm test`: 6257 total, 6128 pass, 0 fail, 129 skipped.
+- Cedar with PDFs and Chrome: 51/51. The first run failed only on a too-broad causal regex in 14a, which matched KAI's own disclaimer; it was narrowed to affirmative causal sentences.
+- Project B Package 3: 19/19. Document evidence + outcomes: 20/20.
+- `npm run build`: OK. `git diff --check`: clean.
+
+**Remaining AI interpretation gap:** KAI still cannot propose a source-backed "Employment readiness" meaning for `field_7`. No governed source-to-field link maps Cedar's Project Context to that column, so the meaning remains human-supplied. Nothing was built for this, as the owner directed.
+
+**NOT_CONFIRMED:** production and deployed behaviour; real-model wording; independent human usability.
+
+**Status:** GUIDED_INTERPRETATION_AND_LIBRARY_REPORT_REUSE_PROVEN_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
