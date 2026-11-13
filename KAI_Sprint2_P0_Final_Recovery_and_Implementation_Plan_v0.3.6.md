@@ -47795,3 +47795,46 @@ None of the 9 was visible, including "KAI did not check the recorded values agai
 **NOT_CONFIRMED:** production and deployed behaviour; independent human usability.
 
 **Status:** SOURCE_HEADING_SUGGESTION_IMPLEMENTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Outcome heading suggestion: identification-leak correction (2026-11-13)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI — Close the Outcome Header Suggestion Identification Leak Before Production Release". It authorizes a bounded local correction and local commit. Excluded: pushes, deployment, schema, flags, cloud, credentials, tenants, real client data and `00_KAI_CURRENT_STATE.md`. Start: `1e1e7ebb`, `main`, clean, 6 commits ahead of the local `origin/main` ref (not fetched). Correction commit: `e763c57b`. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command.
+
+**Reproduced before the change (TOOL_VERIFIED):** through the real `profileLocalTrustedFile` path and `committedOutcomeHeadingSuggestion` (the helper both scoped reads use), with synthetic headings:
+
+| Heading | Retained and served |
+|---|---|
+| `Jane Doe Readiness Score` | "Jane doe readiness score" |
+| `jane_doe_readiness_score` | "Jane doe readiness score" |
+| `JANE_DOE_READINESS_SCORE` | "Jane doe readiness score" |
+| `Readiness Score Jane Doe` | "Readiness score jane doe" |
+| `Jane Readiness Score` | "Jane readiness score" |
+
+The leak was wider than the reported Title Case example.
+
+**Cause:** the only defence against names was a casing-consistency rule (a capitalized word inside a lower-case heading). Any all-letter word was otherwise admitted, so a heading written uniformly in any one style passed with the name included.
+
+**Repair (`outcomeHeadingSuggestion.js` only):**
+- Every word must be in a closed list of measurement-description words, a score word or a connector. Otherwise there is no suggestion and the neutral meaning questions appear.
+- The list covers employment and learning, wellbeing and health, housing, food and money, social connection, and neutral qualifiers. It leaves out common names that are also ordinary words (hope, grace, joy, young, king, price …).
+- The explicit refusals and the casing rule are kept. The read-time re-screen uses the same function, so a value kept by the earlier rule is not served either.
+- Nothing else changed: no arithmetic, reads, UI, profile version or hash rule. The original heading is never a fallback.
+
+**Now stored and returned (TOOL_VERIFIED):**
+- Name-bearing headings. Twelve variants were tested: the five above plus `readiness_score_doe`, a trailing first name, camelCase, "for jane doe", an unlisted surname, and name-like ordinary words such as "Hope Grace", "Young King". Each gives `outcome_heading_suggestions: {}` in the committed profile, `null` from the read helper and from the factual-review DTO, and no name anywhere in the profile JSON. The field is still measured with the same counts.
+- Unfamiliar or ambiguous text ("Zorblax", "XQ", "v2", "Ms") also gives none.
+- Admissible headings are unchanged: Cedar F/G "Digital confidence score (1-5)" and "Employment readiness score (1-5)"; housing stability, mental wellbeing (0-10), income adequacy (1-7), food security, substance use recovery, quality of life.
+
+**Verification (TOOL_VERIFIED):**
+- Focused: paired outcome with the Cedar workbook, review projection, guided interpretation, factual-review UI and P1 kernel: 63/63.
+- `npm test`: 6266 total, 6137 pass, 0 fail, 129 skipped.
+- `npm run build`: OK, bundle byte-identical (backend-only change).
+- Cedar with PDFs and Chrome: 51/51, 0 skipped. This includes 11 (scoped read), 11a (browser: suggestion shown unconfirmed, selecting writes nothing, human submission only) and 14a (library reuse; the saved report has no suggestion).
+- `git diff --check`: clean.
+
+**Limitations:**
+- A name made only of listed ordinary words (for example, a surname that is also "Money" or "Trust") is not distinguishable.
+- Legitimate headings using unlisted words get no suggestion (fail closed) until the list is extended.
+- Profiles created locally at `2353499c` may hold an earlier suggestion. It is not served (re-screened on read), and no such profile exists outside disposable test clusters.
+
+**Status:** HEADING_SUGGESTION_NAME_LEAK_CLOSED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
