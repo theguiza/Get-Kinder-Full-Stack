@@ -4962,6 +4962,16 @@ export default function ImpactEvidenceLibrary({
                 />
 
                 <h6 className="mt-3">Limitations</h6>
+                {traceability.derivedMeasurementLimitations.length > 0 ? (
+                  <div className="small mb-2" data-gk-traceability-derived-limitations="">
+                    <div className="fw-semibold">Measurement limitations (KAI&rsquo;s evaluation)</div>
+                    <ul className="mb-0">
+                      {traceability.derivedMeasurementLimitations.map((limitation) => (
+                        <li key={limitation.code} data-gk-traceability-derived-limitation={limitation.code}>{limitation.description}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {traceability.dimensions.filter((dimension) => dimension.displayStatus === "known_limitation").length === 0 ? (
                   <div className="text-muted small">No accepted internal limitations returned.</div>
                 ) : traceability.dimensions.filter((dimension) => dimension.displayStatus === "known_limitation").map((dimension) => (

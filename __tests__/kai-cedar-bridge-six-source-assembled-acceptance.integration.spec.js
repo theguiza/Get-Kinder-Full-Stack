@@ -2123,6 +2123,107 @@ async function runCedarBridgeAcceptance() {
       }
     });
 
+    await test("19a (browser): an unreviewed non-paired derived claim - the GK reviewer sees its material limitations in Traceability and records needs_more_information", { skip: !CHROME || !WORKDIR ? "Chrome or the built bundle not available" : false }, async () => {
+      const claimId = report.claims["derived:events_cancelled_proposed_meaning"].claim_id;
+      const evidenceItemId = TABULAR.events_cancelled.evidenceItemId;
+      const measurementId = TABULAR.events_cancelled.measurementId;
+      const probe = { claim_id: claimId, evidence_item_id: evidenceItemId };
+      report.gk_unreviewed_derived_review = probe;
+      // Genuinely unreviewed: no evidence or claim review decision exists.
+      const decisionsOf = async () => (await query(`SELECT
+          (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $1::uuid)::int AS evidence,
+          (SELECT count(*) FROM kai.claim_review_decisions WHERE claim_id = $2::uuid)::int AS claim`, [evidenceItemId, claimId]))[0];
+      probe.decisions_before = await decisionsOf();
+      assert.deepEqual(probe.decisions_before, { evidence: 0, claim: 0 });
+      const [family] = await query("SELECT measurement_family FROM kai.source_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [measurementId]);
+      assert.equal(family.measurement_family, "tabular_count");
+      // The authoritative limitation set: the derived codes the measurement read returns, plus every
+      // coverage dimension of current traceability that is not clear (derivedMeasurementLimitationCodes).
+      const basis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.events.sourceVersionId));
+      const recordedEvidence = basis.body.data.recorded.flatMap((m) => m.evidence).find((e) => e.evidence_item_id === evidenceItemId);
+      const traced = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+      assert.equal(traced.status, 200);
+      const coverage = Object.entries(traced.body.data.dimensions)
+        .filter(([, d]) => d.assessment_status !== "resolved_clear")
+        .map(([key, d]) => `coverage.${key}.${d.internal_limitation_accepted === true ? "accepted_internal_limitation" : d.assessment_status}`);
+      probe.authoritative_codes = [...recordedEvidence.limitations.map((l) => l.code), ...coverage].sort();
+      assert.ok(probe.authoritative_codes.includes("derived.values_not_verified"));
+      assert.ok(probe.authoritative_codes.includes("derived.meaning_proposed"));
+
+      const browser = await launchChrome();
+      const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
+      try {
+        const mark = gkPage.mark();
+        await gkPage.goto("/impact-library");
+        await gkPage.clickNav("Knowledge Studio");
+        await gkPage.idle();
+        await gkPage.clickTab("Evidence");
+        await gkPage.idle();
+        const exists = (selector) => gkPage.evaluate(`Boolean(document.querySelector(${J(selector)}))`);
+        await gkPage.waitFor(() => exists(`span[title="${claimId}"]`), "the unreviewed claim is listed");
+        probe.review_finding_offered = await exists(`[data-gk-review-finding="${claimId}"]`);
+        await gkPage.evaluate(`document.querySelector(${J(`span[title="${claimId}"]`)}).closest("button").click()`);
+        await gkPage.idle();
+        await gkPage.waitFor(async () => Boolean(await gkPage.textOf("[data-gk-traceability-summary]")) && !/Loading traceability/.test(await gkPage.text()), "Traceability", { timeout: 30000 });
+        const traceRead = gkPage.requestsSince(mark).filter((r) => r.method === "GET" && new URL(r.url).pathname.endsWith(`/claims/${claimId}/traceability`)).at(-1);
+        probe.traceability_get = { status: traceRead?.status, path: traceRead && new URL(traceRead.url).pathname };
+        const body = traceRead ? await gkPage.responseBody(traceRead) : null;
+        probe.traceability_get.keys = body?.data ? Object.keys(body.data).sort() : null;
+        assert.equal(probe.traceability_get.status, 200);
+        assert.equal(probe.review_finding_offered, false, "the narrowed entry point is unchanged");
+        // The read carries exactly the authoritative limitation set, each with its description.
+        const served = body.data.derived_measurement_limitations;
+        probe.traceability_get.derived_measurement_limitations = served;
+        assert.deepEqual(served.map((l) => l.code), probe.authoritative_codes);
+        assert.ok(served.every((l) => typeof l.description === "string" && l.description.length > 0), J(served));
+        const card = () => gkPage.evaluate(`document.querySelector("[data-gk-traceability-summary]").closest(".admin-card").innerText`);
+        probe.visible_before = await card();
+        // Before any decision, the reviewer sees the claim, its source and every material limitation.
+        assert.match(probe.visible_before, /Claim \(restates its evidence\): 10 distinct field_1 identifiers/);
+        assert.match(probe.visible_before, /Source: 03_service_events\.csv, current version/);
+        assert.match(probe.visible_before, /Measurement limitations \(KAI’s evaluation\)/);
+        probe.visible_limitations = served.map(({ code, description }) => ({ code, visible: probe.visible_before.includes(description) }));
+        assert.deepEqual(probe.visible_limitations.filter((l) => !l.visible), [], "every limitation is visible");
+        assert.ok(probe.visible_before.includes("KAI did not check the recorded values against any other source."));
+        assert.match(probe.visible_before, /Evidence review decision\s*none/);
+        assert.match(probe.visible_before, /Claim review decision\s*none/);
+        assert.match(probe.visible_before, /Human-approved scope\s*none/);
+        probe.evidence_form = await exists("#evidence-review-decision-needs_more_information");
+        probe.claim_form = await exists("#claim-review-decision-needs_more_information");
+        assert.equal(probe.evidence_form, true, "the evidence decision form is reachable");
+
+        // An authorized synthetic needs_more_information evidence decision through the existing form.
+        const decideMark = gkPage.mark();
+        await gkPage.evaluate(`document.querySelector("#evidence-review-decision-needs_more_information").click()`);
+        await gkPage.clickButton("Record Evidence Review Decision");
+        await gkPage.waitFor(() => gkPage.requestsSince(decideMark).some((r) => r.method === "POST" && r.done), "the decision request");
+        const posted = gkPage.requestsSince(decideMark).find((r) => r.method === "POST");
+        probe.decision_post = { status: posted.status, path: new URL(posted.url).pathname };
+        await gkPage.waitFor(async () => /Evidence review decision\s*needs_more_information/.test(await card()), "the reread decision", { timeout: 30000 });
+        probe.visible_after = await card();
+        probe.decisions_after = await decisionsOf();
+        const reread = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+        probe.reread = { status: reread.status, eligible: reread.body.data.eligible, blockerCodes: reread.body.data.blockerCodes,
+          evidence_review_decision: reread.body.data.evidence_review_decision?.decision_outcome ?? null,
+          claim_review_decision: reread.body.data.claim_review_decision, claim_status: reread.body.data.claim.claim_status,
+          claim_strength: reread.body.data.claim.claim_strength, support_strength: reread.body.data.evidence.support_strength };
+        probe.exceptions = gkPage.exceptions;
+        assert.equal(probe.decision_post.status, 200);
+        assert.deepEqual(probe.decisions_after, { evidence: 1, claim: 0 });
+        // needs_more_information approves nothing and bypasses no check.
+        assert.equal(probe.reread.evidence_review_decision, "needs_more_information");
+        assert.deepEqual([probe.reread.eligible, probe.reread.claim_review_decision, probe.reread.claim_status, probe.reread.claim_strength, probe.reread.support_strength],
+          [false, null, "proposed", "unassessed", "unassessed"]);
+        for (const code of ["claim_review_unresolved", "evidence_review_unresolved", "support_strength_unassessed"]) assert.ok(probe.reread.blockerCodes.includes(code), code);
+        assert.ok(probe.visible_after.includes("KAI did not check the recorded values against any other source."), "limitations stay visible after the decision");
+        assert.deepEqual(gkPage.exceptions, []);
+      } finally {
+        await gkPage.close().catch(() => {});
+        await browser.close();
+      }
+      console.log(`19a-probe ${J(probe)}`);
+    });
+
     let crossDraftId = null;
     await test("20: an internal Evidence Summary cites the cross-source and existing derived findings; Get Kinder's review packet cites both source versions", async () => {
       // The existing findings re-cited for regression; the generator's total text limit bounds one draft.
@@ -3725,7 +3826,8 @@ async function launchChrome() {
       const exited = child.exitCode !== null ? Promise.resolve() : new Promise((r) => child.once("exit", r));
       child.kill("SIGKILL");
       await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
-      rmSync(profileDir, { recursive: true, force: true });
+      // Chrome's helpers can still be writing just after the kill.
+      rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     },
   };
 }

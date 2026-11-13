@@ -29,7 +29,8 @@ import {
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
 import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent,
-  derivedMeasurementLabelsAdmitted, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
+  derivedMeasurementLabelsAdmitted, derivedEvidenceIsCurrent, derivedMeasurementLimitationCodes,
+  describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { evaluateProvisionalInternalDraftAdmissionInTransaction } from "./postgresProvisionalInternalDraftAdmission.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
@@ -1002,6 +1003,31 @@ export function createPostgresClaimTraceabilityRepository({ runInTransaction } =
         return await run(async (tx) => {
           await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
           return evaluateClaimTraceabilityInTransaction(tx, input);
+        });
+      } catch (error) {
+        return shapeError(error);
+      }
+    },
+    // The Get Kinder reviewer's Traceability read: the same P2-06 result and,
+    // for derived-measurement evidence only, its material limitations - the
+    // authoritative evaluation every generated finding and report discloses,
+    // over this read's own dimensions - read in the same transaction. The P2-06
+    // DTO every other consumer validates is unchanged.
+    async getClaimTraceabilityReviewSummary(input) {
+      if (!validateInput(input)) return failure("validation_blocker");
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const result = await evaluateClaimTraceabilityInTransaction(tx, input);
+          if (!result.ok) return result;
+          const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
+            { organizationId: input.organizationId, evidenceItemId: result.data.evidence.evidence_item_id }, tx);
+          if (derivedRow) {
+            result.data.derived_measurement_limitations = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: result.data.dimensions })
+              .map((code) => ({ code, description: describeDerivedLimitationCode(code) }));
+          }
+          return result;
         });
       } catch (error) {
         return shapeError(error);

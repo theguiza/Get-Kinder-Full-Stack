@@ -61,9 +61,10 @@ function isMappedHumanActor(actorContext) {
 }
 
 function isClaimTraceabilityInput(value) {
-  const allowedKeys = new Set(["organizationId", "claimId", "requestedAudience", "actorContext"]);
+  const allowedKeys = new Set(["organizationId", "claimId", "requestedAudience", "actorContext", "includeDerivedMeasurementLimitations"]);
   if (!isPlainObject(value) || !hasOnlyKeys(value, allowedKeys)) return false;
   return (
+    (value.includeDerivedMeasurementLimitations === undefined || value.includeDerivedMeasurementLimitations === true) &&
     isNonEmptyString(value.organizationId) &&
     isNonEmptyString(value.claimId) &&
     REQUESTED_AUDIENCES.has(value.requestedAudience) &&
@@ -120,9 +121,14 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
     claimId: input.claimId,
     requestedAudience: input.requestedAudience,
   };
+  // The Get Kinder Traceability panel also asks for a derived measurement's
+  // material limitations (full DTO only; never the organization diagnostic).
   const result = auth.organizationTraceabilityDiagnostic === true && typeof repository.getOrganizationInternalDraftDiagnostic === "function"
     ? await repository.getOrganizationInternalDraftDiagnostic(readInput)
-    : await repository.getClaimTraceabilitySummary(readInput);
+    : input.includeDerivedMeasurementLimitations === true && auth.organizationTraceabilityDiagnostic !== true
+      && typeof repository.getClaimTraceabilityReviewSummary === "function"
+      ? await repository.getClaimTraceabilityReviewSummary(readInput)
+      : await repository.getClaimTraceabilitySummary(readInput);
 
   if (!result.ok) {
     const traceabilityConflictReason =

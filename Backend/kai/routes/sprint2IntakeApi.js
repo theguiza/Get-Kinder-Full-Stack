@@ -3413,6 +3413,7 @@ router.get(
         claimId: identifiers.claimId,
         requestedAudience,
         actorContext: sprint2MappedActorContext(req),
+        includeDerivedMeasurementLimitations: true,
       });
     });
   },

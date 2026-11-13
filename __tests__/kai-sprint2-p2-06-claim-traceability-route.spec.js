@@ -177,6 +177,8 @@ test("P2-06 claim-traceability route", async (t) => {
         claimId,
         requestedAudience: "public",
         actorContext,
+        // The GK Traceability panel's read (derived limitations; grants nothing).
+        includeDerivedMeasurementLimitations: true,
       });
       assert.deepEqual(response.body, { ok: true, data: injectedTraceabilityDto, warnings: [] });
     },
@@ -210,6 +212,8 @@ test("P2-06 claim-traceability route", async (t) => {
       claimId,
       requestedAudience: "internal",
       actorContext,
+      // The GK Traceability panel's read (derived limitations; grants nothing).
+      includeDerivedMeasurementLimitations: true,
     });
   });
 

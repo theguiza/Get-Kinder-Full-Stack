@@ -2901,6 +2901,11 @@ export function projectTraceability(dto) {
   return {
     requestedAudience: dto.requestedAudience,
     eligible: dto.eligible === true,
+    // The derived measurement's material limitations, as the server's
+    // authoritative evaluation describes them (derived evidence only).
+    derivedMeasurementLimitations: asArray(dto.derived_measurement_limitations)
+      .filter((entry) => typeof entry?.code === "string" && entry.code && typeof entry.description === "string" && entry.description)
+      .map(({ code, description }) => ({ code, description })),
     blockerCodes: asArray(dto.blockerCodes),
     affectedDimensionKeys: asArray(dto.affectedDimensionKeys),
     affectedObjectIds: asArray(dto.affectedObjectIds),
