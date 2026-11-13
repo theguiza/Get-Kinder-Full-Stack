@@ -531,6 +531,18 @@ export function documentStatementAuthorityViolations({ blocks, generationClaims 
 
     // The server's own measurement disclosures are not the model's assertions.
     let text = modelAuthoredText(block.text, others.filter((claim) => (claim.limitationCodes || []).some(isMeasuredClaimCode)));
+    // A complete, attributed source statement already preserves the exact
+    // excerpt and its qualifications. Recognize the whole statement before
+    // parsing shorter quotations: the excerpt may itself contain quotes
+    // (for example records marked "confirmed"), which otherwise exposes a
+    // source word as an apparent assertion of completed processing. Replace
+    // only an exact cited statement; assertions added beside it still run
+    // through every authority check below.
+    for (const claim of documents) {
+      if (excerptFromDocumentClaimStatement(claim.claimStatement) !== null) {
+        text = text.split(claim.claimStatement).join(" [quoted source statement] ");
+      }
+    }
     // Verbatim quotations of a cited excerpt, introduced as the source's own words.
     text = text.replace(/"([^"\n]+)"|“([^”\n]+)”/g, (whole, straight, curly, offset, full) => {
       const quotation = straight ?? curly;

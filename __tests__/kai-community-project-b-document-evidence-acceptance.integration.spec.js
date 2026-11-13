@@ -1469,6 +1469,74 @@ async function runPackage4Acceptance() {
       if (REPORT_PATH) writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".reporting-period-note.md", markdown);
     });
 
+    await test("assessment document guidance (browser, HTTP, PostgreSQL): nested source quotes in findings block seven save and reopen without review decisions", async () => {
+      const excerpt = 'Records marked "confirmed" should be reconciled before the annual review is completed.';
+      const bytes = Buffer.from(`${"\n".repeat(10)}${excerpt}\n`);
+      const source = await uploadAndPromote(P, { key: "quoted_guidance", name: "annual_review_guidance.txt",
+        extension: ".txt", mime: "text/plain", bytes, checksum: sha256(bytes), permissions: DECISIONS.notes });
+      await extract(P, source);
+      const evidence = (await documentRows(P, source.sourceVersionId)).find((row) => row.statement.includes(excerpt));
+      assert.ok(evidence);
+      const proposed = await P.api("POST", claimProposalPath(P.organizationId, evidence.evidence_item_id), {});
+      assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+      const claimId = proposed.body.data.claim.claim_id;
+      const decisions = async () => (await query(`SELECT
+        (SELECT count(*) FROM kai.claim_review_decisions WHERE claim_id = $1::uuid)::int AS claim_reviews,
+        (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $2::uuid)::int AS evidence_reviews`, [claimId, evidence.evidence_item_id]))[0];
+      assert.deepEqual(await decisions(), { claim_reviews: 0, evidence_reviews: 0 });
+      // The supplied response puts the intact source quotation in precisely
+      // the reported findings block. External prose generation is simulated;
+      // composition, validation, SQL writes and subsequent reads are real.
+      assessmentRespond = (body) => {
+        const claim = body.claims.find((item) => item.claimId === claimId);
+        assert.ok(claim.limitationCodes.includes("document.method_or_instruction"));
+        const citations = [{ claimId, evidenceItemId: claim.evidenceItemId }];
+        return [
+          { section: "executive_snapshot", text: "The document supplies guidance for preparing the annual review.", citations },
+          ...Array.from({ length: 6 }, (_, index) => ({ section: "evidence_findings",
+            text: index === 5 ? claim.claimStatement : "The source describes a proposed step for preparing the annual review.", citations })),
+          { section: "impact_stories", text: "No participant account is stated beyond the cited findings.", citations },
+        ];
+      };
+      const callCount = modelCalls.length;
+      try {
+        await openStudio("Evidence");
+        await page.clickVisible(`[data-client-select-claim="${claimId}"]`, "Use the document guidance");
+        await page.clickTab("Drafts");
+        const mark = page.mark();
+        await page.clickButton("Generate Free Impact Assessment");
+        await page.waitFor(() => page.visible("[data-client-generated-draft]"), "the guidance assessment is saved", { timeout: 60000 });
+        await page.idle();
+        const posted = page.requestsSince(mark).find((request) => request.method === "POST"
+          && new URL(request.url).pathname === `${orgPath(P.organizationId)}/generated-content-drafts/free-impact-assessment`);
+        assert.equal(posted?.status, 201, J(posted));
+        assert.deepEqual(JSON.parse(posted.postData).claim_ids, [claimId]);
+        const draftId = (await page.responseBody(posted)).data.generatedContentDraftId;
+        const saved = await query("SELECT ordinal, text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal", [draftId]);
+        assert.ok(saved.find((block) => block.ordinal === 7)?.text.includes(excerpt), J(saved));
+        assert.equal(modelCalls.length - callCount, 1, "an exact quotation requires no model correction");
+        const readReport = async () => {
+          await openStudio("Drafts");
+          await page.clickVisible(`[data-client-internal-draft="${draftId}"] button`, "Read the saved guidance assessment");
+          await page.waitFor(() => page.visible(`[data-client-open-internal-report="${draftId}"]`), "the report is available");
+          await page.clickVisible(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+          await page.waitFor(() => page.visible("[data-client-internal-report-markdown]"), "the guidance report opens");
+          return page.textOf("[data-client-internal-report-markdown]");
+        };
+        const markdown = await readReport();
+        assert.ok(markdown.includes(excerpt));
+        assert.match(markdown, /Source-reported method or guidance/);
+        assert.match(markdown, /does not show that the step was carried out/);
+        assert.doesNotMatch(markdown, /KAI confirmed and reconciled/);
+        assert.equal(await readReport(), markdown, "reload opens the identical saved report");
+        assert.deepEqual(await decisions(), { claim_reviews: 0, evidence_reviews: 0 });
+        report.browser.quoted_guidance_assessment = { generation_status: posted.status, draft_id: draftId,
+          finding_ordinal: 7, model_calls: modelCalls.length - callCount, review_decisions: await decisions(), reopened_identical: true };
+      } finally {
+        assessmentRespond = null;
+      }
+    });
+
     await test("agreement: for every admission-governed generation attempt the server's admission predicted whether the provider was called", () => {
       const generations = MATRIX.filter((row) => typeof row.provisional_admitted === "boolean");
       assert.ok(generations.length >= 6);

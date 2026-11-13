@@ -94,6 +94,23 @@ function verdict(claims, modelBlocks) {
   return { ok: result.ok, keys: result.blockers.map((b) => b.validator_key), classes: v4?.evidence?.assertion_classes ?? [] };
 }
 
+test("document guidance: an exact source statement with nested quotation marks remains usable in composed findings", () => {
+  const excerpt = 'Records marked "confirmed" should be reconciled before the annual review is completed.';
+  const statement = DOC.composeDocumentClaimStatement({ excerpt,
+    coordinates: { unit: "text_lines", line_start: 11, line_end: 11, sentence_start: 5, sentence_end: 5 } });
+  const claim = generationClaim("B", statement, generationCodes(statement));
+  assert.ok(claim.limitationCodes.includes("document.method_or_instruction"));
+  const composed = `[[assessment:evidence_findings]]\n${statement}`;
+  assert.deepEqual(verdict([claim], [block(7, composed, ["B"])]), { ok: true, keys: [], classes: [] });
+  // Recognizing the quoted source must not hide a new assertion beside it,
+  // nor authorize a rewritten quotation that says the work was completed.
+  for (const own of ["KAI confirmed and reconciled the records.", "The records were reconciled before the annual review."]) {
+    const result = verdict([claim], [block(7, `${composed} ${own}`, ["B"])]);
+    assert.equal(result.ok, false, own);
+    assert.ok(result.classes.includes("document_guidance_presented_as_completed"), own);
+  }
+});
+
 test("Package 4 document meaning: the original documents match the package manifest", { skip: !HAVE_PACKAGE && "Project B package not present" }, () => {
   const manifest = JSON.parse(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "Community_File_Checksums.json"), "utf8"));
   for (const name of ["05_Programme_Coordination_Notes.txt", "06_Community_Review.pdf"]) {
