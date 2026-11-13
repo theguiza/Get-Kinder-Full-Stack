@@ -47647,3 +47647,57 @@ Cedar 11a (browser) also confirms that the organization panel shows the new reas
 **Notes:** the client-scoped claim-library response also carries `measurementFamily`; it is display metadata only. Real-model behaviour and production are NOT_CONFIRMED.
 
 **Status:** GK_ENTRY_POINT_MISMATCH_CLOSED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
+
+### Non-paired reviewer acceptance: material limitations at the Traceability decision point (2026-11-13)
+
+**Owner direction (USER_CONFIRMED):** prove that a GK reviewer opening an unreviewed non-paired derived claim in Traceability sees the material evidence and limitations needed for a decision, and can reach the authorized decision controls. Fix only a demonstrated defect. Local synthetic work only. Start: `1d7a7bd6`, `main`, clean.
+
+**Fixture (TOOL_VERIFIED):** Cedar `events_cancelled` (`tabular_count`, distinct event identifier, category `cancelled`, no meaning recorded, no period). Its claim is proposed in Cedar test 13 and was never reviewed: 0 evidence and 0 claim review decisions. It stays current until Stage B (test 25). The GK reviewer is the existing `USERS.gkReviewer`.
+
+**Reproduced (TOOL_VERIFIED, real Chrome, bundle `a326556f…`): MATERIAL_REVIEW_CONTEXT_DEFECT_REPRODUCED.** The browser selected the claim through the Claims list. No "Review finding" is offered, as narrowed by `d73a6390`. `GET …/claims/:claimId/traceability?requested_audience=internal` returned 200, but its body carried no `derived.*` code. The Traceability card showed the claim, its source (`03_service_events.csv`, current version), the blocker codes, "Limitations: No accepted internal limitations returned.", and the evidence decision form.
+
+The authoritative `derivedMeasurementLimitationCodes` set has 9 codes:
+- `derived.values_not_verified`
+- `derived.meaning_proposed`
+- `derived.no_reporting_period`
+- `derived.each_identifier_counted_once`
+- `coverage.duplicates|definition_clarity|time_period_clarity.resolved_risk_flagged`
+- `coverage.conflicting_source_indicators|requirement_alignment.unresolved`
+
+None of the 9 was visible, including "KAI did not check the recorded values against any other source." The evidence decision form was reachable.
+
+**Why the obvious fix was not taken:** adding the codes to the shared P2-06 DTO broke 7 `npm test` cases and 16 Cedar tests. Generation's `validateTraceabilityData` and the assistant tool validate the traceability root keys exactly, so the internal report read returned 404.
+
+**Correction:**
+- **Repository:** new `getClaimTraceabilityReviewSummary`. It runs the same P2-06 evaluation in the same read-only transaction and, for derived evidence only, attaches `derived_measurement_limitations`. These are `derivedMeasurementLimitationCodes({ measurementRow, dimensions })` over that read's own dimensions, with `describeDerivedLimitationCode` descriptions: the same evaluation the internal report and Evidence Summary disclose. `getClaimTraceabilitySummary` and its DTO are unchanged.
+- **Service:** `getClaimTraceabilitySummary` accepts an optional `includeDerivedMeasurementLimitations: true`; any other value is a `validation_blocker`. It is used only on the GK full-DTO path. The organization diagnostic and authorization are unchanged, and the flag grants nothing.
+- **Route:** only the GK traceability GET sets the flag. Generation, reports, the assistant tool and impact intelligence keep the strict read.
+- **Frontend:** `projectTraceability` projects `derivedMeasurementLimitations`, keeping code and description and dropping malformed entries. The Traceability card's "Limitations" section lists them under "Measurement limitations (KAI's evaluation)", above both decision forms.
+- **Harness:** Chrome profile removal retries on `ENOTEMPTY`. Test 19 (browser) had failed once on that teardown race after its assertions passed.
+- **Unchanged:** the "Review finding" gate, decision contracts, roles, currentness, schema and the factual-review read. The organization's own panel is unchanged.
+
+**Browser proof after the fix (TOOL_VERIFIED; Cedar test "19a (browser)", bundle `20ee13a0…`):**
+- **Read:** the traceability GET returned exactly the 9 authoritative codes with descriptions, and all 9 were visible in the Traceability card before any decision.
+- **Still shown:** the claim statement, its source and version, the eligibility checks (internal only; funder, public and export no), blockers, "Evidence review decision none", "Claim review decision none" and "Human-approved scope none".
+- **Decision:** the reviewer chose `needs_more_information` in the existing form. The POST to `…/evidence-review/:queueItemId/complete` returned 200.
+- **Persisted and reread:** evidence decisions went from 0 to 1, and claim decisions stayed at 0. The panel reread shows "Evidence review decision needs_more_information".
+- **Nothing approved:** the reread is `eligible: false` with blockers `claim_review_unresolved, evidence_review_unresolved, support_strength_unassessed, coverage_dimension_unresolved`. The claim is still `proposed`, and claim and support strength are `unassessed`.
+- **Other checks:** the limitations stay visible after the decision, and there were no page exceptions.
+
+**Claim review control:** the claim decision form is shown only after a terminal evidence decision (`claimReviewEvidencePrerequisiteSatisfied`). That is the existing admission order, not a routing defect, and it is unchanged. Its post-evidence path is covered by Cedar 13 (API) and 19 (browser, recorded decisions).
+
+**Verification (TOOL_VERIFIED, sentinel `DATABASE_URL`):**
+- `kai-gk-traceability-derived-limitations.spec.js` (new): 6/6, and 0/6 on the unfixed code.
+- P2-06 route spec: 12/12. Two input expectations now include the flag.
+- Focused traceability/review/derived specs: 407/407.
+- `npm test`: 6249 total: 6120 pass, 0 fail, 129 skipped.
+- Cedar: 50 total: 42 pass, 0 fail, 8 skipped (Stage E survey PDFs not present).
+- `git diff --check`: clean.
+
+**NOT_CONFIRMED:**
+- The claim decision form in the browser on this specific claim after a terminal evidence decision.
+- Whether the server, as well as the UI, enforces the evidence-before-claim order.
+- Production and deployed behaviour.
+- Independent human usability.
+
+**Status:** MATERIAL_REVIEW_CONTEXT_DEFECT_CORRECTED_LOCALLY; PRODUCTION_NOT_CHANGED. Stop here.
