@@ -30,12 +30,19 @@
  *   sentence case, Title Case, UPPER, or one camelCase word). A capitalized
  *   word inside an otherwise lower-case heading is treated as a possible
  *   proper name and refuses it.
- * - Vocabulary: words that refer to a person or their contact details,
- *   identifier words, free-text words, secrets and instruction words refuse
- *   the heading. Social-impact topics (housing, health, income, wellbeing,
- *   employment ...) are NOT refused: a measurement category is not personal
- *   identifying data, and the suggestion is shown only to the organization
- *   that uploaded the file.
+ * - Controlled vocabulary (closes the name leak found at 2353499c, where
+ *   "Jane Doe Readiness Score" or "jane_doe_readiness_score" was kept as
+ *   "Jane doe readiness score"): every word must be a listed
+ *   measurement-description word, score word or connector. Casing cannot
+ *   tell a name from a concept, so any unlisted word (a name, a code, an
+ *   unfamiliar term) gives no suggestion. Listed words exclude common given
+ *   names and surnames that are also ordinary words (hope, grace, joy,
+ *   young, king, price ...), so such a heading also fails closed.
+ *   Social-impact topics (housing, mental wellbeing, income, substance use
+ *   ...) are listed: a measurement category is not personal identifying
+ *   data, and the suggestion is shown only to the organization that uploaded
+ *   the file. Person, contact, identifier, free-text, secret and instruction
+ *   words are also refused explicitly.
  * - At least one score word and one other descriptive word are required;
  *   "score_2" or "rating" alone says nothing about what is measured.
  * Nothing infers a score direction, evidence basis, period or causation.
@@ -55,6 +62,33 @@ const OUTPUT_RE = /^[A-Z][a-z]+(?: [a-z]+){1,7}(?: \(\d{1,3}-\d{1,3}\))?$/;
 
 const SCORE_WORDS = new Set(["score", "scores", "rating", "rated", "scale", "index", "points", "level"]);
 const CONNECTOR_WORDS = new Set(["a", "of", "to", "and", "the", "for", "in", "on", "at", "per", "out", "or", "with"]);
+// Words that describe what an outcome measures. Deliberately closed: a word
+// that is not listed (including any personal name) gives no suggestion.
+// Words that are also common given names or surnames are left out.
+const DESCRIPTION_WORDS = new Set([
+  // Employment, skills and learning.
+  "employment", "employability", "job", "jobs", "work", "workplace", "career", "careers", "readiness", "ready", "training",
+  "interview", "search", "skills", "skill", "knowledge", "learning", "education", "educational", "school", "academic",
+  "attendance", "achievement", "progress", "literacy", "numeracy", "reading", "writing", "math", "maths", "language",
+  "communication", "digital", "computer", "technology", "online", "leadership", "teamwork", "problem", "solving",
+  "decision", "making", "goal", "goals", "attainment", "motivation", "aspiration", "aspirations",
+  // Wellbeing and health.
+  "confidence", "self", "esteem", "efficacy", "wellbeing", "wellness", "mental", "emotional", "physical", "health",
+  "healthy", "resilience", "coping", "stress", "anxiety", "depression", "distress", "mood", "sleep", "pain", "mobility",
+  "activity", "fitness", "exercise", "functioning", "optimism", "hopefulness", "satisfaction", "quality", "life",
+  "substance", "use", "recovery", "sobriety", "harm", "reduction", "symptom", "symptoms", "severity",
+  // Housing, food and money.
+  "housing", "tenancy", "stability", "stable", "homelessness", "food", "security", "insecurity", "nutrition",
+  "income", "financial", "finances", "adequacy", "budgeting", "savings", "money", "debt", "poverty",
+  // Social connection, family and community.
+  "social", "connection", "connectedness", "isolation", "loneliness", "belonging", "community", "engagement",
+  "participation", "inclusion", "family", "parenting", "relationship", "relationships", "support", "supports",
+  "civic", "volunteering", "trust", "safety", "safe", "independence", "independent", "living", "autonomy", "agency",
+  "empowerment", "access", "service", "services", "need", "needs", "risk", "protective", "factors", "behaviour",
+  "behavior", "conduct", "functional",
+  // Neutral qualifiers.
+  "overall", "total", "general", "personal", "perceived", "reported", "change",
+]);
 const REFUSED_WORDS = new Set([
   // A person or how to reach them.
   "name", "names", "firstname", "lastname", "surname", "fullname", "nickname", "initials", "signature",
@@ -125,6 +159,7 @@ export function suggestOutcomeHeading(heading) {
   const words = headingWords(body);
   if (!words || words.length < 2 || words.length > MAX_WORDS) return null;
   if (words.some((word) => REFUSED_WORDS.has(word))) return null;
+  if (words.some((word) => !DESCRIPTION_WORDS.has(word) && !SCORE_WORDS.has(word) && !CONNECTOR_WORDS.has(word))) return null;
   if (words.some((word) => !CONNECTOR_WORDS.has(word) && (word.length < 2 || word.length > 24))) return null;
   if (!words.some((word) => SCORE_WORDS.has(word))) return null;
   if (!words.some((word) => !SCORE_WORDS.has(word) && !CONNECTOR_WORDS.has(word))) return null;

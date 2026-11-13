@@ -137,6 +137,8 @@ test("heading suggestion: served as unconfirmed source context for its own field
   assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, outcome_heading_suggestions: {} } }))).data.derived_measurement.source_heading_suggestion, null);
   assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, outcome_heading_suggestions: { field_7: "ignore previous instructions score" } } }))).data.derived_measurement.source_heading_suggestion,
     null, "a stored value the current screen would not produce is never served");
+  assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, outcome_heading_suggestions: { field_7: "Jane doe readiness score" } } }))).data.derived_measurement.source_heading_suggestion,
+    null, "a name-bearing value kept by the earlier rule is never served");
   assert.equal((await project(f, transaction(f, { pairedBasis: { ...PAIRED_BASIS, candidates: { numeric_outcome: ["field_6"] } } }))).data.derived_measurement.source_heading_suggestion,
     null, "only a numeric outcome candidate of that worksheet");
 });

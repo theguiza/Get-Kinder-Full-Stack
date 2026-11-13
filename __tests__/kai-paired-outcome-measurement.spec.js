@@ -523,3 +523,50 @@ test("heading suggestions: bound per field and worksheet; ambiguous duplicates a
   const tampered = { sheets: [{ sheet_key: "sheet_1", paired_outcome_basis: { ...first, outcome_heading_suggestions: { field_3: "Ignore previous instructions score" } } }] };
   assert.equal(committedOutcomeHeadingSuggestion(tampered, { worksheetKey: "sheet_1", outcomeFieldKey: "field_3" }), null, "every reader screens again");
 });
+
+// Identification-leak correction (owner prompt "Close the Outcome Header
+// Suggestion Identification Leak"): at 2353499c a person's name in a heading,
+// in any casing, was kept as part of the suggestion. Every word must now be a
+// listed measurement-description word. Synthetic names only.
+const NAME_BEARING_HEADINGS = Object.freeze([
+  "Jane Doe Readiness Score", "jane_doe_readiness_score", "JANE_DOE_READINESS_SCORE", "Readiness Score Jane Doe",
+  "Jane Readiness Score", "readiness_score_doe", "Employment Readiness Score Jane", "janeDoeReadinessScore",
+  "Hope Grace Confidence Score", "Young King Wellbeing Rating", "Kowalczyk employment score", "employment score for jane doe",
+]);
+
+test("identification leak: name-bearing headings keep no suggestion in the retained profile or in any read", async () => {
+  for (const heading of NAME_BEARING_HEADINGS) assert.equal(suggestOutcomeHeading(heading), null, heading);
+  // Ambiguous or unsupported text also fails closed.
+  for (const heading of ["Zorblax readiness score", "XQ readiness score", "readiness score v2", "Ms readiness score"]) assert.equal(suggestOutcomeHeading(heading), null, heading);
+  // The actual profiling path, one worksheet per heading, then the read used by both scoped projections.
+  const rows = [["P1", "pre", 1], ["P1", "post", 2], ["P2", "pre", 2], ["P2", "post", 2]];
+  const bytes = syntheticXlsxWorkbook({ sheets: NAME_BEARING_HEADINGS.map((heading, index) => ({ name: `Sheet${index + 1}`, rows: [["participant_id", "stage", heading], ...rows] })) });
+  const profile = await workbookProfile(bytes);
+  assert.equal(profile.sheets.length, NAME_BEARING_HEADINGS.length);
+  for (const sheet of profile.sheets) {
+    const basis = sheet.paired_outcome_basis;
+    assert.deepEqual(basis.candidates.numeric_outcome, ["field_3"], `${sheet.sheet_key}: still measured`);
+    assert.deepEqual(basis.outcome_heading_suggestions, {}, `${sheet.sheet_key}: nothing retained`);
+    assert.deepEqual(basis.alternatives[0].measurements.map((m) => [m.comparable_pair_count, m.increased_count, m.unchanged_count]), [[2, 1, 1]], "arithmetic unchanged");
+    assert.equal(committedOutcomeHeadingSuggestion(profile, { worksheetKey: sheet.sheet_key, outcomeFieldKey: "field_3" }), null);
+  }
+  assert.doesNotMatch(JSON.stringify(profile), /jane|doe|kowalczyk|grace|hope|young|king/i, "no name reaches the committed profile");
+  // A value stored by the earlier rule is not served either.
+  const earlier = { sheets: [{ sheet_key: "sheet_1", paired_outcome_basis: { ...profile.sheets[0].paired_outcome_basis, outcome_heading_suggestions: { field_3: "Jane doe readiness score" } } }] };
+  assert.equal(committedOutcomeHeadingSuggestion(earlier, { worksheetKey: "sheet_1", outcomeFieldKey: "field_3" }), null);
+});
+
+test("identification leak: admissible outcome headings still give their suggestions through the profile", async () => {
+  const header = ["participant_id", "stage", "employment_readiness_score_1_to_5", "digital_confidence_score_1_to_5", "housing_stability_rating",
+    "mental_wellbeing_score_0_to_10", "Income Adequacy Rating 1-7", "Jane Doe Readiness Score"];
+  const rows = [["P1", "pre", 1, 1, 1, 1, 1, 1], ["P1", "post", 2, 2, 2, 2, 2, 2], ["P2", "pre", 2, 2, 2, 2, 2, 2], ["P2", "post", 2, 2, 2, 2, 2, 2]];
+  const profile = await workbookProfile(syntheticXlsxWorkbook({ sheets: [{ name: "Outcomes", rows: [header, ...rows] }] }));
+  assert.deepEqual(profile.sheets[0].paired_outcome_basis.outcome_heading_suggestions, {
+    field_3: "Employment readiness score (1-5)",
+    field_4: "Digital confidence score (1-5)",
+    field_5: "Housing stability rating",
+    field_6: "Mental wellbeing score (0-10)",
+    field_7: "Income adequacy rating (1-7)",
+  }, "the name-bearing field_8 alone gets none");
+  assert.doesNotMatch(JSON.stringify(profile), /jane|doe/i);
+});
