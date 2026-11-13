@@ -404,7 +404,7 @@ test("batched current gaps respect reviewed small-cell state and retain independ
   fixture.sensitivityDecision = { ...fixture.sensitivityDecision, decision_id: uid("ab", 92), reviewed_small_cell_risk_status: "present" };
   const present = await runOrgGaps({ organizationId: ORG, limit: 10, candidatePage, fakeTx });
   assert.equal(present.ok, true, JSON.stringify(present));
-  assert.equal(present.data.items.find((item) => item.gap_log_item_id === small.gap_log_item_id)?.assessment_status, "resolved_risk_flagged");
+  assert.equal(present.data.items.some((item) => item.gap_log_item_id === small.gap_log_item_id), false, "a disclosed warning is not an open clarification");
 });
 
 function candidateRowFromGap(gapRow) {

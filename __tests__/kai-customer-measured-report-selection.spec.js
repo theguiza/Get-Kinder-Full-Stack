@@ -271,7 +271,7 @@ test("Package 3: a claim's use in a new internal draft is the server's provision
   assert.match(permissionRefusal, /^No draft was created and nothing was sent to the AI model: the linked participant register's recorded processing permissions/);
 });
 
-test("Package 3: one claim row never says 'not usable' while offering the claim for a draft; strict open items are shown as what they are", () => {
+test("report use: an admitted finding has no mandatory final-review warning, including legacy diagnostics", () => {
   const CROSS = claim(9, "source_derived_measurement");
   const ok = (data) => claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: { traceability_passed: true, ...data } } });
   const provisional = ok({ eligible: false, blocker_codes: ["evidence_review_unresolved", "claim_review_unresolved"],
@@ -279,14 +279,13 @@ test("Package 3: one claim row never says 'not usable' while offering the claim 
   const shown = claimUsePresentation({ claim: CROSS, strictUse: "not_usable", diagnosis: provisional });
   assert.equal(shown.draft, "admitted");
   assert.deepEqual(shown.lines.map((line) => line.key), ["provisional"]);
-  assert.match(shown.lines[0].text, /^Usable in a provisional internal draft now \(determined by KAI.s checks; this is not a review or an approval\)\.$/);
-  assert.match(shown.lines[0].detail, /^Not yet established for final internal use \(factual review and release\), and never for funder or public use from this draft: /);
+  assert.match(shown.lines[0].text, /^Ready to use in your report\./);
+  assert.equal(shown.lines[0].detail, undefined);
   assert.doesNotMatch(JSON.stringify(shown), /Not usable|Processing permissions|Count records|record-count rule/, "no contradiction and no irrelevant permission or record-count advice on a cross-source finding");
-  assert.match(shown.lines[0].detail, /its evidence has no completed review; its claim has no completed review\.$/);
+  assert.doesNotMatch(JSON.stringify(shown), /no completed review|Before final use|never for funder/);
   const DOC = claim(10, "source_document_statement");
   assert.doesNotMatch(JSON.stringify(claimUsePresentation({ claim: DOC, strictUse: "not_usable", diagnosis: provisional })), /Processing permissions/);
-  // A record count keeps the ordinary-rule note beside its strict conditions only.
-  assert.match(claimUsePresentation({ claim: MEASURED, strictUse: "not_usable", diagnosis: provisional }).lines[0].detail, /Processing permissions/);
+  assert.equal(claimUsePresentation({ claim: MEASURED, strictUse: "not_usable", diagnosis: provisional }).lines[0].detail, undefined);
   const refused = ok({ eligible: false, blocker_codes: [], provisional_internal_draft: { admitted: false, blocker_codes: ["ai_processing_not_permitted"], source_role: "reference" } });
   assert.deepEqual(claimUsePresentation({ claim: CROSS, strictUse: "usable", diagnosis: refused }).lines.map((line) => line.key), ["refused"],
     "strict eligibility never hides a processing refusal for new generation");
@@ -302,7 +301,7 @@ test("Package 3 mixed selection: refused, provisional and unconfirmed claims are
   assert.deepEqual(selectionReportUsability([MEASURED.claimId], use, undefined, draft), { immediatelyUsable: true, refused: [], provisional: [], unknown: [], refusedMeasured: [] });
   const mixed = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use, (claimId) => (claimId === OTHER.claimId ? "measurement" : "other"), draft);
   assert.deepEqual(mixed, { immediatelyUsable: false, refused: [], provisional: [OTHER.claimId], unknown: [], refusedMeasured: [] });
-  assert.match(selectionReportUsabilityMessage(mixed), /1 selected finding\(s\) are provisional: KAI's checks admit them to an internal draft/);
+  assert.match(selectionReportUsabilityMessage(mixed), /1 selected finding\(s\) can be used in your report/);
   assert.doesNotMatch(selectionReportUsabilityMessage(mixed), /will be refused/, "an admitted measured finding is never told the request will be refused (the defect repaired)");
   const refusedDraft = (claimId) => (claimId === OTHER.claimId ? "refused" : "admitted");
   const withRefused = selectionReportUsability([MEASURED.claimId, OTHER.claimId], use, (claimId) => (claimId === OTHER.claimId ? "measurement" : "other"), refusedDraft);

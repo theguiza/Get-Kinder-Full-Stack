@@ -311,7 +311,7 @@ export function makeStoryEvidenceFixture({
 
     const calls = [];
     return {
-      fixture: { claimRow, evidenceItemRow, sourceRow, sourceVersionRow, candidateRow, profileRow, locatorRow },
+      fixture: { claimRow, evidenceItemRow, sourceRow, sourceVersionRow, candidateRow, profileRow, locatorRow, gapRows, followupRows, followupQueueRows },
       calls,
       async query(rawSql) {
         const sql = typeof rawSql === "string" ? rawSql : rawSql?.text ?? "";

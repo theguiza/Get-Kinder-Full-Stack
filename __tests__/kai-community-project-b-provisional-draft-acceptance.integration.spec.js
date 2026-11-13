@@ -781,11 +781,12 @@ async function runPackage3Acceptance() {
       assert.doesNotMatch(P.recordCount.statement, /\b(190|67)\b/);
     });
 
-    await test("P5: the server's strict P2-06 answer is 'not eligible' (open GK review) while its provisional internal draft admission admits both claims; no approval exists", async () => {
+    await test("P5: both measured findings are internally usable without any review approval", async () => {
       for (const label of ["encounters", "people"]) {
         const strict = await gkTrace(P, P.claims[label].claimId);
         const client = await diagnose(P, P.claims[label].claimId);
-        assert.equal(strict.eligible, false, J(strict));
+        assert.equal(strict.eligible, true, J(strict));
+        assert.deepEqual(strict.blockerCodes, []);
         assert.ok(!strict.blockerCodes.includes("measured_claim_integrity_not_established"), J(strict));
         assert.equal(client.status, 200);
         assert.deepEqual(client.provisional, { admitted: true, blocker_codes: [], source_role: null }, J(client));
@@ -797,7 +798,7 @@ async function runPackage3Acceptance() {
       assert.deepEqual([now.claim_review_decisions, now.evidence_review_decisions, now.coverage_review_decisions], [0, 0, 0], "no review was recorded to obtain the admission");
     });
 
-    await test("P6 (browser): in Evidence both claims show 'Usable in a provisional internal draft now' with the open final-use items; the administrator selects them", async () => {
+    await test("P6 (browser): both findings are ready for reporting without a final-use review prerequisite", async () => {
       await openStudio("Evidence");
       for (const label of ["encounters", "people"]) {
         const row = `[data-client-claim="${P.claims[label].claimId}"]`;
@@ -812,15 +813,11 @@ async function runPackage3Acceptance() {
           if (n.hidden && n.dataset.knowledgeStudioReveal) document.querySelector('[data-knowledge-studio-reveal-toggle="' + n.dataset.knowledgeStudioReveal + '"]')?.click(); } } return true; })()`);
         await page.waitFor(() => page.visible(row), `${label} claim row visible`);
         const shown = await page.textOf(row);
-        assert.match(shown, /Usable in a provisional internal draft now \(determined by KAI.s checks; this is not a review or an approval\)\./, shown);
+        assert.match(shown, /Ready to use in your report\./, shown);
         assert.doesNotMatch(shown, /Not usable/, "no contradiction on an admitted claim");
-        await page.clickVisible(`${row} [data-knowledge-studio-disclosure="claim-final-use-open"] > button`, "Before final use");
-        await page.waitFor(() => page.visible(`${row} [data-client-claim-final-use-open]`), `${label}: open final-use items`);
-        const open = await page.textOf(`${row} [data-client-claim-final-use-open]`);
-        assert.match(open, /^Not yet established for final internal use \(factual review and release\), and never for funder or public use from this draft: /);
-        assert.doesNotMatch(open, /Processing permissions|Count records|record-count rule/, "no unrelated permission or record-count advice on a cross-source finding");
-        assert.match(open, /its claim has no completed review/);
-        report.browser[`status_${label}`] = { attribute: "admitted", text: shown.split("\n")[0], final_use_open: open };
+        assert.doesNotMatch(shown, /Before final use|no completed review|never for funder/);
+        assert.equal(await page.evaluate(`Boolean(document.querySelector(${J(`${row} [data-client-claim-final-use-open]`)}))`), false);
+        report.browser[`status_${label}`] = { attribute: "admitted", text: shown.split("\n")[0] };
         await page.clickVisible(`[data-client-select-claim="${P.claims[label].claimId}"]`, `${label}: Use in an internal draft`);
         await page.waitFor(() => page.evaluate(`document.querySelector('[data-client-select-claim="${P.claims[label].claimId}"]').checked === true`), `${label} selected`);
       }
@@ -828,7 +825,7 @@ async function runPackage3Acceptance() {
       assert.equal(await page.evaluate(`document.querySelector('[data-client-select-claim="${P.recordCount.claimId}"]')?.checked ?? null`) !== true, true);
     });
 
-    await test("P7 (browser): in Drafts the selection is described as provisional; Generate internal evidence summary saves a draft from exactly the two admitted claims", async () => {
+    await test("P7 (browser): Generate saves a report from exactly the selected findings without a provisional-review warning", async () => {
       await page.clickTab("Drafts");
       await page.idle();
       await page.waitFor(async () => Boolean(await page.textOf("[data-client-draft-selected-claims]")), "the selected findings");
@@ -836,9 +833,7 @@ async function runPackage3Acceptance() {
       assert.equal(selected.split("\n").filter(Boolean).length, 2, selected);
       const note = await page.textOf("[data-client-draft-selection-usability]");
       report.browser.observed_selection_note = { attribute: await page.attrOf("[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), text: note };
-      assert.equal(await page.attrOf("[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "provisional");
-      assert.match(note, /2 selected finding\(s\) are provisional: KAI's checks admit them to an internal draft/);
-      assert.doesNotMatch(note, /will be refused/);
+      assert.equal(note, null, "usable findings require no additional review warning");
       const calls = modelCalls.length;
       const mark = page.mark();
       await page.clickButton("Generate internal evidence summary");
@@ -860,7 +855,7 @@ async function runPackage3Acceptance() {
       assert.ok(!call.claims.some((c) => c.claimId === P.recordCount.claimId), "the 217-record claim was not sent");
       for (const c of call.claims) {
         assert.ok(c.limitationCodes.includes("derived.cross_source_linked"), J(c.limitationCodes));
-        assert.ok(c.limitationCodes.includes("claim_review_unresolved") || c.limitationCodes.includes("evidence_review_unresolved"), "the open review travels as a limitation");
+        assert.equal(c.limitationCodes.some((code) => ["claim_review_unresolved", "evidence_review_unresolved"].includes(code)), false, "review completion is not a source limitation");
       }
       assert.doesNotMatch(call.serialized, RAW_IDENTIFIER, "no participant or event identifier reaches the model");
       report.provider.positive = { calls: providerCalls.length, claim_ids: call.claims.map((c) => c.claimId).sort(), requested_audience: call.requestedAudience,
@@ -903,10 +898,9 @@ async function runPackage3Acceptance() {
       const detailGet = page.requests().filter((r) => r.method === "GET" && new URL(r.url).pathname === clientInternalDraftPath(P.organizationId, P.projectId, P.draftId)).at(-1);
       assert.equal(detailGet?.status, 200, "the supported client read path");
       const detail = await page.textOf(`[data-client-internal-draft-detail="${P.draftId}"]`);
-      assert.match(detail, /provisional internal report/);
-      assert.match(detail, /not reviewed, verified or released/);
-      assert.doesNotMatch(detail, /no further review or release step is needed/);
-      assert.equal(await page.attrOf(`[data-client-internal-draft-detail="${P.draftId}"] [data-client-internal-report]`, "data-client-internal-report-provisional"), "true");
+      assert.match(detail, /No review or release approval is required/);
+      assert.doesNotMatch(detail, /not reviewed, verified or released/);
+      assert.equal(await page.attrOf(`[data-client-internal-draft-detail="${P.draftId}"] [data-client-internal-report]`, "data-client-internal-report-provisional"), "false");
       for (const label of ["encounters", "people"]) assert.ok(await page.textOf(`[data-client-internal-draft-detail="${P.draftId}"] [data-client-internal-draft-citation="${P.claims[label].claimId}"]`), `${label} cited`);
       const mark = page.mark();
       await page.clickVisible(`[data-client-open-internal-report="${P.draftId}"]`, "Open report");
@@ -915,9 +909,8 @@ async function runPackage3Acceptance() {
       const markdownGet = page.requestsSince(mark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(P.organizationId, P.projectId, P.draftId));
       assert.equal(markdownGet?.status, 200);
       const markdown = await page.textOf("[data-client-internal-report-markdown]");
-      assert.match(markdown, /\*\*Status:\*\* Provisional internal draft\./);
-      assert.match(markdown, /not approved for release, funders or the public/);
-      assert.match(markdown, /Review for final use complete: no \(provisional finding\)/);
+      assert.match(markdown, /\*\*Status:\*\* Working report\./);
+      assert.doesNotMatch(markdown, /not approved for release|Review for final use complete/);
       assert.match(markdown, /\b190\b[\s\S]*\b67\b|\b67\b[\s\S]*\b190\b/);
       assert.match(markdown, new RegExp(`${PERIOD.start}[\\s\\S]*${PERIOD.end}`));
       for (const sv of [P.events.sourceVersionId, P.roster.sourceVersionId]) assert.ok(markdown.includes(sv), `the report cites version ${sv}`);

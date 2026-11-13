@@ -430,13 +430,9 @@ function audienceGateSummary(claimRow) {
  * KAI P2-10 internal audience authority, extended by KAI B1B for funder. For
  * requestedAudience = "internal", these three blockers
  * (claim_not_approved_for_requested_audience, audience_gate_closed,
- * requirement_authority_absent) no longer fire merely because this stub used
- * to unconditionally return false: P2-09 evidence/claim-review completeness
- * is already independently enforced below by the
- * evidence_review_unresolved/claim_review_unresolved blockers, and per-
- * dimension internal coverage-acceptance is independently enforced by the
- * coverage_dimension_unresolved carve-out below - so no additional gate is
- * owned here for internal.
+ * requirement_authority_absent) do not apply. Owner correction 2026-11-13:
+ * internal report use needs no claim, evidence or coverage approval. Source
+ * permissions are enforced separately at processing and report reads.
  *
  * For requestedAudience = "funder" (KAI B1B): approved only when BOTH (a) the
  * current claim-review-head decision (claimReviewHead, already resolved by
@@ -630,9 +626,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     evidenceItemRow,
     baseDimensions: computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys }),
   });
-  const expectedGapPlans = buildExpectedGapPlans(dimensions);
-  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
   const storedGapRows = await readGapRows(tx, { organizationId, claimId });
+  const expectedGapPlans = buildExpectedGapPlans(dimensions, {
+    historicalGapRows: storedGapRows,
+  });
+  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
   const gapRows = projectSmallCellGapRows(storedGapRows, expectedGapPlans, profileRow, {
     evidenceItemId: evidenceItemRow.evidence_item_id, sourceVersionId: evidenceItemRow.source_version_id,
   });
@@ -713,6 +711,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     })
     : null;
   const ordinaryInternal = ordinaryAuthority?.ordinary === true;
+  // Owner correction 2026-11-13: reviews and coverage assessments inform the
+  // organization's work; they are not prerequisites for using its report.
+  // Keep recorded decisions and dimensions intact. Source currentness,
+  // factual integrity and processing permissions have their own checks.
+  const internalReportUse = requestedAudience === "internal";
   // Owner Package 1 (2026-11-10): a claim on measurement evidence is usable
   // for any audience only while it asserts exactly what its calculation
   // established (postgresOrdinaryInternalFactAuthority.js). A recorded review,
@@ -775,11 +778,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
         (requestedAudience === "internal" && internalAccepted)
         || (requestedAudience === "funder" && funderAccepted)
         || (requestedAudience === "public" && publicAccepted);
-      // An ordinary measurement carries its source-level limitations into
-      // internal use as limitations (never as accepted or resolved), so they
-      // need no per-claim acceptance.
+      // Internal reports carry unresolved dimensions as information. A prior
+      // acceptance remains visible, but none is required to use the report.
       const carriedInternalLimitation = ordinaryInternal && ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS.includes(dimensionKey);
       const blocksRequestedAudience =
+        !internalReportUse &&
         dimension.evidence.assessment_status === "unresolved" &&
         !currentAudienceAccepted &&
         !carriedInternalLimitation;
@@ -800,7 +803,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const claimReviewHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
 
   const blockers = new Set();
-  if (p204EvaluationRequired) addOrderedBlocker(blockers, "p204_evaluation_required");
+  if (p204EvaluationRequired && !internalReportUse) addOrderedBlocker(blockers, "p204_evaluation_required");
   const affectedDimensionKeys = new Set();
   const affectedObjectIds = new Set();
   const graphRelationships = composeClaimTraceabilityGraphRelationships({
@@ -827,10 +830,10 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   if (!audienceApproval.approved) addOrderedBlocker(blockers, "claim_not_approved_for_requested_audience");
   if (!audienceApproval.gateOpen) addOrderedBlocker(blockers, "audience_gate_closed");
   if (!audienceApproval.authorityPresent) addOrderedBlocker(blockers, "requirement_authority_absent");
-  // A recorded review decision always governs its own lineage; only the
-  // absence of one is answered by the ordinary internal authority (the open
-  // needs_gk_review queue item stays as it is).
+  // Review history stays recorded. Missing or incomplete reviews do not
+  // block internal reports; recorded negative support is checked below.
   if (
+    !internalReportUse &&
     (unresolvedReviewStatus(claimReviewQueueItemRow.review_status) || !claimReviewHead
       || claimReviewHead.decision_outcome === "needs_more_information")
     && !(ordinaryInternal && !claimReviewHead)
@@ -845,6 +848,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // claim_review_decisions organization audience CHECK), so approvalForAudience
   // already refuses it.
   if (
+    !internalReportUse &&
     (unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status) || !evidenceReviewHead
       || evidenceReviewHead.decision_outcome === "needs_more_information"
       || (requestedAudience !== "internal" && evidenceReviewHead.decided_by_role === "client_admin"))
@@ -853,15 +857,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     addOrderedBlocker(blockers, "evidence_review_unresolved");
     affectedObjectIds.add(evidenceReviewQueueItemRow.review_queue_item_id);
   }
-  // Fires whenever either strength column is anything other than
-  // 'reviewed_supported' - an unassessed value AND a negative terminal
-  // ('reviewed_not_supported') decision must both remain permanently
-  // ineligible here. Same blocker code as before (support_strength_unassessed)
-  // - only the triggering condition is broadened.
-  // The deterministic count supports an ordinary measured claim that no
-  // review has assessed; a recorded negative assessment still blocks.
-  const supported = (strength, head) => strength === "reviewed_supported"
-    || (ordinaryInternal && !head && strength === "unassessed");
+  // Unassessed support is not a rejection. Internal source evidence can be
+  // used without a support review; an explicit negative decision remains
+  // distinct, as does a measured statement that fails its own arithmetic.
+  const supported = (strength, head) => !["rejected", "not_supported"].includes(head?.decision_outcome)
+    && (strength === "reviewed_supported"
+      || (internalReportUse && strength === "unassessed")
+      || (ordinaryInternal && !head && strength === "unassessed"));
   if (!supported(claimRow.claim_strength, claimReviewHead) || !supported(evidenceItemRow.support_strength, evidenceReviewHead)) {
     addOrderedBlocker(blockers, "support_strength_unassessed");
     affectedObjectIds.add(claimId);
@@ -879,13 +881,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     }
   }
   for (const row of followupQueueRows) {
-    if (unresolvedReviewStatus(row.review_status) || row.queue_status === "waiting_on_client") {
+    if (!internalReportUse && (unresolvedReviewStatus(row.review_status) || row.queue_status === "waiting_on_client")) {
       addOrderedBlocker(blockers, "client_followup_unresolved");
       affectedObjectIds.add(row.review_queue_item_id);
     }
   }
   for (const row of conflictQueueRows) {
-    if (unresolvedReviewStatus(row.review_status) || row.queue_status === "open") {
+    if (!internalReportUse && (unresolvedReviewStatus(row.review_status) || row.queue_status === "open")) {
       addOrderedBlocker(blockers, "potential_conflict_review_unresolved");
       affectedObjectIds.add(row.review_queue_item_id);
     }

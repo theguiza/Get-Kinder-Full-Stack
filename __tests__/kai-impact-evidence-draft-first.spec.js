@@ -168,39 +168,79 @@ async function readReport(h, draftId) {
   return { detail, markdown };
 }
 
-test("1 qualitative: an unreviewed source-reported observation drafts a provisional internal narrative with no claim approval", async () => {
+test("reporting-period source note: unprepared, current and six-gap historical claims all generate and reopen a cited report without reviews", async () => {
+  const excerpt = "Staff also entered some March preparation work into a file used for the April-to-March review, and a few spring records belong to the following fiscal year.";
+  for (const state of ["unprepared", "current", "historical"]) {
+    const h = harness([{ kind: "document", excerpt }]);
+    const [finding] = h.fixtures;
+    if (state === "unprepared") finding.gapRows.length = 0;
+    if (state === "historical") {
+      for (const key of ["definition_clarity", "denominator_clarity", "time_period_clarity", "entity_level_clarity"]) {
+        finding.gapRows.push({ ...finding.gapRows[0], gap_log_item_id: `75000000-0000-4000-8000-${String(finding.gapRows.length).padStart(12, "0")}`,
+          dimension_key: key, assessment_status: "resolved_risk_flagged", validator_key: `VAL-KAI-P2-02-${key}`,
+          safe_summary: `Claim gap requires review for dimension: ${key}.` });
+      }
+      assert.equal(finding.gapRows.length, 6);
+    }
+    const before = JSON.stringify({ claim: finding.claimRow, evidence: finding.evidenceItemRow, gaps: finding.gapRows });
+    const trace = await evaluateClaimTraceabilityInTransaction(h.tx, { organizationId: ORG, claimId: finding.claimId, requestedAudience: "internal" });
+    assert.equal(trace.ok, true, JSON.stringify(trace));
+    assert.equal(trace.data.eligible, true, state);
+    assert.deepEqual(trace.data.blockerCodes, [], state);
+    assert.equal(trace.data.claim_review_decision, null);
+    assert.equal(trace.data.evidence_review_decision, null);
+    assert.equal(trace.data.dimensions.time_period_clarity.assessment_status, "resolved_risk_flagged");
+    assert.equal(trace.data.dimensions.time_period_clarity.blocks_requested_audience, false);
+    const result = await createEvidenceSummaryDraft(h.input([finding.claimId], `period-note-${state}`), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(h.providerInputs.length, 1);
+    assert.ok(h.providerInputs[0].claims[0].claimStatement.includes(excerpt));
+    const first = await readReport(h, result.data.generatedContentDraftId);
+    const reopened = await readReport(h, result.data.generatedContentDraftId);
+    assert.equal(first.markdown.ok, true, JSON.stringify(first.markdown));
+    assert.equal(first.detail.data.internalReport.available, true);
+    assert.equal(reopened.markdown.data.markdown, first.markdown.data.markdown);
+    assert.ok(first.markdown.data.markdown.includes(excerpt));
+    assert.ok(first.markdown.data.markdown.includes(finding.claimId));
+    assert.doesNotMatch(first.markdown.data.markdown, /Review for final use complete|never for funder|not approved for release|no completed review/);
+    assert.equal(JSON.stringify({ claim: finding.claimRow, evidence: finding.evidenceItemRow, gaps: finding.gapRows }), before, "no source, review or historical gap is rewritten");
+    assert.equal(h.store.drafts.length, 1, "reopening creates no replacement draft");
+  }
+});
+
+test("1 qualitative: an unreviewed source-reported observation is usable and downloads without claim approval", async () => {
   const h = harness([FEEDBACK]);
   const [feedback] = h.fixtures;
   const trace = await evaluateClaimTraceabilityInTransaction(h.tx, { organizationId: ORG, claimId: feedback.claimId, requestedAudience: "internal" });
-  assert.equal(trace.data.eligible, false, "no review has happened");
-  assert.ok(trace.data.blockerCodes.includes("claim_review_unresolved"));
+  assert.equal(trace.data.eligible, true, "no review is needed to use attributed source evidence");
+  assert.deepEqual(trace.data.blockerCodes, []);
   const result = await createImpactNarrativeDraft(h.input([feedback.claimId], "qualitative"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(h.providerInputs.length, 1);
-  assert.ok(h.providerInputs[0].claims[0].limitationCodes.includes("claim_review_unresolved"), "review state travels as a limitation");
+  assert.ok(h.providerInputs[0].claims[0].limitationCodes.some((code) => code.startsWith("document.")), "attribution travels with the finding");
   const { detail, markdown } = await readReport(h, result.data.generatedContentDraftId);
   assert.equal(detail.data.internalReport.available, true, JSON.stringify(detail.data.internalReport));
-  assert.deepEqual(detail.data.internalReport.informationReasons, ["cited_claims_not_currently_eligible"]);
+  assert.deepEqual(detail.data.internalReport.informationReasons, []);
   assert.equal(markdown.ok, true, JSON.stringify(markdown));
   const md = markdown.data.markdown;
   assert.ok(md.includes(PROVISIONAL_REPORT_STATUS));
   assert.match(md, /weekly sessions helped them feel more confident about finding work/);
-  assert.match(md, /Review for final use complete: no \(provisional finding\)/);
-  assert.match(md, /open review items: `claim_review_unresolved`/);
+  assert.match(md, /Evidence basis: the cited source evidence/);
+  assert.doesNotMatch(md, /Review for final use complete|open review items|not approved for release/);
 });
 
 test("2 measured + 7 minors/small cells: unreviewed counts and paired outcomes from flagged sources draft with exact values, citations and a heightened informational alert", async () => {
   const h = harness([ACTIVITY, OUTCOME], { sensitivity: { reviewed_minor_data_status: "present", reviewed_small_cell_risk_status: "present" } });
   for (const f of h.fixtures) {
     const trace = await evaluateClaimTraceabilityInTransaction(h.tx, { organizationId: ORG, claimId: f.claimId, requestedAudience: "internal" });
-    assert.equal(trace.data.eligible, false, "flags plus no review: not eligible for final use");
+    assert.equal(trace.data.eligible, true, "source categories are information, not an extra approval stage");
   }
   const result = await createImpactNarrativeDraft(h.input(h.fixtures.map((f) => f.claimId), "measured"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
   assert.equal(result.ok, true, JSON.stringify(result));
   const { detail, markdown } = await readReport(h, result.data.generatedContentDraftId);
   assert.equal(detail.data.internalReport.available, true);
   assert.deepEqual(detail.data.internalReport.getKinderReviewReasons, [], "flags inform; no review stage is added");
-  assert.deepEqual(detail.data.internalReport.informationReasons, ["minor_information_not_cleared", "small_cell_risk_not_cleared", "cited_claims_not_currently_eligible"]);
+  assert.deepEqual(detail.data.internalReport.informationReasons, ["minor_information_not_cleared", "small_cell_risk_not_cleared"]);
   const md = markdown.data.markdown;
   assert.ok(md.includes(`**${MINOR_SMALL_CELL_ALERT}**`), "combined alert leads the Information section");
   assert.match(md, /37 nonblank data rows/);
@@ -210,7 +250,7 @@ test("2 measured + 7 minors/small cells: unreviewed counts and paired outcomes f
     assert.ok(md.includes(f.claimId) && md.includes(f.evidenceItemId) && md.includes(f.sourceVersionId), "every finding traces to claim, evidence and source version");
   }
   const facts = (await h.reportRepository.readInternalReport({ organizationId: ORG, generatedContentDraftId: result.data.generatedContentDraftId })).data.facts;
-  assert.deepEqual(facts.map((fact) => fact.currentlyEligible), [false, false]);
+  assert.deepEqual(facts.map((fact) => fact.currentlyEligible), [true, true]);
 });
 
 test("3+4 impact discovery and limitations: the end-to-end ordinary NPO assessment is substantive, qualified, cited and provisional", async () => {
@@ -222,7 +262,7 @@ test("3+4 impact discovery and limitations: the end-to-end ordinary NPO assessme
   assert.equal(h.providerInputs.length, 1, "first attempt passes");
   assert.deepEqual(new Set(h.providerInputs[0].claims.map((claim) => claim.claimId)), new Set(h.fixtures.map((f) => f.claimId)), "no unreviewed claim is dropped");
   const gapKeys = h.providerInputs[0].assessment.documentedGaps.map((gap) => gap.key);
-  assert.ok(gapKeys.includes("provisional_findings") && gapKeys.includes("follow_up_evidence_limited"), JSON.stringify(gapKeys));
+  assert.ok(!gapKeys.includes("provisional_findings") && gapKeys.includes("follow_up_evidence_limited"), JSON.stringify(gapKeys));
   const { detail, markdown } = await readReport(h, result.data.generatedContentDraftId);
   assert.equal(detail.data.internalReport.available, true, JSON.stringify(detail.data.internalReport));
   const md = markdown.data.markdown;
@@ -235,7 +275,7 @@ test("3+4 impact discovery and limitations: the end-to-end ordinary NPO assessme
   assert.match(md, /25 of 38/);
   // Useful limitations, not refusal: uncertain outcome coverage and provisional status.
   assert.match(md, /Follow-up information describes only the people who were reached/);
-  assert.match(md, /presented as provisional interpretations for internal planning and drafting/);
+  assert.doesNotMatch(md, /Review for final use complete|open review items:|never for funder/);
   assert.match(md, /Proposed change:/);
   // Citations and provenance for every cited finding.
   for (const f of [activity, feedback, outcome]) assert.ok(md.includes(f.claimId) && md.includes(f.sourceVersionId));
@@ -293,7 +333,7 @@ test("12 draft versus release: a provisional draft is readable but not released,
   const release = await evaluateOrganizationInternalReleaseInTransaction(h.tx, { organizationId: ORG, generatedContentDraftId: draftId });
   assert.equal(release.organizationMayRelease, false);
   assert.ok(release.blockedReasons.includes("factual_review_not_complete"));
-  assert.ok(release.blockedReasons.includes("cited_claims_not_currently_eligible"));
+  assert.equal(release.blockedReasons.includes("cited_claims_not_currently_eligible"), false, "optional release state does not define report usability");
   const { detail } = await readReport(h, draftId);
   assert.equal(detail.data.internalReport.available, true);
   assert.equal(detail.data.release.state === "released_for_internal_use", false, "reading is not release");

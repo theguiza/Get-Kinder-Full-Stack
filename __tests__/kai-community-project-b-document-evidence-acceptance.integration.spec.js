@@ -513,7 +513,7 @@ async function runPackage4Acceptance() {
          JOIN kai.review_queue_items q ON q.target_object_id = s.intake_sensitivity_profile_id AND q.queue_type = 'sensitivity_review' WHERE s.intake_file_id = $1::uuid`, [intakeFileId]);
     assert.ok(sensitivity, `${file.key}: sensitivity profile`);
     const decided = await api("POST", `${COCKPIT}/sensitivity-profiles/${sensitivity.intake_sensitivity_profile_id}/decision?organization_id=${organizationId}`, {
-      expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: DECISIONS[file.key] });
+      expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: file.permissions || DECISIONS[file.key] });
     assert.equal(decided.status, 200, J(decided.body));
     const [candidate] = await query("SELECT intake_source_candidate_id::text FROM kai.intake_source_candidates WHERE intake_sensitivity_profile_id = $1::uuid", [sensitivity.intake_sensitivity_profile_id]);
     const promoted = await api("POST", sourceCandidateDecisionPath(organizationId, candidate.intake_source_candidate_id), { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
@@ -729,11 +729,12 @@ async function runPackage4Acceptance() {
         conclusion: "Equivalent scope is not established (entity and eligibility rules differ by the source's own account), so 90 and 67 are not presented as a contradiction or as a discrepancy to resolve; the estimate is kept with its qualifiers and the 67 keeps its linked-source basis." };
     });
 
-    await test("P5: strict P2-06 stays 'not eligible' while the provisional internal admission admits all five claims; no approval exists", async () => {
+    await test("P5: all five source-backed claims are internally usable without review approval", async () => {
       for (const [label, claimId] of [["encounters", P.claims.encounters.claimId], ["people", P.claims.people.claimId], ...Object.entries(P.docs).map(([k, d]) => [k, d.claimId])]) {
         const strict = await gkTrace(P, claimId);
         const admission = await diagnose(P, claimId);
-        assert.equal(strict.eligible, false, J(strict));
+        assert.equal(strict.eligible, true, J(strict));
+        assert.deepEqual(strict.blockerCodes, []);
         assert.deepEqual([admission.status, admission.provisional], [200, { admitted: true, blocker_codes: [], source_role: null }], `${label}: ${J(admission)}`);
         assert.equal(admission.frontend, "admitted");
         report.admission[label] = { strict_eligible: strict.eligible, strict_blockers: strict.blockerCodes, provisional: admission.provisional };
@@ -764,7 +765,8 @@ async function runPackage4Acceptance() {
         await page.waitFor(async () => (await page.attrOf(row, "data-client-claim-provisional-draft")) === "admitted", `${label}: the server's admission is shown`, { timeout: 30000 });
         await revealRow(row);
         await page.waitFor(() => page.visible(row), `${label} row visible`);
-        assert.match(await page.textOf(row), /Usable in a provisional internal draft now/);
+        assert.match(await page.textOf(row), /Ready to use in your report\./);
+        assert.doesNotMatch(await page.textOf(row), /Before final use|no completed review|never for funder/);
         await page.clickVisible(`[data-client-select-claim="${claimId}"]`, `${label}: Use in an internal draft`);
         await page.waitFor(() => page.evaluate(`document.querySelector('[data-client-select-claim="${claimId}"]').checked === true`), `${label} selected`);
       }
@@ -806,7 +808,7 @@ async function runPackage4Acceptance() {
       assert.equal(c.evidenceItemId, P.docs.C.evidenceItemId);
       assert.equal(c.sourceVersionId, P.review.sourceVersionId, "the PDF version");
       for (const code of ["document.source_reported_not_verified", "document.source_estimate", "document.contains_uncertainty"]) assert.ok(c.limitationCodes.includes(code), `${code}: ${J(c.limitationCodes)}`);
-      assert.ok(c.limitationCodes.includes("claim_review_unresolved") || c.limitationCodes.includes("evidence_review_unresolved"), "the open review travels too");
+      assert.equal(c.limitationCodes.some((code) => ["claim_review_unresolved", "evidence_review_unresolved"].includes(code)), false, "missing review is not a reporting limitation");
       for (const label of ["encounters", "people"]) {
         const m = call.claims.find((x) => x.claimId === P.claims[label].claimId);
         assert.ok(m.limitationCodes.includes("derived.cross_source_linked"));
@@ -856,7 +858,7 @@ async function runPackage4Acceptance() {
       const markdownGet = page.requestsSince(mark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(P.organizationId, P.projectId, P.draftId));
       assert.equal(markdownGet?.status, 200);
       const markdown = await page.textOf("[data-client-internal-report-markdown]");
-      assert.match(markdown, /Status:\s*Provisional internal draft\.|\*\*Status:\*\* Provisional internal draft\./);
+      assert.match(markdown, /\*\*Status:\*\* Working report\./);
       assert.match(markdown, /Source-reported preliminary estimate \(not calculated or verified by KAI\)/);
       assert.doesNotMatch(markdown, /Source-reported observation \(qualitative\):\*?\*? the source records that "Prepared before/, "the estimate is not called an observation");
       assert.match(markdown, /not comparable with a KAI measurement unless the same people, period, programmes and eligibility rules are established/);
@@ -867,7 +869,7 @@ async function runPackage4Acceptance() {
       assert.match(markdown, new RegExp(`${PERIOD.start}[\\s\\S]*${PERIOD.end}`));
       assert.doesNotMatch(markdown, /\b217 (?:completed|eligible|contacts|people)/i);
       assert.doesNotMatch(markdown, RAW_IDENTIFIER);
-      assert.match(markdown, /Review for final use complete: no \(provisional finding\)/);
+      assert.doesNotMatch(markdown, /Review for final use complete|not approved for release/);
       report.browser.saved_draft = { detail_get: detailGet.status, markdown_get: markdownGet.status,
         estimate_lines: markdown.split("\n").filter((line) => /estimate/i.test(line)).slice(0, 6) };
       assert.deepEqual(page.exceptions, [], "no page exception");
@@ -1275,7 +1277,7 @@ async function runPackage4Acceptance() {
         await pageO.idle();
         assert.equal(pageO.requestsSince(reportMark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(O.organizationId, O.projectId, draftId))?.status, 200);
         const markdown = await pageO.textOf("[data-client-internal-report-markdown]");
-        assert.match(markdown, /Provisional internal draft/);
+        assert.match(markdown, /\*\*Status:\*\* Working report\./);
         assert.ok(markdown.indexOf("Impact assessment") >= 0 && markdown.indexOf("Impact assessment") < markdown.indexOf("Supporting evidence and method"), "the assessment leads the report");
         assert.ok(markdown.includes(`${cc.higher} (${cc.percentage}%) had a higher value at follow-up`));
         if (cc.same * 2 <= cc.pairs) assert.doesNotMatch(markdown, /\bmost\b[^.\n]*(?:same value|no change|not report a change)/i, "the report does not call the unchanged group most");
@@ -1414,6 +1416,57 @@ async function runPackage4Acceptance() {
       }
       // Every case is run and recorded before any is reported.
       assert.deepEqual(failures, [], J(Object.fromEntries(Object.entries(report.outcomes.interpretation).map(([key, entry]) => [key, { expected: entry.expected, saved: entry.saved_contains_sentence, report: entry.report_contains_sentence, provider_calls: entry.provider_calls }]))));
+    });
+
+    await test("reporting-period note (HTTP, PostgreSQL, browser): the owner's exact statement goes from line 11 to a reusable report with zero evidence or claim reviews", async () => {
+      const excerpt = "Staff also entered some March preparation work into a file used for the April-to-March review, and a few spring records belong to the following fiscal year.";
+      const bytes = Buffer.from(`${"\n".repeat(10)}${excerpt}\n`);
+      const source = await uploadAndPromote(P, { key: "period_note", name: "05_operations_and_interpretation_notes.txt",
+        extension: ".txt", mime: "text/plain", bytes, checksum: sha256(bytes), permissions: DECISIONS.notes });
+      await extract(P, source);
+      const evidence = (await documentRows(P, source.sourceVersionId)).find((row) => row.statement.includes(excerpt));
+      assert.ok(evidence, "the source statement is extracted from the actual uploaded bytes");
+      const proposed = await P.api("POST", claimProposalPath(P.organizationId, evidence.evidence_item_id), {});
+      assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+      const claimId = proposed.body.data.claim.claim_id;
+      const diagnosis = await diagnose(P, claimId);
+      assert.deepEqual([diagnosis.strictEligible, diagnosis.provisional?.admitted], [true, true]);
+      const decisions = async () => (await query(`SELECT
+        (SELECT count(*) FROM kai.claim_review_decisions WHERE claim_id = $1::uuid)::int AS claim_reviews,
+        (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $2::uuid)::int AS evidence_reviews`, [claimId, evidence.evidence_item_id]))[0];
+      assert.deepEqual(await decisions(), { claim_reviews: 0, evidence_reviews: 0 });
+      await openStudio("Evidence");
+      const row = `[data-client-claim="${claimId}"]`;
+      await page.waitFor(async () => /Ready to use in your report\./.test((await page.textOf(row)) || ""), "the reporting-period finding is ready without review");
+      const shown = await page.textOf(row);
+      assert.doesNotMatch(shown, /Before final use|no completed review|never for funder|needs_gk_review|Support strength/);
+      await page.clickVisible(`[data-client-select-claim="${claimId}"]`, "Use the reporting-period note");
+      await page.clickTab("Drafts");
+      const mark = page.mark();
+      await page.clickButton("Generate internal evidence summary");
+      await page.waitFor(() => page.visible("[data-client-generated-draft]"), "a report from the reporting-period note", { timeout: 60000 });
+      await page.idle();
+      const post = page.requestsSince(mark).find((request) => request.method === "POST" && new URL(request.url).pathname === createEvidenceSummaryPath(P.organizationId));
+      assert.equal(post?.status, 201);
+      assert.deepEqual(JSON.parse(post.postData).claim_ids, [claimId]);
+      const draftId = (await page.responseBody(post)).data.generatedContentDraftId;
+      const readInBrowser = async () => {
+        await openStudio("Drafts");
+        await page.clickVisible(`[data-client-internal-draft="${draftId}"] button`, "Read the reporting-period report");
+        await page.waitFor(() => page.visible(`[data-client-open-internal-report="${draftId}"]`), "report available without release approval");
+        await page.clickVisible(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+        await page.waitFor(() => page.visible("[data-client-internal-report-markdown]"), "the reporting-period report opens");
+        return page.textOf("[data-client-internal-report-markdown]");
+      };
+      const markdown = await readInBrowser();
+      assert.ok(markdown.includes(excerpt));
+      assert.ok(markdown.includes(claimId) && markdown.includes(source.sourceVersionId));
+      assert.doesNotMatch(markdown, /Review for final use complete|not approved for release|no completed review/);
+      assert.equal(await readInBrowser(), markdown, "reload reopens the same saved report");
+      assert.deepEqual(await decisions(), { claim_reviews: 0, evidence_reviews: 0 });
+      report.browser.reporting_period_note = { claim_id: claimId, source_version_id: source.sourceVersionId, generated_draft_id: draftId,
+        generation_status: post.status, review_decisions: await decisions(), reopened_identical: true };
+      if (REPORT_PATH) writeFileSync(REPORT_PATH.replace(/\.json$/, "") + ".reporting-period-note.md", markdown);
     });
 
     await test("agreement: for every admission-governed generation attempt the server's admission predicted whether the provider was called", () => {

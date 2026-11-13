@@ -555,7 +555,7 @@
     const checks = {
       organizationLine: new RegExp(`^- \\*\\*Organization:\\*\\* .*\\(\`${escaped(state.organizationId)}\`\\)$`, "m").test(text),
       engagementLine: new RegExp(`^- \\*\\*Project / engagement:\\*\\* .*\\(\`${escaped(state.engagementId)}\`\\)$`, "m").test(text),
-      internalEvidenceSummary: text.startsWith("# Internal Evidence Summary\n") && /internal use by this organization only/.test(text),
+      internalEvidenceSummary: text.startsWith("# Internal Evidence Summary\n") && /\*\*Prepared for:\*\* this organization's reporting and planning/.test(text),
       countAndUnit: /\*\*5 nonblank data rows were counted/.test(section("Key findings")),
       methodAndArithmetic: /minus 1 blank record excluded = \*\*5\*\* counted/.test(section("Measurement definition and counting method")),
       duplicatesIncluded: /2 (?:counted|data) records in exact-duplicate groups \([^)]*\)\. The record count removes no duplicate: every one of them stays in the count of 5/.test(section("Duplicate records")),

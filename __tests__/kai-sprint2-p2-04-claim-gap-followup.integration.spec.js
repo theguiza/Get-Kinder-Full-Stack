@@ -296,7 +296,7 @@ async function runClaimGapFollowupIntegrationSuite() {
     };
   }
 
-  test("P2-04 (a): first generation creates nine gaps, four client follow-ups, four client_followup queue items, and exactly one audit row", async () => {
+  test("P2-04 (a): first generation creates seven unresolved notes, two follow-ups and two follow-up queue items, and exactly one audit row", async () => {
     const seed = await seedPromotedClaim(1);
     const audit = createAuditProbe();
 
@@ -310,9 +310,9 @@ async function runClaimGapFollowupIntegrationSuite() {
 
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.data.replayed, false);
-    assert.equal(result.data.gapItems.length, 9);
-    assert.equal(result.data.clientFollowupItems.length, 4);
-    assert.equal(result.data.reviewQueueItems.length, 4);
+    assert.equal(result.data.gapItems.length, 7);
+    assert.equal(result.data.clientFollowupItems.length, 2);
+    assert.equal(result.data.reviewQueueItems.length, 2);
     const gapByDimension = new Map(result.data.gapItems.map((gap) => [gap.dimension_key, gap]));
     const followupById = new Map(result.data.clientFollowupItems.map((followup) => [followup.client_followup_item_id, followup]));
     for (const followup of result.data.clientFollowupItems) {
@@ -326,7 +326,7 @@ async function runClaimGapFollowupIntegrationSuite() {
     assert.ok(!result.data.gapItems.some((g) => g.dimension_key === "coverage_gaps"));
     assert.deepEqual(
       result.data.clientFollowupItems.map((f) => f.dimension_key).sort(),
-      ["definition_clarity", "denominator_clarity", "entity_level_clarity", "time_period_clarity"],
+      ["denominator_clarity", "time_period_clarity"],
     );
     for (const queueItem of result.data.reviewQueueItems) {
       const followup = followupById.get(queueItem.target_object_id);
@@ -344,8 +344,8 @@ async function runClaimGapFollowupIntegrationSuite() {
       client.query(`SELECT count(*)::int AS count FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, seed.claimId]),
       client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_gap_and_followup_generated' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`, [ORG, seed.intakeFileId]),
     ]));
-    assert.equal(counts[0].rows[0].count, 9);
-    assert.equal(counts[1].rows[0].count, 4);
+    assert.equal(counts[0].rows[0].count, 7);
+    assert.equal(counts[1].rows[0].count, 2);
     assert.equal(counts[2].rows[0].count, 1);
 
     const auditRow = await withClient((client) => client.query(
@@ -386,15 +386,15 @@ async function runClaimGapFollowupIntegrationSuite() {
     assert.equal(second.ok, true);
     assert.equal(second.data.replayed, true);
     assert.equal(secondAudit.published.length, 0);
-    assert.equal(second.data.gapItems.length, 9);
-    assert.equal(second.data.clientFollowupItems.length, 4);
-    assert.equal(second.data.reviewQueueItems.length, 4);
+    assert.equal(second.data.gapItems.length, 7);
+    assert.equal(second.data.clientFollowupItems.length, 2);
+    assert.equal(second.data.reviewQueueItems.length, 2);
 
     const counts = await withClient((client) => Promise.all([
       client.query(`SELECT count(*)::int AS count FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, seed.claimId]),
       client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_gap_and_followup_generated' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`, [ORG, seed.intakeFileId]),
     ]));
-    assert.equal(counts[0].rows[0].count, 9);
+    assert.equal(counts[0].rows[0].count, 7);
     assert.equal(counts[1].rows[0].count, 1);
   });
 
@@ -444,8 +444,8 @@ async function runClaimGapFollowupIntegrationSuite() {
       client.query(`SELECT count(*)::int AS count FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, seed.claimId]),
       client.query(`SELECT count(*)::int AS count FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, seed.claimId]),
     ]));
-    assert.equal(counts[0].rows[0].count, 9);
-    assert.equal(counts[1].rows[0].count, 4);
+    assert.equal(counts[0].rows[0].count, 7);
+    assert.equal(counts[1].rows[0].count, 2);
   });
 
   test("P2-04 (d): tenant isolation - a different organizationId with a matching claimId returns not_found and creates nothing", async () => {
@@ -624,8 +624,8 @@ async function runClaimGapFollowupIntegrationSuite() {
       ),
       client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_gap_and_followup_generated' AND intake_file_id = $1::uuid`, [seed.intakeFileId]),
     ]));
-    assert.equal(counts[0].rows[0].count, 4);
-    assert.equal(counts[1].rows[0].count, 3, "the missing queue row must not be repaired");
+    assert.equal(counts[0].rows[0].count, 2);
+    assert.equal(counts[1].rows[0].count, 1, "the missing queue row must not be repaired");
     assert.equal(counts[2].rows[0].count, 1, "only the original successful audit row should exist");
   });
 
@@ -747,7 +747,7 @@ async function runClaimGapFollowupIntegrationSuite() {
       { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.data.gapItems.length, 9);
+    assert.equal(result.data.gapItems.length, 7);
 
     const deniedResult = await generateClaimGapFollowups(
       { organizationId: ORG, claimId: seed.claimId, actorContext: humanActor({ actorType: "ai" }), now: NOW },

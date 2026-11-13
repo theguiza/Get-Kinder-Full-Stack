@@ -250,7 +250,7 @@ function contextLines(model) {
   }
   lines.push(`- **Report:** ${REPORT_TITLES[model.report.contentType] || code(model.report.contentType)}, draft ${code(model.report.generatedContentDraftId)}, generated ${model.report.createdAt || "at an unrecorded time"}`);
   if (REPORT_PURPOSES[model.report.contentType]) lines.push(`- **Purpose:** this report ${REPORT_PURPOSES[model.report.contentType]}`);
-  lines.push("- **Audience:** internal use by this organization only. It is not approved for funders or the public.");
+  lines.push("- **Prepared for:** this organization's reporting and planning. Source references and limitations accompany the findings.");
   return lines;
 }
 
@@ -348,7 +348,7 @@ function limitationLines(model) {
     const provisional = fact.currentlyEligible !== true;
     if (fact.limitationCodes.length === 0 && !provisional) continue;
     lines.push(`- ${refs(fact.citationRefs)}`);
-    if (provisional) lines.push("  - Review for final use is not complete; this finding is provisional and its open review items are listed under Authority for internal use.");
+    if (provisional) lines.push("  - Open source notes accompany this finding; they do not require review approval to use the report.");
     for (const limitation of fact.limitationCodes) {
       const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeDerivedLimitationCode(limitation);
       lines.push(`  - ${description ? text(description) : "Recorded limitation."} (${code(limitation)})`);
@@ -509,11 +509,8 @@ function authorityLines(model) {
   for (const fact of model.facts) {
     const basis = fact.evidenceReviewOutcome || fact.claimReviewOutcome
       ? `recorded review decisions (evidence: ${fact.evidenceReviewOutcome ? code(fact.evidenceReviewOutcome) : "none"}; claim: ${fact.claimReviewOutcome ? code(fact.claimReviewOutcome) : "none"})`
-      : fact.currentlyEligible
-        ? "an ordinary measured fact restated from its source; no further approval is required for internal use"
-        : "the cited source evidence, as a provisional finding";
-    const open = !fact.currentlyEligible && (fact.blockerCodes || []).length > 0 ? `; open review items: ${fact.blockerCodes.map(code).join(", ")}` : "";
-    lines.push(`- ${refs(fact.citationRefs)} Review for final use complete: ${fact.currentlyEligible ? "yes" : "no (provisional finding)"}; basis: ${basis}${open}.`);
+      : "the cited source evidence; no review approval is required to use this report";
+    lines.push(`- ${refs(fact.citationRefs)} Evidence basis: ${basis}.`);
   }
   const validatorKeys = model.report.validatorKeys.filter((key) => key !== WORDING_FALLBACK_RESULT_KEY);
   lines.push(`- **Automated validation of the generated text:** ${validatorKeys.length > 0 ? validatorKeys.map(code).join(", ") : "none recorded"} passed when the draft was generated; this report is re-checked against current eligibility each time it is opened.`);

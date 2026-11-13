@@ -853,8 +853,8 @@ async function runBrowserAcceptance() {
       console.log(`[p204-unreconciled-api] ${JSON.stringify(traced)}`);
       assert.deepEqual(await snapshot(), before, "traceability GET writes nothing");
       assert.equal(traced.status, 200, "missing evaluation is reported without a stale-state conflict");
-      assert.equal(traced.body.data.eligible, false);
-      assert.ok(traced.body.data.blockerCodes.includes("p204_evaluation_required"));
+      assert.equal(traced.body.data.eligible, true);
+      assert.deepEqual(traced.body.data.blockerCodes, [], "gap preparation is optional for report use");
       assert.equal(traced.body.data.dimensions.denominator_clarity.assessment_status, "unresolved");
     });
 
@@ -917,7 +917,7 @@ async function runBrowserAcceptance() {
       const row = `[data-client-claim="${ids.claimId}"]`;
       assert.equal(await attr(adminPage, row, "data-client-claim-kind"), "measurement");
       assert.equal(await attr(adminPage, row, "data-client-claim-internal-use"), "usable");
-      assert.match(await textOf(adminPage, row), /Usable in internal reports now/);
+      assert.match(await textOf(adminPage, row), /Ready to use in your report\./);
       assert.doesNotMatch(await textOf(adminPage, row), /needs_gk_review|Get Kinder review/, "no GK-review state contradicting the authoritative eligibility");
       assert.equal(listed.indexOf(ids.claimId), 0, "the measured finding is listed first");
       await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
@@ -945,10 +945,10 @@ async function runBrowserAcceptance() {
       const pipeline = await adminPage.api("GET", clientEvidencePipelinePath(ORG_X, PROJECT_X));
       assert.equal(pipeline.status, 200, JSON.stringify(pipeline.body));
       const sessionFile = pipeline.body.data.files.find((file) => file.intakeFileId === FILE_X);
-      assert.equal(sessionFile.reviewedImpactFactCount, 1);
+      assert.equal(sessionFile.reviewedImpactFactCount, 2, "both current source claims are usable without review");
       assert.equal(sessionFile.stages.find((stage) => stage.key === "evidence_review").status, "complete", "not held at Get Kinder's evidence review");
-      // What remains is the client's own work: the follow-up questions P2-04 opened for the historical field_2 claim.
-      assert.deepEqual([sessionFile.currentStage, sessionFile.responsibleParty, sessionFile.nextAction], ["impact_fact_review", "client", "answer_client_followups"], JSON.stringify(sessionFile));
+      // Optional questions on another claim do not hold the usable source.
+      assert.deepEqual([sessionFile.currentStage, sessionFile.responsibleParty, sessionFile.nextAction], [null, "none", "none"], JSON.stringify(sessionFile));
       assert.notEqual(sessionFile.reason, "evidence_awaiting_review");
       results.test1 = { listedClaims: listed.length, cited: state.cited_claim_ids, historicalUnchanged: true, sessionFile: sessionFile.reason };
     });
@@ -1101,9 +1101,9 @@ async function runBrowserAcceptance() {
       created(proposed, "risk measured claim");
       ids.riskClaimId = proposed.body.data.claim.claim_id;
       const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.riskClaimId, "internal"));
-      assert.equal(traced.body.data.eligible, false, "a measurement from a source with small-cell risk recorded is outside the ordinary rule");
+      assert.equal(traced.body.data.eligible, true, "source risk notes do not require report-review approval");
       ids.riskBlockers = traced.body.data.blockerCodes;
-      assert.ok(ids.riskBlockers.includes("claim_review_unresolved") || ids.riskBlockers.includes("evidence_review_unresolved"), JSON.stringify(ids.riskBlockers));
+      assert.deepEqual(ids.riskBlockers, []);
       assert.equal((await claimRows()).length, 43);
       assert.deepEqual(await approvalCounts(), NO_APPROVALS);
     });
@@ -1170,18 +1170,18 @@ async function runBrowserAcceptance() {
         const diagnosed = adminPage.requestsSince(mark).filter((entry) => entry.url.includes(`/claims/${ids.claimId}/traceability?requested_audience=internal`));
         assert.equal(diagnosed.length, 1, "the claim's own client-safe P2-06 diagnostic decided it");
         assert.ok(diagnosed.every((entry) => entry.method === "GET"));
-        assert.match(await textOf(adminPage, row), /Usable in internal reports now/);
+        assert.match(await textOf(adminPage, row), /Ready to use in your report\./);
         const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
-        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
+        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "usable");
         // Owner Package 3: the strict answer stays "not usable" for final use,
         // while the server's provisional internal draft admission (draft first,
         // 2026-11-06) admits this unrejected, intact count. The row says so and
         // keeps the strict conditions under "Before final use"; it no longer
         // calls the claim unusable while offering it for a draft.
         await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-provisional-draft")) === "admitted", "the server's provisional admission");
-        assert.match(await textOf(adminPage, `${riskRow} [data-client-claim-provisional-admitted]`), /^Usable in a provisional internal draft now/);
+        assert.match(await textOf(adminPage, `${riskRow} [data-client-claim-usable]`), /^Ready to use in your report/);
         assert.equal(await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`), null);
-        assert.match(await adminPage.evaluate(`document.querySelector('${riskRow} [data-client-claim-final-use-open]').textContent`), /the ordinary record-count rule does not cover it/);
+        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('${riskRow} [data-client-claim-final-use-open]'))`), false);
       } finally {
         await adminPage.stopIntercepting();
       }
@@ -1208,29 +1208,28 @@ async function runBrowserAcceptance() {
       }
     });
 
-    await test("Scenario C: an ordinary measured claim beside genuinely restricted ones: generation, internal-report availability and the next actions each follow their own rule, and nothing not yet established is presented as more than provisional", async () => {
+    await test("Scenario C: source risk notes do not require review approval for generation or report use; a failed diagnostic is checked at generation", async () => {
       await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       const row = `[data-client-claim="${ids.claimId}"]`;
       const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
-      await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-internal-use")) === "not_usable", "the restricted claim's condition");
+      await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-internal-use")) === "usable", "the source finding is usable without review");
       await adminPage.idle();
       assert.equal(await attr(adminPage, row, "data-client-claim-internal-use"), "usable");
       assert.equal(await attr(adminPage, riskRow, "data-client-claim-kind"), "measurement");
       const riskText = await textOf(adminPage, riskRow);
-      assert.match(riskText, /the ordinary record-count rule does not cover it/);
-      assert.match(riskText, /no sensitive category recorded/, "names the rule that does not apply");
+      assert.match(riskText, /Ready to use in your report/);
+      assert.doesNotMatch(riskText, /the ordinary record-count rule does not cover it|Before final use/);
       assert.doesNotMatch(riskText, /needs_gk_review/);
       const before = await approvalCounts();
       const draftsBefore = await projectDraftCount(PROJECT_X2);
-      // C1 generation rule (6f56e744, draft first): an intact measured claim that is not yet established for final internal use
-      // is admitted to a PROVISIONAL internal draft, said before any request; strict internal use stays "not usable".
+      // Both current, permitted findings can be used without another review.
+      // Source risk notes accompany them without becoming approval tasks.
       assert.equal(await attr(adminPage, riskRow, "data-client-claim-provisional-draft"), "admitted");
       await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
       await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
       await adminPage.idle();
       assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null);
-      assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "provisional");
-      assert.match(await textOf(adminPage, "[data-client-draft-selection-usability]"), /are provisional[\s\S]*generating it approves nothing and grants no funder or public use/);
+      assert.equal(await textOf(adminPage, "[data-client-draft-selection-usability]"), null);
       assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === "Generate internal evidence summary").disabled`), false);
       const provisionalGeneration = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
         claim_ids: [ids.claimId, ids.riskClaimId].sort(), idempotency_key: "customer-mixed-restricted-0001", engagement_id: PROJECT_X2,
@@ -1247,11 +1246,11 @@ async function runBrowserAcceptance() {
         () => ({ status: 503, json: { ok: false, error: { code: "system_error" } } }));
       try {
         await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
-        // The complete impact-facts read still says it is not usable for final use; without its own diagnosis the
-        // provisional admission is unknown (6f56e744), so the claim says so and is never shown as admitted or refused.
-        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${riskRow} [data-client-claim-use-unknown]`)), "the impact-facts answer");
+        // The fact is usable. The separate model-processing diagnostic is
+        // unknown here; generation still checks the recorded permission.
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${riskRow} [data-client-claim-usable]`)), "the impact-facts answer");
         await adminPage.idle();
-        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
+        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "usable");
         assert.equal(await attr(adminPage, riskRow, "data-client-claim-provisional-draft"), "unknown");
         await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
         await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
@@ -1269,9 +1268,8 @@ async function runBrowserAcceptance() {
       } finally {
         await adminPage.stopIntercepting();
       }
-      // C3 availability rule (6f56e744): a draft prepared from a usable measured claim and an unreviewed structural one
-      // (generation admits the structural claim) is saved as a PROVISIONAL internal report: the cited claim that is not yet
-      // usable for final use is information shown with it, not a blocker.
+      // A measured finding can be reported with unreviewed source context;
+      // report availability does not depend on reviewing the context.
       const prepared = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
         claim_ids: [ids.claimId, ids.legacyClaimId].sort(), idempotency_key: "customer-mixed-structural-0001", engagement_id: PROJECT_X2,
       });
@@ -1285,16 +1283,16 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       const detail = await textOf(adminPage, `[data-client-internal-draft-detail="${preparedId}"]`);
       assert.ok(await textOf(adminPage, `[data-client-open-internal-report="${preparedId}"]`), "a provisional internal report");
-      assert.equal(await attr(adminPage, '[data-client-internal-report="available"]', "data-client-internal-report-provisional"), "true");
-      assert.match(detail, /This is your organization's provisional internal report/);
-      assert.match(detail, /it is not reviewed, verified or released/);
+      assert.equal(await attr(adminPage, '[data-client-internal-report="available"]', "data-client-internal-report-provisional"), "false");
+      assert.match(detail, /No review or release approval is required/);
+      assert.doesNotMatch(detail, /it is not reviewed, verified or released/);
       assert.doesNotMatch(detail, /Ask Get Kinder to review the cited claims|Structural facts only|needs_gk_review/, "a mixed draft is not structural-only, and no blanket review request");
       const preparedDetail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, preparedId));
       assert.deepEqual(preparedDetail.body.data.internalReport,
-        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: ["cited_claims_not_currently_eligible"] });
+        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] });
       const provisionalReport = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, preparedId));
       assert.equal(provisionalReport.status, 200, provisionalReport.body);
-      assert.match(provisionalReport.body, /\*\*Status:\*\* Provisional internal draft\./);
+      assert.match(provisionalReport.body, /\*\*Status:\*\* Working report\./);
       // C4 the usable claim alone: an internal report at once.
       await adminPage.waitFor(async () => (await textOf(adminPage, `${row} input[type=checkbox]`)) !== null, "the measured claim");
       await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
@@ -1428,7 +1426,7 @@ async function runBrowserAcceptance() {
       // 6f56e744 (draft first): while the structural claim is not yet eligible the measured narrative is a provisional
       // internal report; the not-yet-eligible citation is information, not a blocker.
       assert.deepEqual((await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId))).body.data.internalReport,
-        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: ["cited_claims_not_currently_eligible"] },
+        { available: true, getKinderReviewReasons: [], blockedReasons: [], informationReasons: [] },
         "provisional while the structural claim is not eligible");
       // Legitimate Get Kinder review: evidence and claim decisions, internal coverage acceptance, and the follow-ups completed.
       const evidenceQueue = await queueOf("evidence_review", wide.evidence_item_id);
@@ -1521,8 +1519,8 @@ async function runBrowserAcceptance() {
       for (let read = 0; read < 2; read++) {
         const trace = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"));
         assert.equal(trace.status, 200, JSON.stringify(trace));
-        assert.equal(trace.body.data.eligible, false);
-        assert.ok(trace.body.data.blockerCodes.includes("p204_evaluation_required"));
+        assert.equal(trace.body.data.eligible, true);
+        assert.deepEqual(trace.body.data.blockerCodes, [], "a source statement needs no gap or review preparation");
         beforeDimensions = trace.body.data.dimensions;
       }
       assert.deepEqual(await docState(), before, "repeated GETs do not prepare state");
@@ -1600,7 +1598,7 @@ async function runBrowserAcceptance() {
       assert.ok(after[0].gaps > 0, "generation reconciled the fresh document claim");
       const docAfter = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, docClaimId, "internal"));
       assert.equal(docAfter.status, 200);
-      assert.equal(docAfter.body.data.eligible, false);
+      assert.equal(docAfter.body.data.eligible, true);
       assert.ok(!docAfter.body.data.blockerCodes.includes("p204_evaluation_required"));
       assert.deepEqual(await approvalCounts(), approvalsBefore, "reconciliation approved nothing");
       const readState = await docState();

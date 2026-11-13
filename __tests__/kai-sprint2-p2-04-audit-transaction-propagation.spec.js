@@ -401,7 +401,7 @@ test("P2-04 refresh projects historical small-cell gap through successive review
   head = { ...snapshot, decision_id: "head-b", reviewed_small_cell_risk_status: "present" };
   result = await refresh();
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.data.gapItems.find((row) => row.dimension_key === "small_cell_risk").assessment_status, "resolved_risk_flagged");
+  assert.equal(result.data.gapItems.some((row) => row.dimension_key === "small_cell_risk"), false);
   head = { ...snapshot, decision_id: "head-c", reviewed_small_cell_risk_status: "unknown" };
   result = await refresh();
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -410,10 +410,10 @@ test("P2-04 refresh projects historical small-cell gap through successive review
   head = { ...snapshot, decision_id: "head-d", reviewed_small_cell_risk_status: "present" };
   result = await refresh();
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.data.replayed, false);
-  assert.equal(gaps.find((row) => row.dimension_key === "small_cell_risk").assessment_status, "resolved_risk_flagged");
+  assert.equal(result.data.replayed, true);
+  assert.equal(gaps.some((row) => row.dimension_key === "small_cell_risk"), false, "a disclosed risk creates no new gap");
   assert.equal((await refresh()).data.replayed, true);
-  gaps.pop();
+  head = { ...snapshot, decision_id: "head-e", reviewed_small_cell_risk_status: "unknown" };
   concurrentInsert = true;
   result = await refresh();
   assert.equal(result.error.code, "conflict_current_state_changed");

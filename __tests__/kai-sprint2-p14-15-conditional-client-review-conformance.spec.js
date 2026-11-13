@@ -121,7 +121,7 @@ function gateDependencies({ currentUseEligible, effective }) {
   };
 }
 
-test("REQUIREMENT A/B: client_followup_unresolved is the real, existing, authoritative client-required blocker - real evaluator source declares it, gated only on a persisted waiting_on_client/unresolved queue row, never fired for every claim", () => {
+test("client follow-up is optional for internal reports and retains the existing external-audience contract", () => {
   assert.ok(__claimTraceabilityRepositoryContract.BLOCKER_ORDER.includes("client_followup_unresolved"));
 
   const source = readFileSync(
@@ -136,7 +136,7 @@ test("REQUIREMENT A/B: client_followup_unresolved is the real, existing, authori
   // no blocker - this is what makes client review conditional, not universal.
   assert.match(
     source,
-    /for \(const row of followupQueueRows\) \{\s*if \(unresolvedReviewStatus\(row\.review_status\) \|\| row\.queue_status === "waiting_on_client"\) \{\s*addOrderedBlocker\(blockers, "client_followup_unresolved"\);/,
+    /for \(const row of followupQueueRows\) \{\s*if \(!internalReportUse && \(unresolvedReviewStatus\(row\.review_status\) \|\| row\.queue_status === "waiting_on_client"\)\) \{\s*addOrderedBlocker\(blockers, "client_followup_unresolved"\);/,
   );
 });
 

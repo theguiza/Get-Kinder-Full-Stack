@@ -174,9 +174,9 @@ test("P2-04 service: a repository refusal keeps its named blocker", async () => 
   assert.deepEqual([result.ok, result.error.code, result.blockers], [false, "validation_blocker", blockers]);
 });
 
-test("dimensionResultRequiresGap: every assessment_status other than resolved_clear requires a gap", () => {
+test("dimensionResultRequiresGap: only unresolved assessments need a clarification; warnings are information", () => {
   assert.equal(dimensionResultRequiresGap({ evidence: { assessment_status: "resolved_clear" } }), false);
-  assert.equal(dimensionResultRequiresGap({ evidence: { assessment_status: "resolved_risk_flagged" } }), true);
+  assert.equal(dimensionResultRequiresGap({ evidence: { assessment_status: "resolved_risk_flagged" } }), false);
   assert.equal(dimensionResultRequiresGap({ evidence: { assessment_status: "unresolved" } }), true);
   assert.equal(dimensionResultRequiresGap(undefined), false);
   assert.equal(dimensionResultRequiresGap({ evidence: {} }), false);
@@ -600,7 +600,7 @@ test("P2-04 audit contract discloses its validator key and operation as a P2-04 
   );
 });
 
-test("P2-04 buildExpectedGapPlans: creates a plan for every non-resolved_clear dimension only, and safeSummaryFor matches the fixed template", () => {
+test("P2-04 buildExpectedGapPlans: new plans exclude warnings and historical warning snapshots remain checkable", () => {
   const { buildExpectedGapPlans, safeSummaryFor } = __claimGapFollowupRepositoryTestables;
   const dimensions = {
     missingness: { validator_key: "VAL-KAI-P2-02-missingness", evidence: { assessment_status: "resolved_clear" } },
@@ -617,14 +617,23 @@ test("P2-04 buildExpectedGapPlans: creates a plan for every non-resolved_clear d
   const plans = buildExpectedGapPlans(dimensions);
   assert.deepEqual(
     plans.map((plan) => plan.dimension_key),
-    ["duplicates", "definition_clarity", "denominator_clarity", "time_period_clarity", "conflicting_source_indicators", "requirement_alignment"],
+    ["denominator_clarity", "time_period_clarity", "conflicting_source_indicators", "requirement_alignment"],
   );
   for (const plan of plans) {
     assert.equal(plan.safe_summary, safeSummaryFor(plan.dimension_key));
   }
-  const duplicatesPlan = plans.find((plan) => plan.dimension_key === "duplicates");
+  const legacyPlans = buildExpectedGapPlans(dimensions, { historicalGapRows: [
+    { dimension_key: "duplicates", assessment_status: "resolved_risk_flagged" },
+    { dimension_key: "definition_clarity", assessment_status: "resolved_risk_flagged" },
+  ] });
+  assert.deepEqual(legacyPlans.map((plan) => plan.dimension_key), ["duplicates", "definition_clarity", "denominator_clarity", "time_period_clarity", "conflicting_source_indicators", "requirement_alignment"]);
+  const duplicatesPlan = legacyPlans.find((plan) => plan.dimension_key === "duplicates");
   assert.equal(duplicatesPlan.open_finding_count, 2);
   assert.equal(duplicatesPlan.field_count, null);
+  const partialHistory = buildExpectedGapPlans(dimensions, { historicalGapRows: [
+    { dimension_key: "duplicates", assessment_status: "resolved_risk_flagged" },
+  ] });
+  assert.equal(partialHistory.some((plan) => plan.dimension_key === "definition_clarity"), false, "replaying historical warnings creates no new warning tasks");
 });
 
 test("P2-04 buildExpectedFollowupDimensionKeys: only the intersection of gap dimensions and the four client-answerable dimensions", () => {

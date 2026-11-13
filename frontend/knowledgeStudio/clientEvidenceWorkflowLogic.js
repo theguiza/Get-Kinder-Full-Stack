@@ -323,8 +323,7 @@ export function provisionalDraftRefusalMessage(diagnosis) {
   return `Not usable in a new internal draft: ${codes.map((code) => PROVISIONAL_DRAFT_BLOCKER_MESSAGES[code](provisional.sourceRole)).join("; ")}.`;
 }
 
-export const PROVISIONAL_DRAFT_ADMITTED_MESSAGE = "Usable in a provisional internal draft now (determined by KAI\u2019s checks; this is not a review or an approval).";
-export const FINAL_USE_OPEN_PREFIX = "Not yet established for final internal use (factual review and release), and never for funder or public use from this draft: ";
+export const PROVISIONAL_DRAFT_ADMITTED_MESSAGE = "Ready to use in your report. Source notes and limitations stay with the finding.";
 
 /**
  * What one claim row says about its use, from the strict internal answer
@@ -333,8 +332,8 @@ export const FINAL_USE_OPEN_PREFIX = "Not yet established for final internal use
  * Returns { draft, strict, lines } where each line is
  * { key, text, detail? }:
  * - "usable": strictly usable and admitted (or admission not yet read);
- * - "provisional": admitted to a new internal draft while final use is open
- *   (detail: the strict conditions, with no unrelated permission advice);
+ * - "provisional": an admitted finding from a legacy strict diagnostic;
+ *   usable with its source notes, without a separate final-use prerequisite;
  * - "refused": the server refuses the claim for a new draft, and why;
  * - "unknown": neither answer is confirmed here.
  */
@@ -346,14 +345,10 @@ export function claimUsePresentation({ claim, strictUse, diagnosis }) {
     return { draft, strict: strictUse, lines: [{ key: "refused", text: provisionalDraftRefusalMessage(diagnosis) }] };
   }
   if (strictUse === "usable") {
-    return { draft, strict: strictUse, lines: [{ key: "usable", text: "Usable in internal reports now (determined by KAI\u2019s checks)" }] };
+    return { draft, strict: strictUse, lines: [{ key: "usable", text: "Ready to use in your report." }] };
   }
   if (draft === "admitted") {
-    const open = strictUse === "not_usable" && Array.isArray(diagnosis?.blockerCodes) && diagnosis.blockerCodes.length > 0
-      ? `${FINAL_USE_OPEN_PREFIX}${diagnosis.blockerCodes.map((code) => blockerMessage(code, kind)).join("; ")}.`
-        + (kind === "measurement" && diagnosis.blockerCodes.some((code) => REVIEW_BLOCKERS.has(code)) ? ` ${ORDINARY_RULE_NOTE}` : "")
-      : null;
-    return { draft, strict: strictUse, lines: [{ key: "provisional", text: PROVISIONAL_DRAFT_ADMITTED_MESSAGE, ...(open ? { detail: open } : {}) }] };
+    return { draft, strict: strictUse, lines: [{ key: "provisional", text: PROVISIONAL_DRAFT_ADMITTED_MESSAGE }] };
   }
   return { draft, strict: strictUse, lines: [{ key: "unknown", text: CLAIM_USE_UNKNOWN_MESSAGE }] };
 }
@@ -389,9 +384,7 @@ export function selectionReportUsabilityMessage({ refused = [], provisional = []
       + "The condition and what can change it are shown on each claim; deselect them to draft from the others.");
   }
   if (provisional.length > 0) {
-    parts.push(`${provisional.length} selected finding(s) are provisional: KAI's checks admit them to an internal draft, but they are not yet `
-      + "established for final internal use (factual review and release). The draft states them with their limitations; generating it approves "
-      + "nothing and grants no funder or public use.");
+    parts.push(`${provisional.length} selected finding(s) can be used in your report with their source notes and limitations. No review approval is required.`);
   }
   if (unknown.length > 0) parts.push(`${unknown.length} selected claim(s) are not confirmed for an internal draft here; KAI checks them when the draft is generated, and the saved draft says whether it is usable.`);
   return parts.join(" ");
@@ -479,12 +472,10 @@ export function claimProposalResultMessage(data) {
 // P2-04 outcome: counts only. Generation records open gaps and open client
 // follow-up questions; it answers, resolves, and approves nothing.
 export function gapFollowupResultMessage(data) {
-  const gaps = Array.isArray(data?.gapItems) ? data.gapItems.length : 0;
+  const gaps = Array.isArray(data?.gapItems)
+    ? data.gapItems.filter((item) => item.assessment_status === "unresolved" || item.assessmentStatus === "unresolved").length : 0;
   const followups = Array.isArray(data?.clientFollowupItems) ? data.clientFollowupItems.length : 0;
-  const counts = `${gaps} open gap(s) and ${followups} client follow-up question(s)`;
-  return data?.replayed === true
-    ? `Gap follow-ups were already generated for this claim (${counts}). Nothing new was written.`
-    : `Gap follow-ups generated: ${counts} recorded. They stay open until answered and reviewed; the claim is not approved.`;
+  return `${gaps} clarification note(s) and ${followups} follow-up question(s). You can continue with your report; answers can improve it later.`;
 }
 
 // Why a P2-04 request wrote nothing, from the server's own refusal.

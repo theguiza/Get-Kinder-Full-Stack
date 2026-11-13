@@ -216,14 +216,18 @@ function computeDimensions(rows) {
 
 /**
  * Builds the complete deterministic expected gap-plan set: one entry per
- * dimension whose authoritative assessment_status is not 'resolved_clear', in
- * the fixed DIMENSION_KEYS order.
+ * unresolved dimension, in the fixed DIMENSION_KEYS order. Historical warning
+ * snapshots can still be checked and replayed without rewriting their rows.
  */
-function buildExpectedGapPlans(dimensions) {
+function buildExpectedGapPlans(dimensions, { historicalGapRows = [] } = {}) {
   const plans = [];
+  const historicalWarningKeys = new Set(historicalGapRows
+    .filter((row) => row.assessment_status === "resolved_risk_flagged")
+    .map((row) => row.dimension_key));
   for (const dimensionKey of DIMENSION_KEYS) {
     const result = dimensions[dimensionKey];
-    if (!dimensionResultRequiresGap(result)) continue;
+    if (!dimensionResultRequiresGap(result)
+      && !(historicalWarningKeys.has(dimensionKey) && result?.evidence?.assessment_status === "resolved_risk_flagged")) continue;
     const counts = extractSafeCounts(result.evidence);
     plans.push({
       dimension_key: dimensionKey,
@@ -966,13 +970,15 @@ export function createPostgresClaimGapFollowupRepository({
             evidenceItemRow,
             baseDimensions: computeDimensionsFn({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys }),
           });
-          const expectedGapPlans = buildExpectedGapPlans(dimensions);
+          const existingGapRows = await readExistingGapRows(tx, { organizationId, claimId });
+          const expectedGapPlans = buildExpectedGapPlans(dimensions, {
+            historicalGapRows: existingGapRows,
+          });
           const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 
           const evidenceItemId = evidenceItemRow.evidence_item_id;
           const sourceVersionId = evidenceItemRow.source_version_id;
 
-          const existingGapRows = await readExistingGapRows(tx, { organizationId, claimId });
           const existingFollowupRows = await readExistingFollowupRows(tx, { organizationId, claimId });
           const existingQueueRows = await readExistingFollowupQueueRows(tx, {
             organizationId,

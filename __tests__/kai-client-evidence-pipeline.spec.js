@@ -264,8 +264,8 @@ test("stages: automatic processing, failures, and every human gate map to the re
     19: ["impact_fact_review", "waiting_for_client", "client", "answer_client_followups", "waiting_for_client"],
     20: ["impact_fact_review", "not_currently_eligible", "get_kinder", "none_waiting_for_get_kinder", "not_currently_eligible"],
     21: [null, "complete", "none", "none", "complete"],
-    // Open client follow-ups outrank an already-usable sibling claim.
-    23: ["impact_fact_review", "waiting_for_client", "client", "answer_client_followups", "waiting_for_client"],
+    // Optional follow-ups do not hold an already-usable source.
+    23: [null, "complete", "none", "none", "complete"],
     25: [null, "complete", "none", "none", "complete"],
     27: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
   };

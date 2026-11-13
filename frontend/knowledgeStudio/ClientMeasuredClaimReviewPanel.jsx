@@ -258,6 +258,7 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
           </div>
           {[...new Set([...review.evidenceReview.getKinderReviewReasons, ...review.evidenceReview.blockedReasons,
             ...review.claimReview.getKinderReviewReasons, ...review.claimReview.blockedReasons])]
+            .filter(() => !review.internalEligibility.eligible)
             .filter((reason) => reason !== "factual_review_not_supported")
             .map((reason) => <div key={reason} className="mt-1" data-client-measured-claim-review-reason={reason}>{reviewReasonText(reason, { derived: Boolean(derived) })}</div>)}
           {JUDGMENTS.map(([judgment, label, style]) => {

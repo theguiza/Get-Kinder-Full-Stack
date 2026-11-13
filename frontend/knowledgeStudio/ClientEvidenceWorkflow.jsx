@@ -721,28 +721,20 @@ export default function ClientEvidenceWorkflow({
       ? { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current" } : claimDiagnostics.get(claim.claimId);
     const recoveryVersion = currentRecordCountRecoveryVersion(claim, sources.items, diagnosis);
     const claimText = claim.claimStatement || claim.evidenceStatement || "";
-    // Owner Package 3: the strict internal answer (final use) and the
-    // server's provisional draft admission are shown as what each is, so a
-    // claim is never called unusable while it is offered for a draft.
+    // Report usability follows the server. Open review and coverage notes
+    // never become an additional final-use prerequisite in this view.
     const presentation = claimUsePresentation({ claim, strictUse: use, diagnosis });
     const line = presentation.lines[0] || null;
     const refused = line?.key === "refused" ? splitNotUsableMessage(line.text) : null;
     return (
       <div key={claim.claimId} className="border-top mt-2 pt-2 small" data-client-claim={claim.claimId}
         data-client-claim-kind={kind} data-client-claim-internal-use={use} data-client-claim-provisional-draft={presentation.draft}>
-        {/* Internal use is determined by KAI's existing checks (P2-06), not by a
-            person; the wording says so and adds no approval language. */}
         {line?.key === "usable" ? (
-          <div className="text-success" data-client-claim-usable="">Usable in internal reports now (determined by KAI&rsquo;s checks)</div>
+          <div className="text-success" data-client-claim-usable="">{line.text}</div>
         ) : null}
         {line?.key === "provisional" ? (
           <>
             <div className="text-success" data-client-claim-provisional-admitted="">{line.text}</div>
-            {line.detail ? (
-              <Disclosure name="claim-final-use-open" label="Before final use" openLabel="Hide">
-                <div className="text-muted" data-client-claim-final-use-open="">{line.detail}</div>
-              </Disclosure>
-            ) : null}
           </>
         ) : null}
         {refused ? (
@@ -777,7 +769,7 @@ export default function ClientEvidenceWorkflow({
           {access.generateClaimGapFollowups && (selectability.selectable || selectability.reason === "structural_fact") ? (
             <button type="button" className="btn btn-sm btn-outline-secondary" disabled={Boolean(pending)}
               data-client-claim-gap-followups={claim.claimId} onClick={() => generateGapFollowups(claim.claimId)}>
-              {pending === `gaps:${claim.claimId}` ? "Generating..." : "Generate gap follow-ups"}
+              {pending === `gaps:${claim.claimId}` ? "Checking..." : "Find useful clarifications"}
             </button>
           ) : null}
           {access.reviewMeasuredClaimFactualContent && !claimSourceVersionUnavailable(claim, diagnosis) && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
@@ -832,9 +824,6 @@ export default function ClientEvidenceWorkflow({
       <TechnicalDetails label="Details">
         <div>Evidence item: {finding.evidenceItemId}</div>
         {finding.sourceVersionId ? <div>Source version: {finding.sourceVersionId}</div> : null}
-        {finding.evidence?.evidenceReviewStatus ? <div>Recorded review status: {finding.evidence.evidenceReviewStatus}</div> : null}
-        {finding.evidence?.sensitivityLevel ? <div>Sensitivity: {finding.evidence.sensitivityLevel}</div> : null}
-        {finding.evidence?.supportStrength ? <div>Support strength: {finding.evidence.supportStrength}</div> : null}
         {finding.claims.map((claim) => <div key={claim.claimId}>Claim: {claim.claimId}</div>)}
         {!finding.evidence ? <div>This claim&rsquo;s evidence item is not among the evidence loaded so far.</div> : null}
       </TechnicalDetails>

@@ -367,7 +367,7 @@ async function runCedarBridgeAcceptance() {
   const assertOwnInternalMarkdownSafe = (response) => {
     assert.deepEqual([response.status, blockersOf(response)], [200, []], J(response.body));
     const markdown = typeof response.body === "string" ? response.body : response.body?.data?.markdown;
-    assert.match(markdown, /\*\*Status:\*\* Provisional internal draft\. It can be used for internal planning and drafting now; it is not approved for release, funders or the public\./);
+    assert.match(markdown, /\*\*Status:\*\* Working report\. Source references and limitations are included/);
     assert.match(markdown, /## Information[\s\S]*A cited source may contain personal information\. Keep participant names and direct identifiers out of anything shared outside the organization\./);
     assert.match(markdown, /CIT-001/);
     assert.match(markdown, /## Source and evidence traceability/);
@@ -800,9 +800,10 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual(detail("workbook", "record_count_basis").blockers, ["measurement_xlsx_worksheet_selection_required"]);
       for (const label of ["register", "events", "assessments", "followups"]) {
         const claim = report.claims[label];
-        assert.deepEqual([claim.traceability_initial.eligible, claim.traceability_initial.blockerCodes.includes("evidence_review_unresolved")], [false, true],
-          `${label}: personal information present needs Get Kinder review first`);
-        assert.equal(claim.traceability_after_review.eligible, true, label);
+        assert.deepEqual([claim.traceability_initial.eligible, claim.traceability_initial.blockerCodes.includes("evidence_review_unresolved")], [true, false],
+          `${label}: source categories do not impose report-review approval`);
+        assert.equal((claim.traceability_after_review || claim.traceability_initial).eligible, true, label);
+        assert.equal(claim.gk_review, undefined, "the count needed no review approval");
         assert.deepEqual([claim.funder_eligible, claim.public_eligible], [false, false], label);
         // Package 1 contract: the count asserts source records; the period is attributed, never applied.
         assert.match(claim.statement, /Not applied by KAI: .*no reporting period was defined\./, `${label}: the engagement's reporting period is not applied to the count`);
@@ -966,8 +967,8 @@ async function runCedarBridgeAcceptance() {
         assert.match(claim.statement, /whether higher is better is not established/);
         assert.doesNotMatch(claim.statement, /improv|caus|unique participants/i);
         const initial = await trace(claimId);
-        assert.equal(initial.eligible, false, "this source records personal information; meaning is not inferred as the reason");
-        assert.ok(initial.blockerCodes.includes("evidence_review_unresolved") && initial.blockerCodes.includes("claim_review_unresolved"), J(initial));
+        assert.equal(initial.eligible, true, "source categories and unstated meaning do not require report-review approval");
+        assert.deepEqual(initial.blockerCodes, [], J(initial));
         scenario.claims.push({ field, claim_id: claimId, evidence_item_id: evidenceItemId, statement: claim.statement, initial });
       }
       const claimIds = scenario.claims.map((entry) => entry.claim_id);
@@ -1008,7 +1009,7 @@ async function runCedarBridgeAcceptance() {
       const sentForAssessment = modelCalls.slice(callsBefore);
       assert.ok(sentForAssessment.length >= 1 && sentForAssessment.length <= 2, "one model call, plus at most the single bounded correction");
       for (const call of sentForAssessment) assert.deepEqual(call.claims.map((claim) => claim.claimId).sort(), [...claimIds].sort(), "exactly the admitted claims");
-      for (const call of sentForAssessment) for (const claim of call.claims) assert.ok(claim.limitationCodes.includes("claim_review_unresolved"), "open review travels as a limitation");
+      for (const call of sentForAssessment) for (const claim of call.claims) assert.equal(claim.limitationCodes.includes("claim_review_unresolved"), false, "missing review is not a source limitation");
       assert.equal(await draftCount(), draftsBefore + 1, "the provisional assessment is saved");
 
       // These are new, attributed synthetic decisions on descriptive findings,
@@ -1200,10 +1201,9 @@ async function runCedarBridgeAcceptance() {
         };
         assertReadable(clientText, "client panel");
         // Viewing, recording meaning and Get Kinder's review decisions are told apart (reason code unchanged).
-        assert.ok(clientText.includes("You can view this result here, and your organization's administrator can record what it measures; recording a meaning is not a review. "
-          + "The evidence and claim review decisions for this kind of measurement are recorded by Get Kinder, not by your organization."), clientText);
+        assert.doesNotMatch(clientText, /The evidence and claim review decisions for this kind of measurement are recorded by Get Kinder, not by your organization\./);
         assert.doesNotMatch(clientText, /Only a record-count measurement can be reviewed here/);
-        assert.equal(await page.attrOf(`${clientPanel} [data-client-measured-claim-review-reason="evidence_type_requires_get_kinder_review"]`, "data-client-measured-claim-review-reason"), "evidence_type_requires_get_kinder_review");
+        assert.equal(await page.attrOf(`${clientPanel} [data-client-measured-claim-review-reason="evidence_type_requires_get_kinder_review"]`, "data-client-measured-claim-review-reason"), null, "no mandatory-review handoff on a usable finding");
         assert.equal(await page.evaluate(`document.querySelectorAll(${J(`${clientPanel} [data-client-measured-claim-judgment]`)}).length`), 0, "no organization review action is offered");
         assert.equal(await page.attrOf(`${clientPanel} [data-factual-review-paired]`, "data-factual-review-meaning-state"), "not_recorded");
         assert.ok(offered, "Get Kinder's reviewer is offered Review finding for the paired claim");
@@ -1304,7 +1304,7 @@ async function runCedarBridgeAcceptance() {
         assert.deepEqual(current.derived_measurement.interpretation, { interpretation_id: history[0].interpretation_id, indicator_label: semantics.indicator_label,
           meaning_text: semantics.meaning_text, score_direction: "not_established", evidence_basis: "self_reported" });
         assert.equal(current.derived_measurement.evidence_item_id, newEvidenceItemId);
-        assert.equal(current.internal_eligibility.eligible, false, "no review is copied to the new claim");
+        assert.equal(current.internal_eligibility.eligible, true, "the current source finding needs no copied review approval");
         assert.deepEqual([current.evidence_review.decision_outcome, current.claim_review.decision_outcome], [null, null], "no approval is manufactured");
         assert.equal(await page.attrOf(`[data-client-measured-claim-review="${newClaimId}"] [data-factual-review-paired]`, "data-factual-review-meaning-state"), "recorded");
         assert.match(currentText, /^Employment readiness$/m);
@@ -1641,7 +1641,7 @@ async function runCedarBridgeAcceptance() {
         const [claim] = await query("SELECT statement, claim_type FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
         const initial = await trace(claimId);
         const entry = { source: label, claim_id: claimId, evidence_item_id: evidenceItemId, statement: claim.statement, traceability_initial: initial };
-        assert.equal(initial.eligible, false, `${label}: personal information present needs Get Kinder review first`);
+        assert.equal(initial.eligible, true, `${label}: internal use needs no review approval`);
         entry.gk_review = await reviewToInternal(claimId, evidenceItemId);
         entry.traceability_after_review = await trace(claimId);
         assert.equal(entry.traceability_after_review.eligible, true, `${label}: ${J(entry.traceability_after_review)}`);
@@ -1767,7 +1767,7 @@ async function runCedarBridgeAcceptance() {
         const row = `[data-client-claim="${claimId}"]`;
         await page.waitFor(() => page.visible(row), "the current claim in Evidence", { timeout: 30000 });
         await page.waitFor(async () => (await page.attrOf(row, "data-client-claim-provisional-draft")) === "admitted", "the claim admitted for drafting", { timeout: 30000 });
-        assert.match(await page.textOf(row), /Usable in internal reports now/, "the established review made it usable; nothing was seeded");
+        assert.match(await page.textOf(row), /Ready to use in your report\./, "the current finding is usable");
         const reviewMark = page.mark();
         await page.clickVisible(`[data-client-open-measured-claim-review="${claimId}"]`, "View measurement");
         const panel = `[data-client-measured-claim-review="${claimId}"]`;
@@ -2302,7 +2302,7 @@ async function runCedarBridgeAcceptance() {
         const proposed = await adminApi("POST", claimProposalPath(ORG, stated.body.data.evidenceItem.evidence_item_id), {});
         assert.ok([200, 201].includes(proposed.status), J(proposed.body));
         const traced = await gkApi("GET", claimTraceabilityPath(ORG, proposed.body.data.claim.claim_id, "internal"));
-        assert.equal(traced.body?.data?.eligible, false, "ordinary review and both-source sensitivity still apply");
+        assert.equal(traced.body?.data?.eligible, true, "the permitted source finding needs no additional report review");
         const evidenceId = stated.body.data.evidenceItem.evidence_item_id;
         const claimId = proposed.body.data.claim.claim_id;
         activityOriginal[entry.definition.metric] = { measurement: entry, evidenceId, claimId };
@@ -2345,7 +2345,7 @@ async function runCedarBridgeAcceptance() {
         assert.ok([200, 201].includes(proposed.status), `${label}: ${J(proposed.body)}`);
         const claimId = proposed.body.data.claim.claim_id;
         const initial = await trace(claimId);
-        assert.equal(initial.eligible, false, `${label}: personal information present in both sources needs Get Kinder review first`);
+        assert.equal(initial.eligible, true, `${label}: permitted cross-source findings need no additional report review`);
         const evidenceQueue = await queueOf("evidence_review", CROSS[label].evidenceItemId);
         const evidence = await gkApi("POST", evidenceReviewCompletePath(ORG, CROSS[label].evidenceItemId, evidenceQueue.review_queue_item_id),
           evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
@@ -2549,8 +2549,8 @@ async function runCedarBridgeAcceptance() {
         // needs_more_information approves nothing and bypasses no check.
         assert.equal(probe.reread.evidence_review_decision, "needs_more_information");
         assert.deepEqual([probe.reread.eligible, probe.reread.claim_review_decision, probe.reread.claim_status, probe.reread.claim_strength, probe.reread.support_strength],
-          [false, null, "proposed", "unassessed", "unassessed"]);
-        for (const code of ["claim_review_unresolved", "evidence_review_unresolved", "support_strength_unassessed"]) assert.ok(probe.reread.blockerCodes.includes(code), code);
+          [true, null, "proposed", "unassessed", "unassessed"]);
+        assert.deepEqual(probe.reread.blockerCodes, [], "an unanswered clarification does not block report use");
         assert.ok(probe.visible_after.includes("KAI did not check the recorded values against any other source."), "limitations stay visible after the decision");
         assert.deepEqual(gkPage.exceptions, []);
       } finally {
@@ -3308,7 +3308,7 @@ async function runCedarBridgeAcceptance() {
         assert.ok([200, 201].includes(proposed.status), J(proposed.body));
         const claimId = proposed.body.data.claim.claim_id;
         assert.notEqual(claimId, old.claimId);
-        assert.equal((await traceOf(claimId)).eligible, false);
+        assert.equal((await traceOf(claimId)).eligible, true, "no review approval is required for the current finding");
         const queue = async (kind, id) => (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid", [ORG, kind, id]))[0];
         const eq = await queue("evidence_review", evidenceId);
         const er = await gkApi("POST", evidenceReviewCompletePath(ORG, evidenceId, eq.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(eq.updated_at).toISOString(), decision: "supported" }));
@@ -3342,7 +3342,7 @@ async function runCedarBridgeAcceptance() {
         assert.ok([200, 201].includes(proposed.status), `${label}: ${J(proposed.body)}`);
         const claimId = proposed.body.data.claim.claim_id;
         assert.notEqual(claimId, crossClaims[label], "a new claim, not the old one reused");
-        assert.equal((await traceOf(claimId)).eligible, false, "Get Kinder review is required again");
+        assert.equal((await traceOf(claimId)).eligible, true, "a corrected source finding requires no new review approval");
         const queueOf = async (queueType, targetId) => (await query(
           "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
           [ORG, queueType, targetId]))[0];
@@ -3696,7 +3696,7 @@ async function runCedarBridgeAcceptance() {
         const followups = await query("SELECT dimension_key FROM kai.client_followup_items WHERE claim_id = $1::uuid ORDER BY dimension_key", [claimId]);
         const initial = await traceOf(claimId);
         assert.equal(p204.status, 200, `${label}: ${J(p204.body)}`);
-        assert.equal(initial.eligible, false, `${label}: Get Kinder's claim review is required`);
+        assert.equal(initial.eligible, true, `${label}: an attributed document statement needs no claim-review approval`);
         const claimQueue = await queueOf("claim_review", claimId);
         const reviewed = await gkApi("POST", claimReviewCompletePath(ORG, claimId, claimQueue.review_queue_item_id),
           claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
@@ -4082,7 +4082,7 @@ async function runCedarBridgeAcceptance() {
         await page.idle();
         assert.equal(page.requestsSince(reportMark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(ORG, PROJECT, draftId))?.status, 200);
         const markdown = await page.textOf("[data-client-internal-report-markdown]");
-        assert.match(markdown, /Provisional internal draft/);
+        assert.match(markdown, /\*\*Status:\*\* Working report\./);
         assert.ok(markdown.indexOf("Impact assessment") >= 0 && markdown.indexOf("Impact assessment") < markdown.indexOf("Supporting evidence and method"), "the assessment leads the report");
         assert.match(markdown, /Limitations of the figures/);
         assert.match(markdown, /a favourable observed change on this outcome/);

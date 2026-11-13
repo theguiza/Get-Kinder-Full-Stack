@@ -702,9 +702,14 @@ test("G: P2-04 authority opens no follow-up answer or list, no GK traceability D
 
 test("G: the P2-04 client messages report counts only, and refusals name the server's reason without detail", () => {
   assert.equal(gapFollowupResultMessage(gapFollowupData(ORG_X)),
-    "Gap follow-ups generated: 1 open gap(s) and 1 client follow-up question(s) recorded. They stay open until answered and reviewed; the claim is not approved.");
+    "1 clarification note(s) and 1 follow-up question(s). You can continue with your report; answers can improve it later.");
   assert.equal(gapFollowupResultMessage(gapFollowupData(ORG_X, true)),
-    "Gap follow-ups were already generated for this claim (1 open gap(s) and 1 client follow-up question(s)). Nothing new was written.");
+    "1 clarification note(s) and 1 follow-up question(s). You can continue with your report; answers can improve it later.");
+  assert.equal(gapFollowupResultMessage({ gapItems: [
+    { assessmentStatus: "unresolved" },
+    ...Array.from({ length: 4 }, () => ({ assessmentStatus: "resolved_risk_flagged" })),
+  ], clientFollowupItems: [], replayed: true }),
+  "1 clarification note(s) and 0 follow-up question(s). You can continue with your report; answers can improve it later.", "historical warnings are not counted as open clarifications");
   for (const text of [gapFollowupResultMessage(gapFollowupData(ORG_X)), gapFollowupResultMessage(gapFollowupData(ORG_X, true))]) {
     assert.ok(!text.includes("How is this field defined?") && !text.includes(QUEUE) && !text.includes(GAP), "no record content or ids");
   }

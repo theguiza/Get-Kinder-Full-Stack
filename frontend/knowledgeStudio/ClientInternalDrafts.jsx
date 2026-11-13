@@ -341,15 +341,8 @@ function InternalReport({ draft, canRead, report, onOpen, downloadPath, structur
     return (
       <div className="small mb-2" data-client-internal-report="available"
         data-client-internal-report-provisional={provisional ? "true" : "false"}>
-        {/* Owner Package 3: a draft citing findings that have not completed
-            review is provisional; it never says no review is needed. */}
         <div className="mb-1">
-          {provisional
-            ? "This is your organization's provisional internal report. Every automated check passed, so it can be opened and used for internal "
-              + "planning and drafting now. Some cited findings have not completed review for final use: it is not reviewed, verified or released. "
-              + "Internal use only: it is not approved for funders or the public."
-            : "This is your organization's internal report. Every cited claim is usable for internal use and every automated check passed, so no "
-              + "further review or release step is needed for internal use. Internal use only: it is not approved for funders or the public."}
+          This is your organization&rsquo;s report. Open or download it with its source references and limitations. No review or release approval is required.
         </div>
         {canRead ? (
           <div className="d-flex flex-wrap gap-2">

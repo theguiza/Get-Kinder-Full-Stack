@@ -528,10 +528,13 @@ function claimIsCurrentForGapExposure(claimId, batches, currentGapsByClaimId) {
     : evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
       ? derivedMeasurementCoverageDimensions(baseDimensions, batches.derivedMeasurementsByEvidenceItemId.get(evidenceItemRow.evidence_item_id) || null)
       : { dimensions: baseDimensions, answeredDimensionKeys: [] };
-  const expectedGapPlans = buildExpectedGapPlans(dimensions);
+  const storedGapRows = batches.gapRowsByClaimId.get(claimId) || [];
+  const expectedGapPlans = buildExpectedGapPlans(dimensions, {
+    historicalGapRows: storedGapRows,
+  });
   const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 
-  const gapRows = projectSmallCellGapRows(batches.gapRowsByClaimId.get(claimId) || [], expectedGapPlans, profileRow, {
+  const gapRows = projectSmallCellGapRows(storedGapRows, expectedGapPlans, profileRow, {
     evidenceItemId: evidenceItemRow.evidence_item_id, sourceVersionId: evidenceItemRow.source_version_id,
   });
   if (!gapRows) return false;

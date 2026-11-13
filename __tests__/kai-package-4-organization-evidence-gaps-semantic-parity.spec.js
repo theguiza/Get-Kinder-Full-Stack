@@ -571,12 +571,13 @@ test("final acceptance: a reviewed small-cell 'absent' reaches traceability, org
     aiProcessingAllowed: true, categories: recordedSourcePermissions(head).categories } });
   assert.deepEqual(conditions, []);
 
-  // Reviewed 'unknown' keeps the dimension unresolved (and blocking) end to end.
+  // Reviewed 'unknown' stays disclosed without blocking the report.
   state.head = { ...head, decision_id: "00000000-0000-4000-8000-000000009913", reviewed_small_cell_risk_status: "unknown" };
   const unknown = JSON.parse(JSON.stringify((await runTraceability(tx)).data));
   assert.equal(unknown.dimensions.small_cell_risk.assessment_status, "unresolved");
   const [unknownItem] = projectReviewQueue({ items: [unknown] });
-  assert.equal(projectOrganizationGapsAndRisks([unknownItem]).coverageFindings.some((row) => row.dimensionKey === "small_cell_risk"), true);
+  assert.equal(unknown.dimensions.small_cell_risk.blocks_requested_audience, false);
+  assert.equal(projectOrganizationGapsAndRisks([unknownItem]).coverageFindings.some((row) => row.dimensionKey === "small_cell_risk"), false);
 });
 
 test("real acceptance writer and traceability reader share the small-cell decision fingerprint", async () => {

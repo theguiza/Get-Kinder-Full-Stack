@@ -57,8 +57,6 @@ const PROHIBITION_BLOCKERS = Object.freeze({
   claim_lineage_missing: "claim_lineage_missing",
 });
 
-const TERMINAL_REJECTED_CLAIM_STRENGTH = "reviewed_not_supported";
-
 export async function evaluateProvisionalInternalDraftAdmissionInTransaction(tx, { organizationId, data }) {
   const claimId = data?.claim?.claim_id;
   const evidenceItemId = data?.evidence?.evidence_item_id;
@@ -76,7 +74,7 @@ export async function evaluateProvisionalInternalDraftAdmissionInTransaction(tx,
     sourceRole = refusing.sourceRole;
   }
 
-  if (data.claim.claim_strength === TERMINAL_REJECTED_CLAIM_STRENGTH) blockers.add("claim_reviewed_not_supported");
+  if (traceabilityRecordsReviewRejection(data)) blockers.add("claim_reviewed_not_supported");
 
   const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
   const evidenceType = evidenceItemRow?.evidence_type ?? null;

@@ -569,7 +569,7 @@ test("wording: system-determined internal use is not presented as a human review
   const workflow = readFileSync("frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", "utf8");
   const studio = readFileSync("frontend/knowledgeStudio/ClientKnowledgeStudio.jsx", "utf8");
   const views = readFileSync("frontend/knowledgeStudio/KnowledgeStudioViews.jsx", "utf8");
-  assert.match(workflow, /Usable in internal reports now \(determined by KAI&rsquo;s checks\)/);
+  assert.match(workflow, /data-client-claim-usable="">\{line.text\}/);
   assert.doesNotMatch(workflow, /No further review is needed for internal use/);
   assert.doesNotMatch(studio, /Reviewed for internal use/);
   assert.match(studio, /Usable internally/);

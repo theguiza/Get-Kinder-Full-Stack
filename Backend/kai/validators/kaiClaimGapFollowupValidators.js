@@ -272,11 +272,11 @@ export function validateClientFollowupRouting({ dimensionKey, gapRow, claimRow, 
 
 /**
  * Pure predicate deciding whether one P2-02 dimension result requires a P2-04
- * gap: every assessment_status other than 'resolved_clear'. Never reinterprets
- * or renames the P2-02 assessment-result vocabulary.
+ * clarification: only an unresolved assessment. A disclosed warning is
+ * already information, not an unanswered question or a review task.
  */
 export function dimensionResultRequiresGap(dimensionResult) {
-  return isNonEmptyString(dimensionResult?.evidence?.assessment_status) && dimensionResult.evidence.assessment_status !== "resolved_clear";
+  return dimensionResult?.evidence?.assessment_status === "unresolved";
 }
 
 export const __claimGapFollowupValidatorKeys = Object.freeze({

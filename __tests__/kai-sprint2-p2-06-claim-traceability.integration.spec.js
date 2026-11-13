@@ -225,25 +225,22 @@ async function runP206IntegrationSuite() {
     return prepared;
   }
 
-  test("P2-06 recomputes P2-02, validates P2-04, uses one read-only repeatable-read transaction, and keeps proposed internal-only claims ineligible", async () => {
+  test("P2-06 recomputes source notes in one read-only transaction and permits internal report use without reviews", async () => {
     const [claimId] = await prepareTwoClaims();
     transactionLog.length = 0;
     const beforeAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit`);
     const result = await trace(claimId, "internal");
     assert.equal(result.ok, true);
-    assert.equal(result.data.eligible, false);
+    assert.equal(result.data.eligible, true);
     assert.equal(result.data.requestedAudience, "internal");
     assert.equal(result.data.claim.claim_status, "proposed");
     assert.equal(result.data.claim.audience_gates.internal_only, true);
-    // KAI P2-10: for requestedAudience = "internal", claim_not_approved_for_
-    // requested_audience/audience_gate_closed/requirement_authority_absent no
-    // longer fire merely because this stub used to unconditionally return
-    // false - P2-09 evidence/claim-review completeness (still incomplete
-    // here) is independently enforced by its own blocker codes instead.
+    // Internal report use requires no evidence, claim or coverage approval.
+    // All source notes and the absence of review decisions remain visible.
     assert.ok(!result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
-    assert.ok(result.data.blockerCodes.includes("evidence_review_unresolved"));
-    assert.ok(result.data.blockerCodes.includes("claim_review_unresolved"));
-    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.deepEqual(result.data.blockerCodes, []);
+    assert.equal(result.data.evidence_review_decision, null);
+    assert.equal(result.data.claim_review_decision, null);
     assert.ok(result.data.dimensions.denominator_clarity.assessment_status, "unresolved");
     assert.ok(result.data.gap_items.some((gap) => gap.dimension_key === "denominator_clarity"));
     assert.ok(transactionLog.some((sql) => /REPEATABLE READ READ ONLY/.test(sql)));
@@ -262,7 +259,7 @@ async function runP206IntegrationSuite() {
     assert.equal(result.data.evidence.sensitivity_level, "unknown");
   });
 
-  test("P2-06 reports absent P2-04 evaluation without inferring eligibility", async () => {
+  test("P2-06 permits report use before P2-04 preparation and keeps the read nonmutating", async () => {
     const [claimId] = await prepareTwoClaims();
     const savedGaps = await query(`SELECT * FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
     const savedFollowups = await query(`SELECT * FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
@@ -285,8 +282,8 @@ async function runP206IntegrationSuite() {
     await pool.query(`DELETE FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
     const result = await trace(claimId);
     assert.equal(result.ok, true);
-    assert.equal(result.data.eligible, false);
-    assert.ok(result.data.blockerCodes.includes("p204_evaluation_required"));
+    assert.equal(result.data.eligible, true);
+    assert.deepEqual(result.data.blockerCodes, [], "gap preparation is not required to use the report");
     for (const row of savedGaps) {
       await pool.query(
         `INSERT INTO kai.gap_log_items (
@@ -332,7 +329,8 @@ async function runP206IntegrationSuite() {
     assert.equal(result.ok, true);
     assert.equal(result.data.potential_conflict_groups.length, 1);
     assert.ok(!("confirmed_conflicts" in result.data));
-    assert.ok(result.data.blockerCodes.includes("potential_conflict_review_unresolved"));
+    assert.equal(result.data.blockerCodes.includes("potential_conflict_review_unresolved"), false);
+    assert.equal(result.data.eligible, true, "a possible-conflict note is disclosed without requiring review");
     await pool.query(`DELETE FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'conflict_resolution'`, [ORG]);
     const partial = await trace(lower);
     assert.equal(partial.ok, false);
@@ -357,6 +355,7 @@ async function runP206IntegrationSuite() {
         "potential_conflict_review_unresolved",
         "requirement_authority_absent",
         "traceability_incomplete",
+        "p204_evaluation_required",
       ];
       return order.indexOf(a) - order.indexOf(b);
     }));
@@ -1045,16 +1044,15 @@ async function runP206IntegrationSuite() {
       assert.equal(accepted.ok, true, JSON.stringify(accepted));
     }
     await completeAllFollowups(eligible.claimId);
-    // C: reviewed and approved for internal with follow-ups completed, but its
-    // unresolved coverage dimensions were never accepted for internal use, so
-    // the real evaluator rejects it (coverage_dimension_unresolved).
+    // C: source notes remain unaccepted. They are still usable information,
+    // so the absence of coverage approval must not hide the finding.
     const rejected = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: ["internal"] });
     await completeAllFollowups(rejected.claimId);
     impactFactsFixture = {
       eligibleClaimId: eligible.claimId,
       eligibleUnresolved: unresolvedForEligible,
       unreviewedClaimIds,
-      rejectedClaimId: rejected.claimId,
+      coverageUnacceptedClaimId: rejected.claimId,
     };
     return impactFactsFixture;
   }
@@ -1068,18 +1066,18 @@ async function runP206IntegrationSuite() {
     for (const row of allClaims) evaluations.set(row.claim_id, await internalEvaluation(row.claim_id, { requireUsable: false }));
     const eligibleIds = [...evaluations].filter(([, data]) => data.eligible === true).map(([id]) => id).sort();
 
-    for (const claimId of [fixture.eligibleClaimId, fixture.rejectedClaimId, ...fixture.unreviewedClaimIds]) {
+    for (const claimId of [fixture.eligibleClaimId, fixture.coverageUnacceptedClaimId, ...fixture.unreviewedClaimIds]) {
       assert.notEqual(evaluations.get(claimId).unusable, true, `fixture claim ${claimId} must be evaluable`);
     }
     const eligibleEvaluation = evaluations.get(fixture.eligibleClaimId);
     assert.equal(eligibleEvaluation.eligible, true, JSON.stringify(eligibleEvaluation.blockerCodes));
     for (const claimId of fixture.unreviewedClaimIds) {
-      assert.equal(evaluations.get(claimId).eligible, false);
-      assert.ok(evaluations.get(claimId).blockerCodes.includes("claim_review_unresolved"));
+      assert.equal(evaluations.get(claimId).eligible, true);
+      assert.deepEqual(evaluations.get(claimId).blockerCodes, [], "unreviewed source information is usable");
     }
-    const rejectedEvaluation = evaluations.get(fixture.rejectedClaimId);
-    assert.equal(rejectedEvaluation.eligible, false);
-    assert.ok(rejectedEvaluation.blockerCodes.includes("coverage_dimension_unresolved"), JSON.stringify(rejectedEvaluation.blockerCodes));
+    const unacceptedEvaluation = evaluations.get(fixture.coverageUnacceptedClaimId);
+    assert.equal(unacceptedEvaluation.eligible, true, "unaccepted coverage is information, not rejection");
+    assert.deepEqual(unacceptedEvaluation.blockerCodes, []);
     assert.ok(allClaims.length > eligibleIds.length, "fixture contains hidden (ineligible) claims");
 
     const hidden = await query(
@@ -1119,7 +1117,7 @@ async function runP206IntegrationSuite() {
       assert.equal(item.statement, evaluation.claim.statement);
       assert.equal(item.claimType, evaluation.claim.claim_type);
       const expectedLimitations = Object.entries(evaluation.dimensions)
-        .filter(([, value]) => value.assessment_status === "unresolved" && value.internal_limitation_accepted === true)
+        .filter(([, value]) => value.assessment_status === "unresolved" && (value.internal_limitation_accepted === true || value.blocks_requested_audience === false))
         .map(([key]) => key)
         .sort();
       assert.deepEqual(item.limitationDimensionKeys, expectedLimitations);
@@ -1168,8 +1166,15 @@ async function runP206IntegrationSuite() {
     const fixture = await prepareImpactFactsFixture();
     const clientAdmin = await bindingDerivedClientAdmin(ORG);
     const before = await listClientImpactFacts({ organizationId: ORG, actorContext: clientAdmin }, factsDependencies);
-    // Add one more real ineligible claim (proposed, unreviewed) to ORG.
+    // A genuinely rejected claim stays distinct from an unreviewed finding.
     const extra = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: null });
+    const [extraQueue] = await query(`SELECT review_queue_item_id, updated_at FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid`, [ORG, extra.claimId]);
+    const rejected = await recordClaimReviewDecision({ organizationId: ORG, claimId: extra.claimId,
+      reviewQueueItemId: extraQueue.review_queue_item_id, expectedUpdatedAt: new Date(extraQueue.updated_at).toISOString(),
+      decision: "rejected", actorContext, now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected));
     assert.equal((await internalEvaluation(extra.claimId)).eligible, false);
     const after = await listClientImpactFacts({ organizationId: ORG, actorContext: clientAdmin }, factsDependencies);
     assert.equal(before.ok && after.ok, true);
@@ -1227,8 +1232,8 @@ async function runP206IntegrationSuite() {
 
     const beforeTrace = await trace(legacy.claimId, "internal");
     assert.equal(beforeTrace.ok, true);
-    assert.equal(beforeTrace.data.eligible, false);
-    assert.ok(beforeTrace.data.blockerCodes.includes("p204_evaluation_required"));
+    assert.equal(beforeTrace.data.eligible, true);
+    assert.deepEqual(beforeTrace.data.blockerCodes, []);
 
     await pool.query(
       `INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
@@ -1253,11 +1258,11 @@ async function runP206IntegrationSuite() {
     assert.equal(preflight.ok, false);
     assert.equal(preflight.error.code, "validation_blocker");
     assert.deepEqual(preflight.blockers, [{
-      validator_key: "VAL-GEN-TRACE-P0-001",
+      validator_key: "VAL-GEN-RESULT-P0-001",
       severity: "blocker",
-      blocking_reason: "p204_evaluation_required",
+      blocking_reason: "generator_result_blocks_empty",
     }]);
-    assert.equal(preflightProviderCalls, 0);
+    assert.equal(preflightProviderCalls, 1, "generation does not wait for gap preparation");
 
     const { createProductionMetadataOnlyAuditForClaimGapFollowup } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
     const p204AuditEvents = [];
@@ -1285,7 +1290,7 @@ async function runP206IntegrationSuite() {
          (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated' AND metadata->>'claim_id' = $2::text) AS p204_lifecycle_audits,
          (SELECT count(*)::int FROM kai.generation_runs WHERE organization_id = $1::uuid AND idempotency_key = $3) AS generation_runs`,
       [ORG, legacy.claimId, generationInput.idempotencyKey],
-    ), [{ gaps: 9, followups: 4, queues: 4, p204_lifecycle_audits: 1, generation_runs: 0 }], "P2-04 must commit before downstream validation fails; generation reservation must roll back");
+    ), [{ gaps: 5, followups: 2, queues: 2, p204_lifecycle_audits: 1, generation_runs: 0 }], "P2-04 records only unresolved notes; generation reservation rolls back on an empty provider response");
     const persistedFollowups = await query(
       `SELECT f.dimension_key, f.question_text, f.claim_id::text AS claim_id,
               f.gap_log_item_id::text AS gap_log_item_id, g.claim_id::text AS gap_claim_id,
@@ -1302,7 +1307,7 @@ async function runP206IntegrationSuite() {
       [ORG, legacy.claimId],
     );
     assert.deepEqual(persistedFollowups.map((row) => row.dimension_key), [
-      "definition_clarity", "denominator_clarity", "entity_level_clarity", "time_period_clarity",
+      "denominator_clarity", "time_period_clarity",
     ]);
     for (const row of persistedFollowups) {
       assert.equal(row.claim_id, legacy.claimId);
@@ -1348,7 +1353,7 @@ async function runP206IntegrationSuite() {
     assert.equal(generated.data.blocks.length, 1);
     // The claim's current limitations remain available to the provider, and
     // its text is persisted as written: no server-added designation.
-    assert.ok(providerCalls[0].limitationCodes.length > 0);
+    assert.equal(providerCalls[0].limitationCodes.some((code) => ["claim_review_unresolved", "evidence_review_unresolved"].includes(code)), false, "review completion is not a source limitation");
     assert.equal(generated.data.blocks[0].text, providerCalls[0].claimStatement);
     assert.deepEqual(generated.data.blocks[0].citations.map(({ claimId, evidenceItemId }) => ({ claimId, evidenceItemId })), [
       { claimId: legacy.claimId, evidenceItemId: providerCalls[0].evidenceItemId },
@@ -1363,8 +1368,8 @@ async function runP206IntegrationSuite() {
     assert.deepEqual(generationAudit.metadata.validator_keys, ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005"]);
     const afterTrace = await trace(legacy.claimId, "internal");
     assert.equal(afterTrace.ok, true, JSON.stringify(afterTrace));
-    assert.equal(afterTrace.data.eligible, false, "P2-04 reconciliation does not approve the claim or clear eligibility blockers");
-    assert.ok(afterTrace.data.blockerCodes.length > 0);
+    assert.equal(afterTrace.data.eligible, true, "report use requires no review before or after note reconciliation");
+    assert.deepEqual(afterTrace.data.blockerCodes, []);
     const afterRows = await query(
       `SELECT
          (SELECT count(*)::int FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS gaps,
@@ -1374,8 +1379,8 @@ async function runP206IntegrationSuite() {
       [ORG, legacy.claimId],
     );
     assert.ok(afterRows[0].gaps > 0);
-    assert.equal(afterRows[0].followups, 4, "only P2-04's four currently outstanding client-answerable dimensions are routed");
-    assert.equal(afterRows[0].queues, 4);
+    assert.equal(afterRows[0].followups, 2, "only unresolved client-answerable dimensions are routed");
+    assert.equal(afterRows[0].queues, 2);
     assert.equal(Number((await query(
       `SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated' AND metadata->>'claim_id' = $2`,
       [ORG, legacy.claimId],
@@ -1532,13 +1537,13 @@ async function runP206IntegrationSuite() {
     return row;
   }
 
-  test("client Generated Drafts (real P2-06): A visible, B in GK review hidden, C held by a real client follow-up counted, E audience-ineligible hidden; identical for A/R/C; read-only", async () => {
+  test("client Generated Drafts (real P2-06): usable drafts stay visible with unanswered follow-ups; draft access and audience boundaries stay enforced; read-only", async () => {
     const fixture = await prepareClientDraftFixture();
     const eligibleInternal = await realEvaluation(fixture.eligible.claimId, "internal");
     assert.equal(eligibleInternal.eligible, true, JSON.stringify(eligibleInternal.blockerCodes));
     const heldInternal = await realEvaluation(fixture.held.claimId, "internal");
-    assert.equal(heldInternal.eligible, false);
-    assert.deepEqual([...new Set(heldInternal.blockerCodes)], ["client_followup_unresolved"], "held only by the real client follow-up");
+    assert.equal(heldInternal.eligible, true);
+    assert.deepEqual(heldInternal.blockerCodes, [], "follow-up answers are optional for report use");
     const eligibleFunder = await realEvaluation(fixture.eligible.claimId, "funder");
     assert.equal(eligibleFunder.eligible, false, "the claim is approved for internal only");
     assert.ok(eligibleFunder.blockerCodes.includes("claim_not_approved_for_requested_audience"), JSON.stringify(eligibleFunder.blockerCodes));
@@ -1548,11 +1553,11 @@ async function runP206IntegrationSuite() {
     for (const role of CLIENT_ROLES) views.push(await listFor(role, PROJECT_A));
     assert.deepEqual(views[1], views[0]);
     assert.deepEqual(views[2], views[0]);
-    assert.deepEqual(views[0].items.map((item) => item.generatedContentDraftId), [fixture.caseA.draftId]);
-    assert.equal(views[0].awaitingClientInputCount, 1);
+    assert.deepEqual(views[0].items.map((item) => item.generatedContentDraftId).sort(), [fixture.caseA.draftId, fixture.caseC.draftId].sort());
+    assert.equal(views[0].awaitingClientInputCount, 0);
     assert.equal(views[0].nextCursor, null);
     const serialized = JSON.stringify(views);
-    for (const hidden of [fixture.caseB.draftId, fixture.caseC.draftId, fixture.caseE.draftId, fixture.caseF.draftId, fixture.eligible.evidenceItemId,
+    for (const hidden of [fixture.caseB.draftId, fixture.caseE.draftId, fixture.caseF.draftId, fixture.eligible.evidenceItemId,
       fixture.caseA.queueId, fixture.caseA.runId, fixture.caseA.citationId, "client_followup_unresolved", "needs_gk_review"]) {
       assert.ok(!serialized.includes(hidden), `leaked ${hidden}`);
     }
@@ -1562,7 +1567,7 @@ async function runP206IntegrationSuite() {
     );
     assert.equal(detail.ok, true, JSON.stringify(detail));
     assert.deepEqual(detail.data.blocks, [{ ordinal: 1, text: "Client draft 01 text.", supportingClaimIds: [fixture.eligible.claimId] }]);
-    for (const draft of [fixture.caseB, fixture.caseC, fixture.caseE]) {
+    for (const draft of [fixture.caseB, fixture.caseE]) {
       const denied = await getClientGeneratedDraft(
         { organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: draft.draftId, actorContext: clientMember("client_reviewer") },
         clientContentDeps,
@@ -1572,7 +1577,7 @@ async function runP206IntegrationSuite() {
     assert.deepEqual(await authorityCounts(), before, "client reads write nothing");
   });
 
-  test("client Generated Drafts (real P2-06): the real client_reviewer P2-11 completion makes the held draft visible and creates no generated-content review, export, or final state; A and C cannot complete", async () => {
+  test("client Generated Drafts (real P2-06): optional P2-11 completion preserves report visibility and creates no generated-content review, export or final state", async () => {
     const fixture = await prepareClientDraftFixture();
     const [row] = await query(
       `SELECT cfi.client_followup_item_id, rq.updated_at FROM kai.client_followup_items cfi

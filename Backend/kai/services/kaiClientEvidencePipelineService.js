@@ -468,12 +468,12 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   }
   stages.push(stage("evidence_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: count(row.evidence_reviewed_count) }));
 
-  // An open client follow-up is client work still to do, even when another
-  // claim from the same file is already usable.
-  if (openFollowups > 0) {
-    stages.push(stage("impact_fact_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
-  } else if (reviewedImpactFactCount > 0) {
+  // Optional questions must not put a report-ready file back into a waiting
+  // stage. The source's usable findings can be reported now.
+  if (reviewedImpactFactCount > 0) {
     stages.push(stage("impact_fact_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: reviewedImpactFactCount }));
+  } else if (openFollowups > 0) {
+    stages.push(stage("impact_fact_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
   } else if (claims === 0 || count(row.claim_needs_review_count) > 0) {
     stages.push(stage("impact_fact_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 }));
   } else {

@@ -430,8 +430,8 @@ test("current-with-client-followup parity: traceability accepts a claim with rea
 
   const traceability = await runTraceability(fakeTx);
   assert.equal(traceability.ok, true, JSON.stringify(traceability));
-  assert.equal(traceability.data.eligible, false);
-  assert.ok(traceability.data.blockerCodes.length > 0);
+  assert.equal(traceability.data.eligible, true);
+  assert.deepEqual(traceability.data.blockerCodes, [], "follow-up questions do not prevent report use");
   const traceabilityGapDimensions = traceability.data.gap_items.map((row) => row.dimension_key).sort();
   assert.deepEqual(traceabilityGapDimensions, [...GAP_DIMENSIONS].sort());
 

@@ -8,7 +8,7 @@ export const REPORT_INFORMATION_TEXT = Object.freeze({
   sensitive_information_not_cleared: "A cited source may contain health, housing, justice or immigration information. Share only generalized findings outside the organization.",
   indigenous_governance_not_cleared: "A cited source may contain Indigenous or community-governed information. Follow the community's data governance before sharing it.",
   small_cell_risk_not_cleared: "Some groups in a cited source may be small enough to identify people. Combine or omit small groups before sharing figures outside the organization.",
-  cited_claims_not_currently_eligible: "Some cited findings have not yet completed review for final use, so this draft is provisional. It can be used for internal planning and drafting now.",
+  cited_claims_not_currently_eligible: "Some findings have open source notes or clarifications. You can use this report and update it as more information becomes available.",
 });
 
 export const MINOR_SMALL_CELL_ALERT_CODE = "minor_small_cell_combined";
@@ -28,4 +28,4 @@ export function reportInformationNotes(reasons) {
   return notes;
 }
 
-export const PROVISIONAL_REPORT_STATUS = "Provisional internal draft. It can be used for internal planning and drafting now; it is not approved for release, funders or the public.";
+export const PROVISIONAL_REPORT_STATUS = "Working report. Source references and limitations are included; update it as more information becomes available.";
