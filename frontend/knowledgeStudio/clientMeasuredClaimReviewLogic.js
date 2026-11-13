@@ -67,7 +67,9 @@ function projectDerivedMeasurement(derived) {
     sourceVersionId: derived.source_version_id ?? null,
     isCurrent: derived.is_current === true,
     worksheetKey: derived.worksheet_key ?? null,
+    worksheetName: typeof derived.worksheet_name === "string" && derived.worksheet_name.trim() ? derived.worksheet_name : null,
     outcomeFieldKey: derived.outcome_field_key ?? null,
+    outcomeColumn: typeof derived.outcome_column === "string" && /^[A-Z]{1,3}$/.test(derived.outcome_column) ? derived.outcome_column : null,
     calculationMethod: derived.calculation_method ?? null,
     numerator: derived.numerator ?? null,
     denominator: derived.denominator ?? null,
@@ -468,10 +470,24 @@ export function pairedOutcomeReviewText(derived, { audience = "organization" } =
       || "Whether a higher value is better has not been stated, so a higher follow-up value is not presented as a better result.");
     meaning.push(BASIS_TEXT[interpretation.evidenceBasis] || "Where the values come from has not been stated.");
   }
+  // Where KAI read the values, readable first: the profile's screened
+  // worksheet name and the column letter (the internal keys stay under
+  // source details).
+  const location = derived.outcomeColumn
+    ? `Where KAI read the values: column ${derived.outcomeColumn} of ${derived.worksheetName ? `the worksheet "${derived.worksheetName}"` : "the selected worksheet"}.`
+    : derived.worksheetName ? `Where KAI read the values: the worksheet "${derived.worksheetName}".` : null;
+  const structure = "KAI found from the worksheet's layout that this column holds a numeric score recorded for the same participants at baseline and at follow-up. "
+    + "The layout does not establish what the score means.";
+  const distinction = "A higher follow-up value means the recorded number increased. On its own that is a numerical change, not evidence of a favourable outcome or of what caused it.";
   return {
     heading: label || "Paired baseline/follow-up outcome",
     subheading: label ? "Paired baseline/follow-up outcome" : null,
     meaningRecorded: Boolean(interpretation),
+    location,
+    structure,
+    distinction,
+    // What KAI established before anyone states a meaning (shown above the meaning questions).
+    known: [location, structure, result, population].filter(Boolean),
     result,
     population,
     meaning,

@@ -866,8 +866,9 @@ async function runCedarBridgeAcceptance() {
         meaning_text: "Human-supplied for this synthetic acceptance: the participant's self-rated digital confidence on a 1 to 5 scale." },
       paired_field_7_first: { indicator_label: "Employment readiness", score_direction: "not_established", evidence_basis: "self_reported",
         meaning_text: "Human-supplied for this synthetic acceptance: the participant's self-rated employment readiness." },
+      // The correction changes exactly one value (owner prompt 2026-11-13): the direction.
       paired_field_7: { indicator_label: "Employment readiness", score_direction: "higher_is_better", evidence_basis: "self_reported",
-        meaning_text: "Human-supplied correction for this synthetic acceptance: self-rated employment readiness on a 1 to 5 scale, higher is better." },
+        meaning_text: "Human-supplied for this synthetic acceptance: the participant's self-rated employment readiness." },
     };
     report.human_supplied_semantics.paired = HUMAN_SEMANTICS;
 
@@ -1258,6 +1259,97 @@ async function runCedarBridgeAcceptance() {
         assert.match(currentText, /Whether a higher value is better has not been stated, so a higher follow-up value is not presented as a better result\./);
         assert.match(currentText, /self-reported by the people recorded and were not independently verified/);
         assert.doesNotMatch(currentText, /\bfield_\d+\b|\bsheet_\d+\b|\bimproved\b/);
+
+        // --- State C (owner prompt 2026-11-13): a readable location, then the correction
+        // editor reopens from the current interpretation in both interfaces; opening,
+        // cancelling and closing write nothing; one value is corrected in the browser. ---
+        const panelB = `[data-client-measured-claim-review="${newClaimId}"]`;
+        const location = current.derived_measurement;
+        assert.equal(location.outcome_column, "G", "the persisted column letter is served");
+        assert.ok(typeof location.worksheet_name === "string" && location.worksheet_name.length > 0 && !/^sheet_\d+$/.test(location.worksheet_name), J(location));
+        assert.ok(currentText.includes(`Where KAI read the values: column G of the worksheet "${location.worksheet_name}".`), currentText);
+        assert.ok(clientText.includes(`Where KAI read the values: column G of the worksheet "${location.worksheet_name}".`), "State A is located too");
+        assert.match(clientText, /The layout does not establish what the score means\./);
+        assert.match(clientText, /On its own that is a numerical change, not evidence of a favourable outcome or of what caused it\./);
+        assert.doesNotMatch(clientText, /Employment readiness/, "State A: no meaning is presented before a person states one");
+        const formValues = (scope, attr) => page.evaluate(`(() => { const v = (f) => document.querySelector(${J(scope)} + ' [${attr}="' + f + '"]').value;
+          return { indicator_label: v("indicatorLabel"), meaning_text: v("meaningText"), score_direction: v("scoreDirection") || "not_established", evidence_basis: v("evidenceBasis") }; })()`);
+        const countsBeforeC = await writeCounts();
+        const markC = page.mark();
+        const openEditor = async () => {
+          await page.clickVisible(`${panelB} [data-client-measured-claim-clarify="${measurementId}"]`, "Change what this measures");
+          await page.waitFor(() => page.visible(`${panelB} [data-client-measured-claim-clarify-form]`), "the meaning form");
+        };
+        await openEditor();
+        const editorText = await page.textOf(`${panelB} [data-client-measured-claim-clarify-form]`);
+        capture("state-c-editor", editorText);
+        assert.deepEqual(await formValues(panelB, "data-client-measured-claim-clarify-field"), semantics, "all four current values are prefilled");
+        assert.match(editorText, /What KAI already established/);
+        assert.match(editorText, /1\. What does this measured value represent\?[\s\S]*2\. Is a higher or a lower score the more favourable result\?[\s\S]*3\. What is the source or basis of these recorded values\?/);
+        assert.ok(editorText.includes(`column G of the worksheet "${location.worksheet_name}"`));
+        assert.equal(await page.evaluate(`document.querySelector(${J(`${panelB} [data-client-measured-claim-clarify-submit]`)}).disabled`), true, "an unchanged correction cannot be submitted");
+        await page.clickVisible(`${panelB} [data-client-measured-claim-clarify-cancel]`, "Cancel");
+        await page.waitFor(async () => !(await page.visible(`${panelB} [data-client-measured-claim-clarify-form]`)), "the form closed");
+        await openEditor();
+        assert.deepEqual(await formValues(panelB, "data-client-measured-claim-clarify-field"), semantics, "reopened after Cancel: still the recorded values");
+        // Close the whole panel with the editor open, then reopen the review.
+        await page.evaluate(`[...document.querySelectorAll(${J(`${panelB} button`)})].find((b) => b.innerText.trim() === "Close").click()`);
+        await page.waitFor(async () => !(await page.textOf(panelB)), "the review panel closed");
+        await openClientReview(newClaimId);
+        // The second interface: Count records -> Clarify meaning on the same recorded measurement.
+        await page.clickTab("Sources");
+        await page.idle();
+        await page.clickVisible(`[data-client-open-source-measurement="${state.workbook.sourceVersionId}"]`, "Count records on the workbook");
+        await page.waitFor(() => page.visible("[data-client-source-measurement-worksheet-select]"), "the worksheet selector");
+        assert.ok(await page.choose("[data-client-source-measurement-worksheet-select]", "sheet_1"));
+        const recordedRow = `[data-client-derived-recorded="${measurementId}"]`;
+        await page.waitFor(() => page.visible(recordedRow), "the recorded paired measurement in Count records", { timeout: 30000 });
+        await page.clickVisible(`${recordedRow} [data-client-derived-clarify]`, "Change meaning");
+        await page.waitFor(() => page.visible(`${recordedRow} [data-client-derived-clarify-form]`), "the Count records meaning form");
+        assert.deepEqual(await formValues(recordedRow, "data-client-derived-clarify-field"), semantics, "Count records: all four current values are prefilled");
+        const sectionEditor = await page.textOf(`${recordedRow} [data-client-derived-clarify-form]`);
+        assert.match(sectionEditor, /Column G holds a numeric score recorded for the same participants at baseline and at follow-up/);
+        await page.clickVisible(`${recordedRow} [data-client-derived-clarify-cancel]`, "Cancel");
+        await page.waitFor(async () => !(await page.visible(`${recordedRow} [data-client-derived-clarify-form]`)), "the Count records form closed");
+        assert.equal(page.requestsSince(markC).filter((r) => r.method !== "GET").length, 0, "opening, cancelling and closing sent no write");
+        assert.deepEqual(await writeCounts(), countsBeforeC, "opening, cancelling and closing wrote nothing");
+
+        // The correction: only the direction changes, in the review panel.
+        await page.clickTab("Evidence");
+        await page.idle();
+        await openEditor();
+        const corrected = HUMAN_SEMANTICS.paired_field_7;
+        assert.deepEqual({ ...semantics, score_direction: corrected.score_direction }, corrected, "the synthetic correction changes one value");
+        assert.ok(await page.choose(`${panelB} [data-client-measured-claim-clarify-field="scoreDirection"]`, corrected.score_direction));
+        assert.deepEqual(await formValues(panelB, "data-client-measured-claim-clarify-field"), corrected, "the other three values are unchanged");
+        const correctMark = page.mark();
+        await page.clickVisible(`${panelB} [data-client-measured-claim-clarify-submit]`, "Record the correction");
+        await page.waitFor(() => page.requestsSince(correctMark).some((r) => r.method === "POST" && r.done), "the correction request");
+        await page.idle();
+        const correctionPost = page.requestsSince(correctMark).filter((r) => r.method === "POST");
+        assert.equal(correctionPost.length, 1);
+        assert.deepEqual([new URL(correctionPost[0].url).pathname, correctionPost[0].status], [derivedMeasurementInterpretationPath(ORG, measurementId), 200]);
+        assert.deepEqual(JSON.parse(correctionPost[0].postData), corrected, "the existing POST contract, with all four values");
+        const correctionBody = (await page.responseBody(correctionPost[0])).data;
+        assert.equal(correctionBody.supersededInterpretationId, history[0].interpretation_id, "append-only: the correction supersedes the first statement");
+        const afterC = await writeCounts();
+        assert.deepEqual([afterC.measurements - countsBeforeC.measurements, afterC.interpretations - countsBeforeC.interpretations, afterC.evidence - countsBeforeC.evidence,
+          afterC.claims - countsBeforeC.claims], [0, 1, 1, 0], "one interpretation and its evidence; no measurement and no claim");
+        const historyC = await query(`SELECT interpretation_id::text, supersedes_interpretation_id::text, score_direction, created_by::text, created_by_type
+            FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid ORDER BY created_at`, [measurementId]);
+        assert.deepEqual(historyC.map((h) => [h.score_direction, h.supersedes_interpretation_id, h.created_by, h.created_by_type]),
+          [["not_established", null, adminUser.user_id, "human"], ["higher_is_better", history[0].interpretation_id, adminUser.user_id, "human"]]);
+        const [rowC] = (await derivedRows(state.workbook.sourceVersionId)).filter((row) => row.source_derived_measurement_id === measurementId);
+        assert.deepEqual(rowC, derived.paired_field_7.row, "arithmetic unchanged by the correction");
+        const supersededB = await gkApi("GET", claimTraceabilityPath(ORG, newClaimId, "internal"));
+        assert.equal(supersededB.status, 409);
+        assert.ok(J(supersededB.body).includes("derived_measurement_interpretation_superseded"), "State B's claim is no longer current");
+        const correctedEvidenceId = correctionBody.evidenceItem.evidence_item_id;
+        const [decisionsOnCorrected] = await query(`SELECT (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $1::uuid)::int AS evidence_decisions,
+            (SELECT count(*) FROM kai.claims WHERE evidence_item_id = $1::uuid)::int AS claims`, [correctedEvidenceId]);
+        assert.deepEqual(decisionsOnCorrected, { evidence_decisions: 0, claims: 0 }, "no earlier review or claim is copied to the corrected evidence");
+        scenario.state_c = { interpretation_id: correctionBody.interpretation.interpretation_id, superseded_interpretation_id: history[0].interpretation_id,
+          evidence_item_id: correctedEvidenceId, prefilled: semantics, posted: corrected, worksheet_name: location.worksheet_name, outcome_column: location.outcome_column };
         assert.deepEqual([...page.exceptions, ...gkPage.exceptions], []);
       } finally {
         await page.close().catch(() => {});
@@ -1274,18 +1366,34 @@ async function runCedarBridgeAcceptance() {
       const invalid = await interpret("paired_field_6", { indicator_label: "Digital confidence", meaning_text: "x" });
       assert.deepEqual([invalid.status, blockersOf(invalid)], [422, ["interpretation_score_direction_required"]]);
       const first6 = await interpret("paired_field_6", HUMAN_SEMANTICS.paired_field_6);
-      const first7 = await interpret("paired_field_7", HUMAN_SEMANTICS.paired_field_7_first);
-      assert.deepEqual([first6.status, first7.status], [200, 200], J([first6.body, first7.body]));
-      // A claim on field 7 under its first meaning, then the meaning is corrected.
-      const firstClaim7 = await adminApi("POST", claimProposalPath(ORG, first7.body.data.evidenceItem.evidence_item_id), {});
-      assert.ok([200, 201].includes(firstClaim7.status), J(firstClaim7.body));
-      const beforeCorrection = await writeCounts();
-      const corrected7 = await interpret("paired_field_7", HUMAN_SEMANTICS.paired_field_7);
-      assert.equal(corrected7.status, 200, J(corrected7.body));
-      assert.equal(corrected7.body.data.supersededInterpretationId, first7.body.data.interpretation.interpretation_id);
-      const afterCorrection = await writeCounts();
-      assert.deepEqual([afterCorrection.measurements - beforeCorrection.measurements, afterCorrection.interpretations - beforeCorrection.interpretations,
-        afterCorrection.evidence - beforeCorrection.evidence, afterCorrection.audits - beforeCorrection.audits], [0, 1, 1, 1]);
+      assert.equal(first6.status, 200, J(first6.body));
+      // Field 7's first statement, its claim and the one-value correction were
+      // recorded in the browser by 11a (browser) States B and C when Chrome ran;
+      // otherwise the same synthetic statements go through the same route here.
+      const browserCorrection = report.paired_factual_review_browser?.state_c || null;
+      let correctedEvidenceItemId;
+      let supersededClaimId;
+      let afterCorrection;
+      if (browserCorrection) {
+        correctedEvidenceItemId = browserCorrection.evidence_item_id;
+        supersededClaimId = report.paired_factual_review_browser.state_b.new_claim_id;
+        afterCorrection = await writeCounts();
+      } else {
+        const first7 = await interpret("paired_field_7", HUMAN_SEMANTICS.paired_field_7_first);
+        assert.equal(first7.status, 200, J(first7.body));
+        // A claim on field 7 under its first meaning, then the meaning is corrected.
+        const firstClaim7 = await adminApi("POST", claimProposalPath(ORG, first7.body.data.evidenceItem.evidence_item_id), {});
+        assert.ok([200, 201].includes(firstClaim7.status), J(firstClaim7.body));
+        const beforeCorrection = await writeCounts();
+        const corrected7 = await interpret("paired_field_7", HUMAN_SEMANTICS.paired_field_7);
+        assert.equal(corrected7.status, 200, J(corrected7.body));
+        assert.equal(corrected7.body.data.supersededInterpretationId, first7.body.data.interpretation.interpretation_id);
+        afterCorrection = await writeCounts();
+        assert.deepEqual([afterCorrection.measurements - beforeCorrection.measurements, afterCorrection.interpretations - beforeCorrection.interpretations,
+          afterCorrection.evidence - beforeCorrection.evidence, afterCorrection.audits - beforeCorrection.audits], [0, 1, 1, 1]);
+        correctedEvidenceItemId = corrected7.body.data.evidenceItem.evidence_item_id;
+        supersededClaimId = firstClaim7.body.data.claim.claim_id;
+      }
       const replayInterpretation = await interpret("paired_field_7", HUMAN_SEMANTICS.paired_field_7);
       assert.deepEqual([replayInterpretation.status, replayInterpretation.body.data.replayed], [200, true]);
       assert.deepEqual(await writeCounts(), afterCorrection, "restating the current meaning writes nothing");
@@ -1299,8 +1407,8 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual(history.map((h) => [h.score_direction, h.supersedes_interpretation_id === null]), [["not_established", true], ["higher_is_better", false]]);
 
       derived.paired_field_6.evidenceItemId = first6.body.data.evidenceItem.evidence_item_id;
-      derived.paired_field_7.evidenceItemId = corrected7.body.data.evidenceItem.evidence_item_id;
-      derived.paired_field_7.supersededClaimId = firstClaim7.body.data.claim.claim_id;
+      derived.paired_field_7.evidenceItemId = correctedEvidenceItemId;
+      derived.paired_field_7.supersededClaimId = supersededClaimId;
       for (const entry of report.unresolved_outcome_assessment.claims) {
         const stale = await gkApi("GET", claimTraceabilityPath(ORG, entry.claim_id, "internal"));
         assert.equal(stale.status, 409, J(stale.body));
@@ -1552,6 +1660,177 @@ async function runCedarBridgeAcceptance() {
       for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier reaches the model");
       stage("workbook", "internal_generated_finding:derived", "cited in Evidence Summary", { draft_id: derivedDraftId });
       stage("events", "internal_generated_finding:derived", "cited in Evidence Summary", { draft_id: derivedDraftId });
+    });
+
+    // Owner prompt 2026-11-13 (guided interpretation and reusable impact
+    // evidence): the corrected Employment readiness result is found again in
+    // the Impact Evidence Library (Knowledge Studio Impact and Evidence views,
+    // their existing reads) without opening Count records or re-uploading, and
+    // reused in a newly generated, saved and reopened internal Evidence Summary.
+    // Its review is the established Get Kinder review of test 13; nothing is seeded.
+    await test("14a (browser): the interpreted outcome is retrieved from the Impact Evidence Library and reused in a new cited Evidence Summary", { skip: !CHROME || !WORKDIR ? "Chrome or the built bundle not available" : false }, async () => {
+      const claimId = derivedClaims.paired_field_7;
+      const evidenceItemId = derived.paired_field_7.evidenceItemId;
+      const measurementId = derived.paired_field_7.measurementId;
+      const browserState = report.paired_factual_review_browser || {};
+      const supersededClaims = [derived.paired_field_7.supersededClaimId, report.unresolved_outcome_assessment.claims.find((e) => e.field === "field_7").claim_id];
+      const supersededEvidence = [derived.paired_field_7.proposedEvidenceItemId, browserState.state_b?.new_evidence_item_id].filter(Boolean);
+      const [currentInterpretation] = await query(`SELECT i.interpretation_id::text, i.indicator_label, i.meaning_text, i.score_direction, i.evidence_basis
+          FROM kai.evidence_derived_measurements l JOIN kai.source_derived_measurement_interpretations i ON i.interpretation_id = l.interpretation_id
+         WHERE l.evidence_item_id = $1::uuid`, [evidenceItemId]);
+      assert.deepEqual({ ...currentInterpretation, interpretation_id: undefined }, { ...HUMAN_SEMANTICS.paired_field_7, interpretation_id: undefined });
+      const scenario = { claim_id: claimId, evidence_item_id: evidenceItemId, measurement_id: measurementId, interpretation_id: currentInterpretation.interpretation_id, superseded_claims: supersededClaims };
+      report.library_reuse_browser = scenario;
+      const capture = (name, text) => { if (REPORT_PATH) writeFileSync(`${REPORT_PATH.replace(/\.json$/, "")}.library-reuse-${name}.txt`, text ?? "(not shown)"); };
+      const draftCount = async () => (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG]))[0].n;
+      const before = await writeCounts();
+      const draftsBefore = await draftCount();
+      const browser = await launchChrome();
+      const page = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
+      const openStudio = async (view) => {
+        await page.goto("/impact-library");
+        await page.clickNav("Knowledge Studio");
+        await page.waitFor(() => page.visible("#gk-shell-project-select"), "the Project selector");
+        await page.idle();
+        await page.selectProject(PROJECT);
+        await page.idle();
+        await page.clickTab(view);
+        await page.idle();
+      };
+      try {
+        // --- Retrieval: Impact view, then the finding's evidence, definition and limitations ---
+        await openStudio("Impact");
+        const card = `[data-impact-finding="${evidenceItemId}"]`;
+        await page.waitFor(() => page.visible(card), "the current Employment readiness finding in Impact", { timeout: 30000 });
+        const cardText = await page.textOf(card);
+        capture("impact-card", cardText);
+        assert.match(cardText, /Employment readiness/);
+        assert.match(cardText, /57\.50%/);
+        assert.match(cardText, /Source: /, "its source is named");
+        for (const id of supersededEvidence) assert.equal(await page.visible(`[data-impact-finding="${id}"]`), false, `${id}: an earlier statement is not presented as a current finding`);
+        await page.clickVisible(`[data-impact-open-finding="${evidenceItemId}"]`, "Evidence, definition and limitations");
+        await page.idle();
+        const row = `[data-client-claim="${claimId}"]`;
+        await page.waitFor(() => page.visible(row), "the current claim in Evidence", { timeout: 30000 });
+        await page.waitFor(async () => (await page.attrOf(row, "data-client-claim-provisional-draft")) === "admitted", "the claim admitted for drafting", { timeout: 30000 });
+        assert.match(await page.textOf(row), /Usable in internal reports now/, "the established review made it usable; nothing was seeded");
+        const reviewMark = page.mark();
+        await page.clickVisible(`[data-client-open-measured-claim-review="${claimId}"]`, "View measurement");
+        const panel = `[data-client-measured-claim-review="${claimId}"]`;
+        await page.waitFor(async () => /Among 40 participants/.test((await page.textOf(panel)) || ""), "the measurement detail", { timeout: 30000 });
+        await page.idle();
+        const read = page.requestsSince(reviewMark).find((r) => r.method === "GET" && new URL(r.url).pathname === organizationFactualReviewPath(ORG, claimId));
+        assert.equal(read?.status, 200);
+        const dto = (await page.responseBody(read)).data;
+        const p = dto.derived_measurement;
+        scenario.retrieved = { evidence_item_id: dto.evidence_item_id, source: dto.source, derived_measurement: p, internal_eligibility: dto.internal_eligibility,
+          limitation_codes: dto.limitations.map((l) => l.code), evidence_review: dto.evidence_review.decision_outcome, claim_review: dto.claim_review.decision_outcome };
+        assert.deepEqual([dto.evidence_item_id, p.evidence_item_id, p.source_derived_measurement_id, p.source_version_id, p.is_current, dto.source.is_current],
+          [evidenceItemId, evidenceItemId, measurementId, state.workbook.sourceVersionId, true, true], "measurement, evidence and source version identity, current");
+        assert.deepEqual(p.interpretation, currentInterpretation, "the current human interpretation");
+        assert.deepEqual([p.worksheet_key, p.outcome_column, typeof p.worksheet_name], ["sheet_1", "G", "string"], "a usable locator");
+        assert.deepEqual([p.comparable_pair_count, p.increased_count, p.unchanged_count, p.decreased_count, p.percentage, p.denominator, p.participant_count, p.excluded_participant_count],
+          [40, 23, 13, 4, "57.50", 40, 62, 22]);
+        assert.deepEqual(p.exclusions.participants.map((e) => [e.reason, e.participant_count]),
+          [["no_baseline_observation", 5], ["no_followup_observation", 7], ["instrument_version_mismatch", 8], ["missing_baseline_value", 2]]);
+        assert.equal(p.reporting_period, null);
+        for (const code of ["derived.matched_subset_only", "derived.observations_excluded", "derived.no_reporting_period", "derived.values_not_verified", "derived.meaning_human_stated"]) {
+          assert.ok(scenario.retrieved.limitation_codes.includes(code), code);
+        }
+        assert.deepEqual([dto.internal_eligibility.eligible, dto.evidence_review.decision_outcome, dto.claim_review.decision_outcome], [true, "supported", "approved"]);
+        const detail = await page.textOf(panel);
+        capture("library-detail", detail);
+        assert.match(detail, /^Employment readiness$/m);
+        assert.ok(detail.includes(`Where KAI read the values: column G of the worksheet "${p.worksheet_name}".`));
+        assert.ok(detail.includes(`What this measures, as stated by your organization (not verified by KAI): ${currentInterpretation.meaning_text}`));
+        assert.match(detail, /Your organization states that a higher value is better\./);
+        assert.match(detail, /5 with no baseline observation; 7 with no follow-up observation; 8 whose baseline and follow-up used different instrument versions; 2 with a missing baseline value/);
+        assert.match(detail, /No reporting period was applied to this measurement/);
+        assert.doesNotMatch(detail, /\bimproved\b|2025-04-01/);
+        // Superseded claims are not offered as current findings.
+        for (const id of supersededClaims) {
+          assert.equal(await page.evaluate(`Boolean(document.querySelector(${J(`[data-client-select-claim="${id}"]`)}))`), false, `${id}: a superseded claim cannot be selected`);
+          assert.notEqual(await page.attrOf(`[data-client-claim="${id}"]`, "data-client-claim-internal-use"), "usable", `${id}: not presented as usable`);
+        }
+        const libraryPaths = page.requests().map((r) => new URL(r.url).pathname);
+        assert.ok(!libraryPaths.some((path) => /\/(derived-measurements|paired-outcome-measurements|record-count-measurement|tabular-measurements)(\?|$)/.test(path) && path.includes("/source-versions/")),
+          "found again without opening the calculation workflow");
+        assert.ok(!page.requests().some((r) => r.method !== "GET"), "retrieval sent no write");
+        assert.deepEqual(await writeCounts(), before, "retrieval created no measurement, interpretation, evidence, claim, queue item or audit");
+
+        // --- Reuse: select the current claim and generate a new internal Evidence Summary ---
+        await page.clickVisible(`[data-client-select-claim="${claimId}"]`, "Use in an internal draft");
+        await page.waitFor(() => page.evaluate(`document.querySelector('[data-client-select-claim="${claimId}"]').checked === true`), "selected");
+        await page.clickTab("Drafts");
+        await page.idle();
+        const callsBefore = modelCalls.length;
+        const generateMark = page.mark();
+        await page.clickButton("Generate internal evidence summary");
+        await page.waitFor(() => page.requestsSince(generateMark).some((r) => r.method === "POST" && r.done), "the generation request", { timeout: 60000 });
+        await page.idle();
+        const posted = page.requestsSince(generateMark).find((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [`${orgPath}/generated-content-drafts/evidence-summary`, 201]);
+        assert.deepEqual(JSON.parse(posted.postData).claim_ids, [claimId], "exactly the retrieved claim");
+        const draftId = (await page.responseBody(posted)).data.generatedContentDraftId;
+        scenario.draft_id = draftId;
+        const sent = modelCalls.slice(callsBefore).at(-1).claims;
+        assert.deepEqual(sent.map((c) => [c.claimId, c.evidenceItemId]), [[claimId, evidenceItemId]], "the provider received only the current claim and evidence");
+        const citations = await query(`SELECT b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+            JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+           WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [draftId]);
+        assert.ok(citations.length >= 1 && citations.every((c) => c.claim_id === claimId && c.evidence_item_id === evidenceItemId), J(citations));
+        const draftDetail = `[data-client-internal-draft-detail="${draftId}"]`;
+        await page.waitFor(() => page.visible(draftDetail), "the saved summary opened", { timeout: 30000 });
+        const saved = await page.textOf(draftDetail);
+        capture("draft", saved);
+        assert.ok(await page.textOf(`${draftDetail} [data-client-internal-draft-citation="${claimId}"]`), "the claim is cited");
+        const savedText = citations.map((c) => c.text).join("\n");
+        scenario.saved_blocks = savedText;
+        for (const text of [savedText, saved]) {
+          assert.match(text, /Employment readiness/);
+          assert.match(text, /23 of 40 comparable participant pairs \(57\.50%\)/);
+          assert.match(text, /the organization states higher is better|stated by a person at the organization/);
+          assert.match(text, /not every participant|comparable/);
+          assert.doesNotMatch(text, /\bcaus(e|ed|es|ing)\b|\bimproved\b|programme (?:caused|improves)|2025-04-01|2026-03-31/i, "no causal claim and no invented period");
+        }
+        assert.match(savedText, /KAI did not check the recorded values against any other source\./);
+        assert.match(savedText, /22 of 62 participants excluded as not comparable/);
+        assert.match(savedText, /no reporting period/);
+        // The internal report, through the visible Open report control.
+        const reportMark = page.mark();
+        await page.clickVisible(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+        await page.waitFor(() => page.visible("[data-client-internal-report-markdown]"), "the internal report", { timeout: 30000 });
+        await page.idle();
+        assert.equal(page.requestsSince(reportMark).find((r) => new URL(r.url).pathname === clientInternalReportMarkdownPath(ORG, PROJECT, draftId))?.status, 200);
+        const markdown = await page.textOf("[data-client-internal-report-markdown]");
+        capture("internal-report", markdown);
+        assert.match(markdown, /57\.50%/);
+        assert.match(markdown, /Employment readiness/);
+        // Causation appears only as KAI's own disclaimer, never as a claim.
+        assert.match(markdown, /It does not establish that the programme caused any change/);
+        const affirmativeCausal = markdown.split(/(?<=[.!?])\s+|\n+/).filter((sentence) => /\bcaus(e|ed|es|ing)\b/i.test(sentence) && !/\b(not|no|any)\b/i.test(sentence));
+        assert.deepEqual(affirmativeCausal, [], "no unsupported causal conclusion");
+        assert.doesNotMatch(markdown, /2025-04-01|2026-03-31/, "no invented reporting period");
+        scenario.internal_report_characters = markdown.length;
+        // Reopen from the Drafts list after a reload: the same saved content, nothing recalculated.
+        const countsAfterGeneration = await writeCounts();
+        await openStudio("Drafts");
+        await page.clickVisible(`[data-client-internal-draft="${draftId}"] button`, "Read the saved summary");
+        await page.waitFor(() => page.visible(draftDetail), "the saved summary reopened", { timeout: 30000 });
+        assert.equal(await page.textOf(draftDetail), saved, "the reopened summary is the same saved content");
+        const after = await writeCounts();
+        assert.deepEqual([after.measurements, after.interpretations, after.evidence, after.claims], [before.measurements, before.interpretations, before.evidence, before.claims],
+          "generation and readback created no measurement, interpretation, evidence or claim");
+        assert.deepEqual(after, countsAfterGeneration, "reopening wrote nothing");
+        assert.equal(await draftCount(), draftsBefore + 1, "one new saved draft");
+        const [draftState] = await query("SELECT draft_status, review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draftId]);
+        scenario.draft_state = draftState;
+        assert.equal(draftState.draft_status, "draft", "drafting is not release");
+        assert.deepEqual(page.exceptions, []);
+      } finally {
+        await page.close().catch(() => {});
+        await browser.close();
+      }
     });
 
     await test("15: fabricated and unsupported wording is detected and never saved; a stale claim is refused, through the same generation path", async () => {

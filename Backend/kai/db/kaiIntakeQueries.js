@@ -1578,6 +1578,37 @@ export async function getScopedDerivedMeasurementByEvidenceItemId({ organization
 }
 
 /**
+ * The safe worksheet name the committed P1 profile records for one worksheet
+ * of a source version, read from the exact profile a measurement was
+ * calculated from (matched by its canonical hash), so the name is bound to
+ * that version and profile. The same screened name the record-count read
+ * returns as worksheet_name; null for a CSV, an unknown worksheet or a profile
+ * no longer bound to the version. Tenant-scoped, read-only.
+ */
+export async function getScopedProfileWorksheetName({ organizationId, sourceVersionId, profileCanonicalSha256, worksheetKey }, db = pool) {
+  if (!worksheetKey || !profileCanonicalSha256) return null;
+  const { rows } = await db.query(
+    `SELECT sheet->>'safe_sheet_name' AS worksheet_name
+       FROM kai.intake_file_profiles p
+       JOIN kai.intake_source_candidates c
+         ON c.organization_id = p.organization_id
+        AND c.file_profile_id = p.file_profile_id
+       JOIN kai.source_versions sv
+         ON sv.organization_id = c.organization_id
+        AND sv.intake_source_candidate_id = c.intake_source_candidate_id
+      CROSS JOIN LATERAL jsonb_array_elements(p.profile->'sheets') AS sheet
+      WHERE p.organization_id = $1::uuid
+        AND sv.source_version_id = $2::uuid
+        AND p.profile_canonical_sha256 = $3
+        AND sheet->>'sheet_key' = $4
+      LIMIT 1`,
+    [organizationId, sourceVersionId, profileCanonicalSha256, worksheetKey],
+  );
+  const name = rows[0]?.worksheet_name;
+  return typeof name === "string" && name.trim() ? name : null;
+}
+
+/**
  * Every derived-measurement evidence row of one source version, including a
  * cross-source measurement that combines it as its reference version,
  * tenant-scoped. Read-only.

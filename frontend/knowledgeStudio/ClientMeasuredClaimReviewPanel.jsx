@@ -3,8 +3,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
-import { EMPTY_INTERPRETATION_FORM, derivedMeasurementInterpretationPath, interpretationBody } from "./clientDerivedMeasurementLogic.js";
+import { EMPTY_INTERPRETATION_FORM, derivedMeasurementInterpretationPath, interpretationBody, interpretationFormFrom } from "./clientDerivedMeasurementLogic.js";
 import FactualReviewPairedOutcome from "./FactualReviewPairedOutcome.jsx";
+import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 import {
   COVERAGE_DIMENSION_LABELS,
   calculationMethodText,
@@ -17,6 +18,7 @@ import {
   measurementWorksheetText,
   measurementReviewNoun,
   ordinaryRuleConditions,
+  pairedOutcomeReviewText,
   organizationFactualReviewPath,
   projectOrganizationFactualReview,
   reviewQueueStateText,
@@ -100,6 +102,10 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
   // the existing interpretation route (the server validates every field).
   const derived = review?.derivedMeasurement || null;
   const mayStateMeaning = Boolean(derived) && review.viewer === "organization_administrator" && derived.isCurrent;
+  // A correction starts from the interpretation this evidence is stated under
+  // (the measurement's current one; a superseded claim is not served here).
+  const recordedForm = interpretationFormFrom(derived?.interpretation);
+  const closeMeaning = () => { setClarifying(false); setClarifyForm(recordedForm); };
   const recordMeaning = async (event) => {
     event.preventDefault();
     const body = interpretationBody(clarifyForm, { paired: true });
@@ -158,48 +164,14 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
           {mayStateMeaning && !meaningRecorded ? (
             <div className="mt-1" data-client-measured-claim-meaning-action="">
               <button type="button" className="btn btn-sm btn-outline-primary" data-client-measured-claim-clarify={derived.sourceDerivedMeasurementId}
-                aria-expanded={clarifying} onClick={() => { setClarifying((value) => !value); setClarifyForm(EMPTY_INTERPRETATION_FORM); }}>
+                aria-expanded={clarifying} onClick={() => { setClarifying((value) => !value); setClarifyForm(recordedForm); }}>
                 {derived.interpretation ? "Change what this measures" : "Record what this measures"}
               </button>
               {clarifying ? (
-                <form className="mt-1" onSubmit={recordMeaning} data-client-measured-claim-clarify-form="">
-                  <div className="text-muted">
-                    Recorded as your organization&apos;s statement; KAI does not check it. The numbers never change. This claim keeps its wording and
-                    is no longer current once a meaning is recorded; a claim can then be proposed from the measurement&apos;s current evidence.
-                  </div>
-                  <label className="d-block">
-                    Indicator label
-                    <input className="form-control form-control-sm" value={clarifyForm.indicatorLabel} data-client-measured-claim-clarify-field="indicatorLabel"
-                      onChange={(event) => setClarifyForm((value) => ({ ...value, indicatorLabel: event.target.value }))} />
-                  </label>
-                  <label className="d-block">
-                    What it represents
-                    <input className="form-control form-control-sm" value={clarifyForm.meaningText} data-client-measured-claim-clarify-field="meaningText"
-                      onChange={(event) => setClarifyForm((value) => ({ ...value, meaningText: event.target.value }))} />
-                  </label>
-                  <label className="d-block">
-                    Is a higher value better?
-                    <select className="form-select form-select-sm" value={clarifyForm.scoreDirection} data-client-measured-claim-clarify-field="scoreDirection"
-                      onChange={(event) => setClarifyForm((value) => ({ ...value, scoreDirection: event.target.value }))}>
-                      <option value="">not established</option>
-                      <option value="higher_is_better">higher is better</option>
-                      <option value="lower_is_better">lower is better</option>
-                    </select>
-                  </label>
-                  <label className="d-block">
-                    Where the values come from
-                    <select className="form-select form-select-sm" value={clarifyForm.evidenceBasis} data-client-measured-claim-clarify-field="evidenceBasis"
-                      onChange={(event) => setClarifyForm((value) => ({ ...value, evidenceBasis: event.target.value }))}>
-                      <option value="not_established">not stated</option>
-                      <option value="self_reported">self-reported by the people recorded</option>
-                      <option value="organization_record">the organization&apos;s own records</option>
-                    </select>
-                  </label>
-                  <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(pending) || !interpretationBody(clarifyForm, { paired: true })}
-                    data-client-measured-claim-clarify-submit="">
-                    {pending === "clarify" ? "Recording..." : "Record meaning"}
-                  </button>
-                </form>
+                <MeaningQuestionsForm attr="data-client-measured-claim-clarify" form={clarifyForm} setForm={setClarifyForm} initial={recordedForm}
+                  paired known={pairedOutcomeReviewText(derived).known} pending={pending === "clarify"} onSubmit={recordMeaning} onCancel={closeMeaning}
+                  note={"This claim keeps its wording, but once a meaning or a correction is recorded it is no longer current; a claim can then be proposed "
+                    + "from the measurement's current evidence. Earlier review decisions are not copied to that claim."} />
               ) : null}
             </div>
           ) : null}

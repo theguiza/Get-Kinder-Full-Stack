@@ -4,6 +4,7 @@ import {
   getScopedEvidenceItemById,
   getScopedEvidenceMeasurementByEvidenceItemId,
   getScopedDerivedMeasurementByEvidenceItemId,
+  getScopedProfileWorksheetName,
   getScopedSourceLocatorById,
   getScopedSourceVersionById,
 } from "../db/kaiIntakeQueries.js";
@@ -239,6 +240,14 @@ export async function readFactualReviewMeasurementsInTransaction(tx, {
   }
   const interpretation = interpretationOf(derived);
   const counts = derived.component_counts;
+  // A readable location: the profile's screened worksheet name (bound to the
+  // version and profile the measurement was calculated from) and the column
+  // letter persisted in the definition. Never a header or a cell value.
+  const worksheetName = await getScopedProfileWorksheetName({
+    organizationId, sourceVersionId: derived.source_version_id,
+    profileCanonicalSha256: derived.profile_canonical_sha256, worksheetKey: derived.worksheet_key,
+  }, tx);
+  const outcomeColumn = /^[A-Z]{1,3}$/.test(derived.definition.outcome_column ?? "") ? derived.definition.outcome_column : null;
   data.derived_measurement = {
     measurement_type: derived.measurement_family,
     source_derived_measurement_id: derived.source_derived_measurement_id,
@@ -246,7 +255,9 @@ export async function readFactualReviewMeasurementsInTransaction(tx, {
     source_version_id: derived.source_version_id,
     is_current: true,
     worksheet_key: derived.worksheet_key,
+    worksheet_name: worksheetName,
     outcome_field_key: derived.definition.outcome_field_key,
+    outcome_column: outcomeColumn,
     calculation_method: derived.calculation_method,
     numerator: derived.numerator,
     denominator: derived.denominator,

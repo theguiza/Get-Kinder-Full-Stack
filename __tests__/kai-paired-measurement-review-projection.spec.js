@@ -55,12 +55,17 @@ function fixture(field = "field_6", interpreted = false) {
     sourceVersionRow: { organization_id: ORG, source_version_id: VERSION, is_current: true, profile_canonical_sha256: row.profile_canonical_sha256, intake_sensitivity_profile_id: "17000000-0000-4000-8000-000000000001" },
   };
 }
-function transaction(f, { record = null, sourceDecision = cleared, evidenceHead = null, claimHead = null, versions = {}, decisionsByProfile = {} } = {}) {
+function transaction(f, { record = null, sourceDecision = cleared, evidenceHead = null, claimHead = null, versions = {}, decisionsByProfile = {}, worksheetName = "Participant assessments" } = {}) {
   const calls = [];
   return { calls, async query(sql, params) {
     calls.push({ sql, params });
     assert.match(sql.trim(), /^SELECT\b/, "review projection must never mutate");
     assert.equal(params[0], ORG, "every read stays organization scoped");
+    // The screened worksheet name from the exact profile the measurement was calculated from.
+    if (/FROM kai\.intake_file_profiles p/.test(sql)) {
+      assert.deepEqual(params.slice(1), [VERSION, f.row?.profile_canonical_sha256, f.row?.worksheet_key]);
+      return { rows: [{ worksheet_name: worksheetName }] };
+    }
     if (/FROM kai\.evidence_review_decisions/.test(sql)) return { rows: evidenceHead ? [evidenceHead] : [] };
     if (/FROM kai\.claim_review_decisions/.test(sql)) return { rows: claimHead ? [claimHead] : [] };
     if (/FROM kai\.source_versions/.test(sql) && versions[params[1]]) return { rows: [versions[params[1]]] };
@@ -98,8 +103,19 @@ for (const field of ["field_6", "field_7"]) {
     assert.ok(result.data.limitations.every(l => typeof l.description === "string" && l.description.length > 0));
     assert.doesNotMatch(JSON.stringify(result), new RegExp(PRIVATE));
     assert.equal(Object.hasOwn(p, "row_locators"), false);
+    // A readable, version-bound location: the profile's screened worksheet name and the persisted column letter.
+    assert.deepEqual([p.worksheet_key, p.worksheet_name, p.outcome_field_key, p.outcome_column], ["sheet_1", "Participant assessments", field, field === "field_6" ? "F" : "G"]);
   });
 }
+
+test("paired location: no screened worksheet name is reported as unknown, never guessed", async () => {
+  const f = fixture("field_7");
+  const unnamed = await project(f, transaction(f, { worksheetName: null }));
+  assert.equal(unnamed.data.derived_measurement.worksheet_name, null);
+  const blank = await project(f, transaction(f, { worksheetName: "  " }));
+  assert.equal(blank.data.derived_measurement.worksheet_name, null);
+  assert.equal(blank.data.derived_measurement.outcome_column, "G", "the persisted column letter is still served");
+});
 test("current recorded interpretation is reported without inventing independent verification", async () => {
   const result = await project(fixture("field_6", true));
   assert.equal(result.data.derived_measurement.interpretation.meaning_text, "The organization describes a self rating.");

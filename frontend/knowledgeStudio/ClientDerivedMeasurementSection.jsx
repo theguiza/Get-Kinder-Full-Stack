@@ -13,12 +13,15 @@ import {
   derivedMeasurementBasisPath,
   derivedMeasurementInterpretationPath,
   interpretationBody,
+  interpretationFormFrom,
+  recordedMeasurementKnownLines,
   measurementFamilyLabel,
   pairedOutcomeMeasurementsPath,
   tabularDefinitionBody,
   tabularFormProblem,
   tabularMeasurementPath,
 } from "./clientDerivedMeasurementLogic.js";
+import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 
 const ROLE_LABELS = Object.freeze({ identifier: "identifier", categorical: "category", date: "date" });
 
@@ -295,45 +298,15 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
               </button>
             ) : null}
             <button type="button" className="btn btn-sm btn-link" data-client-derived-clarify={recorded.source_derived_measurement_id}
-              onClick={() => { setClarifying(clarifying === recorded.source_derived_measurement_id ? null : recorded.source_derived_measurement_id); setClarifyForm(EMPTY_INTERPRETATION_FORM); }}>
-              Clarify meaning
+              aria-expanded={clarifying === recorded.source_derived_measurement_id}
+              onClick={() => { setClarifying(clarifying === recorded.source_derived_measurement_id ? null : recorded.source_derived_measurement_id); setClarifyForm(interpretationFormFrom(current?.interpretation)); }}>
+              {current?.interpretation ? "Change meaning" : "Clarify meaning"}
             </button>
             {clarifying === recorded.source_derived_measurement_id ? (
-              <form onSubmit={(event) => clarify(event, recorded)} data-client-derived-clarify-form="">
-                <label className="d-block">
-                  Indicator label
-                  <input className="form-control form-control-sm" value={clarifyForm.indicatorLabel} data-client-derived-clarify-field="indicatorLabel"
-                    onChange={(event) => setClarifyForm((value) => ({ ...value, indicatorLabel: event.target.value }))} />
-                </label>
-                <label className="d-block">
-                  What it represents
-                  <input className="form-control form-control-sm" value={clarifyForm.meaningText} data-client-derived-clarify-field="meaningText"
-                    onChange={(event) => setClarifyForm((value) => ({ ...value, meaningText: event.target.value }))} />
-                </label>
-                {paired ? (
-                  <label className="d-block">
-                    Is a higher score better?
-                    <select className="form-select form-select-sm" value={clarifyForm.scoreDirection} data-client-derived-clarify-field="scoreDirection"
-                      onChange={(event) => setClarifyForm((value) => ({ ...value, scoreDirection: event.target.value }))}>
-                      <option value="">not established</option>
-                      <option value="higher_is_better">higher is better</option>
-                      <option value="lower_is_better">lower is better</option>
-                    </select>
-                  </label>
-                ) : null}
-                <label className="d-block">
-                  Where the values come from
-                  <select className="form-select form-select-sm" value={clarifyForm.evidenceBasis} data-client-derived-clarify-field="evidenceBasis"
-                    onChange={(event) => setClarifyForm((value) => ({ ...value, evidenceBasis: event.target.value }))}>
-                    <option value="not_established">not stated</option>
-                    <option value="self_reported">self-reported by the people recorded</option>
-                    <option value="organization_record">the organization's own records</option>
-                  </select>
-                </label>
-                <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(pending) || !interpretationBody(clarifyForm, { paired })} data-client-derived-clarify-submit="">
-                  {pending === "clarify" ? "Recording..." : "Record meaning"}
-                </button>
-              </form>
+              <MeaningQuestionsForm attr="data-client-derived-clarify" form={clarifyForm} setForm={setClarifyForm}
+                initial={interpretationFormFrom(current?.interpretation)} paired={paired} known={recordedMeasurementKnownLines(recorded)}
+                pending={pending === "clarify"} onSubmit={(event) => clarify(event, recorded)}
+                onCancel={() => { setClarifying(null); setClarifyForm(interpretationFormFrom(current?.interpretation)); }} />
             ) : null}
           </div>
         );

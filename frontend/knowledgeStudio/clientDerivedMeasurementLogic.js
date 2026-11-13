@@ -89,6 +89,66 @@ export function tabularDefinitionBody(form) {
   };
 }
 
+const SCORE_DIRECTIONS = Object.freeze(["higher_is_better", "lower_is_better"]);
+const EVIDENCE_BASES = Object.freeze(["self_reported", "organization_record"]);
+
+/**
+ * The interpretation form, initialized from the current recorded
+ * interpretation (either the snake_case record the server returns or the
+ * factual-review projection's camelCase one), so a correction starts from
+ * what is recorded. Unknown stays unknown: a direction or basis that is not
+ * established, missing or unrecognized is left "not established"; nothing is
+ * inferred from the label. No interpretation gives the empty form.
+ */
+export function interpretationFormFrom(interpretation) {
+  if (!interpretation || typeof interpretation !== "object") return EMPTY_INTERPRETATION_FORM;
+  const pick = (snake, camel) => (typeof interpretation[snake] === "string" ? interpretation[snake]
+    : typeof interpretation[camel] === "string" ? interpretation[camel] : "");
+  const direction = pick("score_direction", "scoreDirection");
+  const basis = pick("evidence_basis", "evidenceBasis");
+  return Object.freeze({
+    indicatorLabel: pick("indicator_label", "indicatorLabel"),
+    meaningText: pick("meaning_text", "meaningText"),
+    scoreDirection: SCORE_DIRECTIONS.includes(direction) ? direction : "",
+    evidenceBasis: EVIDENCE_BASES.includes(basis) ? basis : "not_established",
+  });
+}
+
+/** Whether the form would record something other than `initial` (both as the route would receive them). */
+export function interpretationFormChanged(form, initial, { paired }) {
+  const next = interpretationBody(form, { paired });
+  const before = interpretationBody(initial || EMPTY_INTERPRETATION_FORM, { paired });
+  if (!next) return false;
+  return JSON.stringify(next) !== JSON.stringify(before);
+}
+
+/**
+ * What KAI already established about a recorded measurement, before a person
+ * is asked what it means: for a paired outcome, the column KAI read, the
+ * structure it found and the persisted breakdown; otherwise the recorded
+ * result. Persisted values only; nothing here states a meaning.
+ */
+export function recordedMeasurementKnownLines(recorded) {
+  if (!recorded) return [];
+  if (recorded.measurement_family !== "paired_outcome_change") {
+    return [`Recorded result: ${recorded.measured_value}${recorded.percentage ? ` (${recorded.percentage}%)` : ""}. KAI calculated it; what it represents is not something KAI can tell from the file.`];
+  }
+  const counts = recorded.component_counts || {};
+  const column = recorded.definition?.outcome_column;
+  const lines = [
+    `${column ? `Column ${column}` : "This column"} holds a numeric score recorded for the same participants at baseline and at follow-up. `
+      + "KAI found this from the worksheet's layout; the layout does not say what the score means.",
+  ];
+  if ([counts.comparable_pair_count, counts.increased_count, counts.unchanged_count, counts.decreased_count].every(Number.isInteger)) {
+    lines.push(`Among ${counts.comparable_pair_count} participants with comparable baseline and follow-up values, ${counts.increased_count} had a higher follow-up value, `
+      + `${counts.unchanged_count} were unchanged and ${counts.decreased_count} had a lower follow-up value.`);
+  }
+  if (Number.isInteger(counts.excluded_participant_count) && Number.isInteger(counts.participant_count)) {
+    lines.push(`${counts.excluded_participant_count} of ${counts.participant_count} participants had no comparable pair and were excluded.`);
+  }
+  return lines;
+}
+
 /** The interpretation body, or null when no label and meaning are given. */
 export function interpretationBody(form, { paired }) {
   const label = form.indicatorLabel.trim();
