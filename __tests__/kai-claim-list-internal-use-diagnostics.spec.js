@@ -5,21 +5,34 @@ import { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } from "../Backend/kai/auth/kaiOr
 import {
   getClaimTraceabilitySummary,
   listOrganizationInternalDraftDiagnostics,
+  listedInternalUseDiagnostic,
 } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
-import { listClaimLibraryCandidates } from "../Backend/kai/services/kaiClaimLibraryService.js";
+import http from "node:http";
+import express from "express";
+import sprint2IntakeApiRouter, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
+import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
+import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
+import {
+  handleKaiSprint2JsonParserError,
+  kaiSprint2ActorMutationLimiter,
+  kaiSprint2MetadataJsonParser,
+  kaiSprint2OrganizationMutationLimiter,
+  setKaiSprint2NoStore,
+} from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import {
   createPostgresClaimTraceabilityRepository,
   __claimTraceabilityRepositoryContract,
 } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
-import { projectCandidateClaims } from "../frontend/impactEvidenceLibraryLogic.js";
+import { CLAIM_INTERNAL_USE_BATCH_MAX, claimInternalUsePath } from "../frontend/impactEvidenceLibraryLogic.js";
 import { claimUseDiagnosis, listedClaimDiagnostics } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 
 /**
- * Owner direction 2026-11-16: the claims page carries each claim's internal-use
- * answer (the organization administrator's client-safe P2-06 diagnostic and
- * provisional internal draft admission), evaluated server-side in one
+ * Owner direction 2026-11-16: the internal-use answers (the organization
+ * administrator's client-safe P2-06 diagnostic and provisional internal draft
+ * admission) of a claims page come from ONE batch request evaluated in one
  * read-only transaction, instead of the Knowledge Studio reading the
- * traceability route once per claim.
+ * traceability route once per claim. The claims list itself is never held
+ * for that evaluation.
  *
  * Synthetic fixtures only. Real: authorization, the traceability service and
  * its response shaping, the claim library service and the client projection.
@@ -110,72 +123,92 @@ test("only an organization administrator of this organization gets the batch; no
   assert.deepEqual([empty.ok, empty.data.items, repo.calls.batch], [true, [], []], "an empty page reads nothing");
 });
 
-const row = (n, { evidenceType = "source_record_count_measurement", current = true } = {}) => ({
-  claim_id: claimId(n), organization_id: ORG, evidence_item_id: `3c000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
-  claim_type: "finding", claim_status: "proposed", claim_review_status: "needs_gk_review", claim_strength: "unassessed",
-  review_queue_items: [], evidence_type: evidenceType, evidence_source_version_is_current: current,
-});
-const PAGE = [
-  row(1), row(2), row(3), row(5),
-  row(6, { evidenceType: "dictionary_field_presence_fact" }),
-  row(7, { current: false }),
-  row(8, { current: null }),
-];
-
-test("the claims page carries each evaluated claim's answer for an administrator, in one batch; structural and non-current claims are not evaluated", async () => {
-  const repo = repository();
-  const result = await listClaimLibraryCandidates({ organizationId: ORG, actorContext: ADMIN }, {
-    env: ENV, listClaimLibraryReviewCandidates: async () => PAGE, claimTraceabilityRepository: repo,
+// The mounted batch route, with the real traceability service over the injected repository.
+async function withRouteServer(t, getScenario) {
+  const basePath = "/api/kai/sprint2/intake";
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async getClaimTraceabilitySummary() { throw new Error("the batch route never reads one claim"); },
+    async listOrganizationInternalDraftDiagnostics(input) {
+      const scenario = getScenario();
+      scenario.serviceCalls += 1;
+      return listOrganizationInternalDraftDiagnostics(input, { env: process.env, claimTraceabilityRepository: scenario.repository });
+    },
+    listedInternalUseDiagnostic,
   });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(repo.calls.batch.length, 1, "one evaluation for the whole page");
-  assert.equal(repo.calls.single.length, 0);
-  assert.deepEqual(repo.calls.batch[0].claimIds, [claimId(1), claimId(2), claimId(3), claimId(5), claimId(8)]);
-  const listed = Object.fromEntries(result.data.items.map((item) => [item.claimId, item.internalUseDiagnostic]));
-  assert.equal(listed[claimId(1)].status, 200);
-  assert.equal(listed[claimId(1)].data.provisional_internal_draft.admitted, true);
-  assert.deepEqual(listed[claimId(3)], { status: 409, error_code: "conflict_current_state_changed", traceability_conflict_reason: "source_version_not_current" });
-  assert.deepEqual(listed[claimId(5)], { status: 500, error_code: "system_error", traceability_conflict_reason: null });
-  assert.equal(listed[claimId(6)], null, "structural fact: not evaluated");
-  assert.equal(listed[claimId(7)], null, "non-current source version: not evaluated");
-
-  // Through the client projection, each listed answer is what the per-claim read gave the page.
-  const claims = projectCandidateClaims(result.data);
-  const byClaim = listedClaimDiagnostics(claims);
-  for (const n of [1, 2, 3, 5, 8]) {
-    const single = await getClaimTraceabilitySummary({ organizationId: ORG, claimId: claimId(n), requestedAudience: "internal", actorContext: ADMIN },
-      { env: ENV, claimTraceabilityRepository: repository() });
-    const viaRoute = claimUseDiagnosis({ statusCode: single.ok ? 200 : single.error.status, body: single });
-    assert.deepEqual(byClaim.get(claimId(n)), viaRoute, `claim ${n}`);
-  }
-  assert.equal(byClaim.has(claimId(6)), false);
-  assert.equal(byClaim.has(claimId(7)), false);
-});
-
-test("other readers' claims pages are unchanged and evaluate nothing; a failed evaluation never fails the claims read", async () => {
-  const gk = actor("gk_reviewer", { source: null });
-  const repo = repository();
-  const gkRead = await listClaimLibraryCandidates({ organizationId: ORG, actorContext: gk }, {
-    env: ENV, listClaimLibraryReviewCandidates: async () => PAGE, claimTraceabilityRepository: repo,
+  const app = express();
+  app.use(basePath, setKaiSprint2NoStore, requireKaiSprint2Enabled, kaiSprint2MetadataJsonParser);
+  app.use(basePath, handleKaiSprint2JsonParserError);
+  app.use(basePath, (req, res, next) => {
+    req.isAuthenticated = () => true;
+    req.user = { id: 7301 };
+    req.kaiSprint2ActorContext = getScenario().actorContext;
+    return next();
   });
-  assert.equal(gkRead.ok, true, JSON.stringify(gkRead));
-  assert.ok(gkRead.data.items.every((item) => !Object.hasOwn(item, "internalUseDiagnostic")), "no field for a Get Kinder reader");
-  assert.deepEqual(repo.calls.batch, []);
-
-  for (const [label, listOrganizationInternalDraftDiagnosticsStub] of [
-    ["refused batch", async () => ({ ok: false, error: { code: "system_error", status: 500 } })],
-    ["thrown batch", async () => { throw new Error("database unavailable"); }],
-    ["batch missing a claim", async ({ claimIds }) => ({ ok: true, data: { items: claimIds.slice(1).map((id) => ({ claimId: id, response: { ok: true, data: {} } })) } })],
-  ]) {
-    const read = await listClaimLibraryCandidates({ organizationId: ORG, actorContext: ADMIN }, {
-      env: ENV, listClaimLibraryReviewCandidates: async () => PAGE, listOrganizationInternalDraftDiagnostics: listOrganizationInternalDraftDiagnosticsStub,
+  app.use(basePath, requireKaiSprint2Enabled, kaiSprint2OrganizationMutationLimiter, kaiSprint2ActorMutationLimiter, requireKaiSprint2Authenticated, sprint2IntakeApiRouter);
+  const server = await new Promise((resolve, reject) => {
+    const listening = app.listen(0, "127.0.0.1");
+    listening.once("listening", () => resolve(listening));
+    listening.once("error", reject);
+  });
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  });
+  return (path) => new Promise((resolve, reject) => {
+    const request = http.request({ hostname: "127.0.0.1", port: server.address().port, path: `${basePath}${path}`, method: "GET" }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ statusCode: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) }));
     });
-    assert.equal(read.ok, true, label);
-    const first = read.data.items.find((item) => item.claimId === claimId(1)).internalUseDiagnostic;
-    assert.deepEqual([first.status, first.error_code], [500, "system_error"], label);
-    const diagnosis = listedClaimDiagnostics(projectCandidateClaims(read.data)).get(claimId(1));
-    assert.equal(diagnosis.status, "unknown", `${label}: unknown, never adverse; "Check internal use" stays available`);
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+test("HTTP: one request answers a page of claims exactly as the per-claim route answers each, from one batch read", async (t) => {
+  const scenario = { actorContext: ADMIN, repository: repository(), serviceCalls: 0 };
+  const get = await withRouteServer(t, () => scenario);
+  const ids = [1, 2, 3, 5, 8].map(claimId);
+  const response = await get(claimInternalUsePath(ORG, ids).replace("/api/kai/sprint2/intake", ""));
+  assert.equal(response.statusCode, 200, JSON.stringify(response.body));
+  assert.equal(scenario.serviceCalls, 1);
+  assert.deepEqual(scenario.repository.calls.batch.map((call) => call.claimIds), [ids], "one batch read");
+  assert.deepEqual(scenario.repository.calls.single, [], "no per-claim read");
+  assert.deepEqual(response.body.data.items.map((item) => item.claimId), ids);
+  const answers = new Map(response.body.data.items.map((item) => [item.claimId, item.internalUseDiagnostic]));
+  const byClaim = listedClaimDiagnostics(answers);
+  for (const id of ids) {
+    const single = await getClaimTraceabilitySummary({ organizationId: ORG, claimId: id, requestedAudience: "internal", actorContext: ADMIN },
+      { env: ENV, claimTraceabilityRepository: repository() });
+    assert.deepEqual(byClaim.get(id), claimUseDiagnosis({ statusCode: single.ok ? 200 : single.error.status, body: single }), id);
   }
+  assert.deepEqual(answers.get(claimId(3)), { status: 409, error_code: "conflict_current_state_changed", traceability_conflict_reason: "source_version_not_current" });
+  assert.equal(byClaim.get(claimId(5)).status, "unknown", "a failed evaluation is unknown, never adverse");
+});
+
+test("HTTP: malformed, oversized or duplicate claim ids and other readers are refused; nothing is read", async (t) => {
+  let scenario;
+  const get = await withRouteServer(t, () => scenario);
+  const set = (actorContext) => { scenario = { actorContext, repository: repository(), serviceCalls: 0 }; };
+  const path = (query) => `/admin/organizations/${ORG}/claim-library/internal-use${query}`;
+  for (const query of ["", `?claim_ids=`, `?claim_ids=${claimId(1)},${claimId(1)}`, `?claim_ids=${claimId(1).toUpperCase()}`, `?claim_ids=not-a-uuid`,
+    `?claim_ids=${Array.from({ length: 26 }, (_, i) => claimId(i + 1)).join(",")}`, `?claim_ids=${claimId(1)}&extra=1`]) {
+    set(ADMIN);
+    const refused = await get(path(query));
+    assert.equal(refused.statusCode, 422, query);
+    assert.deepEqual([scenario.serviceCalls, scenario.repository.calls.batch.length], [0, 0], query);
+  }
+  for (const reader of [actor("client_contributor"), actor("client_reviewer"), actor("client_admin", { organizationId: OTHER_ORG }), actor("gk_reviewer", { source: null })]) {
+    set(reader);
+    const refused = await get(path(`?claim_ids=${claimId(1)}`));
+    assert.equal(refused.statusCode, 403, JSON.stringify(reader.organizationMemberships));
+    assert.deepEqual(scenario.repository.calls.batch, []);
+  }
+  assert.equal(CLAIM_INTERNAL_USE_BATCH_MAX, 25);
 });
 
 test("the repository batch evaluates every claim in one read-only transaction, isolating each claim's database error with a savepoint", async () => {

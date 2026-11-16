@@ -30,6 +30,7 @@ import {
   claimSelectabilityMessage,
   claimUseDiagnosis,
   listedClaimDiagnostics,
+  claimInternalUseBatches,
   listedClaimUseDiagnosis,
   internalDraftFailureMessage,
   internalDraftReadiness,
@@ -223,15 +224,22 @@ test("the claims page carries each claim's internal-use answer; it maps exactly 
   }
   for (const absent of [null, undefined, {}, { status: "200" }]) assert.equal(listedClaimUseDiagnosis(absent), undefined);
 
-  const withListed = { ...MEASURED, internalUseDiagnostic: listed };
-  const notEvaluated = { ...FIELD_2, internalUseDiagnostic: null };
-  const byClaim = listedClaimDiagnostics([withListed, notEvaluated, UNKNOWN]);
-  assert.deepEqual([...byClaim.keys()], [MEASURED.claimId], "only claims the server evaluated");
-  assert.equal(claimDraftAdmission(withListed, byClaim.get(MEASURED.claimId)), "admitted");
+  const answers = new Map([[MEASURED.claimId, listed], [FIELD_2.claimId, null]]);
+  const byClaim = listedClaimDiagnostics(answers);
+  assert.deepEqual([...byClaim.keys()], [MEASURED.claimId], "only claims the server answered");
+  assert.equal(claimDraftAdmission(MEASURED, byClaim.get(MEASURED.claimId)), "admitted");
   const fresh = { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current", provisional: { status: "refused", blockerCodes: [], sourceRole: null } };
-  const overridden = listedClaimDiagnostics([withListed], new Map([[MEASURED.claimId, fresh]]));
-  assert.equal(overridden.get(MEASURED.claimId), fresh, "an on-demand read is newer than the listed answer");
-  assert.equal(claimDraftAdmission(withListed, overridden.get(MEASURED.claimId)), "refused");
+  const overridden = listedClaimDiagnostics(answers, new Map([[MEASURED.claimId, fresh]]));
+  assert.equal(overridden.get(MEASURED.claimId), fresh, "an on-demand read is newer than the batch answer");
+  assert.equal(claimDraftAdmission(MEASURED, overridden.get(MEASURED.claimId)), "refused");
+
+  // Which claims the batch read answers: substantive, not on a non-current version, not yet requested, 25 per request.
+  const OTHER_MEASURED = claim(6, "source_record_count_measurement");
+  const stale = { ...claim(7, "source_record_count_measurement"), evidenceSourceVersionIsCurrent: false };
+  assert.deepEqual(claimInternalUseBatches([MEASURED, FIELD_2, UNKNOWN, OTHER_MEASURED, stale]), [[MEASURED.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId]]);
+  assert.deepEqual(claimInternalUseBatches([MEASURED, UNKNOWN, OTHER_MEASURED], new Set([UNKNOWN.claimId])), [[MEASURED.claimId, OTHER_MEASURED.claimId]], "never twice");
+  const many = Array.from({ length: 30 }, (_, i) => claim(100 + i, "source_record_count_measurement"));
+  assert.deepEqual(claimInternalUseBatches(many).map((batch) => batch.length), [25, 5], "one request per 25 claims");
 });
 
 test("Package 3: a claim's use in a new internal draft is the server's provisional admission, never inferred from currentness or strict P2-06", () => {
@@ -445,7 +453,8 @@ test("UI wiring: library reads keep completeness and continue from the cursor; p
   assert.match(workflow, /claims: claims\.status === "success" \? claims\.items : undefined, claimsComplete: claims\.complete/);
   // Each claim's internal-use answer comes with the claims page; a single
   // claim is read on its own only on demand (Check internal use, or a refused draft).
-  assert.match(workflow, /listedClaimDiagnostics\(claims\.items, onDemandDiagnostics\)/);
+  assert.match(workflow, /listedClaimDiagnostics\(currentBatchAnswers, onDemandDiagnostics\)/);
+  assert.match(workflow, /getJson\(claimInternalUsePath\(organizationId, batch\)\)/, "one batch read per claims page");
   assert.doesNotMatch(workflow, /claimsToDiagnose|CLAIM_DIAGNOSES_PER_REFRESH/, "no automatic per-claim reads");
   assert.match(workflow, /getJson\(claimTraceabilityPath\(organizationId, claimId, "internal"\)\)/);
   assert.match(workflow, /diagnoseClaims\(\[claim\.claimId\]\)/);
@@ -499,22 +508,14 @@ test("the Claim Library preserves Boolean source currentness through the client 
     organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "kai_organization_membership" }] };
   const row = (n, flag) => ({ claim_id: id(n), organization_id: ORG, evidence_item_id: id(100+n), claim_type: "finding", claim_status: "proposed",
     claim_review_status: "needs_gk_review", claim_strength: "unassessed", review_queue_items: [], evidence_source_version_is_current: flag });
-  const asked = [];
   const result = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
     env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, false), row(2, true), row(3, null)],
-    listOrganizationInternalDraftDiagnostics: async ({ claimIds }) => {
-      asked.push(...claimIds);
-      return { ok: true, data: { items: claimIds.map((claimId) => ({ claimId, response: { ok: true, data: { traceability_passed: true, eligible: true } } })) } };
-    },
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(projectCandidateClaims(result.data).map((item) => item.evidenceSourceVersionIsCurrent), [false, true, null]);
-  // A recorded non-current version is never evaluated (always refused); current and unrecorded currentness are.
-  assert.deepEqual(asked, [id(2), id(3)]);
-  assert.deepEqual(projectCandidateClaims(result.data).map((item) => item.internalUseDiagnostic?.status ?? null), [null, 200, 200]);
+  assert.ok(result.data.items.every((item) => !Object.hasOwn(item, "internalUseDiagnostic")), "the claims list is never held for evaluation");
   const malformed = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
     env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, "false")],
-    listOrganizationInternalDraftDiagnostics: async () => assert.fail("a malformed page is refused before any evaluation"),
   });
   assert.equal(malformed.error.code, "system_error");
 });

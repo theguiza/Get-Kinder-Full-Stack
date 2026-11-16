@@ -183,7 +183,8 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       if (requests.some((request) => !request.done)) quietSince = Date.now();
       else if (Date.now() - quietSince > 500) return;
     }
-    throw new Error("network never went idle");
+    const pending = requests.filter((request) => !request.done).map((request) => `${request.method} ${request.url} (status ${request.status ?? "none"})`);
+    throw new Error(`network never went idle; still open: ${pending.join(" | ")}`);
   };
   const waitFor = async (predicate, description, { timeout = 15000 } = {}) => {
     const deadline = Date.now() + timeout;
@@ -747,7 +748,7 @@ async function runXlsxAcceptance() {
     await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
     const mark = adminPage.mark();
     await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-    await adminPage.waitForText(`Measurement: ${independent.counted} programme sessions`);
+    await adminPage.waitForText(`Measurement: ${independent.counted} source records (your label: programme sessions).`);
     await adminPage.idle();
     assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => {
       const url = new URL(r.url);
@@ -775,7 +776,7 @@ async function runXlsxAcceptance() {
     ], [independent.counted, worksheetKey ? SELECTED_XLSX_METHOD : XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords,
       worksheetKey ?? "sheet_1", DEFINITION.counted_unit, DEFINITION.period_start, DEFINITION.period_end], "a fresh authorized service read returns the saved measurement and definition");
     await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose a claim");
-    await adminPage.waitForText(`Claim: The promoted source records ${independent.counted} programme sessions`);
+    await adminPage.waitForText(`Claim: The promoted source has ${independent.counted} source records`);
     const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
       [ORG_X, measurement.evidence_item_id]);
     const freshClaimRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId, worksheetKey));
@@ -788,19 +789,26 @@ async function runXlsxAcceptance() {
     assert.equal(measurement.calculation_method, selected ? SELECTED_XLSX_METHOD : XLSX_METHOD);
     assert.deepEqual(measurement.coordinates, { scope: "data_records_after_header", sheet_key: "sheet_1" }, "the worksheet locator");
     if (selected) {
-      assert.match(measurement.statement, /from selected worksheet sheet_1, counting each selected worksheet data row/);
+      assert.match(measurement.statement, /from selected worksheet sheet_1 \(each selected worksheet data row after the header row;/);
       assert.match(claim.statement, /in selected worksheet sheet_1/);
     } else {
-      assert.match(measurement.statement, /counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included\.$/);
-      assert.equal(claim.statement, "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 "
-        + "(record count: one programme session per worksheet data row; 1 blank record excluded, 2 exact-duplicate records included).");
+      // 11-10 factual integrity: the record count is stated as source records; the human description is attributed, not applied.
+      assert.equal(measurement.statement, "Source version record count: 5 source records (each worksheet data row after the header row; 1 blank record excluded; "
+        + "2 in exact-duplicate groups (1 excess copy), not removed). Not applied by KAI: the organization's description of each record as one programme session, "
+        + "its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
+      assert.equal(claim.statement, "The promoted source has 5 source records (record count: one record per worksheet data row; 1 blank record excluded; "
+        + "2 in exact-duplicate groups (1 excess copy), not removed). Not applied by KAI: the organization's description of each record as one programme session, "
+        + "its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
     }
   };
   // A complete internal report of the workbook count, with no unsupported conclusion.
   const assertWorkbookReport = (shown, heading, { claimId, evidenceItemId, sourceVersionId, selected = false, worksheet = ["Sessions", "sheet_1"] }) => {
+    console.log(`[xlsx-file-to-report] ${heading} report:\n${shown}`);
     assert.ok(shown.startsWith(`${heading}\n`), shown.slice(0, 80));
-    assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independent.counted);
-    assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
+    // Current report format: the count is stated as rows counted; the human label is attributed, not applied.
+    assert.equal(Number((/\*\*(\d+) nonblank data rows were counted in /.exec(shown) || [])[1]), independent.counted);
+    assert.match(shown, /The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\./);
+    assert.match(shown, /A person at the organization defined each row as one `programme session`; KAI did not verify that meaning/);
     const method = selected ? SELECTED_XLSX_METHOD : XLSX_METHOD;
     const methodDescription = selected
       ? "every data row after the header row of the explicitly selected worksheet of the exact promoted source version is one record"
@@ -808,10 +816,10 @@ async function runXlsxAcceptance() {
     assert.ok(shown.includes(`\`${method}\`: ${methodDescription}`));
     if (selected) {
       assert.ok(shown.includes(`Selected worksheet:** ${worksheet[0]} (\`${worksheet[1]}\`)`), "the selected worksheet");
-      assert.ok(shown.includes(`Worksheet citation: ${worksheet[0]} (\`${worksheet[1]}\`)`), "the worksheet citation");
+      assert.ok(shown.includes(`[CIT-001] Row count of ${worksheet[0]} (\`${worksheet[1]}\`)`), "the worksheet citation");
     }
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
-    assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
+    assert.match(shown, /2 counted records in exact-duplicate groups \(1 excess copy\)\. The record count removes no duplicate: every one of them stays in the count of 5, not removed or merged/);
     assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*outcome[\s\S]*caused any result/);
     assert.doesNotMatch(shown, /CSV data record/, "the calculation names the workbook's method, not CSV");
     for (const id of [claimId, evidenceItemId, sourceVersionId]) assert.ok(shown.includes(`\`${id}\``), id);
@@ -988,11 +996,15 @@ async function runXlsxAcceptance() {
       const shown = await textOf(adminPage, "[data-client-source-measurement-unmeasurable]");
       assert.match(shown, /profiled before worksheet records were counted/);
       assert.match(shown, /choose the same workbook again and select "Upload again as a new intake version"/);
+      // Four-view layout (11-06): the source's entry names the file; the
+      // version row states its readiness; ids are under "Technical details".
       const sourceRow = await textOf(adminPage, `[data-client-source-version="${ids.legacy.source_version_id}"]`);
+      const sourceEntry = await adminPage.evaluate(`document.querySelector('[data-client-source-version="${ids.legacy.source_version_id}"]').closest("[data-client-source]").innerText`);
       const visibleLegacyFilename = LEGACY.name.replaceAll("-", "_");
-      assert.ok(sourceRow.includes(visibleLegacyFilename));
-      assert.match(sourceRow, new RegExp(ids.legacy.source_version_id));
-      assert.match(sourceRow, /XLSX measurement basis missing/);
+      assert.ok(sourceEntry.includes(visibleLegacyFilename), sourceEntry);
+      assert.match(sourceRow, /This workbook's earlier profile cannot be counted\./);
+      assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-source-version="${ids.legacy.source_version_id}"] [data-client-xlsx-measurement-readiness]')?.getAttribute("data-client-xlsx-measurement-readiness")`),
+        "new_version_required");
       assert.ok(await textOf(adminPage, `[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`), "the old source offers its supported continuation");
       await adminPage.clickIn(`[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`, "Prepare workbook for counting");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-xlsx-continuation-source="${ids.legacy.source_version_id}"]`)), "the focused Files continuation");
@@ -1282,13 +1294,20 @@ async function runXlsxAcceptance() {
       assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE organization_id = $1::uuid", [ORG_X]))[0].n, before);
       modelOverride.text = "The promoted source records 5 programme sessions reaching 40 participants, which improved literacy because of the sessions.";
       try {
+        // Current design: unsupported participant, outcome and causal wording is
+        // refused, or replaced by the finding's recorded wording; never saved.
         const unsupported = await generate(adminApi, "evidence-summary", [ids.ordinary.claimId], "e-unsupported");
-        assert.equal(unsupported.status, 422, J(unsupported.body));
+        if (unsupported.status !== 422) {
+          assert.ok([200, 201].includes(unsupported.status), J(unsupported.body));
+          const [{ n: saved }] = await query("SELECT count(*)::int AS n FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid AND (text ILIKE '%40 participants%' OR text ILIKE '%improved literacy%' OR text ILIKE '%because of the sessions%')",
+            [unsupported.body.data.generatedContentDraftId]);
+          assert.equal(saved, 0, "the unsupported participant, outcome and causal wording is not saved");
+        }
       } finally {
         modelOverride.text = null;
       }
       results.e = { selectedWorksheet: "sheet_1", method: SELECTED_XLSX_METHOD, count: 5, reports: ["evidence_summary", "impact_narrative"], noRepeatedApprovals: true,
-        omission: "measurement_xlsx_worksheet_selection_required", invalid: "measurement_xlsx_worksheet_selection_invalid", roles: 403, otherProject: 404, replay: "replayed", conflict: 409, unsupportedAssertion: 422 };
+        omission: "measurement_xlsx_worksheet_selection_required", invalid: "measurement_xlsx_worksheet_selection_invalid", roles: 403, otherProject: 404, replay: "replayed", conflict: 409, unsupportedAssertion: "not saved" };
     });
 
     // -----------------------------------------------------------------------
@@ -1397,7 +1416,7 @@ async function runXlsxAcceptance() {
         coordinates: { scope: "data_records_after_header", sheet_key: "sheet_3" }, counted_unit: DEFINITION.counted_unit, unit_label: DEFINITION.unit_label,
         period_start: DEFINITION.period_start, period_end: DEFINITION.period_end,
       });
-      assert.match(recorded.measurement.statement, /from selected worksheet sheet_3, counting each selected worksheet data row/);
+      assert.match(recorded.measurement.statement, /from selected worksheet sheet_3 \(each selected worksheet data row after the header row;/);
       assert.match(recorded.claim.statement, /in selected worksheet sheet_3/);
       assert.doesNotMatch(recorded.claim.statement, /participant|people|unique|outcome/i, "worksheet rows are not people or outcomes");
 
@@ -1549,7 +1568,7 @@ async function runXlsxAcceptance() {
       return { fileId, ...promoted, evidenceItemId, claimId: proposed.body.data.claim.claim_id, worksheetKey };
     };
 
-    await test("H1 (A, B): worksheet counts keep their identity; an ordinary count is eligible with no approval; a count from a source with an independent minor-data risk is restricted, and the exact recorded condition is explained", async () => {
+    await test("H1 (A, B): worksheet counts keep their identity; an ordinary count is eligible with no approval; a count from a source with an independent minor-data risk is usable internally and closed externally", async () => {
       // A historical structural-only draft, read before anything below runs.
       const [structuralClaim] = await query(
         `SELECT c.claim_id::text, c.statement FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
@@ -1604,7 +1623,7 @@ async function runXlsxAcceptance() {
         const expected = H_INDEPENDENT[key];
         assert.deepEqual([row.measured_value, row.total_record_count, row.blank_record_count, row.duplicate_record_count, row.calculation_method, row.coordinates],
           [expected.counted, expected.dataRecords, expected.blank, expected.duplicates, SELECTED_XLSX_METHOD, { scope: "data_records_after_header", sheet_key: key }], label);
-        assert.match(row.claim_statement, new RegExp(`^The promoted source records ${expected.counted} service events .* in selected worksheet ${key} \\(record count: one service event per selected worksheet data row;`), label);
+        assert.match(row.claim_statement, new RegExp(`^The promoted source has ${expected.counted} source records in selected worksheet ${key} \\(record count: one record per selected worksheet data row;.*Not applied by KAI: the organization's description of each record as one service event`), label);
         assert.doesNotMatch(row.claim_statement, /participant|people|unique|outcome|verified/i, `${label}: a record count, not participants or outcomes`);
       }
       ids.h.measurementDigest = await measurementRowsDigest();
@@ -1616,17 +1635,21 @@ async function runXlsxAcceptance() {
       const ordinaryView = await findingReview(adminApi, ids.h.s3Ordinary.claimId);
       assert.deepEqual([ordinaryView.status, ordinaryView.body.data.ordinary_internal_rule, ordinaryView.body.data.review_requirement],
         [200, { applies: true, reasons: [], basis: "all_sensitive_categories_absent" }, null]);
-      // A: the restricted counts are not eligible, for the recorded reason, which says 'unknown', not 'present'.
+      // A: active reporting policy (ExecPlan active contract rule 2, a72413e6): a
+      // source whose minor-data category is unknown does not hold internal use;
+      // section 7.2 controls apply at the actual external release. Internally
+      // usable with no review; funder and public stay closed.
       for (const entry of [ids.h.s5, ids.h.s3Restricted]) {
-        const restricted = await internalEligibility(entry.claimId);
-        assert.equal(restricted.eligible, false);
-        assert.ok(restricted.blockerCodes.includes("evidence_review_unresolved") && restricted.blockerCodes.includes("claim_review_unresolved"), J(restricted.blockerCodes));
+        const internal = await internalEligibility(entry.claimId);
+        assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], J(internal));
+        for (const audience of ["funder", "public"]) {
+          assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} stays closed`);
+        }
+        assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 0, claim: 0, coverage: 0 }, "no review was needed");
         const view = await findingReview(adminApi, entry.claimId);
         assert.equal(view.status, 200, J(view.body));
-        assert.deepEqual(view.body.data.ordinary_internal_rule, { applies: false, reasons: ["minor_information_not_cleared"], basis: null });
-        assert.deepEqual([view.body.data.source_permissions.categories.reviewed_story_testimonial_status, view.body.data.source_permissions.allowed_use_status,
-          view.body.data.source_permissions.ai_processing_allowed, view.body.data.source_permissions.is_current], ["unknown", "allowed", true, true]);
-        assert.equal(view.body.data.review_requirement.responsible_role, "gk_reviewer");
+        assert.deepEqual([view.body.data.source_permissions.allowed_use_status, view.body.data.source_permissions.ai_processing_allowed,
+          view.body.data.source_permissions.is_current], ["allowed", true, true]);
         assert.equal(view.body.data.viewer, "organization_administrator");
       }
       // B: the human meaning stays a disclosed, unverified limitation beside the machine count.
@@ -1634,7 +1657,7 @@ async function runXlsxAcceptance() {
       assert.deepEqual([s5View.measurement.worksheet_key, s5View.measurement.worksheet_name, s5View.measurement.measured_value, s5View.measurement.counted_unit],
         ["sheet_5", "Data_Dictionary", 37, "service event"]);
       assert.ok(s5View.limitations.some((row) => row.code === "measurement.record_meaning_human_defined"
-        && /KAI counted the records but did not verify what they represent/.test(row.description)), J(s5View.limitations));
+        && /KAI counted the records but did not (apply those rules or )?verify what (they|the records) represent/.test(row.description)), J(s5View.limitations));
       // The read-only pgAdmin query for the production facts, on this schema.
       const productionSql = readFileSync(new URL("../scripts/kai-measured-finding-eligibility-read-only.sql", import.meta.url), "utf8");
       assert.ok(productionSql.includes("'485b90cd-cdf3-470e-a308-fe75d5d4b5fe'::uuid, ''::text"), "the shipped parameters");
@@ -1665,36 +1688,32 @@ async function runXlsxAcceptance() {
         readOnlySql: { story: asAdmin["INFO reviewed_story_testimonial_status"], adminMayRecordGkReview: false, gkReviewerMayRecordGkReview: true } };
     });
 
-    await test("H2 (C): the organization administrator sees 'View review status' with the responsible Get Kinder role and the review items, and no approval", async () => {
+    // Active reporting policy (ExecPlan active contract rule 2, a72413e6): an
+    // unknown minor-data category does not hold internal use, so the
+    // administrator sees the count as usable ("View measurement"), with no
+    // review required. Recording a review decision on that evidence stays
+    // outside the organization's authority (minor information not cleared).
+    await test("H2 (C): the organization administrator sees the minor-unknown count as usable with 'View measurement', no review required, and still cannot record a review decision on it", async () => {
       await openStudioTab("Data Sources");
       const action = `[data-client-open-measured-claim-review="${ids.h.s5.claimId}"]`;
-      await adminPage.waitFor(async () => /View review status/.test((await textOf(adminPage, action)) || ""), "View review status on the restricted claim");
+      await adminPage.waitFor(async () => /View measurement/.test((await textOf(adminPage, action)) || ""), "View measurement on the minor-unknown claim");
+      assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.h.s5.claimId}"]')?.getAttribute("data-client-claim-internal-use")`), "usable");
       const mark = adminPage.mark();
-      await adminPage.clickIn(action, "View review status");
-      const status = `[data-client-measured-claim-review="${ids.h.s5.claimId}"] [data-client-measured-claim-review-status]`;
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, status)), "the review status");
+      await adminPage.clickIn(action, "View measurement");
+      const panel = `[data-client-measured-claim-review="${ids.h.s5.claimId}"]`;
+      await adminPage.waitFor(async () => /Data_Dictionary \(sheet_5\)/.test((await textOf(adminPage, panel)) || ""), "the measurement");
       await adminPage.idle();
-      const shown = await textOf(adminPage, `[data-client-measured-claim-review="${ids.h.s5.claimId}"]`);
-      assert.match(shown, /Worksheet counted: Data_Dictionary \(sheet_5\)/);
-      assert.match(shown, /This source may contain stories or testimonials/);
-      assert.match(shown, /Minor|minor/);
-      assert.match(shown, /Get Kinder review required\. Responsible: a Get Kinder reviewer \(gk_reviewer\)\. Outstanding: [^.]*claim review[^.]*evidence review/);
-      assert.match(shown, /Evidence review item: open \/ needs gk review\. Claim review item: open \/ needs gk review\./);
-      assert.match(shown, /listed in Get Kinder's Review Queue; no separate request is needed/);
-      assert.match(shown, /KAI counted the records but did not verify what they represent/);
-      assert.doesNotMatch(shown, /Confirm: the count is supported|Report a problem/, "no organization decision is offered");
+      const shown = await textOf(adminPage, panel);
+      assert.match(shown, /Data_Dictionary \(sheet_5\)/);
+      assert.doesNotMatch(shown, /Get Kinder review required/, "no review is required for internal use");
       assert.deepEqual(adminPage.requestsSince(mark).filter((request) => request.method !== "GET"), [], "viewing writes nothing");
-      // The handoff is real: the claim is in Get Kinder's Review Queue.
-      const queue = await gkApi("GET", `${orgPath()}/review-queue`);
-      assert.equal(queue.status, 200, J(queue.body));
-      assert.ok(J(queue.body).includes(ids.h.s5.claimId), "the restricted claim is listed for Get Kinder");
-      // The organization administrator cannot decide it.
+      // The organization administrator cannot record a review decision on minor-data evidence.
       const evidenceQueue = await queueOf("evidence_review", ids.h.s5.evidenceItemId);
       const refused = await adminApi("POST", evidenceReviewCompletePath(ORG_X, ids.h.s5.evidenceItemId, evidenceQueue.review_queue_item_id),
         evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
       assert.equal(refused.status, 422, J(refused.body));
       assert.ok(J(refused.body).includes("minor_information_not_cleared"), J(refused.body));
-      results.h2 = { clientAction: "View review status", responsible: "gk_reviewer", organizationDecision: refused.status };
+      results.h2 = { clientAction: "View measurement", internalUse: "usable", organizationDecision: refused.status };
     });
 
     await test("H3 (C): Get Kinder's reviewer opens 'Review finding' in the Claims list, sees the finding, and records the evidence, claim and coverage decisions through the existing forms; they persist, are audited and re-read", async () => {
@@ -1710,6 +1729,10 @@ async function runXlsxAcceptance() {
         assert.ok(await gkPage.evaluate(`(() => { const o = [...document.querySelectorAll(".gk-shell-org-switcher-option")].find((el) => el.innerText.trim() === "Harbourline Workbook Society"); if (!o) return false; o.click(); return true; })()`));
         await gkPage.idle();
       }
+      // Four-view Knowledge Studio (11-06): Impact is the default view; the
+      // Claims list with "Review finding" is under Evidence.
+      await gkPage.clickTab("Evidence");
+      await gkPage.idle();
       const action = `[data-gk-review-finding="${entry.claimId}"]`;
       await gkPage.waitFor(async () => Boolean(await textOf(gkPage, action)), "Review finding on the restricted Service_Events claim");
       assert.equal(await textOf(gkPage, action), "Review finding");
@@ -1723,8 +1746,10 @@ async function runXlsxAcceptance() {
       assert.match(shown, /Counted: 364 service events/);
       assert.match(shown, /364 data records; 0 blank excluded; 2 exact duplicates included/);
       assert.match(shown, /Meaning, as defined by the organization \(not verified by KAI\): one record is one service event\./);
-      assert.match(shown, /Ordinary internal rule: does not apply[\s\S]*Stories or testimonials: not determined \(recorded as unknown\)/);
-      assert.match(shown, /Not eligible for internal use/);
+      // The recorded source condition is stated; under the active reporting
+      // policy it does not hold internal use, and external use stays closed.
+      assert.match(shown, /Ordinary internal rule: does not apply, because of what is recorded for the source:[\s\S]*Information about minors: recorded as present/);
+      assert.match(shown, /Eligible for internal use\. This does not approve it for funders or the public\./);
 
       // Evidence review, through the existing Traceability form.
       const evidenceBefore = await queueOf("evidence_review", entry.evidenceItemId);
@@ -1749,9 +1774,11 @@ async function runXlsxAcceptance() {
       await gkPage.waitFor(async () => /Claim review: approved \(recorded by Get Kinder\)/.test((await textOf(gkPage, panel)) || ""), "the re-read claim decision");
       await gkPage.idle();
       assert.deepEqual(posts(), [[claimReviewCompletePath(ORG_X, entry.claimId, claimBefore.review_queue_item_id), 200]]);
+      // Active reporting policy (ExecPlan active contract rule 1): unresolved
+      // coverage is information, not a hold on internal use. The optional
+      // coverage acceptances below remain available and are recorded as before.
       const afterReviews = await internalEligibility(entry.claimId);
-      assert.equal(afterReviews.eligible, false, "approving the evidence and claim does not clear coverage");
-      assert.deepEqual(afterReviews.blockerCodes, ["coverage_dimension_unresolved"], J(afterReviews.blockerCodes));
+      assert.deepEqual([afterReviews.eligible, afterReviews.blockerCodes], [true, []], J(afterReviews.blockerCodes));
 
       // Coverage: accept each unresolved limitation from the finding. The
       // source's reviewed small-cell 'absent' (restrictedSnapshot) is clear, so
@@ -1775,7 +1802,8 @@ async function runXlsxAcceptance() {
       const audits = await query("SELECT metadata->>'decision_id' AS decision_id FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND metadata->>'decision_id' = ANY($2::text[])",
         [ORG_X, [evidenceDecision.decision_id, claimDecision.decision_id]]);
       assert.deepEqual(audits.map((row) => row.decision_id).sort(), [evidenceDecision.decision_id, claimDecision.decision_id].sort(), "one audit row per decision");
-      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 1, claim: 1, coverage: 3 });
+      // One coverage decision per accepted limitation (two offered above; no small-cell acceptance since 7e8247f).
+      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 1, claim: 1, coverage: unresolved.length });
       const fresh = await internalEligibility(entry.claimId);
       assert.deepEqual([fresh.eligible, fresh.blockerCodes], [true, []]);
       const freshView = (await findingReview(gkApi, entry.claimId)).body.data;
@@ -1792,13 +1820,18 @@ async function runXlsxAcceptance() {
       for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} stays closed`);
       const queue = await gkApi("GET", `${orgPath()}/review-queue`);
       assert.ok(!J(queue.body).includes(entry.claimId), "the reviewed claim leaves the Review Queue");
-      assert.ok(J(queue.body).includes(ids.h.s5.claimId), "the unreviewed claim stays");
+      // Active reporting policy: the Review Queue lists current blockers only; a
+      // not-yet-reviewed claim has none, and its own review work stays open
+      // (reachable through "Review finding" in the Claims list, as H4 does).
+      assert.ok(!J(queue.body).includes(ids.h.s5.claimId), "no blocker is listed for the not-yet-reviewed claim");
+      assert.equal((await queueOf("evidence_review", ids.h.s5.evidenceItemId)).queue_status, "open", "its review work stays open");
       results.h3 = { gkAction: "Review finding", evidence: evidenceDecision.decision_outcome, claim: claimDecision.decision_outcome, coverage: unresolved.length, eligible: true, stale: stale.status };
     });
 
-    await test("H4 (C): Get Kinder's reviewer asks for more information on the Data_Dictionary count; no claim decision is offered and it stays restricted", async () => {
+    await test("H4 (C): Get Kinder's reviewer asks for more information on the Data_Dictionary count; no claim decision is offered; internal use is not held by it and external use stays closed", async () => {
       const entry = ids.h.s5;
       const action = `[data-gk-review-finding="${entry.claimId}"]`;
+      if (!(await textOf(gkPage, action))) { await gkPage.clickTab("Evidence"); await gkPage.idle(); }
       await gkPage.clickIn(action, "Review finding");
       const panel = `[data-gk-finding-review="${entry.claimId}"]`;
       await gkPage.waitFor(async () => /Data_Dictionary \(sheet_5\)/.test((await textOf(gkPage, panel)) || ""), "the Data_Dictionary finding");
@@ -1810,11 +1843,14 @@ async function runXlsxAcceptance() {
       await gkPage.idle();
       assert.equal(await gkPage.evaluate(`[...document.querySelectorAll("button")].some((el) => el.offsetParent !== null && el.innerText.trim() === "Record Claim Review Decision")`), false,
         "a claim decision needs a terminal evidence decision");
+      // Active reporting policy (ExecPlan active contract rule 1): an open
+      // "needs more information" answer is information; internal use is not
+      // held by it. Funder and public stay closed.
       const after = await internalEligibility(entry.claimId);
-      assert.equal(after.eligible, false);
-      assert.ok(after.blockerCodes.includes("evidence_review_unresolved"), J(after.blockerCodes));
+      assert.equal(after.eligible, true, J(after.blockerCodes));
+      for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} stays closed`);
       assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 1, claim: 0, coverage: 0 });
-      results.h4 = { evidence: "needs_more_information", claimFormOffered: false, eligible: false };
+      results.h4 = { evidence: "needs_more_information", claimFormOffered: false, internalEligible: true };
     });
 
     await test("H5 (C): other roles, another organization and Get Kinder roles without decision authority are refused; nothing is written", async () => {
@@ -1836,7 +1872,7 @@ async function runXlsxAcceptance() {
       results.h5 = { refused: ["client_contributor", "client_reviewer", "other organization admin", "cross-tenant path"] };
     });
 
-    await test("H6 (D): the reviewed measured claim reaches internal Evidence Summary generation with its citation and limitations; an unreviewed claim is refused; historical records are unchanged", async () => {
+    await test("H6 (D): the reviewed measured claim reaches internal Evidence Summary generation with its citation and limitations; a not-yet-reviewed claim may be drafted beside it; historical records are unchanged", async () => {
       const entry = ids.h.s3Restricted;
       const [{ statement }] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [entry.claimId]);
       modelOverride.text = `${statement} This is a count of source records under the human-defined definition; no reporting period was defined. `
@@ -1860,21 +1896,20 @@ async function runXlsxAcceptance() {
       const read = await adminApi("GET", clientInternalDraftPath(ORG_X, PROJECT_X, draftId));
       assert.equal(read.status, 200, J(read.body));
       assert.ok(J(read.body).includes(entry.claimId), "the persisted draft is read back with its citation");
-      // An unreviewed (ineligible) measured claim is excluded: the request is refused and nothing is persisted.
+      // Active reporting policy (ExecPlan active contract rule 1): a missing or
+      // "needs more information" review is information, not a prerequisite, so
+      // a draft may include the not-yet-reviewed count beside the reviewed one.
       const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
-      const callsBeforeRefusal = modelCalls.length;
-      const refused = await generate(adminApi, "evidence-summary", [entry.claimId, ids.h.s5.claimId], "h-with-unreviewed");
+      const withUnreviewed = await generate(adminApi, "evidence-summary", [entry.claimId, ids.h.s5.claimId], "h-with-unreviewed");
       modelOverride.text = null;
-      assert.equal(refused.status, 422, J(refused.body));
-      const refusalReasons = (refused.body.blockers || []).map((blocker) => blocker.blocking_reason);
-      console.log(`[kai-customer-xlsx-file-to-report] H6 unreviewed refusal ${J({ refusalReasons, modelCalled: modelCalls.length > callsBeforeRefusal })}`);
-      assert.ok(!refusalReasons.includes("unsupported_numeric_or_causal_assertion") && !refusalReasons.includes("material_limitation_not_disclosed"),
-        `refused for the claim's eligibility, not the stub's text: ${J(refusalReasons)}`);
-      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore);
+      assert.ok([200, 201].includes(withUnreviewed.status), J(withUnreviewed.body));
+      const bothCited = new Set((withUnreviewed.body.data.blocks || []).flatMap((block) => (block.citations || []).map((citation) => citation.claimId)));
+      assert.ok(bothCited.has(entry.claimId) && bothCited.has(ids.h.s5.claimId), J([...bothCited]));
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore + 1);
       // Historical records unchanged: every measurement row, and the structural-only draft.
       assert.equal(await measurementRowsDigest(), ids.h.measurementDigest, "no measurement row was rewritten by review or generation");
       assert.equal(await ids.h.draftDigest(ids.h.structuralDraftId), ids.h.structuralDigest, "the structural-only draft is unchanged");
-      results.h6 = { draft: draftId, citations: citations.length, limitationCodes: cited.limitationCodes, unreviewedRefused: [refused.status, refusalReasons] };
+      results.h6 = { draft: draftId, citations: citations.length, limitationCodes: cited.limitationCodes, unreviewedIncluded: withUnreviewed.status };
       assert.deepEqual(gkPage.exceptions, []);
       await gkPage.close();
     });
@@ -1911,8 +1946,10 @@ async function runXlsxAcceptance() {
       exclusion_rule: `${SENTINEL.exclusion} the header row and empty rows.`,
       period_start: "2026-09-01", period_end: "2026-09-30",
     });
-    const ROW_STATEMENT = "The promoted source records 364 service event records for the reporting period 2026-09-01 to 2026-09-30 in selected worksheet sheet_3 "
-      + "(record count: one service event record per selected worksheet data row; 0 blank records excluded, 2 exact-duplicate records included).";
+    // 11-10 factual integrity: a record count is "N source records"; the organization's description is attributed, not applied.
+    const ROW_STATEMENT = "The promoted source has 364 source records in selected worksheet sheet_3 (record count: one record per selected worksheet data row; "
+      + "0 blank records excluded; 2 in exact-duplicate groups (1 excess copy), not removed). Not applied by KAI: the organization's description of each record "
+      + "as one service event record, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.";
     const ROW_TEXT = "In selected worksheet sheet_3 the promoted source records 364 service event records for the reporting period 2026-09-01 to 2026-09-30. "
       + "This is a count of worksheet records, one per row, under the human-defined definition; KAI did not check what each row represents. "
       + "The period is attested in that definition and not verified against record dates. 2 exact-duplicate rows are included in the count, not removed. "
@@ -1982,9 +2019,21 @@ async function runXlsxAcceptance() {
           reports.push({ status: result.status, report: report.status, replay: replay.status });
         }
         modelOverride.text = claim => `${claim.claimStatement} ${composeMeasurementDisclosure(claim.limitationCodes)} One participant said "it changed my life".`;
+        // Current design: generated wording that fails the checks (here an
+        // invented quotation) is replaced by the finding's recorded wording;
+        // nothing the checks refused is saved, so the quotation never reaches the report.
         const unsupported = await generate(adminApi, "evidence-summary", [entry.claimId], `i-${flag}-unsupported-quote`);
-        assert.equal(unsupported.status, 422);
-        assert.ok(unsupported.body.blockers.some(item => item.blocking_reason === "unsupported_quotation"));
+        if (unsupported.status === 422) {
+          assert.ok(unsupported.body.blockers.some(item => item.blocking_reason === "unsupported_quotation"));
+        } else {
+          assert.ok([200, 201].includes(unsupported.status), J(unsupported.body));
+          const quotedReport = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, unsupported.body.data.generatedContentDraftId));
+          assert.equal(quotedReport.status, 200, J(quotedReport.body));
+          assert.doesNotMatch(quotedReport.body, /it changed my life/i, "the invented quotation is not saved");
+          const [{ n: savedQuotes }] = await query("SELECT count(*)::int AS n FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid AND text ILIKE '%it changed my life%'",
+            [unsupported.body.data.generatedContentDraftId]);
+          assert.equal(savedQuotes, 0, "nor stored in the draft");
+        }
         assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), before);
         outcomes.push(reports);
       }
@@ -2103,7 +2152,7 @@ async function runXlsxAcceptance() {
         await fillDefinition(expected.definition);
         mark = adminPage.mark();
         await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-        await adminPage.waitForText(`Measurement: ${expected.counted} ${expected.definition.unit_label}`);
+        await adminPage.waitForText(`Measurement: ${expected.counted} source records (your label: ${expected.definition.unit_label}).`);
         const after = await shownFor(key);
         const row = await measurementRowOf(key);
         const written = requestsOf(mark);
@@ -2203,7 +2252,7 @@ async function runXlsxAcceptance() {
           fresh.body.data.recorded.definition.source_measurement_definition_id, fresh.body.data.recorded.claim.claim_id],
         [200, key, recordedIds[key].evidenceItemId, recordedIds[key].definitionId, recordedIds[key].claimId], `${key}: fresh service read`);
         const [claim] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [recordedIds[key].claimId]);
-        assert.match(claim.statement, new RegExp(`^The promoted source records ${EXPECTED[key].counted} ${EXPECTED[key].definition.unit_label} .* in selected worksheet ${key} \\(record count: one ${EXPECTED[key].definition.counted_unit} per selected worksheet data row; 0 blank records excluded, ${EXPECTED[key].duplicates} exact-duplicate records? included\\)\\.$`));
+        assert.match(claim.statement, new RegExp(`^The promoted source has ${EXPECTED[key].counted} source records in selected worksheet ${key} \\(record count: one record per selected worksheet data row; 0 blank records excluded; .*\\)\\. Not applied by KAI: the organization's description of each record as one ${EXPECTED[key].definition.counted_unit}`));
         assert.doesNotMatch(claim.statement, /participant|people|unique|outcome|verified/i);
       }
       assert.deepEqual([await fileCount(), await versionCount(), await auditCount()], [filesAfterPromotion, versionsAfterPromotion, auditsBefore + 2],
@@ -2334,7 +2383,7 @@ async function runXlsxAcceptance() {
         await fillDefinition(expected.definition);
         let mark = adminPage.mark();
         await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-        await adminPage.waitForText(`Measurement: ${expected.counted} ${expected.definition.unit_label}`);
+        await adminPage.waitForText(`Measurement: ${expected.counted} source records (your label: ${expected.definition.unit_label}).`);
         const recorded = await shownFor(key);
         const row = await rowOf(key);
         assert.deepEqual(requestsOf(mark).filter(([method]) => method === "POST"), [["POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), 200]], `${key}: one write, naming the worksheet`);
@@ -2351,7 +2400,7 @@ async function runXlsxAcceptance() {
         const [claim] = await query("SELECT claim_id::text, statement, claim_type FROM kai.claims WHERE evidence_item_id = $1::uuid", [row.evidence_item_id]);
         assert.equal(await attr("[data-client-source-measurement-claim]", "data-client-source-measurement-claim"), claim.claim_id);
         assert.equal(claim.claim_type, "finding");
-        assert.match(claim.statement, new RegExp(`^The promoted source records ${expected.counted} ${expected.definition.unit_label} .* in selected worksheet ${key} \\(record count: one ${expected.definition.counted_unit} per selected worksheet data row; 0 blank records excluded, ${expected.duplicates} exact-duplicate records? included\\)\\.$`));
+        assert.match(claim.statement, new RegExp(`^The promoted source has ${expected.counted} source records in selected worksheet ${key} \\(record count: one record per selected worksheet data row; 0 blank records excluded; .*\\)\\. Not applied by KAI: the organization's description of each record as one ${expected.definition.counted_unit}`));
         entries[key] = { evidenceItemId: row.evidence_item_id, definitionId: row.definition_id, claimId: claim.claim_id };
         if (key === "sheet_5") entries.sheet_5.digest = await sheet5Digest(row.evidence_item_id);
       }

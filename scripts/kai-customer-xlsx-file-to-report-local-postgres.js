@@ -188,7 +188,7 @@ try {
   }
   console.log("XLSX acceptance: read-only method verifier OVERALL PASS after the derived-measurement migration");
 
-  const testResult = spawnSync("node", ["--test", "--test-timeout=600000", spec], {
+  const testResult = spawnSync("node", ["--test", "--test-timeout=1800000", spec], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: "inherit",

@@ -1149,12 +1149,12 @@ async function runBrowserAcceptance() {
       }
     });
 
-    // Owner direction 2026-11-16: each claim's own P2-06 evaluation comes with
-    // the claims page (claim-library/candidates, internalUseDiagnostic) rather
-    // than one traceability read per claim. Injected (labeled) here: a failed
-    // evaluation of one listed claim, substituted in that claims response.
+    // Owner direction 2026-11-16: each claim's own P2-06 evaluation comes from
+    // one batch read per claims page (claim-library/internal-use) rather than
+    // one traceability read per claim. Injected (labeled) here: a failed
+    // evaluation of one claim, substituted in that batch response.
     const failListedEvaluation = (claimId) => ({ url, json }) => {
-      if (!url.includes("/claim-library/candidates")) return null;
+      if (!url.includes("/claim-library/internal-use")) return null;
       const body = json();
       body.data.items = body.data.items.map((item) => (item.claimId === claimId
         ? { ...item, internalUseDiagnostic: { status: 503, error_code: "system_error", traceability_conflict_reason: null } }
@@ -1184,8 +1184,8 @@ async function runBrowserAcceptance() {
         await adminPage.idle();
         // The claim's own client-safe P2-06 evaluation decided it, from the claims page: no per-claim read.
         assert.deepEqual(perClaimReads(mark, ids.claimId), [], "no per-claim traceability read");
-        const claimsPages = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/claim-library/candidates"));
-        assert.ok(claimsPages.length >= 1 && claimsPages.every((entry) => entry.method === "GET" && entry.status === 200));
+        const batches = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/claim-library/internal-use"));
+        assert.ok(batches.length >= 1 && batches.every((entry) => entry.method === "GET" && entry.status === 200), "answered by the batch read");
         assert.match(await textOf(adminPage, row), /Ready to use in your report\./);
         const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
         assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "usable");
@@ -1205,7 +1205,7 @@ async function runBrowserAcceptance() {
       const failMeasured = failListedEvaluation(ids.claimId);
       await adminPage.intercept([
         { urlPattern: "*/impact-facts*", requestStage: "Response" },
-        { urlPattern: "*claim-library/candidates*", requestStage: "Response" },
+        { urlPattern: "*claim-library/internal-use*", requestStage: "Response" },
       ], (request) => truncate(request) ?? failMeasured(request));
       try {
         await openDataSources();
@@ -1267,7 +1267,7 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       // C2 when the claim's condition cannot be read here, the server's refusal is explained, not shown as a bare validation error.
       // Injected (labeled): the restricted claim's listed evaluation fails.
-      await adminPage.intercept([{ urlPattern: "*claim-library/candidates*", requestStage: "Response" }], failListedEvaluation(ids.riskClaimId));
+      await adminPage.intercept([{ urlPattern: "*claim-library/internal-use*", requestStage: "Response" }], failListedEvaluation(ids.riskClaimId));
       try {
         await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
         // The fact is usable. The separate model-processing diagnostic is

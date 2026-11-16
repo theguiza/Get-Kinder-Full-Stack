@@ -163,6 +163,20 @@ function organizationDiagnosticResponse(result, claimId) {
   return { ok: true, data: organizationTraceabilityDiagnostic(result.data, claimId, result.provisionalInternalDraft), error: null };
 }
 
+// One claim's internal-use answer as the per-claim traceability route would
+// have answered it: its HTTP status and either the client-safe diagnostic or
+// the error code and allowlisted conflict reason.
+export function listedInternalUseDiagnostic(response) {
+  if (response?.ok === true) return { status: 200, data: response.data };
+  const status = Number.isInteger(response?.error?.status) ? response.error.status : 500;
+  const reason = response?.data?.traceability_conflict_reason;
+  return {
+    status,
+    error_code: typeof response?.error?.code === "string" ? response.error.code : "system_error",
+    traceability_conflict_reason: typeof reason === "string" ? reason : null,
+  };
+}
+
 /**
  * The organization administrator's internal traceability diagnostic for a
  * listed page of claims, evaluated in one read-only transaction. Same

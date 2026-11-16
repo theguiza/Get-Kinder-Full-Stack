@@ -623,6 +623,14 @@ export function traceabilityUnavailableMessage(result, { canGenerateGapFollowups
   return errorText(result);
 }
 
+// Owner direction 2026-11-16: the internal-use answers of up to 25 claims in
+// one request (one claims page), instead of one traceability read per claim.
+export const CLAIM_INTERNAL_USE_BATCH_MAX = 25;
+export function claimInternalUsePath(organizationId, claimIds) {
+  const params = new URLSearchParams({ claim_ids: claimIds.join(",") });
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/internal-use?${params.toString()}`;
+}
+
 export function claimTraceabilityPath(organizationId, claimId, audience) {
   const params = new URLSearchParams({ requested_audience: audience });
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
@@ -2729,11 +2737,6 @@ export function projectCandidateClaims(dto) {
     evidenceInternalOnly: claim.evidenceInternalOnly ?? null,
     evidencePublicUseAllowed: claim.evidencePublicUseAllowed ?? null,
     evidenceFunderUseAllowed: claim.evidenceFunderUseAllowed ?? null,
-    // The server's internal-use answer for this claim, listed for an
-    // organization administrator (the per-claim traceability read's status and
-    // diagnostic, or its error). null: not evaluated; absent: not provided.
-    internalUseDiagnostic: claim.internalUseDiagnostic && typeof claim.internalUseDiagnostic === "object"
-      ? claim.internalUseDiagnostic : null,
   })).filter((claim) => isRouteUuid(claim.claimId) && isRouteUuid(claim.evidenceItemId));
 }
 

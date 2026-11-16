@@ -243,16 +243,33 @@ export function listedClaimUseDiagnosis(listed) {
   });
 }
 
-// claimId -> diagnosis for every listed claim that carries the server's
-// answer; a later on-demand read for a claim (`overrides`) replaces it.
-export function listedClaimDiagnostics(claims, overrides = null) {
+// claimId -> diagnosis from the batch answers (claimId -> listed answer); a
+// later on-demand read for a claim (`overrides`) replaces it.
+export function listedClaimDiagnostics(answers, overrides = null) {
   const byClaim = new Map();
-  for (const claim of Array.isArray(claims) ? claims : []) {
-    const diagnosis = listedClaimUseDiagnosis(claim?.internalUseDiagnostic);
-    if (diagnosis && isRouteUuid(claim.claimId)) byClaim.set(claim.claimId, diagnosis);
+  if (answers instanceof Map) {
+    for (const [claimId, listed] of answers) {
+      const diagnosis = listedClaimUseDiagnosis(listed);
+      if (diagnosis && isRouteUuid(claimId)) byClaim.set(claimId, diagnosis);
+    }
   }
   if (overrides instanceof Map) for (const [claimId, diagnosis] of overrides) byClaim.set(claimId, diagnosis);
   return byClaim;
+}
+
+// The listed claims whose internal use is answered by the batch read: every
+// substantive claim whose source version is not recorded as non-current
+// (structural column facts are never offered; a non-current version is
+// always refused), not yet answered or requested, in pages of `size`.
+export function claimInternalUseBatches(claims, known, size = 25) {
+  const done = known instanceof Set ? known : new Set();
+  const ids = (Array.isArray(claims) ? claims : [])
+    .filter((claim) => isRouteUuid(claim?.claimId) && !done.has(claim.claimId)
+      && claimKind(claim) !== "structural" && !claimSourceVersionUnavailable(claim))
+    .map((claim) => claim.claimId);
+  const batches = [];
+  for (let index = 0; index < ids.length; index += size) batches.push(ids.slice(index, index + size));
+  return batches;
 }
 
 // What a P2-06 blocker means to the organization administrator.

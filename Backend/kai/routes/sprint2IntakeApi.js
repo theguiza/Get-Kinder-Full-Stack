@@ -3419,6 +3419,51 @@ router.get(
   },
 );
 
+/**
+ * Owner direction 2026-11-16: the internal-use answer (strict internal
+ * eligibility and provisional draft admission) of up to one claims page in
+ * ONE request and one read-only transaction, instead of one traceability
+ * read per claim. Same authorization, evaluation and per-claim answer as the
+ * route above for an organization administrator; the claims list itself is
+ * never held for it. Read-only.
+ */
+const CLAIM_INTERNAL_USE_BATCH_MAX = 25;
+function claimInternalUseBatchQuery(req = {}) {
+  const keys = Object.keys(req.query || {});
+  if (keys.length !== 1 || keys[0] !== "claim_ids" || typeof req.query.claim_ids !== "string") return null;
+  const claimIds = req.query.claim_ids.split(",");
+  if (claimIds.length < 1 || claimIds.length > CLAIM_INTERNAL_USE_BATCH_MAX || new Set(claimIds).size !== claimIds.length) return null;
+  return claimIds.every((id) => KAI_SPRINT2_P0_PATTERNS.uuid.test(id) && id === id.toLowerCase()) ? claimIds : null;
+}
+
+router.get(
+  "/admin/organizations/:organizationId/claim-library/internal-use",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const claimIds = claimInternalUseBatchQuery(req);
+    if (!identifiers || !claimIds) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_organization_id_or_claim_ids", "organization_id_or_claim_ids")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimTraceabilityService();
+      const batch = await service.listOrganizationInternalDraftDiagnostics({
+        organizationId: identifiers.organizationId,
+        claimIds,
+        actorContext: sprint2MappedActorContext(req),
+      });
+      if (!batch.ok) return batch;
+      return {
+        ok: true,
+        data: { items: batch.data.items.map((item) => ({ claimId: item.claimId, internalUseDiagnostic: service.listedInternalUseDiagnostic(item.response) })) },
+        warnings: [],
+      };
+    });
+  },
+);
+
 let organizationFactualReviewServicePromise = null;
 async function getOrganizationFactualReviewService() {
   if (intakeServiceOverride?.getOrganizationFactualReview) return intakeServiceOverride;

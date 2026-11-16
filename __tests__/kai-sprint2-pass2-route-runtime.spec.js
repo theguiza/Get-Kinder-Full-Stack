@@ -140,6 +140,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Impact Evidence Library claim-navigation index: read-only, additive, and
     // every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/claim-library/candidates",
+    "/admin/organizations/:organizationId/claim-library/internal-use",
     // KAI P2-04 claim-gap/client-followup surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",

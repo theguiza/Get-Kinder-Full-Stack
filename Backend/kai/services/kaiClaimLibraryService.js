@@ -5,7 +5,6 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listClaimLibraryReviewCandidates as readClaimLibraryReviewCandidates } from "../db/kaiClaimLibraryReadModels.js";
 import { resolveProjectScope } from "./kaiProjectScope.js";
-import { authorizeClaimTraceabilityRead, listOrganizationInternalDraftDiagnostics } from "./kaiClaimTraceabilityService.js";
 
 const CLAIM_LIBRARY_READ_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 // Owner decision 2026-10-18: an active organization administrator of this
@@ -162,58 +161,6 @@ function responseClaimCandidate(row, organizationId, { clientProjection = false 
   };
 }
 
-// A claim the organization's Evidence view never evaluates for internal use:
-// a structural column fact (not an impact finding, never selectable) or a
-// claim whose source version is recorded as non-current (always refused).
-const STRUCTURAL_EVIDENCE_TYPE = "dictionary_field_presence_fact";
-function needsInternalUseDiagnostic(item) {
-  return item.evidenceType !== STRUCTURAL_EVIDENCE_TYPE && item.evidenceSourceVersionIsCurrent !== false;
-}
-
-// One listed claim's internal-use answer, as the per-claim traceability
-// route would have answered it: its HTTP status and either the client-safe
-// diagnostic or the error code and allowlisted conflict reason.
-function listedInternalUseDiagnostic(response) {
-  if (response?.ok === true) return { status: 200, data: response.data };
-  const status = Number.isInteger(response?.error?.status) ? response.error.status : 500;
-  const reason = response?.data?.traceability_conflict_reason;
-  return {
-    status,
-    error_code: typeof response?.error?.code === "string" ? response.error.code : "system_error",
-    traceability_conflict_reason: typeof reason === "string" ? reason : null,
-  };
-}
-
-/**
- * Owner direction 2026-11-16: an organization administrator's claims page
- * carries each claim's internal-use answer (strict internal eligibility and
- * provisional internal draft admission), evaluated server-side in one
- * transaction, instead of the browser reading the traceability route once
- * per claim. Only for an actor the organization diagnostic admits; every
- * other reader's items are unchanged. A failed evaluation is reported per
- * claim and never fails the claims read itself.
- */
-async function withInternalUseDiagnostics(items, organizationId, actorContext, dependencies) {
-  const auth = authorizeClaimTraceabilityRead(actorContext, organizationId, "internal");
-  if (!auth.ok || auth.organizationTraceabilityDiagnostic !== true) return items;
-  const claimIds = items.filter(needsInternalUseDiagnostic).map((item) => item.claimId);
-  const listDiagnostics = dependencies.listOrganizationInternalDraftDiagnostics || listOrganizationInternalDraftDiagnostics;
-  let batch;
-  try {
-    batch = await listDiagnostics({ organizationId, claimIds, actorContext }, dependencies);
-  } catch {
-    batch = buildKaiError("system_error");
-  }
-  const responses = new Map(batch?.ok === true && Array.isArray(batch.data?.items)
-    ? batch.data.items.map((item) => [item.claimId, item.response])
-    : []);
-  return items.map((item) => {
-    if (!needsInternalUseDiagnostic(item)) return { ...item, internalUseDiagnostic: null };
-    const response = responses.get(item.claimId) ?? (batch?.ok === true ? buildKaiError("system_error") : batch);
-    return { ...item, internalUseDiagnostic: listedInternalUseDiagnostic(response) };
-  });
-}
-
 export async function listClaimLibraryCandidates(input = {}, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -274,9 +221,8 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
     if (!candidate) return buildKaiError("system_error");
     candidates.push(candidate);
   }
-  const pageItems = candidates.slice(0, limit);
+  const items = candidates.slice(0, limit);
   const hasNext = candidates.length > limit;
-  const items = await withInternalUseDiagnostics(pageItems, organizationId, input.actorContext, dependencies);
 
   return {
     ok: true,

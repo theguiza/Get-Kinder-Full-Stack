@@ -5,6 +5,8 @@ import {
   claimLibraryCandidatesPath,
   claimProposalPath,
   claimTraceabilityPath,
+  claimInternalUsePath,
+  CLAIM_INTERNAL_USE_BATCH_MAX,
   clientImpactFactsPath,
   createEvidenceSummaryPath,
   createFreeImpactAssessmentPath,
@@ -39,6 +41,7 @@ import {
   claimUseDiagnosis,
   claimUsePresentation,
   listedClaimDiagnostics,
+  claimInternalUseBatches,
   claimNeedsGapPreparation,
   claimProposalResultMessage,
   claimProposalRunMessage,
@@ -292,15 +295,42 @@ export default function ClientEvidenceWorkflow({
   }, [organizationId, engagementId]);
 
   // Each claim's own P2-06 internal evaluation (the client-safe traceability
-  // diagnostic). The claims list carries it for every listed claim (owner
-  // direction 2026-11-16: one request per page, not one per claim). A claim
-  // is read on its own only on demand - "Check internal use", or explaining a
-  // refused draft - and that newer answer replaces the listed one. Cleared on
-  // every refresh and organization.
+  // diagnostic). Owner direction 2026-11-16: the claims list is shown at once,
+  // then each loaded page's answers come from ONE batch read (up to 25 claims,
+  // one read-only transaction) instead of one traceability read per claim. A
+  // claim is read on its own only on demand - "Check internal use", or
+  // explaining a refused draft - and that newer answer replaces the batch one.
+  // Cleared on every refresh and organization.
   const [diagnostics, setDiagnostics] = useState({ key: "", byClaim: new Map() });
   const diagnosticsKey = `${organizationId}:${refreshToken}`;
   const onDemandDiagnostics = useMemo(() => diagnostics.key === diagnosticsKey ? diagnostics.byClaim : null, [diagnostics, diagnosticsKey]);
-  const claimDiagnostics = useMemo(() => listedClaimDiagnostics(claims.items, onDemandDiagnostics), [claims.items, onDemandDiagnostics]);
+  const [batchAnswers, setBatchAnswers] = useState({ key: "", byClaim: new Map() });
+  const batchRequestedRef = useRef({ key: "", ids: new Set() });
+  useEffect(() => {
+    if (access.readClaimTraceabilityDiagnostics !== true || claims.status !== "success" || !isRouteUuid(organizationId)) return;
+    const key = diagnosticsKey;
+    if (batchRequestedRef.current.key !== key) batchRequestedRef.current = { key, ids: new Set() };
+    const requested = batchRequestedRef.current.ids;
+    const batches = claimInternalUseBatches(claims.items, requested, CLAIM_INTERNAL_USE_BATCH_MAX);
+    if (batches.length === 0) return;
+    for (const batch of batches) for (const claimId of batch) requested.add(claimId);
+    (async () => {
+      for (const batch of batches) {
+        const result = await getJson(claimInternalUsePath(organizationId, batch));
+        if (batchRequestedRef.current.key !== key) return;
+        const items = result.statusCode === 200 && result.body?.ok === true && Array.isArray(result.body.data?.items) ? result.body.data.items : [];
+        setBatchAnswers((current) => {
+          const byClaim = new Map(current.key === key ? current.byClaim : []);
+          for (const item of items) if (isRouteUuid(item?.claimId)) byClaim.set(item.claimId, item.internalUseDiagnostic);
+          return { key, byClaim };
+        });
+      }
+    })();
+    // diagnosticsKey changes with every refresh; requested ids are tracked per key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [access.readClaimTraceabilityDiagnostics, claims.status, claims.items, organizationId, diagnosticsKey]);
+  const currentBatchAnswers = batchAnswers.key === diagnosticsKey ? batchAnswers.byClaim : null;
+  const claimDiagnostics = useMemo(() => listedClaimDiagnostics(currentBatchAnswers, onDemandDiagnostics), [currentBatchAnswers, onDemandDiagnostics]);
   const diagnoseClaims = useCallback(async (claimIds) => {
     const key = diagnosticsKey;
     const reads = [];
