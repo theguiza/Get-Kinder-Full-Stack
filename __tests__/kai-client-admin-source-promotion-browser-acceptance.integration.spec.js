@@ -716,7 +716,7 @@ async function runBrowserAcceptance() {
       assert.equal(fileOf(admin, FILE.main).evidenceItemCount, 0);
       assert.ok(admin.body.data.summary.reasons.some((r) => r.reason === "source_promotion_ready" && r.fileCount === 1));
       const body = await adminPage.text();
-      assert.ok(body.includes("Your action is needed: review this file's source candidate and promote it as a source in Data Sources."));
+      assert.ok(body.includes("Your action is needed: review this file's source candidate and promote it as a source in Sources > Files that need a step."));
       assert.ok(body.includes("Review & promote source"));
       await contributorPage.goto("/impact-library");
       const contributor = await contributorPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
@@ -729,6 +729,59 @@ async function runBrowserAcceptance() {
       const stored = await storedAdminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       assert.deepEqual(currentOf(fileOf(stored, FILE.main)), ["source_review", "waiting_for_client", "client", "promote_source", "source_promotion_ready"]);
       results.pipeline_before = "PASS: promote_source for the binding-derived and the stored administrator; the contributor waits on the organization's administrator";
+    });
+
+    // Owner direction 2026-11-16: the announced next step is one click away.
+    // From the default Impact view and from the file's status row, "Take me to
+    // this step" opens Sources with this file's promotion panel open and in view.
+    await test("Take me to this step: from Impact and from the file's status, the administrator lands on this file's open promotion panel in Sources; nothing is written", async () => {
+      const PANEL = `[data-client-source-promotion-panel="${FILE.main}"]`;
+      const sourcesActive = () => adminPage.evaluate(`document.querySelector('[data-knowledge-studio-view="sources"]')?.hidden === false`);
+      const panelInView = () => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(PANEL)});
+        if (!el || el.offsetParent === null) return false;
+        const top = el.getBoundingClientRect().top;
+        return top > -2 && top < window.innerHeight; // sub-pixel scroll offsets
+      })()`);
+      const mark = adminPage.mark();
+      // From Impact (the default view), with several files waiting: the first
+      // file this administrator can act on is opened at its step, in view.
+      await adminPage.clickTab("Impact");
+      await adminPage.waitForText("file(s) in this Project need a step before their evidence can be used.");
+      await adminPage.clickButton("Take me to this step");
+      await adminPage.waitFor(async () => (await sourcesActive())
+        && Boolean(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-step-focused="true"]'))`)), "Sources at a focused step");
+      await adminPage.idle();
+      const landed = await adminPage.evaluate(`(() => {
+        const row = document.querySelector('[data-client-step-focused="true"]');
+        const id = row.dataset.clientPreparationFile;
+        const target = document.querySelector('[data-client-source-promotion-panel="' + id + '"]')
+          || document.querySelector('[data-client-sensitivity-review-panel="' + id + '"]') || row;
+        const top = target.getBoundingClientRect().top;
+        return { next: row.dataset.clientPreparationNext, inView: top > -2 && top < window.innerHeight };
+      })()`);
+      assert.equal(landed.inView, true, JSON.stringify(landed));
+      results.take_me_from_impact = landed.next;
+      for (const label of ["Close source review", "Close review"]) {
+        const open = await adminPage.evaluate(`[...document.querySelectorAll("button")].some((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(label)})`);
+        if (open) { await adminPage.clickButton(label); await adminPage.idle(); break; }
+      }
+
+      // The file's status row names where the step is and links to it.
+      const status = await adminPage.evaluate(`document.querySelector('[data-pipeline-file="${FILE.main}"]')?.innerText || ""`);
+      assert.ok(status.includes("Next action: Your action is needed: review this file's source candidate and promote it as a source in Sources > Files that need a step."), status);
+      await adminPage.evaluate(`window.scrollTo(0, document.body.scrollHeight)`);
+      await adminPage.pointerClick(`[data-pipeline-file="${FILE.main}"] [data-client-open-file-step="${FILE.main}"]`, "Take me to this step (status)");
+      await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(PANEL)}))`)), "the promotion panel again");
+      await adminPage.waitForText("Decision outcome");
+      await adminPage.idle();
+      assert.equal(await panelInView(), true, "scrolled up to the panel");
+      // The review status list offers the same step.
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-review-status] [data-client-open-file-step="${FILE.main}"]'))`), true);
+      await adminPage.clickButton("Close source review");
+      await adminPage.idle();
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET"), [], "navigation writes nothing");
+      results.take_me_to_step = "PASS: Impact attention opens Sources at the first actionable step in view; this file's status row opens its promotion panel in view; review status offers it; no write";
     });
 
     await test("negatives before promotion: other roles, revoked authority, another Project, and another organization are refused; nothing is written", async () => {

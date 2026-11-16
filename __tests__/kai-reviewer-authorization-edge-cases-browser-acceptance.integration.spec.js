@@ -797,7 +797,7 @@ async function runBrowserAcceptance() {
     await page.clickTab("Reviews");
     // The viewer is the organization's stored client_admin: its sensitivity
     // reviews and promotions are its own work (owner decision 2026-10-19).
-    await page.waitForText("Ready for you in Data Sources");
+    await page.waitForText("Ready for you in Sources > Files that need a step");
     return page.text();
   }
   async function openAdminKaiAccess(page) {
@@ -904,7 +904,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual([stageStatus(FILES.unrelated, "sensitivity_review"), byId[FILES.unrelated].currentStage], ["waiting_for_client", "sensitivity_review"],
         "an unrelated file is not marked reviewed");
       const body = await clientReviewsText(npoPage);
-      assert.ok(body.includes(`${NAMES.withBoth}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), body.slice(0, 3000));
+      assert.ok(body.includes(`${NAMES.withBoth}: Your action is needed: review this file's source candidate and promote it as a source in Sources > Files that need a step.`), body.slice(0, 3000));
       assert.ok(!body.includes(`${NAMES.withBoth}: Your action is needed: review this file's sensitivity & allowed use`));
       assert.ok(body.includes(`${NAMES.unrelated}: Your action is needed: review this file's sensitivity & allowed use`));
       assert.deepEqual(npoPage.exceptions, []);

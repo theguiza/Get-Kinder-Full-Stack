@@ -69,7 +69,9 @@ import {
 } from "./clientEvidenceWorkflowLogic.js";
 import {
   PIPELINE_STAGE_LABELS,
+  TAKE_ME_TO_STEP_LABEL,
   clientEvidencePipelinePath,
+  clientFileStepName,
   isPipelineSuccess,
   projectClientEvidencePipeline,
   stageStatusLabel,
@@ -101,6 +103,8 @@ const EVIDENCE_CURSOR = "nextAfterEvidenceItemId";
 // "Use for impact" claim proposal reads the whole Evidence Library (25 per
 // page) before proposing; beyond this it stops and says so.
 const CLAIM_PROPOSAL_EVIDENCE_PAGES = 200;
+// After "Take me to this step", the step is kept in view while Sources loads.
+const STEP_SCROLL_SETTLE_MS = 2500;
 const projectInternalUse = (data) => {
   const facts = projectClientImpactFacts(data);
   return facts ? { claimIds: new Set(facts.items.map((item) => item.claimId)), truncated: facts.truncated } : null;
@@ -240,6 +244,8 @@ export default function ClientEvidenceWorkflow({
   // the view selection and passes its own sections for each view.
   view = "sources", visitedViews = ["impact", "evidence", "sources", "drafts"], onSelectView, projectName = "",
   extraAttention = [], impactAfter = null, evidenceAfter = null, sourcesBefore = null, sourcesAfter = null, draftsAfter = null,
+  // "Take me to this step" from anywhere in the Studio: { intakeFileId | null, nonce }.
+  fileStepRequest = null,
 }) {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
@@ -470,6 +476,65 @@ export default function ClientEvidenceWorkflow({
     }, sourcePreparationContinuationFailureMessage);
   const pipelineReady = isPipelineSuccess(pipeline?.status) && Boolean(pipeline?.data);
   const preparationFiles = pipelineReady ? sourcePreparationFiles(pipeline.data, access) : [];
+
+  // Owner direction 2026-11-16: "Take me to this step" opens Sources at the
+  // file's own step - the promotion or sensitivity panel opened for that file,
+  // any other step's row highlighted - and scrolls it into view, so a file's
+  // announced next step is always one click away. With no file named, the
+  // first file this actor can act on (or the card) is shown.
+  const [stepFocus, setStepFocus] = useState(null);
+  const [focusedStepFileId, setFocusedStepFileId] = useState(null);
+  const [pendingStepScroll, setPendingStepScroll] = useState(null);
+  const handledStepRef = useRef(null);
+  const stepNonceRef = useRef(0);
+  const goToFileStep = (intakeFileId = null) => {
+    stepNonceRef.current += 1;
+    setStepFocus({ contextKey, intakeFileId, nonce: stepNonceRef.current });
+    onSelectView?.("sources");
+  };
+  useEffect(() => {
+    if (fileStepRequest) goToFileStep(fileStepRequest.intakeFileId ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileStepRequest]);
+  useEffect(() => { setFocusedStepFileId(null); }, [organizationId, engagementId]);
+  useEffect(() => {
+    if (!stepFocus || stepFocus.contextKey !== contextKey || handledStepRef.current === stepFocus.nonce) return;
+    if (view !== "sources" || !pipelineReady) return;
+    handledStepRef.current = stepFocus.nonce;
+    const target = stepFocus.intakeFileId
+      ? preparationFiles.find((file) => file.intakeFileId === stepFocus.intakeFileId)
+      : preparationFiles.find((file) => clientFileStepName(file)) || preparationFiles[0];
+    if (target?.currentStage === "source_review" && target.nextAction === "promote_source" && access.promoteSource) {
+      setPreparation({ contextKey, kind: "source", file: target });
+    } else if (target?.currentStage === "sensitivity_review" && access.reviewSensitivity) {
+      setPreparation({ contextKey, kind: "sensitivity", file: target });
+    }
+    setFocusedStepFileId(target ? target.intakeFileId : null);
+    setPendingStepScroll({ intakeFileId: target?.intakeFileId ?? null, nonce: stepFocus.nonce, until: Date.now() + STEP_SCROLL_SETTLE_MS });
+    // preparationFiles is derived from the pipeline read above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepFocus, contextKey, view, pipelineReady, pipeline?.data]);
+  // Scrolled after the render that shows the opened panel (or the row), and
+  // again whenever the Sources content above it settles (opening Sources
+  // re-reads the pipeline, which re-renders the cards) for a short time after
+  // the request, so the step is still in view once the page has loaded.
+  useEffect(() => {
+    if (!pendingStepScroll) return undefined;
+    const document = globalThis.document;
+    const { intakeFileId, until } = pendingStepScroll;
+    const element = (intakeFileId && (document?.querySelector(`[data-client-source-promotion-panel="${intakeFileId}"]`)
+      || document?.querySelector(`[data-client-sensitivity-review-panel="${intakeFileId}"]`)
+      || document?.querySelector(`[data-client-preparation-file="${intakeFileId}"]`)))
+      || document?.querySelector("[data-client-source-preparation]");
+    element?.scrollIntoView?.({ block: "start" });
+    const remaining = until - Date.now();
+    if (remaining <= 0) {
+      setPendingStepScroll(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setPendingStepScroll((current) => (current?.nonce === pendingStepScroll.nonce ? null : current)), remaining);
+    return () => clearTimeout(timer);
+  }, [pendingStepScroll, pipeline?.status, pipeline?.data, sources.status, openPreparation]);
   const reviewedFiles = pipelineReady ? processingPermissionReviewFiles(pipeline.data, access) : [];
   // A corrected decision refreshes the pipeline and the reads; it never runs
   // a processing step (Use for impact stays the person's separate action).
@@ -663,7 +728,7 @@ export default function ClientEvidenceWorkflow({
     attention.push({
       key: "source_preparation",
       text: `${preparationFiles.length} file(s) in this Project need a step before their evidence can be used.`,
-      actionLabel: "Open Sources", onAction: () => onSelectView?.("sources"),
+      actionLabel: TAKE_ME_TO_STEP_LABEL, onAction: () => goToFileStep(),
     });
   }
   if (access.proposeClaim && unclaimedCount > 0) {
@@ -899,8 +964,9 @@ export default function ClientEvidenceWorkflow({
               {preparationFiles.map((file) => {
                 const current = file.stages.find((entry) => entry.key === file.currentStage);
                 return (
-                  <li key={file.intakeFileId} className="list-group-item small" data-client-preparation-file={file.intakeFileId}
-                    data-client-preparation-next={file.nextAction}>
+                  <li key={file.intakeFileId} className={`list-group-item small${focusedStepFileId === file.intakeFileId ? " border-primary border-2" : ""}`}
+                    data-client-preparation-file={file.intakeFileId} data-client-preparation-next={file.nextAction}
+                    data-client-step-focused={focusedStepFileId === file.intakeFileId ? "true" : undefined}>
                     <div className="fw-semibold">{file.safeFilename}</div>
                     <div className="text-muted">
                       {PIPELINE_STAGE_LABELS[file.currentStage]}: {current ? stageStatusLabel(current) : "Unknown"}

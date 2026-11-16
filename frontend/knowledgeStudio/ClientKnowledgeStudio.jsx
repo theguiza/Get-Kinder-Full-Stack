@@ -13,6 +13,8 @@ import useRevalidateOnReturn from "../useRevalidateOnReturn.js";
 import {
   GET_KINDER_STAGE_DESCRIPTIONS,
   PIPELINE_STAGE_LABELS,
+  TAKE_ME_TO_STEP_LABEL,
+  clientFileStepName,
   evidenceTabView,
   getKinderReviewAccessText,
   nextActionText,
@@ -185,6 +187,14 @@ export default function ClientKnowledgeStudio({
   }, Boolean(organizationId && engagementId));
   const canContribute = capabilities?.intakeContribution === true;
   const workflowAccess = clientEvidenceWorkflowAccess(capabilities);
+  // "Take me to this step" (owner direction 2026-11-16): the evidence
+  // workflow opens Sources at the named file's own step. Offered only where
+  // that workflow, which holds the step's controls, is shown.
+  const [fileStepRequest, setFileStepRequest] = useState(null);
+  const openFileStep = workflowAccess.visible && organizationId
+    ? (intakeFileId = null) => setFileStepRequest((current) => ({ intakeFileId, nonce: (current?.nonce || 0) + 1 }))
+    : null;
+  useEffect(() => { setFileStepRequest(null); }, [organizationId, engagementId]);
   const canReviewFollowups = capabilities?.clientFollowupReview === true;
   const factsStatus = facts?.status || "loading";
   const factItems = Array.isArray(facts?.items) ? facts.items : [];
@@ -215,6 +225,7 @@ export default function ClientKnowledgeStudio({
       canReviewFollowups={canReviewFollowups}
       canContribute={canContribute}
       onRefresh={refreshPipeline}
+      onOpenFileStep={openFileStep}
     />
   ) : null;
   const uploadSection = organizationId ? (
@@ -250,7 +261,7 @@ export default function ClientKnowledgeStudio({
           safeFilename: file.safeFilename,
         })}
         organizationId={organizationId}
-        onOpenDataSources={null}
+        onOpenFileStep={openFileStep}
       />
       {openSensitivityReview ? (
         <ClientSensitivityReviewPanel
@@ -329,6 +340,7 @@ export default function ClientKnowledgeStudio({
           sourcesBefore={sourcesBefore}
           sourcesAfter={sourcesAfter}
           draftsAfter={draftsAfter}
+          fileStepRequest={fileStepRequest}
         />
       ) : (
         <>
@@ -483,7 +495,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   );
 }
 
-function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview, onOpenDataSources }) {
+function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview, onOpenFileStep }) {
   if (!view) {
     return (
       <>
@@ -513,7 +525,7 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
       ) : null}
       {view.sourceWork.length > 0 ? (
         <div className="mb-2" data-reviews-source-work="">
-          <div className="fw-semibold">Ready for you in Data Sources</div>
+          <div className="fw-semibold">Ready for you in Sources &gt; Files that need a step</div>
           <ul className="mb-1">
             {view.sourceWork.map((file) => (
               <li key={file.intakeFileId}>
@@ -531,12 +543,18 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
                     </button>
                   </div>
                 ) : null}
+                {typeof onOpenFileStep === "function" && clientFileStepName(file) && !(canReviewSensitivity && file.nextAction === "review_sensitivity") ? (
+                  <div>
+                    <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-file-step={file.intakeFileId}
+                      aria-label={`${TAKE_ME_TO_STEP_LABEL}: ${clientFileStepName(file)}, ${file.safeFilename}`}
+                      onClick={() => onOpenFileStep(file.intakeFileId)}>
+                      {TAKE_ME_TO_STEP_LABEL}
+                    </button>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
-          {onOpenDataSources ? (
-            <button type="button" className="btn btn-sm btn-outline-primary" onClick={onOpenDataSources}>Open Data Sources</button>
-          ) : null}
         </div>
       ) : null}
       {Array.isArray(view.waitingForAdministrator) && view.waitingForAdministrator.length > 0 ? (
@@ -552,7 +570,7 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
               );
             })}
           </ul>
-          <div className="text-muted">Your organization&rsquo;s administrator completes these steps in Data Sources. No action is required from you.</div>
+          <div className="text-muted">Your organization&rsquo;s administrator completes these steps in Sources &gt; Files that need a step. No action is required from you.</div>
         </div>
       ) : null}
       {view.waitingForGetKinder.length > 0 ? (

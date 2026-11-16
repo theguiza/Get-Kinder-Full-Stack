@@ -195,7 +195,7 @@ test("frontend: the propose_claims file is offered Use for impact, listed as sou
   assert.deepEqual(view.sourceWork.map((entry) => entry.intakeFileId), [fileId(1)]);
   assert.deepEqual(view.waitingForGetKinder, []);
   assert.match(nextActionText(file), /^Your action is needed: evidence from this file has no proposed claims yet/);
-  assert.match(pipelineReasonMessage("claim_proposal_ready", 1), /Propose claims from it in Data Sources/);
+  assert.match(pipelineReasonMessage("claim_proposal_ready", 1), /Propose claims from it in Sources > Files that need a step/);
   assert.ok(USE_FOR_IMPACT_MAX_STEPS >= 5, "continue, extract, and propose fit in one run");
 });
 

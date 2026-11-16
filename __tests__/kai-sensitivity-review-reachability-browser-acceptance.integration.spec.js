@@ -567,7 +567,7 @@ async function runBrowserAcceptance() {
     await page.waitFor(async () => Boolean(await page.pipelineFileText(FILE_QUEUE)), "pipeline entry");
     // Owner decision 2026-10-19: a file may wait on Get Kinder, on this actor,
     // or on the organization's administrator; wait for the card itself.
-    await page.waitFor(async () => /Waiting for Get Kinder review|Waiting for your organization\u2019s administrator|Ready for you in Data Sources|No action is currently required from you\./
+    await page.waitFor(async () => /Waiting for Get Kinder review|Waiting for your organization\u2019s administrator|Ready for you in Sources > Files that need a step|No action is currently required from you\./
       .test(await page.text()), "the Reviews card");
     await page.idle();
     return page.text();
@@ -605,7 +605,7 @@ async function runBrowserAcceptance() {
       const clientCard = await clientPage.cardText("Review status");
       assert.ok(clientCard.includes("No action is currently required from you."), "the ordinary client's Reviews card keeps the no-action explanation");
       assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"), "no Get Kinder review work is assigned to an ordinary client");
-      assert.ok(body.includes("Your organization\u2019s administrator completes these steps in Data Sources. No action is required from you."), "who does it is explained");
+      assert.ok(body.includes("Your organization\u2019s administrator completes these steps in Sources > Files that need a step. No action is required from you."), "who does it is explained");
       assert.ok(body.includes("Your account does not have sensitivity-review access for this organization"), "whether this user may act");
       assert.ok(!body.includes("Evidence and Impact Fact reviews are completed by Get Kinder reviewers."), "the old Evidence/Impact-Fact-only explanation is gone");
       assertClientBoundary(clientPage, "case 1", body);
@@ -880,10 +880,10 @@ async function runBrowserAcceptance() {
       // Owner decision 2026-10-19: the four sensitivity reviews and the promotion
       // are this administrator's own work, counted together.
       assert.ok(reviewsCard.includes("5 files in this project are ready for sensitivity review, source preparation, source promotion, or evidence extraction, "
-        + "which your role can complete in Data Sources."), "it counts only the actionable files");
+        + "which your role can complete in Sources > Files that need a step."), "it counts only the actionable files");
       assert.ok(!reviewsCard.includes("Get Kinder sent follow-up questions"), "no client follow-up work is claimed");
       // Owner decision 2026-10-18: FILE_QUEUE's promotable candidate is this administrator's source work.
-      assert.ok(reviewsCard.includes("Ready for you in Data Sources"), "the administrator's source work is listed");
+      assert.ok(reviewsCard.includes("Ready for you in Sources > Files that need a step"), "the administrator's source work is listed");
       assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
       const since = mixedPage.requestsSince(mark);
       for (const r of since) {
@@ -995,7 +995,7 @@ async function runBrowserAcceptance() {
       // Leave and come back: the existing item is reused, never duplicated.
       await mixedPage.clickTab("Impact");
       await mixedPage.clickTab("Sources");
-      await mixedPage.waitForText("Ready for you in Data Sources");
+      await mixedPage.waitForText("Ready for you in Sources > Files that need a step");
       await mixedPage.idle();
       assert.equal(await mixedPage.reviewPanelFileId(), null, "leaving Sources closes the panel");
       mark = mixedPage.mark();

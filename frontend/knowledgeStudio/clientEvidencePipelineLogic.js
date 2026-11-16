@@ -271,22 +271,22 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
         ? "Contact Get Kinder for help with this file's security check."
         : "Contact Get Kinder. Processing cannot be retried from here.";
     case "promote_source":
-      return "Your action is needed: review this file's source candidate and promote it as a source in Data Sources. Evidence can only be created from a promoted source.";
+      return "Your action is needed: review this file's source candidate and promote it as a source in Sources > Files that need a step. Evidence can only be created from a promoted source.";
     case "extract_evidence":
-      return "Your action is needed: this file's source is promoted. Extract evidence from it in Data Sources.";
+      return "Your action is needed: this file's source is promoted. Extract evidence from it in Sources > Files that need a step.";
     case "continue_source_preparation":
-      return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; the review is not changed.";
+      return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Sources > Files that need a step to create it; the review is not changed.";
     case "propose_claims":
-      return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Data Sources proposes them "
+      return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Sources > Files that need a step proposes them "
         + "(structural column facts are skipped); Get Kinder then reviews each claim with its evidence.";
     case "review_sensitivity":
-      return "Your action is needed: review this file's sensitivity & allowed use in Data Sources. Your recorded decision governs how its content may be used.";
+      return "Your action is needed: review this file's sensitivity & allowed use in Sources > Files that need a step. Your recorded decision governs how its content may be used.";
     case "retry_security_check":
       return canContribute
         ? "Check security again when the scanner is available. Nothing is processed until the check succeeds."
         : "A client admin in your organization can check this file's security again. Nothing is processed until the check succeeds.";
     case "ask_organization_administrator":
-      return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Data Sources.`;
+      return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Sources > Files that need a step.`;
     default:
       if (file.reason === "no_extractable_evidence") {
         return "No action required from you. This file's source is promoted, but KAI cannot create evidence from it: "
@@ -313,20 +313,20 @@ const REASON_MESSAGES = Object.freeze({
   failed: (n) => `${pluralFiles(n)} could not be processed. See Files for details.`,
   processing: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} still being processed by KAI.`,
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
-  sensitivity_review_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "needs" : "need"} your sensitivity & allowed-use review in Data Sources before ${n === 1 ? "it" : "they"} can become a source.`,
-  organization_administrator_action_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} waiting for your organization's administrator to prepare ${n === 1 ? "it" : "them"} in Data Sources.`,
+  sensitivity_review_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "needs" : "need"} your sensitivity & allowed-use review in Sources > Files that need a step before ${n === 1 ? "it" : "they"} can become a source.`,
+  organization_administrator_action_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} waiting for your organization's administrator to prepare ${n === 1 ? "it" : "them"} in Sources > Files that need a step.`,
   allowed_use_not_allowed: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} a recorded allowed use of not_allowed, so ${n === 1 ? "it is" : "they are"} not used for evidence, claims, or drafts.`,
   waiting_for_source_promotion: (n) => `${pluralFiles(n)} passed the Get Kinder sensitivity review and ${n === 1 ? "is" : "are"} waiting for Get Kinder to review and promote ${n === 1 ? "it" : "them"} as a source. Evidence can only be created from a promoted source.`,
-  source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Data Sources. Evidence can only be created from a promoted source.`,
-  source_preparation_ready: (n) => `${pluralFiles(n)} passed the sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Data Sources; evidence can only be created from a promoted source.`,
+  source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Sources > Files that need a step. Evidence can only be created from a promoted source.`,
+  source_preparation_ready: (n) => `${pluralFiles(n)} passed the sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Sources > Files that need a step; evidence can only be created from a promoted source.`,
   source_candidate_missing: (n) => `${pluralFiles(n)} passed the sensitivity review, but no source candidate was created, so ${n === 1 ? "it" : "they"} cannot be promoted yet. Contact Get Kinder.`,
   source_promotion_blocked: (n) => `${pluralFiles(n)} ${n === 1 ? "has a source candidate that" : "have source candidates that"} cannot be promoted in ${n === 1 ? "its" : "their"} current state. Contact Get Kinder.`,
-  evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Data Sources.`,
+  evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Sources > Files that need a step.`,
   evidence_extraction_pending: (n) => `The source from ${pluralFiles(n)} has been promoted. Get Kinder has not yet created evidence from it.`,
   no_extractable_evidence: (n) => `The source from ${pluralFiles(n)} has been promoted, but KAI cannot create evidence from ${n === 1 ? "it" : "them"}: ${n === 1 ? "it is" : "they are"} not a PDF or plain-text document and ${n === 1 ? "has" : "have"} no data fields.`,
   document_evidence_not_enabled: (n) => `The source from ${pluralFiles(n)} has been promoted. Evidence from document text is not yet available in this KAI installation, so no evidence can be created from ${n === 1 ? "it" : "them"} yet.`,
   no_supportable_statements: (n) => `The source from ${pluralFiles(n)} has been promoted. KAI read ${n === 1 ? "its" : "their"} text and found no complete statement it could cite as evidence, so no evidence was created.`,
-  claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Data Sources (Use for impact); Get Kinder then reviews each claim with its evidence.`,
+  claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Sources > Files that need a step (Use for impact); Get Kinder then reviews each claim with its evidence.`,
   evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
   impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
   not_currently_eligible: (n) => `Evidence from ${pluralFiles(n)} was reviewed but is not currently usable as an Impact Fact. Contact Get Kinder for details.`,
@@ -437,7 +437,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "source_work",
       heading: "Your action is needed",
-      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for sensitivity review, source preparation, source promotion, or evidence extraction, which your role can complete in Data Sources.`,
+      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for sensitivity review, source preparation, source promotion, or evidence extraction, which your role can complete in Sources > Files that need a step.`,
     });
   }
   if (clientCount === 0 && sensitivityCount === 0 && sourceCount === 0) {
@@ -488,3 +488,19 @@ const CLIENT_SOURCE_WORK_ACTIONS = new Set(["review_sensitivity", "promote_sourc
 export function isClientSourceWork(file) {
   return file?.responsibleParty === "client" && CLIENT_SOURCE_WORK_ACTIONS.has(file.nextAction);
 }
+
+// The step a file's own row in Sources > "Files that need a step" offers
+// this actor, named as that row's button names it. Owner direction
+// 2026-11-16: wherever a file's next step is announced, "Take me to this
+// step" opens Sources at that file's step, so no one has to find it.
+const FILE_STEP_NAMES = Object.freeze({
+  review_sensitivity: "Review sensitivity & allowed use",
+  promote_source: "Review & promote source",
+  continue_source_preparation: "Continue source preparation",
+  extract_evidence: "Use for impact",
+  propose_claims: "Use for impact",
+});
+export function clientFileStepName(file) {
+  return isClientSourceWork(file) ? FILE_STEP_NAMES[file.nextAction] : null;
+}
+export const TAKE_ME_TO_STEP_LABEL = "Take me to this step";

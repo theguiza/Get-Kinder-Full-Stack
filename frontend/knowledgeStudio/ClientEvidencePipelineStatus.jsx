@@ -5,6 +5,8 @@ import {
   PIPELINE_FAILURE_MESSAGES,
   PIPELINE_REQUEST_STATUS,
   PIPELINE_STAGE_LABELS,
+  TAKE_ME_TO_STEP_LABEL,
+  clientFileStepName,
   nextActionText,
   securityCheckRetryResultText,
   stageStatusLabel,
@@ -46,7 +48,7 @@ function primaryStatusText(file) {
   return `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}`;
 }
 
-export default function ClientEvidencePipelineStatus({ organizationId, request, canReviewFollowups = false, canContribute = false, onRefresh }) {
+export default function ClientEvidencePipelineStatus({ organizationId, request, canReviewFollowups = false, canContribute = false, onRefresh, onOpenFileStep = null }) {
   const { status, data } = request;
   const [retrying, setRetrying] = useState(null);
   const [retryResults, setRetryResults] = useState({});
@@ -118,6 +120,13 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
                 <span className="fw-semibold">Next action: </span>
                 {nextActionText(file, { canReviewFollowups, canContribute })}
               </div>
+              {typeof onOpenFileStep === "function" && clientFileStepName(file) ? (
+                <button type="button" className="btn btn-sm btn-primary mt-1" data-client-open-file-step={file.intakeFileId}
+                  aria-label={`${TAKE_ME_TO_STEP_LABEL}: ${clientFileStepName(file)}, ${file.safeFilename}`}
+                  onClick={() => onOpenFileStep(file.intakeFileId)}>
+                  {TAKE_ME_TO_STEP_LABEL}
+                </button>
+              ) : null}
               {file.nextAction === "answer_client_followups" && canReviewFollowups ? (
                 <a className="btn btn-sm btn-outline-primary mt-1" href={clientFollowupReviewHref(organizationId)}>
                   Answer follow-up questions

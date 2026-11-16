@@ -457,7 +457,7 @@ test("UI logic: vocabulary, guidance, Reviews source work, and the continuation 
   assert.ok(PIPELINE_NEXT_ACTIONS.includes("continue_source_preparation"));
   assert.ok(PIPELINE_REASONS.includes("source_preparation_ready"));
   const file = { currentStage: "source_review", currentStatus: "waiting_for_client", responsibleParty: "client", nextAction: "continue_source_preparation", reason: "source_preparation_ready" };
-  assert.match(nextActionText(file), /Continue source preparation in Data Sources/);
+  assert.match(nextActionText(file), /Continue source preparation in Sources > Files that need a step/);
   assert.match(sourcePreparationGuidance(file, { promoteSource: true }), /Continue source preparation/);
   assert.match(pipelineReasonMessage("source_preparation_ready", 1), /Continue source preparation/);
   assert.equal(isClientSourceWork(file), true);

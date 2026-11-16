@@ -705,16 +705,16 @@ async function runBrowserAcceptance() {
       }
       // The viewer is the organization's (stored) client_admin: the sensitivity
       // review is its own step (owner decisions 2026-10-12 and 2026-10-19).
-      assert.match(entry, /Next action: Your action is needed: review this file's sensitivity & allowed use in Data Sources\./);
+      assert.match(entry, /Next action: Your action is needed: review this file's sensitivity & allowed use in Sources > Files that need a step\./);
       // The Files persistence surface is still present alongside the status.
       await page.waitForText(NAMES.alpha);
       const body = await page.text();
       assertClientBoundary(page, "case 1", body);
       await page.clickTab("Reviews");
-      await page.waitForText("Ready for you in Data Sources");
+      await page.waitForText("Ready for you in Sources > Files that need a step");
       const reviews = await page.text();
       assert.ok(!reviews.includes("No action is currently required from you."), "the administrator's own review is pending");
-      assert.ok(reviews.includes(`${NAMES.alpha}: Your action is needed: review this file's sensitivity & allowed use in Data Sources.`));
+      assert.ok(reviews.includes(`${NAMES.alpha}: Your action is needed: review this file's sensitivity & allowed use in Sources > Files that need a step.`));
       assertClientBoundary(page, "case 4", reviews);
       assert.deepEqual(await governedCounts(), before, "browsing wrote nothing");
       results.case1 = results.case4 = "PASS";
@@ -723,7 +723,7 @@ async function runBrowserAcceptance() {
     await test("case 2: with no reviewed Impact Fact, Evidence explains the upstream state instead of '0 shown / No reviewed evidence yet'", async () => {
       const mark = page.mark();
       await page.clickTab("Evidence");
-      await page.waitForText("1 file needs your sensitivity & allowed-use review in Data Sources before it can become a source.");
+      await page.waitForText("1 file needs your sensitivity & allowed-use review in Sources > Files that need a step before it can become a source.");
       await pipelineRead(page, PROJECT.alpha, mark, "case 2");
       const body = await page.text();
       assert.ok(body.includes("No usable Impact Facts for this Project yet. Here is where its files are:"));
@@ -879,12 +879,12 @@ async function runBrowserAcceptance() {
       await page.selectProject(PROJECT.alpha);
       // A client_admin holds P2-01 extraction itself (owner decision
       // 2026-10-18), so the promoted source is its own next step.
-      await page.waitForText("The source from 1 file has been promoted. Extract evidence from it in Data Sources.");
+      await page.waitForText("The source from 1 file has been promoted. Extract evidence from it in Sources > Files that need a step.");
       await extractEvidence();
       await page.clickTab("Files");
       await page.clickTab("Evidence");
       await page.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
-      assert.ok(!(await page.text()).includes("Extract evidence from it in Data Sources"));
+      assert.ok(!(await page.text()).includes("Extract evidence from it in Sources > Files that need a step"));
     });
 
     let eligibleStatement = "";

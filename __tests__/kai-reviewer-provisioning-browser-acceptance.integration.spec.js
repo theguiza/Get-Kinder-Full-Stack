@@ -904,11 +904,11 @@ async function runBrowserAcceptance() {
       await npoAdminPage.clickTab("Reviews");
       // Owner decision 2026-10-19: the stored administrator's remaining
       // sensitivity review and the promotion are its own work in Data Sources.
-      await npoAdminPage.waitForText("Ready for you in Data Sources");
+      await npoAdminPage.waitForText("Ready for you in Sources > Files that need a step");
       const body = await npoAdminPage.text();
       assert.ok(body.includes(`${NAMES.afterRevoke}: Your action is needed: review this file's sensitivity & allowed use`), "the unreviewed file is the administrator's step");
       // The stored client_admin now holds the P1-08 step itself (owner decision 2026-10-19).
-      assert.ok(body.includes(`${NAMES.reviewer}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), "the client sees the next stage");
+      assert.ok(body.includes(`${NAMES.reviewer}: Your action is needed: review this file's source candidate and promote it as a source in Sources > Files that need a step.`), "the client sees the next stage");
       assert.ok(!body.includes(`${NAMES.reviewer}: Sensitivity review (Waiting for Get Kinder)`));
       assert.ok(!body.includes("reviewed_personal_data_status"), "no decision values reach the client");
       results.B10_projection = "PASS: client pipeline shows sensitivity review complete, Source review the organization administrator's step";

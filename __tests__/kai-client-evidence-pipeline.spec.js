@@ -993,6 +993,23 @@ test("frontend: source work is listed for the actor and never counted as client 
   const missing = data.files.find((f) => f.intakeFileId === fileId(3));
   assert.match(nextActionText(promote), /^Your action is needed: review this file's source candidate and promote it/);
   assert.match(nextActionText(missing), /no source candidate was created/);
-  assert.match(pipelineReasonMessage("source_promotion_ready", 2), /you can review and promote in Data Sources/);
-  assert.match(pipelineReasonMessage("evidence_extraction_ready", 1), /Extract evidence from it in Data Sources/);
+  assert.match(pipelineReasonMessage("source_promotion_ready", 2), /you can review and promote in Sources > Files that need a step/);
+  assert.match(pipelineReasonMessage("evidence_extraction_ready", 1), /Extract evidence from it in Sources > Files that need a step/);
+});
+
+test("Take me to this step is offered for exactly the steps this actor takes in Sources > Files that need a step, named as that row names them", async () => {
+  const { clientFileStepName, TAKE_ME_TO_STEP_LABEL } = await import("../frontend/knowledgeStudio/clientEvidencePipelineLogic.js");
+  const file = (nextAction, responsibleParty = "client") => ({ nextAction, responsibleParty });
+  assert.equal(TAKE_ME_TO_STEP_LABEL, "Take me to this step");
+  assert.equal(clientFileStepName(file("promote_source")), "Review & promote source");
+  assert.equal(clientFileStepName(file("review_sensitivity")), "Review sensitivity & allowed use");
+  assert.equal(clientFileStepName(file("continue_source_preparation")), "Continue source preparation");
+  assert.equal(clientFileStepName(file("extract_evidence")), "Use for impact");
+  assert.equal(clientFileStepName(file("propose_claims")), "Use for impact");
+  for (const notMine of [file("ask_organization_administrator"), file("none_waiting_for_get_kinder", "get_kinder"),
+    file("promote_source", "get_kinder"), file("answer_client_followups"), file("upload_new_file"), null]) {
+    assert.equal(clientFileStepName(notMine), null, JSON.stringify(notMine));
+  }
+  // The guidance names where the step is.
+  assert.match(nextActionText({ ...file("promote_source"), currentStage: "source_review", stages: [] }), /promote it as a source in Sources > Files that need a step\./);
 });

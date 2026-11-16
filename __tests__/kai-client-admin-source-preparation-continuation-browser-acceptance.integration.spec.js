@@ -761,7 +761,7 @@ async function runBrowserAcceptance() {
         assert.equal(await has(adminPage, `[data-client-open-source-review="${FILE[key]}"]`), false, key);
       }
       const text = await adminPage.text();
-      assert.ok(text.includes("Continue source preparation in Data Sources to create it; the review is not changed."));
+      assert.ok(text.includes("Continue source preparation in Sources > Files that need a step to create it; the review is not changed."));
       assert.ok(text.includes("This file's recorded allowed use is not_allowed, so it is not used as a source"), "the actual reason stays visible");
       results.ui_offer = "PASS";
     });
