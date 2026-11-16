@@ -989,12 +989,35 @@ async function runBrowserAcceptance() {
     await test("pipeline after promotion and extraction, and P2-01 reuse of the governed source", async () => {
       const after = await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       const main = fileOf(after, FILE.main);
-      assert.deepEqual(currentOf(main), ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]);
+      // Owner direction 2026-11-16: a promoted spreadsheet whose evidence is
+      // only its column facts is the administrator's Count records step - not
+      // a Get Kinder evidence-review wait (production 04_surveys_referrals_and_targets.xlsx).
+      assert.deepEqual(currentOf(main), ["evidence_review", "waiting_for_client", "client", "count_records", "source_measurement_ready"]);
+      assert.equal(main.currentSourceVersionId, ids.sourceVersionId);
       assert.equal(main.evidenceItemCount, 2);
       assert.deepEqual(main.stages.slice(5, 8).map((stage) => [stage.key, stage.status]),
         [["sensitivity_review", "complete"], ["source_review", "complete"], ["evidence_extraction", "complete"]]);
       await adminPage.waitForText(ids.sourceCode);
-      await adminPage.waitFor(async () => !(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-preparation-file="${FILE.main}"]'))`)), "main file leaves Source preparation");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(
+        `document.querySelector('[data-client-preparation-file="${FILE.main}"]')?.dataset.clientPreparationNext`)) === "count_records", "the file's next step is Count records");
+      const statusText = await adminPage.evaluate(`document.querySelector('[data-pipeline-file="${FILE.main}"]')?.innerText || ""`);
+      assert.ok(statusText.includes("Use Count records on its source (Sources > Data Sources)"), statusText);
+      assert.ok(!statusText.includes("Waiting for Get Kinder"), statusText);
+      // "Take me to this step" opens Count records on this file's source version, in view; nothing is written.
+      const MEASURE = `[data-client-source-measurement="${ids.sourceVersionId}"]`;
+      const stepMark = adminPage.mark();
+      await adminPage.evaluate(`window.scrollTo(0, document.body.scrollHeight)`);
+      await adminPage.pointerClick(`[data-pipeline-file="${FILE.main}"] [data-client-open-file-step="${FILE.main}"]`, "Take me to this step (Count records)");
+      await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(MEASURE)}))`)), "Count records opened");
+      await adminPage.waitForText("Count the records in this source");
+      await adminPage.idle();
+      assert.equal(await adminPage.evaluate(`(() => {
+        const top = document.querySelector('[data-client-source-version="${ids.sourceVersionId}"]').getBoundingClientRect().top;
+        return top > -2 && top < window.innerHeight;
+      })()`), true, "Count records is in view");
+      assert.equal(adminPage.requestsSince(stepMark).filter((r) => r.method !== "GET").length, 0, "opening Count records writes nothing");
+      await adminPage.clickIn(`${MEASURE} button`, "Close Count records");
+      await adminPage.idle();
       // The promoted source is usable by the existing P2-01 path: its extraction replays.
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
@@ -1008,7 +1031,7 @@ async function runBrowserAcceptance() {
       const replay = await adminPage.api("POST", decisionPath(ORG_X, ids.mainCandidate), PROMOTE);
       assert.deepEqual([replay.status, replay.body.data.replayed, replay.body.data.evidence_extraction_handoff.status], [200, true, "replayed"]);
       assert.deepEqual(await counts(ORG_X), before);
-      results.pipeline_after = "PASS: evidence_review with 2 evidence items; P2-01 replay; promotion replay zero-write";
+      results.pipeline_after = "PASS: count_records (the administrator's step) with 2 column-fact evidence items; Take me to this step opens Count records in view; P2-01 replay; promotion replay zero-write";
     });
 
     await test("reload: the promoted source survives a page reload, the file leaves Source preparation, and Count records opens for its current version", async () => {

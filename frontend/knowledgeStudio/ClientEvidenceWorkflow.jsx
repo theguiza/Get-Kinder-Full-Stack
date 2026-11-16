@@ -492,6 +492,15 @@ export default function ClientEvidenceWorkflow({
     setStepFocus({ contextKey, intakeFileId, nonce: stepNonceRef.current });
     onSelectView?.("sources");
   };
+  // Count records for a promoted spreadsheet, on the file's current source
+  // version (in the Data Sources card), scrolled into view.
+  const openFileMeasurement = (file, nonce = null) => {
+    if (!isRouteUuid(file?.currentSourceVersionId)) return;
+    setMeasuring({ contextKey, sourceVersionId: file.currentSourceVersionId });
+    stepNonceRef.current += 1;
+    setPendingStepScroll({ sourceVersionId: file.currentSourceVersionId, intakeFileId: null,
+      nonce: nonce ?? stepNonceRef.current, until: Date.now() + STEP_SCROLL_SETTLE_MS });
+  };
   useEffect(() => {
     if (fileStepRequest) goToFileStep(fileStepRequest.intakeFileId ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -504,6 +513,11 @@ export default function ClientEvidenceWorkflow({
     const target = stepFocus.intakeFileId
       ? preparationFiles.find((file) => file.intakeFileId === stepFocus.intakeFileId)
       : preparationFiles.find((file) => clientFileStepName(file)) || preparationFiles[0];
+    if (target?.nextAction === "count_records" && access.recordSourceMeasurement && isRouteUuid(target.currentSourceVersionId)) {
+      setFocusedStepFileId(target.intakeFileId);
+      openFileMeasurement(target, stepFocus.nonce);
+      return;
+    }
     if (target?.currentStage === "source_review" && target.nextAction === "promote_source" && access.promoteSource) {
       setPreparation({ contextKey, kind: "source", file: target });
     } else if (target?.currentStage === "sensitivity_review" && access.reviewSensitivity) {
@@ -521,8 +535,8 @@ export default function ClientEvidenceWorkflow({
   useEffect(() => {
     if (!pendingStepScroll) return undefined;
     const document = globalThis.document;
-    const { intakeFileId, until } = pendingStepScroll;
-    const element = (intakeFileId && (document?.querySelector(`[data-client-source-promotion-panel="${intakeFileId}"]`)
+    const { intakeFileId, sourceVersionId, until } = pendingStepScroll;
+    const element = (sourceVersionId && document?.querySelector(`[data-client-source-version="${sourceVersionId}"]`)) || (intakeFileId && (document?.querySelector(`[data-client-source-promotion-panel="${intakeFileId}"]`)
       || document?.querySelector(`[data-client-sensitivity-review-panel="${intakeFileId}"]`)
       || document?.querySelector(`[data-client-preparation-file="${intakeFileId}"]`)))
       || document?.querySelector("[data-client-source-preparation]");
@@ -645,6 +659,13 @@ export default function ClientEvidenceWorkflow({
         if (next.kind === "review_sensitivity" || next.kind === "confirm_promotion") {
           setPreparation({ contextKey, kind: next.kind === "review_sensitivity" ? "sensitivity" : "source", file });
           setNotice({ kind: "info", text: USE_FOR_IMPACT_MESSAGES[next.kind] });
+          return;
+        }
+        if (next.kind === "measure") {
+          setImpactFlow(null);
+          openFileMeasurement(file);
+          setNotice({ kind: "info", text: USE_FOR_IMPACT_MESSAGES.measure });
+          refresh();
           return;
         }
         if (next.kind === "done" || next.kind === "blocked") {
@@ -976,6 +997,12 @@ export default function ClientEvidenceWorkflow({
                       <button type="button" className="btn btn-sm btn-primary mt-1 me-2" data-client-use-for-impact={file.intakeFileId}
                         disabled={Boolean(pending)} onClick={() => runUseForImpact(file)}>
                         {pending === `impact:${file.intakeFileId}` ? "Working..." : "Use for impact"}
+                      </button>
+                    ) : null}
+                    {file.nextAction === "count_records" && access.recordSourceMeasurement && isRouteUuid(file.currentSourceVersionId) ? (
+                      <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-file-measurement={file.intakeFileId}
+                        onClick={() => openFileMeasurement(file)}>
+                        Count records
                       </button>
                     ) : null}
                     {file.currentStage === "sensitivity_review" && access.reviewSensitivity ? (

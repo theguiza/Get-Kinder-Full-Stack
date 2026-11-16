@@ -58,6 +58,7 @@ export const PIPELINE_NEXT_ACTIONS = Object.freeze([
   "ask_organization_administrator",
   "retry_security_check",
   "propose_claims",
+  "count_records",
 ]);
 
 export const PIPELINE_REASONS = Object.freeze([
@@ -80,6 +81,7 @@ export const PIPELINE_REASONS = Object.freeze([
   "document_evidence_not_enabled",
   "no_supportable_statements",
   "claim_proposal_ready",
+  "source_measurement_ready",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -134,6 +136,7 @@ function projectFile(file) {
     reason: file.reason,
     evidenceItemCount: isCount(file.evidenceItemCount) ? file.evidenceItemCount : 0,
     reviewedImpactFactCount: isCount(file.reviewedImpactFactCount) ? file.reviewedImpactFactCount : 0,
+    currentSourceVersionId: isRouteUuid(file.currentSourceVersionId) ? file.currentSourceVersionId : null,
   };
 }
 
@@ -276,6 +279,10 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
       return "Your action is needed: this file's source is promoted. Extract evidence from it in Sources > Files that need a step.";
     case "continue_source_preparation":
       return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Sources > Files that need a step to create it; the review is not changed.";
+    case "count_records":
+      return "Your action is needed: this spreadsheet's columns are recorded, but nothing is counted from it yet. Use Count records "
+        + "on its source (Sources > Data Sources) to record what one record represents; that measured finding can be used in your "
+        + "reports without any review.";
     case "propose_claims":
       return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Sources > Files that need a step proposes them "
         + "(structural column facts are skipped); Get Kinder then reviews each claim with its evidence.";
@@ -326,6 +333,7 @@ const REASON_MESSAGES = Object.freeze({
   no_extractable_evidence: (n) => `The source from ${pluralFiles(n)} has been promoted, but KAI cannot create evidence from ${n === 1 ? "it" : "them"}: ${n === 1 ? "it is" : "they are"} not a PDF or plain-text document and ${n === 1 ? "has" : "have"} no data fields.`,
   document_evidence_not_enabled: (n) => `The source from ${pluralFiles(n)} has been promoted. Evidence from document text is not yet available in this KAI installation, so no evidence can be created from ${n === 1 ? "it" : "them"} yet.`,
   no_supportable_statements: (n) => `The source from ${pluralFiles(n)} has been promoted. KAI read ${n === 1 ? "its" : "their"} text and found no complete statement it could cite as evidence, so no evidence was created.`,
+  source_measurement_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} promoted, with nothing counted from ${n === 1 ? "it" : "them"} yet. Use Count records on ${n === 1 ? "its source" : "their sources"} (Sources > Data Sources); a measured finding can be used in your reports without any review.`,
   claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Sources > Files that need a step (Use for impact); Get Kinder then reviews each claim with its evidence.`,
   evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
   impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
@@ -483,7 +491,7 @@ export function reviewsTabView(request) {
  * promote_source / extract_evidence / continue_source_preparation only for an
  * actor holding that organization-scoped authority and an eligible file.
  */
-const CLIENT_SOURCE_WORK_ACTIONS = new Set(["review_sensitivity", "promote_source", "extract_evidence", "continue_source_preparation", "propose_claims"]);
+const CLIENT_SOURCE_WORK_ACTIONS = new Set(["review_sensitivity", "promote_source", "extract_evidence", "continue_source_preparation", "propose_claims", "count_records"]);
 
 export function isClientSourceWork(file) {
   return file?.responsibleParty === "client" && CLIENT_SOURCE_WORK_ACTIONS.has(file.nextAction);
@@ -499,6 +507,7 @@ const FILE_STEP_NAMES = Object.freeze({
   continue_source_preparation: "Continue source preparation",
   extract_evidence: "Use for impact",
   propose_claims: "Use for impact",
+  count_records: "Count records",
 });
 export function clientFileStepName(file) {
   return isClientSourceWork(file) ? FILE_STEP_NAMES[file.nextAction] : null;

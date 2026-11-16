@@ -15,6 +15,7 @@ import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js
 import { authorizeSourceCandidateContinuation } from "./kaiSourceCandidateService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 import { __claimProposalServiceContract } from "./kaiClaimProposalService.js";
+import { __sourceMeasurementServiceContract } from "./kaiSourceMeasurementService.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceValidators.js";
 
@@ -103,6 +104,10 @@ const STAGE_STATUS = Object.freeze({
 
 const RESPONSIBLE = Object.freeze({ kai: "kai", client: "client", getKinder: "get_kinder", none: "none" });
 
+// Profile formats Count records measures (a single-table CSV file, or one
+// selected worksheet of an Excel workbook).
+const RECORD_COUNTABLE_FORMATS = new Set(["csv", "xlsx"]);
+
 const NEXT_ACTION = Object.freeze({
   none: "none",
   waitForProcessing: "none_waiting_for_kai_processing",
@@ -117,6 +122,7 @@ const NEXT_ACTION = Object.freeze({
   askOrganizationAdministrator: "ask_organization_administrator",
   retrySecurityCheck: "retry_security_check",
   proposeClaims: "propose_claims",
+  countRecords: "count_records",
 });
 
 // Non-policy security assessment outcomes (boundedFileSecurityAssessor.js,
@@ -157,6 +163,7 @@ const PIPELINE_REASONS = Object.freeze([
   "document_evidence_not_enabled",
   "no_supportable_statements",
   "claim_proposal_ready",
+  "source_measurement_ready",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
   "not_currently_eligible",
@@ -173,6 +180,7 @@ const NO_CLIENT_AUTHORITY = Object.freeze({
   continueSourcePreparation: false,
   reviewSensitivity: false,
   proposeClaims: false,
+  recordSourceMeasurement: false,
   getKinderViewer: false,
 });
 const GK_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
@@ -209,6 +217,17 @@ function resolveClientAuthority(actorContext, organizationId) {
     promoteSource: promotion.ok === true && promotion.organizationAdminAuthorized === true,
     extractEvidence: passesExtraction(CLIENT_EXTRACTION_ROLES) && !passesExtraction(GK_EXTRACTION_ROLES),
     proposeClaims: passesProposal(CLIENT_PROPOSAL_ROLES) && !passesProposal(GK_PROPOSAL_ROLES),
+    // The organization's own Count records (the same check its control
+    // uses), by a client role of this organization - as proposeClaims and
+    // extractEvidence decide it, a Get Kinder role held in the organization
+    // is not told it is their step.
+    recordSourceMeasurement: validateActorCanPerformOperation(
+      actorContext, __sourceMeasurementServiceContract.SOURCE_MEASUREMENT_OPERATION, organizationId,
+      { allowedRoles: new Set([...__sourceMeasurementServiceContract.SOURCE_MEASUREMENT_ALLOWED_ROLES].filter((role) => role.startsWith("client_"))) },
+    ).ok === true && validateActorCanPerformOperation(
+      actorContext, __sourceMeasurementServiceContract.SOURCE_MEASUREMENT_OPERATION, organizationId,
+      { allowedRoles: new Set([...__sourceMeasurementServiceContract.SOURCE_MEASUREMENT_ALLOWED_ROLES].filter((role) => !role.startsWith("client_"))) },
+    ).ok !== true,
     continueSourcePreparation: authorizeSourceCandidateContinuation(actorContext, organizationId).ok === true,
     reviewSensitivity: validateActorCanPerformSensitivityReview(
       actorContext, "record_sensitivity_allowed_use_decision", organizationId, GK_ROLES, { globalRolesOnly: true },
@@ -459,6 +478,16 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     } else if (unclaimedProposable > 0 && claims === 0) {
       stages.push(waitingOnAdministratorOr(row, clientAuthority, "evidence_review",
         stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })));
+    } else if (unclaimedProposable === 0 && claims === 0 && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)) {
+      // Owner direction 2026-11-16: a spreadsheet's evidence is only its
+      // structural column facts, which are never an Impact Fact, so a Get
+      // Kinder review of them produces nothing usable. The step that does is
+      // the organization's own Count records on the source; its measured
+      // finding needs no review for internal use.
+      stages.push(clientAuthority.recordSourceMeasurement === true
+        ? stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "source_measurement_ready" })
+        : waitingOnAdministratorOr(row, clientAuthority, "evidence_review",
+          stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })));
     } else if (openFollowups > 0) {
       stages.push(stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
     } else {
@@ -514,6 +543,7 @@ function nextActionFor(current) {
       if (current.detail === "organization_administrator_action_ready") return NEXT_ACTION.askOrganizationAdministrator;
       if (current.detail === "security_check_retry_ready") return NEXT_ACTION.retrySecurityCheck;
       if (current.detail === "claim_proposal_ready") return NEXT_ACTION.proposeClaims;
+      if (current.detail === "source_measurement_ready") return NEXT_ACTION.countRecords;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;
@@ -563,6 +593,10 @@ function projectPipelineFile(row, eligibleClaimIds, clientAuthority = NO_CLIENT_
       reason: reasonForCurrentStage(current),
       evidenceItemCount: count(row.evidence_item_count),
       reviewedImpactFactCount: reviewedImpactFactClaimIds.length,
+      // Only on this actor's own Count records step: the source version that
+      // step opens. No other file or reader receives a source version id.
+      ...(nextActionFor(current) === NEXT_ACTION.countRecords && isCanonicalUuid(row.current_source_version_id)
+        ? { currentSourceVersionId: row.current_source_version_id } : {}),
     },
     reviewedImpactFactClaimIds,
   };

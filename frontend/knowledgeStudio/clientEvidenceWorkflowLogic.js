@@ -641,6 +641,7 @@ export function sourcePreparationFiles(pipelineData, access) {
     || file.currentStage === "source_review"
     || (file.currentStage === "evidence_extraction" && file.nextAction === "extract_evidence")
     || file.nextAction === "propose_claims"
+    || file.nextAction === "count_records"
   ));
 }
 
@@ -787,6 +788,9 @@ export function useForImpactStep(file, access) {
   // Owner decision 2026-11-05: evidence with no claim yet is proposed by the
   // organization administrator; Get Kinder then reviews each claim with its evidence.
   if (action === "propose_claims" && access?.proposeClaim === true) return { kind: "propose" };
+  // Owner direction 2026-11-16: a promoted spreadsheet's finding comes from
+  // Count records on its source, not from a review of its column facts.
+  if (action === "count_records" && access?.recordSourceMeasurement === true) return { kind: "measure" };
   if (file.currentStatus === "complete" || ["evidence_review", "impact_fact_review"].includes(file.currentStage)) {
     return { kind: "done" };
   }
@@ -802,6 +806,7 @@ export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
   review_sensitivity: "Use for impact: this file first needs your sensitivity & allowed-use review. Record your decision below; nothing is decided for you.",
   confirm_promotion: "Use for impact: confirm the source authorization below, then choose the reviewed source type and promote. Nothing is promoted without your confirmation.",
   done: "Use for impact: this file's evidence exists. Propose claims from it below, generate their gap follow-ups, then internal drafts.",
+  measure: "Use for impact: this spreadsheet is a source now. Count records is open below: choose the worksheet if asked, record what one record represents and its period, then propose the claim. That measured finding can be used in your reports without any review.",
   interrupted: "Use for impact stopped. Every completed step is kept; use the action again to continue from the current state.",
 });
 

@@ -788,7 +788,8 @@ async function runBrowserAcceptance() {
       await clientPage.clickTab("Sources");
       await clientPage.waitFor(async () => Boolean(await clientPage.pipelineFileText(FILE_B)), "Project B pipeline entry");
       const entryB = await clientPage.pipelineFileText(FILE_B);
-      assert.match(entryB, /Evidence review\s+Waiting for Get Kinder/);
+      // Owner direction 2026-11-16: column facts alone are the organization's Count records step, not a Get Kinder wait.
+      assert.match(entryB, /Evidence review\s+Waiting for your organization/);
       assert.equal(await clientPage.pipelineFileText(FILE), null, "Project A's file is not in Project B");
 
       const mark = gkPage.mark();

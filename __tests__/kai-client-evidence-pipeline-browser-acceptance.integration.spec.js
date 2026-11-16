@@ -883,8 +883,11 @@ async function runBrowserAcceptance() {
       await extractEvidence();
       await page.clickTab("Files");
       await page.clickTab("Evidence");
-      await page.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
+      // Owner direction 2026-11-16: extracted column facts alone are the
+      // administrator's Count records step, not a Get Kinder evidence-review wait.
+      await page.waitForText("1 file is promoted, with nothing counted from it yet. Use Count records on its source (Sources > Data Sources)");
       assert.ok(!(await page.text()).includes("Extract evidence from it in Sources > Files that need a step"));
+      assert.ok(!(await page.text()).includes("waiting for Get Kinder evidence review"));
     });
 
     let eligibleStatement = "";

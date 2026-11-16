@@ -135,6 +135,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             -- PDF or plain-text source is offered extraction exactly when
             -- the document-statement path can write it.
             dfc.current_profile_format,
+            dfc.current_source_version_id,
             ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
             -- Every current version's text was already read by this
             -- extractor method and held no complete statement (its audit).
@@ -246,6 +247,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
        LEFT JOIN LATERAL (
          SELECT count(df.data_dictionary_field_id)::int AS current_dictionary_field_count,
                 min(fp.profile->>'format') AS current_profile_format,
+                min(v.source_version_id::text) AS current_source_version_id,
                 bool_and(${documentStatementsNoneFoundSql("v.organization_id", "v.source_version_id")}) AS current_document_statements_none_found
            FROM kai.source_versions v
            JOIN kai.intake_source_candidates ic

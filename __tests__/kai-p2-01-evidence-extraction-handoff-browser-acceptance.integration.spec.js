@@ -639,7 +639,10 @@ async function runBrowserAcceptance() {
       results.gkEvidence = "PASS";
     });
 
-    await test("client Knowledge Studio: the Project advances to evidence awaiting Get Kinder review, with no reviewed Impact Fact and no GK payload or control", async () => {
+    // Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only
+    // its column facts is the organization administrator's Count records step,
+    // never a Get Kinder evidence-review wait.
+    await test("client Knowledge Studio: the Project advances to the administrator's Count records step, with no reviewed Impact Fact and no GK payload or control", async () => {
       const before = await governedCounts();
       await clientPage.goto("/impact-library");
       await clientPage.waitForText("Knowledge Studio");
@@ -653,11 +656,12 @@ async function runBrowserAcceptance() {
       const entry = await clientPage.pipelineFileText(FILE.normal);
       console.log(`[evidence-handoff-browser] client pipeline entry:\n${entry}`);
       for (const [label, status] of [["Sensitivity review", "Complete"], ["Source review", "Complete"], ["Evidence creation", "Complete"],
-        ["Evidence review", "Waiting for Get Kinder"]]) {
+        ["Evidence review", "Waiting for your organization"]]) {
         assert.match(entry, new RegExp(`${label}\\s+${status}`), `${label} -> ${status}`);
       }
       await clientPage.clickTab("Evidence");
-      await clientPage.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
+      await clientPage.waitForText("1 file is promoted, with nothing counted from it yet. Use Count records on its source (Sources > Data Sources)");
+      assert.ok(!(await clientPage.text()).includes("waiting for Get Kinder evidence review"), "not presented as a Get Kinder wait");
       const body = await clientPage.text();
       assert.ok(!body.includes("Get Kinder has not yet created evidence"), "no longer waiting for extraction");
       assert.ok(!body.includes("Usable internally") && !body.includes("1 shown"), "no reviewed Impact Fact");
@@ -668,7 +672,7 @@ async function runBrowserAcceptance() {
         const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Usable Impact Facts");
         return h ? h.closest(".admin-card").innerText : "";
       })()`);
-      assert.ok(reviewedCard.includes("waiting for Get Kinder evidence review"), "the reviewed-evidence card explains the state");
+      assert.ok(reviewedCard.includes("Use Count records on its source"), "the reviewed-evidence card names the next step");
       for (const statement of results.normalStatements) assert.ok(!reviewedCard.includes(statement), "no unreviewed evidence statement reaches the reviewed-evidence card");
       assertClientBoundary(clientPage, "client after extraction", body);
       assert.deepEqual(await governedCounts(), before, "browsing wrote nothing");
