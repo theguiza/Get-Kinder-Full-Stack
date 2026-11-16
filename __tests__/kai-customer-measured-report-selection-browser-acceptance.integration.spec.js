@@ -1149,7 +1149,22 @@ async function runBrowserAcceptance() {
       }
     });
 
-    await test("Scenario B2: a measured claim omitted from a truncated impact-facts read is unknown, then resolved by its own P2-06 evaluation; if that also fails it stays unknown, never adverse", async () => {
+    // Owner direction 2026-11-16: each claim's own P2-06 evaluation comes with
+    // the claims page (claim-library/candidates, internalUseDiagnostic) rather
+    // than one traceability read per claim. Injected (labeled) here: a failed
+    // evaluation of one listed claim, substituted in that claims response.
+    const failListedEvaluation = (claimId) => ({ url, json }) => {
+      if (!url.includes("/claim-library/candidates")) return null;
+      const body = json();
+      body.data.items = body.data.items.map((item) => (item.claimId === claimId
+        ? { ...item, internalUseDiagnostic: { status: 503, error_code: "system_error", traceability_conflict_reason: null } }
+        : item));
+      return { status: 200, json: body };
+    };
+    const perClaimReads = (mark, claimId) => adminPage.requestsSince(mark)
+      .filter((entry) => entry.url.includes(`/claims/${claimId}/traceability?requested_audience=internal`));
+
+    await test("Scenario B2: a measured claim omitted from a truncated impact-facts read is resolved by its own P2-06 evaluation, listed with the claims page; if that fails it stays unknown, never adverse, and Check internal use reads it once", async () => {
       // Injected (labeled): the impact-facts response is replaced by a
       // truncated one that omits the measured claim, as a server holding more
       // eligible facts than its 100-fact bound returns it.
@@ -1167,9 +1182,10 @@ async function runBrowserAcceptance() {
         const row = `[data-client-claim="${ids.claimId}"]`;
         await adminPage.waitFor(async () => (await attr(adminPage, row, "data-client-claim-internal-use")) === "usable", "resolved as usable");
         await adminPage.idle();
-        const diagnosed = adminPage.requestsSince(mark).filter((entry) => entry.url.includes(`/claims/${ids.claimId}/traceability?requested_audience=internal`));
-        assert.equal(diagnosed.length, 1, "the claim's own client-safe P2-06 diagnostic decided it");
-        assert.ok(diagnosed.every((entry) => entry.method === "GET"));
+        // The claim's own client-safe P2-06 evaluation decided it, from the claims page: no per-claim read.
+        assert.deepEqual(perClaimReads(mark, ids.claimId), [], "no per-claim traceability read");
+        const claimsPages = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/claim-library/candidates"));
+        assert.ok(claimsPages.length >= 1 && claimsPages.every((entry) => entry.method === "GET" && entry.status === 200));
         assert.match(await textOf(adminPage, row), /Ready to use in your report\./);
         const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
         assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "usable");
@@ -1185,11 +1201,12 @@ async function runBrowserAcceptance() {
       } finally {
         await adminPage.stopIntercepting();
       }
-      // Injected (labeled): the measured claim's diagnostic also fails.
+      // Injected (labeled): the measured claim's listed evaluation also failed.
+      const failMeasured = failListedEvaluation(ids.claimId);
       await adminPage.intercept([
         { urlPattern: "*/impact-facts*", requestStage: "Response" },
-        { urlPattern: `*/claims/${ids.claimId}/traceability*`, requestStage: "Request" },
-      ], (request) => (request.atResponse ? truncate(request) : { status: 503, json: { ok: false, error: { code: "system_error" } } }));
+        { urlPattern: "*claim-library/candidates*", requestStage: "Response" },
+      ], (request) => truncate(request) ?? failMeasured(request));
       try {
         await openDataSources();
         const row = `[data-client-claim="${ids.claimId}"]`;
@@ -1202,7 +1219,15 @@ async function runBrowserAcceptance() {
         await adminPage.idle();
         assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null, "the selection is ready: generation re-checks it");
         assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "unknown");
-        results.b2 = { omittedResolved: "usable", diagnosticFailed: "unknown" };
+        // On demand, the claim's own read: exactly one GET, which resolves it (the real route; only the listing was substituted).
+        await adminPage.clickIn(`${row} input[type=checkbox]`, "Clear the selection");
+        const checkMark = adminPage.mark();
+        await adminPage.clickIn(`[data-client-check-claim-use="${ids.claimId}"]`, "Check internal use");
+        await adminPage.waitFor(async () => (await attr(adminPage, row, "data-client-claim-internal-use")) === "usable", "checked on demand");
+        await adminPage.idle();
+        const checked = perClaimReads(checkMark, ids.claimId);
+        assert.deepEqual(checked.map((entry) => [entry.method, entry.status]), [["GET", 200]], "one on-demand read");
+        results.b2 = { omittedResolved: "usable", perClaimReads: 0, diagnosticFailed: "unknown", checkedOnDemand: "usable" };
       } finally {
         await adminPage.stopIntercepting();
       }
@@ -1241,9 +1266,8 @@ async function runBrowserAcceptance() {
       await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Drop the restricted claim");
       await adminPage.idle();
       // C2 when the claim's condition cannot be read here, the server's refusal is explained, not shown as a bare validation error.
-      // Injected (labeled): the restricted claim's diagnostic fails.
-      await adminPage.intercept([{ urlPattern: `*/claims/${ids.riskClaimId}/traceability*`, requestStage: "Request" }],
-        () => ({ status: 503, json: { ok: false, error: { code: "system_error" } } }));
+      // Injected (labeled): the restricted claim's listed evaluation fails.
+      await adminPage.intercept([{ urlPattern: "*claim-library/candidates*", requestStage: "Response" }], failListedEvaluation(ids.riskClaimId));
       try {
         await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
         // The fact is usable. The separate model-processing diagnostic is

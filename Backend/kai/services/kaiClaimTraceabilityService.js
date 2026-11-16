@@ -130,28 +130,98 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
       ? await repository.getClaimTraceabilityReviewSummary(readInput)
       : await repository.getClaimTraceabilitySummary(readInput);
 
-  if (!result.ok) {
-    const traceabilityConflictReason =
-      result.error.code === "conflict_current_state_changed" &&
-      TRACEABILITY_CONFLICT_REASONS.has(result.error.reason)
-        ? result.error.reason
-        : null;
-    console.error("CLAIM_TRACEABILITY_RESULT_ERROR", {
-      code: result.error.code,
-      status: result.error.status,
-      reason: traceabilityConflictReason,
-    });
-    return buildKaiError(result.error.code, {
-      status: result.error.status,
-      ...(traceabilityConflictReason
-        ? { data: { traceability_conflict_reason: traceabilityConflictReason } }
-        : {}),
-    });
-  }
+  if (!result.ok) return traceabilityFailureResponse(result);
   if (auth.organizationTraceabilityDiagnostic === true) {
-    return { ok: true, data: organizationTraceabilityDiagnostic(result.data, input.claimId, result.provisionalInternalDraft), error: null };
+    return organizationDiagnosticResponse(result, input.claimId);
   }
   return { ok: true, data: result.data, error: null };
+}
+
+// A failed evaluation keeps the GK error shape, whose only data is the
+// allowlisted traceability_conflict_reason.
+function traceabilityFailureResponse(result) {
+  const traceabilityConflictReason =
+    result.error.code === "conflict_current_state_changed" &&
+    TRACEABILITY_CONFLICT_REASONS.has(result.error.reason)
+      ? result.error.reason
+      : null;
+  console.error("CLAIM_TRACEABILITY_RESULT_ERROR", {
+    code: result.error.code,
+    status: result.error.status,
+    reason: traceabilityConflictReason,
+  });
+  return buildKaiError(result.error.code, {
+    status: result.error.status,
+    ...(traceabilityConflictReason
+      ? { data: { traceability_conflict_reason: traceabilityConflictReason } }
+      : {}),
+  });
+}
+
+function organizationDiagnosticResponse(result, claimId) {
+  if (!result.ok) return traceabilityFailureResponse(result);
+  return { ok: true, data: organizationTraceabilityDiagnostic(result.data, claimId, result.provisionalInternalDraft), error: null };
+}
+
+/**
+ * The organization administrator's internal traceability diagnostic for a
+ * listed page of claims, evaluated in one read-only transaction. Same
+ * authorization (organization administrator, internal audience, client-safe
+ * diagnostic only), tenant check, evaluation and per-claim response as
+ * getClaimTraceabilitySummary returns for each claim one at a time. Returns
+ * `{ ok: true, data: { items: [{ claimId, response }] } }`, where `response`
+ * is exactly that claim's single-read response (success or error); an actor
+ * the diagnostic does not admit (including Get Kinder roles, whose read is
+ * the full DTO) is refused.
+ */
+export async function listOrganizationInternalDraftDiagnostics(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  const allowedKeys = new Set(["organizationId", "claimIds", "actorContext"]);
+  if (
+    !isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)
+    || !isNonEmptyString(input.organizationId) || !isPlainObject(input.actorContext)
+    || !Array.isArray(input.claimIds) || !input.claimIds.every(isNonEmptyString)
+    || new Set(input.claimIds).size !== input.claimIds.length
+  ) {
+    return buildKaiError("validation_blocker");
+  }
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) return buildKaiError("authorization_denied");
+  const auth = authorizeClaimTraceabilityRead(actorContext, input.organizationId, ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE);
+  if (!auth.ok || auth.organizationTraceabilityDiagnostic !== true) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+  if (input.claimIds.length === 0) return { ok: true, data: { items: [] }, error: null };
+
+  const repository =
+    dependencies.claimTraceabilityRepository || (await createDefaultClaimTraceabilityRepository());
+  if (typeof repository.getOrganizationInternalDraftDiagnostics !== "function") return buildKaiError("system_error");
+  const batch = await repository.getOrganizationInternalDraftDiagnostics({
+    organizationId: input.organizationId,
+    claimIds: [...input.claimIds],
+    requestedAudience: ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE,
+  });
+  if (!batch.ok) return traceabilityFailureResponse(batch);
+  const byClaim = new Map((Array.isArray(batch.data?.items) ? batch.data.items : []).map((item) => [item?.claimId, item?.result]));
+  const items = input.claimIds.map((claimId) => {
+    const result = byClaim.get(claimId);
+    return {
+      claimId,
+      response: isPlainObject(result) && typeof result.ok === "boolean"
+        ? organizationDiagnosticResponse(result, claimId)
+        : buildKaiError("system_error"),
+    };
+  });
+  return { ok: true, data: { items }, error: null };
 }
 
 /**

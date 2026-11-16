@@ -29,7 +29,8 @@ import {
   claimProposalResultMessage,
   claimSelectabilityMessage,
   claimUseDiagnosis,
-  claimsToDiagnose,
+  listedClaimDiagnostics,
+  listedClaimUseDiagnosis,
   internalDraftFailureMessage,
   internalDraftReadiness,
   isStructuralOnlyDraft,
@@ -205,18 +206,32 @@ test("a claim omitted from a truncated impact-facts read is resolved by its own 
   assert.doesNotMatch(claimNotUsableMessage(followup), /Get Kinder/, "no review request where a review would not resolve the condition");
 });
 
-test("the claims diagnosed one by one: substantive claims impact-facts does not show as usable, selected claims, bounded, never twice", () => {
-  const OTHER_MEASURED = claim(6, "source_record_count_measurement");
-  const facts = { claimIds: new Set([MEASURED.claimId]), truncated: true };
-  const claims = [MEASURED, FIELD_2, UNKNOWN, OTHER_MEASURED];
-  // Package 3: a claim impact-facts shows as usable is diagnosed too (last), because strict
-  // eligibility does not establish that it may be sent to the model for a new draft.
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts }), [UNKNOWN.claimId, OTHER_MEASURED.claimId, MEASURED.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, selectedClaimIds: [FIELD_2.claimId] }), [FIELD_2.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId, MEASURED.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, diagnostics: new Map([[UNKNOWN.claimId, { status: "usable" }]]) }), [OTHER_MEASURED.claimId, MEASURED.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, limit: 1 }), [UNKNOWN.claimId]);
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: facts, limit: -3 }), [], "a spent budget diagnoses nothing");
-  assert.deepEqual(claimsToDiagnose({ claims, impactFacts: null }), [MEASURED.claimId, UNKNOWN.claimId, OTHER_MEASURED.claimId], "a failed impact-facts read is resolved per claim");
+test("the claims page carries each claim's internal-use answer; it maps exactly as the per-claim read, and a later on-demand read replaces it", () => {
+  const diagnostic = { view: "organization_internal_traceability_diagnostic", traceability_passed: true, eligible: false, blocked: true,
+    blocker_codes: ["claim_review_unresolved"], traceability_conflict_reason: null,
+    provisional_internal_draft: { admitted: true, blocker_codes: [], source_role: "primary" } };
+  const listed = { status: 200, data: diagnostic };
+  assert.deepEqual(listedClaimUseDiagnosis(listed), claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: diagnostic } }));
+  assert.equal(listedClaimUseDiagnosis(listed).provisional.status, "admitted");
+  const conflict = { status: 409, error_code: "conflict_current_state_changed", traceability_conflict_reason: "source_version_not_current" };
+  assert.deepEqual(listedClaimUseDiagnosis(conflict), claimUseDiagnosis({ statusCode: 409,
+    body: { ok: false, error: { code: "conflict_current_state_changed" }, data: { traceability_conflict_reason: "source_version_not_current" } } }));
+  assert.equal(listedClaimUseDiagnosis(conflict).conflictReason, "source_version_not_current");
+  for (const failed of [{ status: 500, error_code: "system_error", traceability_conflict_reason: null },
+    { status: 409, error_code: "conflict_current_state_changed", traceability_conflict_reason: "made_up" }]) {
+    assert.equal(listedClaimUseDiagnosis(failed).status, "unknown", "a failed evaluation is not adverse");
+  }
+  for (const absent of [null, undefined, {}, { status: "200" }]) assert.equal(listedClaimUseDiagnosis(absent), undefined);
+
+  const withListed = { ...MEASURED, internalUseDiagnostic: listed };
+  const notEvaluated = { ...FIELD_2, internalUseDiagnostic: null };
+  const byClaim = listedClaimDiagnostics([withListed, notEvaluated, UNKNOWN]);
+  assert.deepEqual([...byClaim.keys()], [MEASURED.claimId], "only claims the server evaluated");
+  assert.equal(claimDraftAdmission(withListed, byClaim.get(MEASURED.claimId)), "admitted");
+  const fresh = { status: "not_usable", blockerCodes: [], conflictReason: "source_version_not_current", provisional: { status: "refused", blockerCodes: [], sourceRole: null } };
+  const overridden = listedClaimDiagnostics([withListed], new Map([[MEASURED.claimId, fresh]]));
+  assert.equal(overridden.get(MEASURED.claimId), fresh, "an on-demand read is newer than the listed answer");
+  assert.equal(claimDraftAdmission(withListed, overridden.get(MEASURED.claimId)), "refused");
 });
 
 test("Package 3: a claim's use in a new internal draft is the server's provisional admission, never inferred from currentness or strict P2-06", () => {
@@ -428,7 +443,13 @@ test("UI wiring: library reads keep completeness and continue from the cursor; p
   assert.match(workflow, /claimLibraryCandidatesPath\(org, after, scope \|\| null\)/);
   assert.match(workflow, /useOrganizationRead\(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken\)/);
   assert.match(workflow, /claims: claims\.status === "success" \? claims\.items : undefined, claimsComplete: claims\.complete/);
+  // Each claim's internal-use answer comes with the claims page; a single
+  // claim is read on its own only on demand (Check internal use, or a refused draft).
+  assert.match(workflow, /listedClaimDiagnostics\(claims\.items, onDemandDiagnostics\)/);
+  assert.doesNotMatch(workflow, /claimsToDiagnose|CLAIM_DIAGNOSES_PER_REFRESH/, "no automatic per-claim reads");
   assert.match(workflow, /getJson\(claimTraceabilityPath\(organizationId, claimId, "internal"\)\)/);
+  assert.match(workflow, /diagnoseClaims\(\[claim\.claimId\]\)/);
+  assert.match(workflow, /const reads = await diagnoseClaims\(claimIds\);/);
   assert.match(workflow, /<LibraryCompleteness read=\{claims\} noun="claims" \/>/);
   // Four-view refactor: every loaded claim renders under its finding (claims
   // whose evidence is not loaded get their own entry from buildFindings).
@@ -446,13 +467,12 @@ test("UI wiring: library reads keep completeness and continue from the cursor; p
   assert.match(drafts, /const nextActions = structuralOnly \? \[\] : internalDraftFactualReviewNextActions\(view\.blockedReasons\);/);
 });
 
-test("a recorded non-current source remains visible but cannot be selected, queued for redundant diagnostics, or submitted for an assessment", () => {
+test("a recorded non-current source remains visible but cannot be selected or submitted for an assessment", () => {
   for (const type of ["source_record_count_measurement", "source_derived_measurement", "source_document_statement"]) {
     const old = claim(21, type, { evidenceSourceVersionIsCurrent: false });
     const current = claim(22, type, { evidenceSourceVersionIsCurrent: true });
     assert.deepEqual(claimInternalDraftSelectability(old), { selectable: false, reason: "source_version_not_current" });
     assert.equal(claimInternalDraftSelectability(current).selectable, true);
-    assert.deepEqual(claimsToDiagnose({ claims: [old, current], impactFacts: null }), [current.claimId]);
     assert.deepEqual(retainSelectableClaimIds([old.claimId, current.claimId], [old, current]), [current.claimId]);
     assert.equal(claimDraftAdmitted(old, null), false);
     assert.deepEqual(internalDraftReadiness({ canGenerate: true, engagementId: ENGAGEMENT,
@@ -470,22 +490,31 @@ test("a fresh stale-source diagnostic overrides an earlier current list read wit
   assert.deepEqual(internalDraftReadiness({ canGenerate: true, engagementId: ENGAGEMENT,
     selectedClaimIds: [current.claimId], claims: [current], unavailableSourceClaimIds: [current.claimId] }), { ready: false, reason: "source_version_not_current" });
   const unknown = { ...current, evidenceSourceVersionIsCurrent: null };
-  assert.deepEqual(claimsToDiagnose({ claims: [unknown], impactFacts: null }), [unknown.claimId]);
   assert.equal(claimInternalUse(current.claimId, null), "unknown", "being current does not establish factual eligibility");
 });
 
 test("the Claim Library preserves Boolean source currentness through the client projection and refuses a malformed flag", async () => {
+  // A stored organization administrator: the actor the internal-use answer is listed for.
   const actorContext = { actorType: "human", actorUserId: id(900),
-    organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active" }] };
+    organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "kai_organization_membership" }] };
   const row = (n, flag) => ({ claim_id: id(n), organization_id: ORG, evidence_item_id: id(100+n), claim_type: "finding", claim_status: "proposed",
     claim_review_status: "needs_gk_review", claim_strength: "unassessed", review_queue_items: [], evidence_source_version_is_current: flag });
+  const asked = [];
   const result = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
     env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, false), row(2, true), row(3, null)],
+    listOrganizationInternalDraftDiagnostics: async ({ claimIds }) => {
+      asked.push(...claimIds);
+      return { ok: true, data: { items: claimIds.map((claimId) => ({ claimId, response: { ok: true, data: { traceability_passed: true, eligible: true } } })) } };
+    },
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(projectCandidateClaims(result.data).map((item) => item.evidenceSourceVersionIsCurrent), [false, true, null]);
+  // A recorded non-current version is never evaluated (always refused); current and unrecorded currentness are.
+  assert.deepEqual(asked, [id(2), id(3)]);
+  assert.deepEqual(projectCandidateClaims(result.data).map((item) => item.internalUseDiagnostic?.status ?? null), [null, 200, 200]);
   const malformed = await listClaimLibraryCandidates({ organizationId: ORG, actorContext }, {
     env: { KAI_SPRINT2_ENABLED: "true" }, listClaimLibraryReviewCandidates: async () => [row(1, "false")],
+    listOrganizationInternalDraftDiagnostics: async () => assert.fail("a malformed page is refused before any evaluation"),
   });
   assert.equal(malformed.error.code, "system_error");
 });

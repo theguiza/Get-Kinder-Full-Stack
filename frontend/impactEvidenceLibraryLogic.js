@@ -2729,6 +2729,11 @@ export function projectCandidateClaims(dto) {
     evidenceInternalOnly: claim.evidenceInternalOnly ?? null,
     evidencePublicUseAllowed: claim.evidencePublicUseAllowed ?? null,
     evidenceFunderUseAllowed: claim.evidenceFunderUseAllowed ?? null,
+    // The server's internal-use answer for this claim, listed for an
+    // organization administrator (the per-claim traceability read's status and
+    // diagnostic, or its error). null: not evaluated; absent: not provided.
+    internalUseDiagnostic: claim.internalUseDiagnostic && typeof claim.internalUseDiagnostic === "object"
+      ? claim.internalUseDiagnostic : null,
   })).filter((claim) => isRouteUuid(claim.claimId) && isRouteUuid(claim.evidenceItemId));
 }
 

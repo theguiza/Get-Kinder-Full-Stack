@@ -38,7 +38,7 @@ import {
   claimNotUsableMessage,
   claimUseDiagnosis,
   claimUsePresentation,
-  claimsToDiagnose,
+  listedClaimDiagnostics,
   claimNeedsGapPreparation,
   claimProposalResultMessage,
   claimProposalRunMessage,
@@ -101,9 +101,6 @@ const EVIDENCE_CURSOR = "nextAfterEvidenceItemId";
 // "Use for impact" claim proposal reads the whole Evidence Library (25 per
 // page) before proposing; beyond this it stops and says so.
 const CLAIM_PROPOSAL_EVIDENCE_PAGES = 200;
-// Per-claim P2-06 diagnostics read automatically per refresh; any further
-// claim offers its own "Check internal use".
-const CLAIM_DIAGNOSES_PER_REFRESH = 25;
 const projectInternalUse = (data) => {
   const facts = projectClientImpactFacts(data);
   return facts ? { claimIds: new Set(facts.items.map((item) => item.claimId)), truncated: facts.truncated } : null;
@@ -289,12 +286,15 @@ export default function ClientEvidenceWorkflow({
   }, [organizationId, engagementId]);
 
   // Each claim's own P2-06 internal evaluation (the client-safe traceability
-  // diagnostic), for the claims the impact-facts read does not establish as
-  // usable: a claim it left out of a truncated read, or one it reports as not
-  // usable (to say why). Read-only; cleared on every refresh and organization.
+  // diagnostic). The claims list carries it for every listed claim (owner
+  // direction 2026-11-16: one request per page, not one per claim). A claim
+  // is read on its own only on demand - "Check internal use", or explaining a
+  // refused draft - and that newer answer replaces the listed one. Cleared on
+  // every refresh and organization.
   const [diagnostics, setDiagnostics] = useState({ key: "", byClaim: new Map() });
   const diagnosticsKey = `${organizationId}:${refreshToken}`;
-  const claimDiagnostics = useMemo(() => diagnostics.key === diagnosticsKey ? diagnostics.byClaim : new Map(), [diagnostics, diagnosticsKey]);
+  const onDemandDiagnostics = useMemo(() => diagnostics.key === diagnosticsKey ? diagnostics.byClaim : null, [diagnostics, diagnosticsKey]);
+  const claimDiagnostics = useMemo(() => listedClaimDiagnostics(claims.items, onDemandDiagnostics), [claims.items, onDemandDiagnostics]);
   const diagnoseClaims = useCallback(async (claimIds) => {
     const key = diagnosticsKey;
     const reads = [];
@@ -316,18 +316,6 @@ export default function ClientEvidenceWorkflow({
     diagnosedOnceRef.current = new Set();
     setDiagnostics({ key: diagnosticsKey, byClaim: new Map() });
   }, [diagnosticsKey]);
-  useEffect(() => {
-    if (access.readClaimTraceabilityDiagnostics !== true || claims.status !== "success" || internalUse.status === "loading") return;
-    const pending = claimsToDiagnose({
-      claims: claims.items, impactFacts: internalUseIndex, diagnostics: claimDiagnostics, selectedClaimIds,
-      limit: CLAIM_DIAGNOSES_PER_REFRESH - diagnosedOnceRef.current.size,
-    }).filter((claimId) => !diagnosedOnceRef.current.has(claimId));
-    if (pending.length === 0) return;
-    for (const claimId of pending) diagnosedOnceRef.current.add(claimId);
-    diagnoseClaims(pending);
-    // claimDiagnostics/internalUseIndex are derived from the listed state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [access.readClaimTraceabilityDiagnostics, claims.status, claims.items, internalUse.status, selectedClaimIds, diagnoseClaims]);
   const useOfClaim = (claimId) => claimSourceVersionUnavailable(claims.items.find((claim) => claim.claimId === claimId), claimDiagnostics.get(claimId))
     ? "not_usable" : claimInternalUse(claimId, internalUseIndex, claimDiagnostics);
   // Owner Package 3: the server's provisional internal draft admission for

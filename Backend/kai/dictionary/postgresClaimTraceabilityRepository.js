@@ -172,6 +172,22 @@ function validateInput(input) {
 // claims without disclosure.
 const REVIEW_QUEUE_CLAIM_LIMIT = 500;
 
+// One listed page of claims (the claim library's page size), internal only.
+const DIAGNOSTICS_BATCH_MAX_CLAIMS = 25;
+function validateDiagnosticsBatchInput(input) {
+  const allowedKeys = new Set(["organizationId", "claimIds", "requestedAudience"]);
+  return (
+    isPlainObject(input) &&
+    hasOnlyKeys(input, allowedKeys) &&
+    isNonEmptyString(input.organizationId) &&
+    input.requestedAudience === "internal" &&
+    Array.isArray(input.claimIds) &&
+    input.claimIds.length <= DIAGNOSTICS_BATCH_MAX_CLAIMS &&
+    input.claimIds.every(isNonEmptyString) &&
+    new Set(input.claimIds).size === input.claimIds.length
+  );
+}
+
 function validateListOrganizationReviewQueueInput(input) {
   const allowedKeys = new Set(["organizationId", "requestedAudience"]);
   return (
@@ -1059,6 +1075,45 @@ export function createPostgresClaimTraceabilityRepository({ runInTransaction } =
         return shapeError(error);
       }
     },
+    // The same organization diagnostic for a listed page of claims, in ONE
+    // read-only transaction (one snapshot, one connection) instead of one
+    // request and transaction per claim. Each claim is evaluated exactly as
+    // getOrganizationInternalDraftDiagnostic evaluates it; a savepoint per
+    // claim keeps one claim's database error from affecting the others, and
+    // that claim's result is the same shaped failure the single read returns.
+    async getOrganizationInternalDraftDiagnostics(input) {
+      if (!validateDiagnosticsBatchInput(input)) return failure("validation_blocker");
+      const { organizationId, claimIds } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const items = [];
+          for (const claimId of claimIds) {
+            await tx.query("SAVEPOINT kai_claim_internal_draft_diagnostic");
+            let result;
+            try {
+              result = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId, requestedAudience: "internal" });
+              if (result.ok) {
+                const provisionalInternalDraft = await evaluateProvisionalInternalDraftAdmissionInTransaction(tx, {
+                  organizationId,
+                  data: result.data,
+                });
+                result = { ...result, provisionalInternalDraft };
+              }
+              await tx.query("RELEASE SAVEPOINT kai_claim_internal_draft_diagnostic");
+            } catch (error) {
+              await tx.query("ROLLBACK TO SAVEPOINT kai_claim_internal_draft_diagnostic");
+              result = shapeError(error);
+            }
+            items.push({ claimId, result });
+          }
+          return success({ items });
+        });
+      } catch (error) {
+        return shapeError(error);
+      }
+    },
     // Organization-scope Review Queue rollup. Returns only claims whose
     // current, freshly-recomputed blockerCodes are non-empty (i.e.
     // `eligible !== true`) - a resolved review_queue_items lifecycle row
@@ -1131,6 +1186,7 @@ export const __claimTraceabilityRepositoryContract = Object.freeze({
   DIMENSION_KEYS,
   REVIEW_QUEUE_CLAIM_LIMIT,
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
+  DIAGNOSTICS_BATCH_MAX_CLAIMS,
 });
 
 // Exposed so other read-only Package 4 capabilities that must reach the same

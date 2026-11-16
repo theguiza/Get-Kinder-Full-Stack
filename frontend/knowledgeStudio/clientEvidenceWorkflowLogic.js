@@ -228,20 +228,31 @@ export function claimUseDiagnosis(result) {
   return { status: "unknown", blockerCodes: [], conflictReason: null, provisional: UNKNOWN_PROVISIONAL };
 }
 
-// The claims whose internal use is diagnosed one by one: every substantive
-// (non-structural) loaded claim, plus any selected claim, up to `limit`.
-// Claims the impact-facts read does not establish as usable come first (they
-// need the strict reason too). Owner Package 3: a claim the impact-facts read
-// shows as usable is still diagnosed, because strict eligibility does not
-// establish that the claim may be sent to the model for a new draft.
-export function claimsToDiagnose({ claims, impactFacts, diagnostics, selectedClaimIds = [], limit = 25 }) {
-  const known = diagnostics instanceof Map ? diagnostics : new Map();
-  const wanted = (Array.isArray(claims) ? claims : [])
-    .filter((claim) => isRouteUuid(claim?.claimId) && !known.has(claim.claimId) && !claimSourceVersionUnavailable(claim))
-    .filter((claim) => claimKind(claim) !== "structural" || selectedClaimIds.includes(claim.claimId));
-  const notShownUsable = wanted.filter((claim) => claimInternalUse(claim.claimId, impactFacts) !== "usable");
-  const shownUsable = wanted.filter((claim) => claimInternalUse(claim.claimId, impactFacts) === "usable");
-  return [...notShownUsable, ...shownUsable].map((claim) => claim.claimId).slice(0, Math.max(0, limit));
+// The internal-use answer the claims list carries for each claim (owner
+// direction 2026-11-16: evaluated by the server with the claims page instead
+// of one traceability read per claim). It is the per-claim read's own status
+// and body, so it maps through claimUseDiagnosis unchanged. undefined when
+// the claim was not evaluated (structural, non-current source version, or a
+// reader the server does not give the answer to).
+export function listedClaimUseDiagnosis(listed) {
+  if (!listed || typeof listed !== "object" || !Number.isInteger(listed.status)) return undefined;
+  if (listed.status === 200) return claimUseDiagnosis({ statusCode: 200, body: { ok: true, data: listed.data } });
+  return claimUseDiagnosis({
+    statusCode: listed.status,
+    body: { ok: false, error: { code: listed.error_code }, data: { traceability_conflict_reason: listed.traceability_conflict_reason ?? null } },
+  });
+}
+
+// claimId -> diagnosis for every listed claim that carries the server's
+// answer; a later on-demand read for a claim (`overrides`) replaces it.
+export function listedClaimDiagnostics(claims, overrides = null) {
+  const byClaim = new Map();
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    const diagnosis = listedClaimUseDiagnosis(claim?.internalUseDiagnostic);
+    if (diagnosis && isRouteUuid(claim.claimId)) byClaim.set(claim.claimId, diagnosis);
+  }
+  if (overrides instanceof Map) for (const [claimId, diagnosis] of overrides) byClaim.set(claimId, diagnosis);
+  return byClaim;
 }
 
 // What a P2-06 blocker means to the organization administrator.
