@@ -631,7 +631,7 @@ async function runBrowserAcceptance() {
       results.b4 = "PASS";
     });
 
-    await test("B5a (before P2-04): the fresh structural claim is not offered for an internal draft, its read-only diagnostic still reports the missing P2-04 state, and nothing is written", async () => {
+    await test("B5a (before P2-04): the fresh structural claim is not offered for an internal draft, a missing P2-04 evaluation does not hold internal use, and nothing is written", async () => {
       // Since 36c6588 a structural (field-presence) claim is not an impact finding, so the UI offers no
       // draft from it; since fa87ece generation records P2-04 itself (proven by its own suites), so the
       // former direct-request refusal no longer applies and is not exercised here (it would write).
@@ -643,17 +643,18 @@ async function runBrowserAcceptance() {
       }
       assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.usableClaimId}"] input'))`), false, "no selection control");
       const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
-      // c1feab49: the missing P2-04 state is read (200) as not eligible with
-      // p204_evaluation_required, rather than refused with a 409.
+      // a72413e6: a missing P2-04 evaluation no longer holds internal use
+      // (`p204EvaluationRequired && !internalReportUse`); the structural claim
+      // is still not offered for a draft (above) because it is not a finding.
       assert.equal(diagnostic.status, 200, JSON.stringify(diagnostic.body));
       assert.deepEqual([diagnostic.body.data.view, diagnostic.body.data.eligible, diagnostic.body.data.traceability_conflict_reason],
-        ["organization_internal_traceability_diagnostic", false, null]);
-      assert.ok(diagnostic.body.data.blocker_codes.includes("p204_evaluation_required"), JSON.stringify(diagnostic.body.data.blocker_codes));
+        ["organization_internal_traceability_diagnostic", true, null]);
+      assert.ok(!diagnostic.body.data.blocker_codes.includes("p204_evaluation_required"), JSON.stringify(diagnostic.body.data.blocker_codes));
       await adminPage.idle();
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET"), [], "nothing is sent");
       assert.equal(modelCalls.length, 0, "no generator call");
       assert.deepEqual(await counts(ORG_X), before);
-      results.b5a = "PASS: structural claim not offered (no_measured_claim, generate disabled); diagnostic 200 p204_evaluation_required; nothing written";
+      results.b5a = "PASS: structural claim not offered (no_measured_claim, generate disabled); diagnostic 200 internal use not held by the missing P2-04 evaluation; nothing written";
     });
 
     await test("B5b (refused P2-04): a synthetic gap-insert fault returns a real 422 the UI explains, and writes nothing", async () => {
@@ -684,7 +685,7 @@ async function runBrowserAcceptance() {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.usableClaimId}"]`, "Generate gap follow-ups");
-      await adminPage.waitForText("Gap follow-ups generated:");
+      await adminPage.waitForText("follow-up question(s). You can continue with your report");
       await adminPage.idle();
       const since = adminPage.requestsSince(mark);
       const posts = since.filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]);
@@ -717,7 +718,8 @@ async function runBrowserAcceptance() {
         sources: 0, evidence: 0, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 0,
         gaps: gaps.length, followups: followups.length, followup_queue: followups.length,
       });
-      await adminPage.waitForText(`Gap follow-ups generated: ${gaps.length} open gap(s) and ${followups.length} client follow-up question(s) recorded.`);
+      // a72413e6: the result names clarification notes and follow-up questions, and says the report can continue.
+      await adminPage.waitForText(`and ${followups.length} follow-up question(s). You can continue with your report; answers can improve it later.`);
 
       const [lifecycleAudit] = await query("SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated'", [ORG_X]);
       assert.equal(lifecycleAudit.n, 1, "the P2-04 lifecycle audit row");
@@ -876,7 +878,7 @@ async function runBrowserAcceptance() {
       await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.offsetParent !== null && /^Show supporting source detail/.test(el.innerText.trim())).click()`);
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${ids.x.secondClaimId}"]'))`), "second claim listed");
       await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.secondClaimId}"]`, "Generate gap follow-ups (second claim)");
-      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.secondClaimId}"]').innerText`)).includes("Gap follow-ups generated:"), "second claim follow-ups");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.secondClaimId}"]').innerText`)).includes("follow-up question(s). You can continue with your report"), "second claim follow-ups");
       await adminPage.idle();
       const [secondGaps] = await query("SELECT count(*)::int AS n FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG_X, ids.x.secondClaimId]);
       assert.ok(secondGaps.n > 0);
@@ -1004,7 +1006,11 @@ async function runBrowserAcceptance() {
         assert.ok([409, 422].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
         if (response.status === 409) assert.ok(["evidence_review_unresolved", "human_review_incomplete", "conflict_current_state_changed"].includes(response.body.error.code), label);
         if (response.status === 422) {
-          assert.deepEqual(response.body.blockers?.map((b) => b.blocking_reason), ["evidence_type_requires_get_kinder_review"], label);
+          // The structural evidence type needs Get Kinder's review; a coverage
+          // acceptance also names that the claim is not yet reviewed as supported.
+          const reasons = response.body.blockers?.map((b) => b.blocking_reason) || [];
+          assert.equal(reasons[0], "evidence_type_requires_get_kinder_review", label);
+          assert.ok(reasons.every((reason) => ["evidence_type_requires_get_kinder_review", "factual_review_not_supported"].includes(reason)), `${label}: ${JSON.stringify(reasons)}`);
         }
         outcomes[label] = response.body.blockers?.[0]?.blocking_reason || response.body.error.code;
       }

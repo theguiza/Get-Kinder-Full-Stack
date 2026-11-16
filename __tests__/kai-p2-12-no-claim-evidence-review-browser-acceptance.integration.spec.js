@@ -688,9 +688,11 @@ async function runBrowserAcceptance() {
       const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === "Usable Impact Facts");
       return h ? h.closest(".admin-card").innerText : "";
     })()`);
-    function assertNoClientLeak(label, body, card = body) {
+    // `usableEvidenceIds`: items whose claim is a usable Impact Fact (a72413e6),
+    // whose own statement may be shown in the Usable Impact Facts card.
+    function assertNoClientLeak(label, body, card = body, usableEvidenceIds = []) {
       for (const row of evidence) {
-        assert.ok(!card.includes(row.statement), `${label}: no evidence statement`);
+        if (!usableEvidenceIds.includes(row.evidence_item_id)) assert.ok(!card.includes(row.statement), `${label}: no evidence statement`);
         assert.ok(!card.includes(row.review_queue_item_id), `${label}: no queue id`);
         assert.ok(!card.includes(row.evidence_item_id), `${label}: no evidence id`);
       }
@@ -701,14 +703,18 @@ async function runBrowserAcceptance() {
       assertClientBoundary(clientPage, label, body);
     }
 
-    await test("case 4: with one of two items reviewed, the client Project shows Evidence creation Complete and Evidence review Waiting for Get Kinder, with no GK data", async () => {
+    // a72413e6 (active reporting policy): the supported item's proposed claim is
+    // usable internally without a claim review; the other item's open review
+    // does not hold the file. No Get Kinder data reaches the client.
+    await test("case 4: with one of two items reviewed as supported, the client Project shows the file Complete with its one usable Impact Fact, with no GK data", async () => {
       const entry = await clientBody();
       console.log(`[p2-12-no-claim-browser] client pipeline (partial):\n${entry}`);
       assert.match(entry, /Evidence creation\s+Complete/);
-      assert.match(entry, /Evidence review\s+Waiting for Get Kinder/);
+      assert.match(entry, /Impact Fact review\s+Complete/);
+      assert.match(entry, /Usable Impact Facts from this file: 1/);
       await clientPage.clickTab("Evidence");
-      await clientPage.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
-      assertNoClientLeak("client partial", await clientPage.text(), await reviewedEvidenceCard());
+      await clientPage.waitForText("1 shown");
+      assertNoClientLeak("client partial", await clientPage.text(), await reviewedEvidenceCard(), [evidence[0].evidence_item_id]);
       assert.deepEqual(clientPage.exceptions, []);
       results.case4_client_partial = "PASS";
     });
@@ -736,17 +742,17 @@ async function runBrowserAcceptance() {
       results.case5_not_supported = "PASS";
     });
 
-    await test("case 6: with both items reviewed and one unreviewed proposed claim, the client Project shows evidence review Complete and Impact Fact review waiting for Get Kinder, with zero Impact Facts", async () => {
+    await test("case 6: with both items reviewed and the supported item's claim not yet reviewed, the client Project shows the file Complete with exactly one usable Impact Fact; the not-supported item adds none", async () => {
       const entry = await clientBody();
       console.log(`[p2-12-no-claim-browser] client pipeline (all reviewed):\n${entry}`);
       assert.match(entry, /Evidence creation\s+Complete/);
       assert.match(entry, /Evidence review\s+Complete/);
-      assert.match(entry, /Impact Fact review\s+Waiting for Get Kinder/);
+      assert.match(entry, /Impact Fact review\s+Complete/);
+      assert.match(entry, /Usable Impact Facts from this file: 1/);
       await clientPage.clickTab("Evidence");
-      await clientPage.waitForText("Evidence from 1 file has been reviewed. Get Kinder has not yet completed the Impact Fact review.");
+      await clientPage.waitForText("1 shown");
       const body = await clientPage.text();
-      assert.ok(!body.includes("Usable internally") && !body.includes("1 shown"), "no reviewed Impact Fact");
-      assertNoClientLeak("client all reviewed", body, await reviewedEvidenceCard());
+      assertNoClientLeak("client all reviewed", body, await reviewedEvidenceCard(), [evidence[0].evidence_item_id]);
       assert.equal((await governedCounts()).claims, 1, "only the supported item has a (proposed) claim");
       assert.equal((await governedCounts()).claim_decisions, 0);
       assert.deepEqual(clientPage.exceptions, []);

@@ -170,6 +170,10 @@ const EXPORT_PATH_MIGRATIONS = Object.freeze([
 // measurements the same panel reads) without the export path.
 const MEASUREMENT_SCHEMA_SPECS = new Set([
   "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
+  // Get Kinder's traceability read includes a derived measurement's material
+  // limitations (4084b36d), which reads kai.evidence_derived_measurements.
+  "__tests__/kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js",
+  "__tests__/kai-reviewed-evidence-claim-proposal-browser-acceptance.integration.spec.js",
 ]);
 const MEASUREMENT_SCHEMA_MIGRATIONS = Object.freeze([
   "kai_sprint2_p2_01m_source_record_count_measurement",

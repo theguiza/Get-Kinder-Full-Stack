@@ -969,7 +969,7 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(() => has(adminPage, `[data-client-claim-gap-followups="${claim.claim_id}"]`), "gap follow-ups offered");
       mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-claim-gap-followups="${claim.claim_id}"]`, "Generate gap follow-ups");
-      await adminPage.waitForText("Gap follow-ups generated:");
+      await adminPage.waitForText("follow-up question(s). You can continue with your report");
       await adminPage.idle();
       const p204 = postsSince(adminPage, mark);
       assert.equal(p204.length, 1);

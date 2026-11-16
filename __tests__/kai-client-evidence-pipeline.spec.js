@@ -1013,3 +1013,18 @@ test("Take me to this step is offered for exactly the steps this actor takes in 
   // The guidance names where the step is.
   assert.match(nextActionText({ ...file("promote_source"), currentStage: "source_review", stages: [] }), /promote it as a source in Sources > Files that need a step\./);
 });
+
+test("an authorization or tenant refusal is shown with the server's client-safe message, never the operator guidance in its blockers", async () => {
+  const { errorText } = await import("../frontend/impactEvidenceLibraryLogic.js");
+  const denied = { statusCode: 403, body: { ok: false, error: { code: "authorization_denied", message: "Actor is not authorized for this operation." },
+    blockers: [{ message: "Actor does not have active membership in this organization.", required_fix: "Grant an active kai.organization_memberships row for the organization." }] } };
+  assert.equal(errorText(denied), "Actor is not authorized for this operation.");
+  assert.doesNotMatch(errorText(denied), /kai\.|membership row|Grant an active/);
+  const tenant = { statusCode: 403, body: { ok: false, error: { code: "tenant_boundary_violation", message: "Tenant boundary violation." },
+    blockers: [{ message: "Organization mismatch.", required_fix: "Use kai.organization_id of the actor." }] } };
+  assert.equal(errorText(tenant), "Tenant boundary violation.");
+  // Any other refusal still explains itself with the server's specific reason.
+  const permission = { statusCode: 422, body: { ok: false, error: { code: "validation_blocker", message: "Request failed KAI validation." },
+    blockers: [{ message: "This source's current decision does not permit AI processing.", required_fix: "Record a review that permits AI processing." }] } };
+  assert.equal(errorText(permission), "This source's current decision does not permit AI processing. Record a review that permits AI processing.");
+});

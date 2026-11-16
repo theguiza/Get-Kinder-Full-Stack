@@ -734,7 +734,9 @@ async function runBrowserAcceptance() {
       results.case4_claim_visible = "PASS";
     });
 
-    await test("case 6: the client Project shows Evidence review Complete and Impact Fact review Waiting for Get Kinder, with no internal ids or reviewer controls", async () => {
+    // a72413e6 (active reporting policy): a claim proposed from evidence Get
+    // Kinder reviewed as supported is usable internally without a claim review.
+    await test("case 6: the client Project shows Evidence review and Impact Fact review Complete with the usable fact, and no internal ids or reviewer controls", async () => {
       await clientPage.goto("/impact-library");
       await clientPage.waitForText("Knowledge Studio");
       await clientPage.clickNav("Knowledge Studio");
@@ -746,16 +748,16 @@ async function runBrowserAcceptance() {
       const entry = await clientPage.pipelineFileText(FILE);
       console.log(`[reviewed-claim-browser] client pipeline:\n${entry}`);
       assert.match(entry, /Evidence review\s+Complete/);
-      assert.match(entry, /Impact Fact review\s+Waiting for Get Kinder/);
+      assert.match(entry, /Impact Fact review\s+Complete/);
+      assert.match(entry, /Usable Impact Facts from this file: 1/);
       const body = await clientPage.text();
       for (const forbidden of [
-        proposed.claim_id, proposed.claim_queue_id, proposed.statement, supportedItem.evidence_item_id, unsupportedItem.evidence_item_id,
+        proposed.claim_id, proposed.claim_queue_id, supportedItem.evidence_item_id, unsupportedItem.evidence_item_id,
         supportedItem.review_queue_item_id, kaiUserIds.gk_reviewer, "needs_gk_review", "claim_review", "reviewed_not_supported",
         "Get Kinder claim review required", ...GK_REVIEW_CONTROLS,
       ]) {
         assert.ok(!body.includes(forbidden), `client never sees ${forbidden}`);
       }
-      assert.ok(!body.includes("Usable internally"), "a proposal is not an Impact Fact");
       assert.equal(clientPage.requests().filter((r) => r.method === "POST").length, 0);
       assertClientBoundary(clientPage, "client", body);
       assert.deepEqual(clientPage.exceptions, []);
@@ -868,7 +870,7 @@ async function runBrowserAcceptance() {
       results.case10_zero_approval = "PASS";
     });
 
-    await test("case 11: a separate GK reviewer discovers the claim review, reads why its traceability is not yet available, completes the P2-04 prerequisite through the existing control, and records the claim decision through the UI", async () => {
+    await test("case 11: a separate GK reviewer discovers the claim review, reads its traceability before P2-04, generates the gap follow-ups through the existing control, and records the claim decision through the UI", async () => {
       const page = claimReviewerPage;
       const [claim] = await claimRows();
       const claimReviewPost = (r) => r.method === "POST" && /\/claim-review\/[^/]+\/complete$/.test(new URL(r.url).pathname);
@@ -879,9 +881,9 @@ async function runBrowserAcceptance() {
       await page.waitFor(async () => page.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
       await page.clickTab("Reviews");
       await page.waitForText(`Claim ${claim.claim_id}`);
-      // Stage B: open the target. Before P2-04 gap state exists, P2-06
-      // traceability fails closed (409 gap_dimension_requires_missing_p204_state);
-      // the reviewer is told exactly that, not that the state went stale.
+      // Stage B: open the target. Since c1feab49 a missing P2-04 gap state is
+      // read (200) and reported as p204_evaluation_required, not refused with a
+      // 409; the reviewer then generates the gap follow-ups and decides.
       let mark = page.mark();
       assert.ok(await page.evaluate(`(() => {
         const li = document.querySelector('[data-claim-review-item="${claim.claim_queue_id}"]');
@@ -894,9 +896,7 @@ async function runBrowserAcceptance() {
       await page.idle();
       const blockedRead = page.requestsSince(mark).filter((r) => /\/traceability/.test(new URL(r.url).pathname));
       console.log(`[reviewed-claim-browser] claim reviewer traceability before P2-04: ${JSON.stringify(blockedRead.map((r) => r.status))}`);
-      assert.ok(blockedRead.some((r) => r.status === 409));
-      await page.waitForText("coverage gaps have not been generated yet");
-      assert.ok(!(await page.text()).includes("Record claim review decision"), "no decision form without readable traceability");
+      assert.ok(blockedRead.length > 0 && blockedRead.every((r) => r.status === 200), "the claim's traceability is readable before P2-04");
       const beforeGaps = await governedCounts();
       // The existing P2-04 control (organization gk_reviewer), then the
       // traceability is re-read and the decision form becomes available.

@@ -2665,6 +2665,12 @@ export function errorText(result) {
     return `The generated draft${attempts} contained ${kinds.length > 0 ? kinds.join(" and ") : "an unsupported number or cause-and-effect wording"}, so nothing was saved. Retry generation; if it repeats, choose a more focused set of claims.`
       + (evidence.origin === "composed_draft" ? " This came from Get Kinder's own assembled text; report it to Get Kinder." : "");
   }
+  // An authorization or tenant refusal is shown as the server's client-safe
+  // message only: its blockers carry operator guidance (membership rows,
+  // grants) that is not for the person who was refused.
+  if (["authorization_denied", "tenant_boundary_violation"].includes(result?.body?.error?.code)) {
+    return result.body.error.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
+  }
   // The server's own reason and fix for the first specific blocker (for
   // example which source's processing permission refused a claim), never the
   // generic "Request failed KAI validation." when a reason was sent.

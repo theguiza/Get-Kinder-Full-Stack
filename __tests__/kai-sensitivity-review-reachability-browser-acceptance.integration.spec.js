@@ -861,7 +861,8 @@ async function runBrowserAcceptance() {
       // Data Sources: the organization administrator's evidence-to-draft
       // workflow (owner decision 2026-10-18), offered by the client Studio only.
       // Four-view refactor: both studios share the four views; the studio kind tells them apart.
-      assert.deepEqual(tabs, ["Impact", "Evidence", "Sources", "Drafts"]);
+      // 58c4e0d9: Sources-first navigation, Impact the default view.
+      assert.deepEqual(tabs, ["Sources", "Impact", "Evidence", "Drafts"]);
       assert.equal(await mixedPage.evaluate(`document.querySelector("[data-knowledge-studio-kind]")?.getAttribute("data-knowledge-studio-kind")`), "client", "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);

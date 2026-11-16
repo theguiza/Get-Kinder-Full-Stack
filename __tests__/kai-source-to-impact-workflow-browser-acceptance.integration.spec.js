@@ -652,7 +652,13 @@ async function runBrowserAcceptance() {
     await page.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
     mark = page.mark();
     await page.clickButton("Promote");
-    await page.waitForText("Use for impact: this file's evidence exists.");
+    // 4e5a758c: a promoted spreadsheet whose evidence is only column facts
+    // continues to its Count records step (opened below); any other file ends
+    // with its evidence created.
+    await page.waitFor(async () => {
+      const shown = await page.text();
+      return shown.includes("Use for impact: this file's evidence exists.") || shown.includes("Use for impact: this spreadsheet is a source now.");
+    }, "Use for impact continued after promotion");
     await page.idle();
     const posts = postsSince(page, mark);
     assert.deepEqual(posts[0], [`${COCKPIT}/source-candidates/${candidateId}/decision`, 200], JSON.stringify(posts));
@@ -971,7 +977,7 @@ async function runBrowserAcceptance() {
       await adminBPage.waitFor(() => has(adminBPage, `[data-client-claim-gap-followups="${claim.claim_id}"]`), "gap follow-ups offered");
       mark = adminBPage.mark();
       await adminBPage.clickIn(`[data-client-claim-gap-followups="${claim.claim_id}"]`, "Generate gap follow-ups");
-      await adminBPage.waitForText("Gap follow-ups generated:");
+      await adminBPage.waitForText("follow-up question(s). You can continue with your report");
       await adminBPage.idle();
       assert.ok([200, 201].includes(postsSince(adminBPage, mark)[0][1]));
       const callsBefore = modelCalls.length;
@@ -998,10 +1004,11 @@ async function runBrowserAcceptance() {
       for (const draft of drafts) {
         const read = await adminBPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, draft.id));
         assert.equal(read.status, 200, JSON.stringify(read.body));
-        assert.deepEqual([read.body.data.audience, read.body.data.reviewState, read.body.data.citedClaimsCurrentlyEligible], ["internal", "awaiting_get_kinder_review", false]);
+        // a72413e6: the cited claim is currently eligible for internal use (no review or P2-04 prerequisite).
+        assert.deepEqual([read.body.data.audience, read.body.data.reviewState, read.body.data.citedClaimsCurrentlyEligible], ["internal", "awaiting_get_kinder_review", true]);
         assert.deepEqual(read.body.data.blocks.map((block) => block.supportingClaimIds), [[claim.claim_id]]);
         assert.ok(read.body.data.blocks[0].text.startsWith("Internal draft text for:"));
-        assert.deepEqual(read.body.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review", "cited_claims_not_currently_eligible"]);
+        assert.deepEqual(read.body.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review"]);
         const serialized = JSON.stringify(read.body);
         for (const hidden of ["reviewQueueItemId", "evidenceItemId", "sourceVersionId", "blockerCodes", "needs_gk_review", "generationRunId"]) {
           assert.ok(!serialized.includes(hidden), `${hidden} is not returned`);
@@ -1046,16 +1053,29 @@ async function runBrowserAcceptance() {
         mixedSummary: await adminBPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY(mixed, "ai-mixed-summary")),
         mixedNarrative: await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY(mixed, "ai-mixed-narrative")),
       };
-      for (const [label, response] of Object.entries(refusals)) {
+      // Alone: refused, naming the restriction.
+      for (const label of ["summary", "narrative"]) {
+        const response = refusals[label];
         assert.equal(response.status, 422, `${label}: ${JSON.stringify(response.body)}`);
         // The route's blocker projection carries the key and reason (the basis is proven in kai-effective-ai-processing-enforcement.spec.js).
         const [blocker] = response.body.blockers || [];
         assert.deepEqual([blocker?.validator_key, blocker?.blocking_reason], ["VAL-KAI-B1A-02-004", "ai_processing_not_permitted"], label);
         assert.match(blocker.message, /does not permit AI processing/, `${label}: the refusal names the restriction`);
       }
-      assert.deepEqual(delta(await counts(ORG_X), before), ZERO, "no write by any refusal");
-      assert.equal(modelCalls.length, callsBefore, "no claim of the file reached the model");
-      results.step8b = "PASS: claim proposal 200 + gap follow-ups for the AI-restricted file; both drafts, alone and mixed with the permitted claim, 422 ai_processing_not_permitted; zero writes; 0 model calls";
+      // Mixed with a permitted claim (11-11 partial AI-permission exclusion): the
+      // restricted claim is excluded and named; the draft is written from the
+      // permitted claim only.
+      for (const label of ["mixedSummary", "mixedNarrative"]) {
+        const response = refusals[label];
+        assert.ok([200, 201].includes(response.status), `${label}: ${JSON.stringify(response.body)}`);
+        assert.deepEqual(response.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.validatorKey, item.blockingReason]),
+          [[uiClaim, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]], label);
+        const cited = new Set(response.body.data.blocks.flatMap((block) => (block.citations || []).map((citation) => citation.claimId)));
+        assert.ok(!cited.has(uiClaim), `${label}: the restricted claim is not cited`);
+      }
+      assert.ok(modelCalls.slice(callsBefore).every((call) => !call.claimIds.includes(uiClaim)), "no claim of the AI-restricted file reached the model");
+      assert.deepEqual(delta(await counts(ORG_X), before), { ...ZERO, drafts: 2, audit_events: 2 }, "only the two mixed drafts (and their audit records) were written");
+      results.step8b = "PASS: claim proposal 200 + gap follow-ups for the AI-restricted file; drafts from it alone 422 ai_processing_not_permitted; mixed drafts exclude and name it; it reached no model call";
     });
 
     // --- 8c: historical reviewed 'unknown', authorized correction, continuation ---
@@ -1081,14 +1101,17 @@ async function runBrowserAcceptance() {
       for (const [label, path, claimIds] of [
         ["historical summary", createEvidenceSummaryPath(ORG_X), [legacyClaim]],
         ["historical narrative", createImpactNarrativePath(ORG_X), [legacyClaim]],
-        ["historical mixed with a permitted claim", createEvidenceSummaryPath(ORG_X), [ids.histClaim, legacyClaim].sort()],
       ]) {
         const refused = await adminBPage.api("POST", path, DRAFT_BODY(claimIds, `legacy-${label.replace(/\W+/g, "-")}`));
         assert.deepEqual([refused.status, refused.body.blockers?.[0]?.validator_key, refused.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"], label);
       }
       assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
-      draftCounts.historicalRefusals = modelCalls.length - callsBefore;
-      assert.equal(draftCounts.historicalRefusals, 0, "no model call for the historical reviewed-unknown file");
+      // Mixed with a permitted claim (11-11 partial AI-permission exclusion): excluded and named, never sent to the model.
+      const mixedHistorical = await adminBPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.histClaim, legacyClaim].sort(), "legacy-historical-mixed-with-a-permitted-claim"));
+      assert.ok([200, 201].includes(mixedHistorical.status), JSON.stringify(mixedHistorical.body));
+      assert.deepEqual(mixedHistorical.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.blockingReason]), [[legacyClaim, "ai_processing_not_permitted"]]);
+      assert.ok(modelCalls.slice(callsBefore).every((call) => !call.claimIds.includes(legacyClaim)), "no model call carried the historical reviewed-unknown claim");
+      draftCounts.historicalRefusals = 0;
 
       // The correction body is the form's own: a re-review seeded from the current decision, with the
       // allowed use and the AI disposition deliberately chosen (the seed never restates the old AI fact).
@@ -1165,16 +1188,20 @@ async function runBrowserAcceptance() {
         assert.deepEqual([read.body.data.audience, read.body.data.reviewState], ["internal", "awaiting_get_kinder_review"]);
         assert.deepEqual(read.body.data.blocks.map((block) => block.supportingClaimIds), [[legacyClaim]]);
         assert.ok(read.body.data.blocks[0].text.startsWith("Internal draft text for:"));
-        assert.deepEqual(read.body.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review", "cited_claims_not_currently_eligible"]);
+        assert.deepEqual(read.body.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review"]);
       }
 
       // The deliberate prohibition on another file still holds, alone or mixed with the corrected claim.
       before = await counts(ORG_X);
       callsBefore = modelCalls.length;
+      // 11-11 partial AI-permission exclusion: the prohibited claim is excluded and named; the draft uses the corrected claim only.
       const mixed = await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([legacyClaim, ids.uiClaim].sort(), "legacy-ui-mixed"));
-      assert.deepEqual([mixed.status, mixed.body.blockers?.[0]?.validator_key, mixed.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]);
-      assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
-      draftCounts.mixedWithExplicitProhibition = modelCalls.length - callsBefore;
+      assert.ok([200, 201].includes(mixed.status), JSON.stringify(mixed.body));
+      assert.deepEqual(mixed.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.validatorKey, item.blockingReason]),
+        [[ids.uiClaim, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]]);
+      assert.deepEqual(delta(await counts(ORG_X), before), { ...ZERO, drafts: 1, audit_events: 1 });
+      assert.ok(modelCalls.slice(callsBefore).every((call) => !call.claimIds.includes(ids.uiClaim)), "the prohibited claim reached no model call");
+      draftCounts.mixedWithExplicitProhibition = modelCalls.slice(callsBefore).filter((call) => call.claimIds.includes(ids.uiClaim)).length;
       assert.equal(draftCounts.mixedWithExplicitProhibition, 0);
 
       // A deliberately unresolved decision (needs more information) restricts AI again; non-AI processing continues.
@@ -1244,7 +1271,11 @@ async function runBrowserAcceptance() {
       assert.deepEqual(stateOf("rereview"), ["source_review", "waiting_for_client", "client", "promote_source"], "reviewed, open candidate");
       assert.deepEqual(stateOf("notAllowed"), ["source_review", "closed", "none", "none"], "reviewed not_allowed, closed");
       for (const key of ["ui", "hist", "later"]) {
-        assert.equal(stateOf(key)[0], "evidence_review", `${key}: promoted, past source preparation`);
+        // Promoted and past source preparation: at evidence review, or complete
+        // once its claim is usable internally (a72413e6).
+        const promotedFile = fileOf(pipeline, FILE[key]);
+        assert.ok([null, "evidence_review", "impact_fact_review"].includes(promotedFile.currentStage), `${key}: promoted, past source preparation (${promotedFile.currentStage})`);
+        assert.equal(promotedFile.stages.find((stage) => stage.key === "source_review").status, "complete", `${key}: source review complete`);
         assert.equal(await has(adminBPage, `[data-client-preparation-file="${FILE[key]}"]`), false, `${key} is not in Source preparation`);
       }
       // Pending stays reviewable as before; the unresolved, failed-policy, and other organization's files are not offered.
@@ -1434,7 +1465,7 @@ async function runBrowserAcceptance() {
       await adminBPage.waitFor(() => has(adminBPage, `[data-client-claim-gap-followups="${claim.claim_id}"]`), "gap follow-ups offered");
       mark = adminBPage.mark();
       await adminBPage.clickIn(`[data-client-claim-gap-followups="${claim.claim_id}"]`, "Generate gap follow-ups");
-      await adminBPage.waitForText("Gap follow-ups generated:");
+      await adminBPage.waitForText("follow-up question(s). You can continue with your report");
       await adminBPage.idle();
       assert.ok([200, 201].includes(postsSince(adminBPage, mark)[0][1]));
       const callsBeforeDrafts = modelCalls.length;
@@ -1474,17 +1505,21 @@ async function runBrowserAcceptance() {
       // --- a deliberate prohibition still blocks AI; the prohibited file's non-AI work is unaffected.
       before = await counts(ORG_X);
       let callsBefore = modelCalls.length;
+      // 11-11 partial AI-permission exclusion: the prohibited claim is excluded and named; never sent to the model.
       const mixed = await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([claim.claim_id, ids.uiClaim].sort(), "rereview-ui-mixed"));
-      assert.deepEqual([mixed.status, mixed.body.blockers?.[0]?.validator_key, mixed.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]);
-      assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
-      draftCounts.mixedWithProhibition = modelCalls.length - callsBefore;
-      assert.equal(draftCounts.mixedWithProhibition, 0);
+      assert.ok([200, 201].includes(mixed.status), JSON.stringify(mixed.body));
+      assert.deepEqual(mixed.body.data.permissionExcludedClaims.map((item) => [item.claimId, item.validatorKey, item.blockingReason]),
+        [[ids.uiClaim, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]]);
+      assert.deepEqual(delta(await counts(ORG_X), before), { ...ZERO, drafts: 1, audit_events: 1 });
+      draftCounts.mixedWithProhibition = modelCalls.slice(callsBefore).filter((call) => call.claimIds.includes(ids.uiClaim)).length;
+      assert.equal(draftCounts.mixedWithProhibition, 0, "the prohibited claim reached no model call");
       const [, uiSecondEvidence] = await query(
         `SELECT e.evidence_item_id::text FROM kai.evidence_items e WHERE e.organization_id = $1::uuid AND e.source_version_id = $2::uuid ORDER BY e.statement`,
         [ORG_X, uiLineage.source_version_id]);
+      const callsBeforeNonAi = modelCalls.length;
       const nonAi = await adminBPage.api("POST", claimProposalPath(ORG_X, uiSecondEvidence.evidence_item_id), {});
       assert.equal(nonAi.status, 200, `non-AI work on the AI-prohibited file: ${JSON.stringify(nonAi.body)}`);
-      assert.equal(modelCalls.length, callsBefore, "non-AI claim proposal calls no model");
+      assert.equal(modelCalls.length, callsBeforeNonAi, "non-AI claim proposal calls no model");
 
       // --- needs more information through the panel stays unresolved: back to the sensitivity review, continuation refused.
       await openDataSources(adminBPage);
@@ -1633,7 +1668,8 @@ async function runBrowserAcceptance() {
       for (const [label, page] of [["Admin B", adminBPage], ["contributor", pages.contributor], ["Admin A", adminAPage]]) {
         const pipeline = await page.api("GET", pipelinePath(ORG_X, PROJECT_X));
         assert.equal(pipeline.status, 200, `${label}: ${JSON.stringify(pipeline.body)}`);
-        assert.equal(fileOf(pipeline, FILE.hist).currentStage, "evidence_review", label);
+        // a72413e6: the file's claims are usable internally, so it is complete.
+        assert.deepEqual([fileOf(pipeline, FILE.hist).currentStage, fileOf(pipeline, FILE.hist).reason], [null, "complete"], label);
         assert.equal(fileOf(pipeline, FILE.notAllowed).reason, "allowed_use_not_allowed", label);
       }
       results.step10 = "PASS: pipeline 200 for Admin B, contributor, Admin A with an unevaluable and a refused claim in the Project";

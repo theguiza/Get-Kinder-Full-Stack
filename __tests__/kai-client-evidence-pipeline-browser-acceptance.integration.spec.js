@@ -160,7 +160,8 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       if (open.length > (allowHeld ? held.length : 0)) quietSince = Date.now();
       else if (Date.now() - quietSince > 500) return;
     }
-    throw new Error("network never went idle");
+    const pending = requests.filter((request) => !request.done).map((request) => `${request.method} ${request.url} (status ${request.status ?? "none"})`);
+    throw new Error(`network never went idle; still open: ${pending.join(" | ")}`);
   };
   const waitFor = async (predicate, description, { timeout = 15000 } = {}) => {
     const deadline = Date.now() + timeout;
@@ -891,7 +892,7 @@ async function runBrowserAcceptance() {
     });
 
     let eligibleStatement = "";
-    await test("case 5 + case 3: reviewed Impact Fact renders under Evidence; the client reviewer sees the follow-up action and no GK control", async () => {
+    await test("case 5 + case 3: reviewed Impact Facts render under Evidence; optional follow-ups do not hold them, the client reviewer can still answer them, and no GK control", async () => {
       await buildGovernedClaim({ completeFollowups: true });
       await buildGovernedClaim({ completeFollowups: false });
       // Evidence review for every remaining extracted item (real P2-12).
@@ -913,15 +914,14 @@ async function runBrowserAcceptance() {
       await page.waitForText(eligibleStatement);
       await pipelineRead(page, PROJECT.alpha, mark, "case 5");
       let body = await page.text();
-      console.log(`[evidence-pipeline-browser] case 5 Evidence (client_admin):\n${body.slice(body.indexOf("Usable Impact Fidence"), body.indexOf("Usable Impact Fidence") + 900)}`);
-      assert.ok(body.includes("1 shown"));
+      console.log(`[evidence-pipeline-browser] case 5 Evidence (client_admin):\n${body.slice(Math.max(0, body.indexOf("Usable Impact Facts")), Math.max(0, body.indexOf("Usable Impact Facts")) + 1500)}`);
+      // a72413e6 (active reporting policy): unanswered follow-up questions are
+      // information, so both governed claims are usable internally.
+      assert.ok(body.includes("2 shown"));
       assert.ok(body.includes("Usable internally"));
-      assert.ok(body.includes("1 file need an answer from a client reviewer in your organization before evidence can be used."));
       assertClientBoundary(page, "case 5 client_admin", body);
       await page.clickTab("Reviews");
-      await page.waitForText("are waiting for a client");
-      body = await page.text();
-      assert.ok(body.includes("No action is currently required from you."));
+      await page.idle();
       assert.ok(!(await page.linkHrefs()).some(([, href]) => href.startsWith("/kai/client-followups")), "client_admin gets no follow-up action");
       results.case5 = "PASS";
 
@@ -930,13 +930,13 @@ async function runBrowserAcceptance() {
       await reviewer.selectProject(PROJECT.alpha);
       await reviewer.waitFor(async () => Boolean(await reviewer.pipelineFileText(FILE.alpha)), "reviewer Alpha entry");
       const entry = await reviewer.pipelineFileText(FILE.alpha);
-      assert.match(entry, /Impact Fact review\s+Waiting for your organization/);
-      assert.match(entry, /Next action: Answer the follow-up questions Get Kinder sent about this file's evidence\./);
-      assert.match(entry, /Usable Impact Facts from this file: 1/);
+      // Optional questions never put a report-ready file back into a waiting
+      // stage; the client reviewer can still answer them from Reviews.
+      assert.match(entry, /Impact Fact review\s+Complete/);
+      assert.match(entry, /Usable Impact Facts from this file: 2/);
       await reviewer.clickTab("Reviews");
-      await reviewer.waitForText("Your action is needed");
+      await reviewer.waitFor(async () => (await reviewer.linkHrefs()).some(([label]) => label === "Answer follow-up questions"), "the follow-up action");
       body = await reviewer.text();
-      assert.ok(body.includes("Get Kinder sent follow-up questions about evidence from 1 file in this project."));
       assert.ok((await reviewer.linkHrefs()).some(([label, href]) => label === "Answer follow-up questions" && href === `/kai/client-followups?organizationId=${ORG}`));
       assertClientBoundary(reviewer, "case 3 client_reviewer", body);
       await reviewer.clickTab("Evidence");
