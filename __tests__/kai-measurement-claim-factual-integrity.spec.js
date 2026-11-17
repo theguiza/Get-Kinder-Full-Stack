@@ -257,10 +257,21 @@ test("9 the existing derived methods, which execute the conditions, give the str
   const contacts = derive({ operation: "count", unit: { kind: "distinct_key", field_key: "field_1", duplicate_policy: D.DUPLICATE_POLICY_COUNT_EACH_KEY_ONCE }, conditions: [status, inFy] });
   assert.equal(contacts.ok, true, JSON.stringify(contacts.blockers));
   assert.equal(contacts.measurement.measuredValue, ORACLE.completedFyContacts);
-  // Distinct people across several months is refused rather than approximated (the basis keeps months only).
+  // Distinct people across several months: each person is counted once in the period, from the committed month windows.
   const people = derive({ operation: "count", unit: { kind: "distinct_key", field_key: "field_2", duplicate_policy: D.DUPLICATE_POLICY_COUNT_EACH_KEY_ONCE }, conditions: [status, inFy] });
-  assert.equal(people.ok, false);
-  assert.equal(people.blockers[0].blocking_reason, "tabular_distinct_not_exact_for_period");
+  assert.equal(people.ok, true, JSON.stringify(people.blockers));
+  assert.equal(people.measurement.measuredValue, ORACLE.completedFyPeople);
+  // Negative control: summing each month's distinct people counts a person once per month attended.
+  const completedFy = ROWS.filter((row) => row[3] === "Completed" && row[2] >= FY.start && row[2] <= FY.end);
+  const perMonthSum = [...new Set(completedFy.map((row) => row[2].slice(0, 7)))]
+    .reduce((total, month) => total + new Set(completedFy.filter((row) => row[2].startsWith(month)).map((row) => row[1])).size, 0);
+  assert.ok(perMonthSum > ORACLE.completedFyPeople, `${perMonthSum} > ${ORACLE.completedFyPeople}`);
+  // A profile committed before the windows still refuses rather than approximating.
+  const { exact_period_aggregates: _windows, ...legacyBasis } = basis;
+  const legacy = D.deriveTabularMeasurement({ ...committed, tabular_measurement_basis: legacyBasis }, null, D.validateTabularMeasurementDefinition({
+    operation: "count", unit: { kind: "distinct_key", field_key: "field_2", duplicate_policy: D.DUPLICATE_POLICY_COUNT_EACH_KEY_ONCE }, conditions: [status, inFy],
+  }).definition, { reportingPeriod: FY });
+  assert.equal(legacy.blockers[0].blocking_reason, "tabular_distinct_not_exact_for_period");
 });
 
 test("6 generated text from a new record-count claim cannot restate the attributed label as the counted entity", async () => {

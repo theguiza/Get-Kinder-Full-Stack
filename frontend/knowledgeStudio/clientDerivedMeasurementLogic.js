@@ -77,18 +77,31 @@ export function tabularFormProblem(form, basis = null) {
     for (const [key, value] of [["categoryFieldKey", "categoryValueKey"], ["populationFieldKey", "populationValueKey"]]) {
       if (form[value] && !field(form[key], "categorical")?.values?.some((entry) => entry.value_key === form[value])) return "Choose a listed value of the selected field.";
     }
-    if (form.operation === "count" && form.periodFieldKey) {
+    if (form.periodFieldKey) {
       const state = basis.reporting_period_context || (basis.reporting_period ? { status: "recorded", period: basis.reporting_period } : null);
       const missing = projectPeriodProblem(state);
       if (missing) return missing;
-      if (form.identifierFieldKey && !(basis.tabular.single_valued_in?.[form.identifierFieldKey] || []).includes(form.periodFieldKey)) return "Some selected identifiers occur in more than one month. KAI cannot count each key once within a period exactly. Choose record as the counted unit, or choose no period (all dates).";
+      const support = basis.tabular.period_support || {};
+      if (form.operation === "count" && form.identifierFieldKey) {
+        const exact = basis.tabular.distinct_period_exact?.[form.identifierFieldKey] ?? basis.tabular.single_valued_in?.[form.identifierFieldKey] ?? [];
+        if (!exact.includes(form.periodFieldKey)) {
+          return support.distinct_month_windows === "exceeds_limit"
+            ? "Some selected identifiers occur in more than one month, and this table has too many months and values for KAI to count each identifier once within a period. Choose record as the counted unit, or choose no period (all dates)."
+            : "Some selected identifiers occur in more than one month, and this source version's profile predates exact cross-month identifier counts. Upload the file again as a new intake version to count each identifier once within the period, or choose record as the counted unit or no period (all dates).";
+        }
+      }
+      if (form.operation === "rate" && form.populationFieldKey && support.population_period_rates !== "available") {
+        return support.population_period_rates === "exceeds_limit"
+          ? "This table has too many value and month combinations for KAI to apply a period to a rate with a population value. Choose all records as the population, or no period (all dates)."
+          : "This source version's profile predates period-filtered rates with a population value. Upload the file again as a new intake version, or choose all records as the population or no period (all dates).";
+      }
       const { start, end } = state.period;
       const date = new Date(`${end}T00:00:00Z`);
       date.setUTCDate(date.getUTCDate() + 1);
       if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. This calculation needs a period starting on a month's first day and ending on a month's last day. Keep your actual Project dates; choose no period (all dates) if they are partial months.";
     }
   }
-  if (form.operation === "rate" && (form.identifierFieldKey || form.periodFieldKey)) return "Rates use record populations without date filtering or distinct-key instructions. Choose the calculation again.";
+  if (form.operation === "rate" && form.identifierFieldKey) return "Rates are calculated over records; a rate in distinct identifiers cannot be recorded yet. Choose the calculation again.";
   if (form.operation === "count" && (form.populationFieldKey || form.populationValueKey)) return "Counts do not use a rate population. Choose the calculation again.";
   if (form.categoryFieldKey && !form.categoryValueKey) return "Choose the value the counted records have.";
   if (form.operation === "rate") {
@@ -103,7 +116,7 @@ export function tabularFormProblem(form, basis = null) {
 export function tabularDefinitionBody(form) {
   const conditions = [];
   if (form.categoryFieldKey && form.categoryValueKey) conditions.push({ kind: "category", field_key: form.categoryFieldKey, value_key: form.categoryValueKey });
-  if (form.operation === "count" && form.periodFieldKey) {
+  if (form.periodFieldKey) {
     conditions.push({ kind: "period", field_key: form.periodFieldKey, period_source: "engagement_reporting_period", scope: form.periodScope === "outside" ? "outside" : "within" });
   }
   if (form.operation === "rate") {

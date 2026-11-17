@@ -219,8 +219,10 @@ function tabularRateReading(row, interpretation) {
   const c = row.component_counts || {};
   const label = interpretation.indicator_label;
   const selfReported = interpretation.evidence_basis === "self_reported";
+  const period = (row.definition?.conditions || []).find((condition) => condition?.kind === "period");
+  const periodScope = period ? ` (records dated ${period.scope === "outside" ? "outside" : "within"} the reporting period ${period.period_start} to ${period.period_end})` : "";
   const text = [
-    `${label}: ${row.numerator} of ${row.denominator} (${row.percentage}%) in the measured population; ${c.other_population_record_count} of the ${row.denominator} do not.`,
+    `${label}: ${row.numerator} of ${row.denominator} (${row.percentage}%) in the measured population${periodScope}; ${c.other_population_record_count} of the ${row.denominator} do not.`,
     meaningSentence(label, interpretation),
     basisSentence(interpretation),
     "It describes only the measured population named in the measurement, not everyone the organization served.",
@@ -237,8 +239,14 @@ function tabularRateReading(row, interpretation) {
 function tabularCountReading(row, interpretation) {
   if (!interpretation) return null;
   const label = interpretation.indicator_label;
+  // A distinct-key count is a number of identifiers, each counted once, not
+  // a number of records (an identifier is not necessarily a person).
+  const unit = row.definition?.unit;
+  const counted = unit?.kind === "distinct_key"
+    ? `${row.measured_value} distinct ${unit.field_key} ${row.measured_value === 1 ? "identifier" : "identifiers"}, each counted once`
+    : `${row.measured_value} ${row.measured_value === 1 ? "record" : "records"}`;
   const text = [
-    `${label}: ${row.measured_value} ${row.measured_value === 1 ? "record" : "records"}.`,
+    `${label}: ${counted}.`,
     meaningSentence(label, interpretation),
     basisSentence(interpretation),
   ].filter(Boolean).join(" ");

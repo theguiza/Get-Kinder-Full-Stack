@@ -23,7 +23,11 @@
  *   apart so neither is reported as "the" duplicate count.
  * - Dates are kept by calendar month only (YYYY-MM), never as a day, so no
  *   date value is stored and a date of birth cannot become a day-level
- *   distribution; a reporting period is applied by whole months.
+ *   distribution; a reporting period is applied by whole months. A date is
+ *   ISO date text, or a worksheet cell the reader established as a date (an
+ *   ISO `t="d"` cell, or a number whose cell style is a calendar-date number
+ *   format, converted under the workbook's own 1900 or 1904 date system). An
+ *   ordinary number is never a date, whatever its magnitude.
  * - Joint aggregates, so a combined condition is calculated, not assumed
  *   from independent histograms: for each listed category value, its
  *   records, its distinct keys per identifier field, its records per value
@@ -32,15 +36,34 @@
  *   per month. A distinct count summed across months is exact only when
  *   every key has one month, which `single_valued_in` records per identifier
  *   field; otherwise the calculation is refused, never estimated.
+ * - Exact-period aggregates (additive to the v1 basis; a profile committed
+ *   before them simply lacks `exact_period_aggregates`, and the calculations
+ *   that need them are refused on it with the new-intake-version remedy):
+ *   * distinct-key month windows: for an identifier field whose keys occur
+ *     in more than one month of a date field, and for each contiguous run of
+ *     that field's recorded months, how many keys have a record inside the
+ *     run and how many have a dated record outside it - overall and for each
+ *     listed category value. A key is one set member however many months it
+ *     occurs in, so a whole-month period's distinct count is exact. Only
+ *     counts are kept: no key, no per-key month pattern.
+ *   * category-pair months: records per month carrying both of two listed
+ *     category values, so a period-filtered rate whose population is a
+ *     category value is calculated from the joint table, not from marginals.
+ *   Each part is omitted, with its reason, when it would exceed its bound;
+ *   the rest of the basis is unaffected.
  *
  * Values are compared exactly after trimming surrounding whitespace.
  */
 
 export const TABULAR_MEASUREMENT_BASIS_VERSION = "kai_tabular_measurement_basis_v1";
+export const EXACT_PERIOD_AGGREGATES_VERSION = "kai_tabular_exact_period_aggregates_v1";
 export const MAX_CATEGORY_VALUES = 12;
 export const MIN_CATEGORY_VALUE_RECORDS = 2;
 const MAX_DATE_MONTHS = 1200;
 const MAX_JOINT_ENTRIES = 50000;
+// Bounds of the exact-period aggregates (numbers kept per part).
+export const MAX_WINDOW_ENTRIES = 40000;
+export const MAX_CATEGORY_PAIR_MONTH_ENTRIES = 20000;
 const IDENTIFIER_RE = /^(?=[A-Za-z0-9_.-]*[A-Za-z])(?=[A-Za-z0-9_.-]*\d)[A-Za-z0-9][A-Za-z0-9_.-]{1,39}$/;
 const CATEGORY_LABEL_RE = /^[A-Za-z][A-Za-z _'()&/-]{0,39}$/;
 // The committed profile's metadata-only CHECK (kai.gate_a_p0_jsonb_metadata_only)
@@ -140,9 +163,15 @@ function fieldKey(position) {
   return `field_${position}`;
 }
 
-// The calendar month (YYYY-MM) of an ISO date cell, or null.
+const READER_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The calendar month (YYYY-MM) of an ISO date cell, or of a cell the
+// worksheet reader established as a date (`cell.date`, a real YYYY-MM-DD
+// day held in memory only), or null.
 function isoMonth(cell) {
-  if (!cell?.present || !TEXT_CELL_TYPES.has(cell.type)) return null;
+  if (!cell?.present) return null;
+  if (typeof cell.date === "string" && READER_DATE_RE.test(cell.date)) return cell.date.slice(0, 7);
+  if (!TEXT_CELL_TYPES.has(cell.type)) return null;
   const match = ISO_DATE_RE.exec(cell.value.trim());
   if (!match) return null;
   const parsed = new Date(`${match[1]}T00:00:00.000Z`);
@@ -195,6 +224,15 @@ function classifyField(records, position, header) {
     result.roles.push("date");
     const sorted = months.filter(Boolean).sort();
     result.date = { date_count: dated, non_date_count: values.length - dated, earliest_month: sorted[0], latest_month: sorted[sorted.length - 1] };
+    // Dates the worksheet reader established from Excel date cells (a
+    // date-formatted number or an ISO date cell), stated so a person can see
+    // that they were read as dates. Absent when there are none.
+    const workbookDates = values.filter((cell) => typeof cell.date === "string" && READER_DATE_RE.test(cell.date)).length;
+    if (workbookDates > 0) {
+      result.date.excel_date_cell_count = workbookDates;
+      const systems = [...new Set(values.filter((cell) => typeof cell.dateSystem === "string").map((cell) => cell.dateSystem))];
+      if (systems.length === 1) result.date.excel_date_system = systems[0];
+    }
     return result;
   }
   const texts = values.map((cell) => (TEXT_CELL_TYPES.has(cell.type) ? cell.value.trim() : null));
@@ -239,6 +277,142 @@ function classifyField(records, position, header) {
     }
   }
   return result;
+}
+
+/**
+ * Distinct-key window tables over one date field's recorded months
+ * (`monthCount` of them, indexed in calendar order), from each key's set of
+ * month indices. `within[i][j - i]` counts the keys with a record in months
+ * i..j; `outside[i][j - i]` the keys with a dated record in a month outside
+ * i..j. A key is counted once in each, however many months it occurs in.
+ */
+function distinctWindowTables(keyMonthSets, monthCount) {
+  const within = Array.from({ length: monthCount }, (_, i) => new Array(monthCount - i).fill(0));
+  const spans = Array.from({ length: monthCount }, () => new Array(monthCount).fill(0));
+  let keys = 0;
+  for (const set of keyMonthSets) {
+    if (set.size === 0) continue;
+    keys += 1;
+    const sorted = [...set].sort((a, b) => a - b);
+    // For each window start i, the key enters window [i, j] at its first month index >= i.
+    let pointer = 0;
+    for (let i = 0; i < monthCount; i += 1) {
+      while (pointer < sorted.length && sorted[pointer] < i) pointer += 1;
+      if (pointer >= sorted.length) break;
+      within[i][sorted[pointer] - i] += 1;
+    }
+    spans[sorted[0]][sorted[sorted.length - 1]] += 1;
+  }
+  for (let i = 0; i < monthCount; i += 1) for (let offset = 1; offset < monthCount - i; offset += 1) within[i][offset] += within[i][offset - 1];
+  // inside(i, j): keys whose every month lies in i..j (first month >= i, last month <= j).
+  const inside = Array.from({ length: monthCount + 1 }, () => new Array(monthCount).fill(0));
+  for (let first = monthCount - 1; first >= 0; first -= 1) {
+    let rowPrefix = 0;
+    for (let last = 0; last < monthCount; last += 1) {
+      rowPrefix += spans[first][last];
+      inside[first][last] = rowPrefix + inside[first + 1][last];
+    }
+  }
+  const outside = Array.from({ length: monthCount }, (_, i) => Array.from({ length: monthCount - i }, (_, offset) => keys - inside[i][i + offset]));
+  return { within, outside };
+}
+
+/**
+ * The exact-period aggregates (see the module comment). `context` carries the
+ * already-classified fields and the record readers of the table.
+ */
+function summarizeExactPeriodAggregates({ records, identifiers, categoricals, dates, valueKeys, cellText, monthOf, singleValuedIn }) {
+  // Distinct-key month windows, only where a month sum is not already exact.
+  const pairs = [];
+  for (const id of identifiers) {
+    for (const date of dates) {
+      if (!(singleValuedIn[id.field_key] ?? []).includes(date.field_key)) pairs.push([id.field_key, date.field_key]);
+    }
+  }
+  const monthLists = new Map(dates.map((date) => [date.field_key, [...new Set(records.map((record) => monthOf(record, date)).filter(Boolean))].sort()]));
+  const conditionCount = 1 + categoricals.reduce((total, field) => total + field.categorical.values.length, 0);
+  const windowEntries = pairs.reduce((total, [, dateKey]) => {
+    const count = monthLists.get(dateKey).length;
+    return total + conditionCount * count * (count + 1);
+  }, 0);
+  let distinctMonthWindows;
+  if (windowEntries > MAX_WINDOW_ENTRIES) {
+    distinctMonthWindows = { status: "not_assessed", reason: "exceeds_limit" };
+  } else {
+    const fields = {};
+    for (const [idKey, dateKey] of pairs) {
+      const months = monthLists.get(dateKey);
+      const monthIndex = new Map(months.map((month, index) => [month, index]));
+      const overall = new Map();
+      const byValue = new Map(categoricals.map((field) => [field.field_key, new Map(field.categorical.values.map((entry) => [entry.value_key, new Map()]))]));
+      const idField = identifiers.find((field) => field.field_key === idKey);
+      const dateField = dates.find((field) => field.field_key === dateKey);
+      for (const record of records) {
+        const key = cellText(record, idField);
+        const month = monthOf(record, dateField);
+        if (key === null || !month) continue;
+        addKey(overall, key, monthIndex.get(month));
+        for (const field of categoricals) {
+          const valueKey = valueKeys.get(field.field_key).get(cellText(record, field));
+          if (valueKey) addKey(byValue.get(field.field_key).get(valueKey), key, monthIndex.get(month));
+        }
+      }
+      const category = {};
+      for (const [catKey, values] of byValue) {
+        category[catKey] = {};
+        for (const [valueKey, keyMonths] of values) category[catKey][valueKey] = distinctWindowTables(keyMonths.values(), months.length);
+      }
+      fields[dateKey] ??= { months, by_identifier: {} };
+      fields[dateKey].by_identifier[idKey] = { ...distinctWindowTables(overall.values(), months.length), by_category: category };
+    }
+    distinctMonthWindows = { status: "assessed", fields };
+  }
+
+  // Category-pair months: records per month carrying two listed values, the
+  // pair stored once in field order (the lower field number first).
+  const pairCells = {};
+  let pairEntries = 0;
+  const ordered = [...categoricals].sort((a, b) => Number(a.field_key.slice(6)) - Number(b.field_key.slice(6)));
+  for (const record of records) {
+    const recordMonths = dates.map((date) => [date.field_key, monthOf(record, date)]).filter(([, month]) => month);
+    if (recordMonths.length === 0) continue;
+    const listed = ordered.map((field) => [field.field_key, valueKeys.get(field.field_key).get(cellText(record, field))]).filter(([, valueKey]) => valueKey);
+    for (let a = 0; a < listed.length; a += 1) {
+      for (let b = a + 1; b < listed.length; b += 1) {
+        const [firstKey, firstValue] = listed[a];
+        const [secondKey, secondValue] = listed[b];
+        const perDate = (((pairCells[firstKey] ??= {})[firstValue] ??= {})[secondKey] ??= {})[secondValue] ??= {};
+        for (const [dateKey, month] of recordMonths) {
+          const perMonth = perDate[dateKey] ??= new Map();
+          if (!perMonth.has(month)) pairEntries += 1;
+          increment(perMonth, month);
+        }
+      }
+    }
+  }
+  let categoryPairMonths;
+  if (pairEntries > MAX_CATEGORY_PAIR_MONTH_ENTRIES) {
+    categoryPairMonths = { status: "not_assessed", reason: "exceeds_limit" };
+  } else {
+    const cells = {};
+    for (const [firstKey, firstValues] of Object.entries(pairCells)) {
+      for (const [firstValue, seconds] of Object.entries(firstValues)) {
+        for (const [secondKey, secondValues] of Object.entries(seconds)) {
+          for (const [secondValue, perDate] of Object.entries(secondValues)) {
+            for (const [dateKey, perMonth] of Object.entries(perDate)) {
+              ((((cells[firstKey] ??= {})[firstValue] ??= {})[secondKey] ??= {})[secondValue] ??= {})[dateKey] = [...perMonth.entries()].sort(([x], [y]) => (x < y ? -1 : 1));
+            }
+          }
+        }
+      }
+    }
+    categoryPairMonths = { status: "assessed", cells };
+  }
+  return {
+    version: EXACT_PERIOD_AGGREGATES_VERSION,
+    distinct_month_windows: distinctMonthWindows,
+    category_pair_months: categoryPairMonths,
+  };
 }
 
 function freezeDeep(value) {
@@ -394,6 +568,11 @@ export function summarizeTabularMeasurementBasis({ rows, headerRow = 1, lastRow,
       .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
   }
 
+  const exactPeriodAggregates = summarizeExactPeriodAggregates({
+    records, identifiers, categoricals, dates, valueKeys, cellText, singleValuedIn,
+    monthOf: (record, field) => isoMonth(record.cells.get(position(field))),
+  });
+
   return freezeDeep({
     basis_version: TABULAR_MEASUREMENT_BASIS_VERSION,
     status: "assessed",
@@ -407,6 +586,7 @@ export function summarizeTabularMeasurementBasis({ rows, headerRow = 1, lastRow,
     category_cells: categoryJoint,
     date_cells: dateJoint,
     single_valued_in: singleValuedIn,
+    exact_period_aggregates: exactPeriodAggregates,
   });
 }
 

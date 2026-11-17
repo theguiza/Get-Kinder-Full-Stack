@@ -3136,6 +3136,161 @@ async function runXlsxAcceptance() {
       console.log(`[kai-customer-xlsx-file-to-report] projectMeasurementJourney ${J(results.projectMeasurementJourney)}`);
     });
 
+    await test("R: Excel date cells, a cross-month distinct count and both period-rate populations go from the real UI through claims to a saved, downloaded report; refusals write nothing", async () => {
+      // Explicit synthetic records [visit_ref, learner_id, status, cohort, intended visit day, cell kind].
+      // Excel stores most days as date-formatted serials (1900 system), one as an ISO date cell, one as ISO text; one has no date.
+      const visits = [
+        ["W01", "K01", "completed", "active", "2025-12-15", "serial"], ["W02", "K01", "completed", "active", "2026-01-10", "serial"],
+        ["W03", "K01", "completed", "active", "2026-02-20", "serial"], ["W04", "K02", "completed", "exited", "2026-01-05", "text"],
+        ["W05", "K02", "waiting", "exited", "2026-02-03", "serial"], ["W06", "K03", "completed", "active", "2026-02-14", "iso_cell"],
+        ["W07", "K03", "waiting", "active", "2026-03-02", "serial"], ["W08", "K04", "waiting", "active", "2026-01-22", "serial"],
+        ["W09", "K04", "completed", "active", "2026-02-27", "serial"], ["W10", "K05", "completed", "active", "2026-01-31", "serial"],
+        ["W11", "K05", "completed", "active", "2026-02-01", "serial"], ["W12", "K06", "completed", "exited", "2026-03-15", "serial"],
+        ["W13", "K07", "waiting", "active", "", "none"], ["W14", "K08", "completed", "exited", "2026-01-18", "serial"],
+        ["W15", "K09", "waiting", "exited", "2025-12-30", "serial"], ["W16", "K10", "completed", "active", "2026-02-09", "serial"],
+      ];
+      const serial1900 = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.parse("1899-12-30T00:00:00Z")) / 86400000;
+      assert.equal(serial1900("2025-01-01"), 45658, "documented Excel anchor");
+      const DATE_STYLE = 2; // cellXfs index of built-in short date (numFmtId 14)
+      const rows = [["visit_ref", "learner_id", "status", "cohort", "visit_date", "score"], ...visits.map(([ref, learner, status, cohort, day, kind]) => [ref, learner, status, cohort,
+        kind === "serial" ? { number: serial1900(day), style: DATE_STYLE } : kind === "iso_cell" ? { isoDate: day } : kind === "text" ? day : null,
+        day ? serial1900(day) : 46000])]; // score: plain numbers of the same magnitude, never dates
+      const period = { start: "2026-01-01", end: "2026-02-28" };
+      assert.equal((await adminApi("GET", periodPath)).body.data.start, period.start);
+      const inPeriod = (row) => row[4] !== "" && row[4] >= period.start && row[4] <= period.end;
+      const completed = (row) => row[2] === "completed";
+      const active = (row) => row[3] === "active";
+      const learnersOf = (list) => new Set(list.map((row) => row[1])).size;
+      const expected = {
+        learners: learnersOf(visits.filter((row) => completed(row) && inPeriod(row))),
+        learnerRecords: visits.filter((row) => completed(row) && inPeriod(row)).length,
+        allRate: [visits.filter((row) => inPeriod(row) && completed(row)).length, visits.filter(inPeriod).length],
+        activeRate: [visits.filter((row) => inPeriod(row) && active(row) && completed(row)).length, visits.filter((row) => inPeriod(row) && active(row)).length],
+      };
+      // Negative controls: the plausible wrong calculations give other answers.
+      const months = ["2026-01", "2026-02"];
+      const monthSum = months.reduce((total, month) => total + learnersOf(visits.filter((row) => completed(row) && row[4].startsWith(month))), 0);
+      assert.notEqual(monthSum, expected.learners, "a month sum counts a learner in each month");
+      assert.notEqual((expected.allRate[0] / expected.allRate[1]) * expected.activeRate[1], expected.activeRate[0], "a marginal product is not the joint count");
+      assert.notDeepEqual([visits.filter((row) => active(row) && completed(row)).length, visits.filter(active).length], expected.activeRate, "ignoring the period changes the rate");
+
+      const fileId = await apiUpload(adminApi, customerFile("synthetic-learner-visits-excel-dates.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Learner_Visits", rows }], cellFormats: [{ numFmtId: 14 }] })), ids.batchId);
+      await dispatcher.whenIdle();
+      const sv = (await decideAndPromote(adminApi, fileId)).source_version_id;
+      const approvalsBefore = await approvalState();
+      // The worker's committed profile: Excel cells are dates by their format; the score of the same magnitude is not.
+      const basis = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, null))).body.data;
+      const dateField = basis.tabular.fields.find((field) => field.field_key === "field_5");
+      assert.deepEqual([dateField.role, dateField.date.date_count, dateField.date.non_date_count, dateField.date.excel_date_cell_count, dateField.date.excel_date_system],
+        ["date", 15, 0, 14, "excel_1900"]);
+      assert.equal(basis.tabular.fields.some((field) => field.field_key === "field_6"), false, "plain numbers keep no role");
+      assert.deepEqual(basis.tabular.distinct_period_exact.field_2, ["field_5"]);
+      assert.deepEqual(basis.tabular.period_support, { distinct_month_windows: "available", population_period_rates: "available" });
+      const [profileRow] = await query(`SELECT p.profile::text AS profile FROM kai.source_versions sv
+        JOIN kai.intake_source_candidates c ON c.organization_id = sv.organization_id AND c.intake_source_candidate_id = sv.intake_source_candidate_id
+        JOIN kai.intake_file_profiles p ON p.organization_id = c.organization_id AND p.file_profile_id = c.file_profile_id WHERE sv.source_version_id = $1::uuid`, [sv]);
+      for (const raw of ["K01", "W01", "2026-01-10", String(serial1900("2026-01-10"))]) assert.ok(!profileRow.profile.includes(raw), `committed profile holds ${raw}`);
+
+      await openCountRecords(sv);
+      const section = `[data-client-derived-measurements="${sv}"]`;
+      const field = (key) => `${section} [data-client-derived-field="${key}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "field controls");
+      assert.match(await textOf(adminPage, field("periodFieldKey")), /including 14 Excel date cells \(1900 date system\)/);
+      const disabled = () => adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)})?.disabled`);
+      const recorded = [];
+      const record = async (selections, inspect) => {
+        for (const [key, value] of selections) assert.ok(await setSelect(field(key), value), `${key}=${value}`);
+        await adminPage.waitFor(async () => (await disabled()) === false, "definition ready");
+        const mark = adminPage.mark();
+        await adminPage.clickIn(`${section} [data-client-derived-record-tabular]`, "Calculate and record");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Measurement recorded:"), "measurement saved");
+        await adminPage.idle();
+        const req = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/tabular-measurements"));
+        assert.equal(req.status, 200);
+        const response = (await adminPage.responseBody(req)).data;
+        const [saved] = await query(`SELECT m.*, m.measured_value::int AS measured_value, m.numerator::int AS numerator, m.denominator::int AS denominator, m.percentage::text AS percentage,
+            e.statement, e.evidence_item_id::text AS evidence_id, l.coordinates FROM kai.source_derived_measurements m JOIN kai.evidence_derived_measurements link USING (source_derived_measurement_id)
+          JOIN kai.evidence_items e ON e.evidence_item_id = link.evidence_item_id JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+          WHERE m.source_derived_measurement_id = $1::uuid AND e.evidence_item_id = $2::uuid`, [response.measurement.source_derived_measurement_id, response.evidenceItem.evidence_item_id]);
+        assert.deepEqual([saved.source_version_id, saved.worksheet_key, saved.basis_version], [sv, "sheet_1", "kai_tabular_measurement_basis_v1"]);
+        assert.deepEqual(saved.coordinates.field_keys, saved.field_keys);
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-recorded="${saved.source_derived_measurement_id}"] [data-client-derived-evidence-statement]`)) === saved.statement, "persisted evidence displayed verbatim");
+        await inspect(JSON.parse(req.postData).definition, saved);
+        recorded.push(saved);
+        assert.ok(await setSelect(field("operation"), ""));
+      };
+      const periodCondition = { kind: "period", field_key: "field_5", period_source: "engagement_reporting_period", scope: "within" };
+      // 1. Distinct learners with a completed visit in the period: K01 and K05 have completed visits in both months and are counted once.
+      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="indicatorLabel"]`, "Learners with completed visits"));
+      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="meaningText"]`, "Learners with at least one completed visit in the period."));
+      await record([["identifierFieldKey", "field_2"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]], async (definition, saved) => {
+        assert.deepEqual(definition, { operation: "count", unit: { kind: "distinct_key", field_key: "field_2", duplicate_policy: "count_each_key_once" },
+          conditions: [{ kind: "category", field_key: "field_3", value_key: "value_1" }, periodCondition] });
+        assert.deepEqual([saved.calculation_method, saved.measured_value, saved.component_counts.matching_record_count], ["kai_tabular_conditional_distinct_key_count_v1", expected.learners, expected.learnerRecords]);
+        assert.deepEqual([saved.definition.conditions[1].period_start, saved.definition.conditions[1].period_end], [period.start, period.end]);
+        assert.match(saved.statement, new RegExp(`^Derived measurement: Learners with completed visits \\(meaning stated by the organization\\): ${expected.learners} distinct field_2 identifiers, each counted once, among the ${expected.learnerRecords} records`));
+        const [interpretation] = await query("SELECT meaning_text FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [saved.source_derived_measurement_id]);
+        assert.equal(interpretation.meaning_text, "Learners with at least one completed visit in the period.");
+      });
+      // 2. Completed visits among every visit dated in the period.
+      await record([["operation", "rate"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]], async (definition, saved) => {
+        assert.deepEqual(definition, { operation: "rate", conditions: [{ kind: "category", field_key: "field_3", value_key: "value_1" }, periodCondition], population: [] });
+        assert.deepEqual([saved.numerator, saved.denominator, saved.percentage], [...expected.allRate, "81.82"]);
+        assert.deepEqual([saved.component_counts.records_without_date, saved.exclusions.records_without_date], [1, 1]);
+        assert.match(saved.statement, new RegExp(`among the ${expected.allRate[1]} records with field_5 within the engagement reporting period 2026-01-01 to 2026-02-28 in selected worksheet sheet_1 \\(the measured population\\), ${expected.allRate[0]} have field_3 = completed: ${expected.allRate[0]} of ${expected.allRate[1]} \\(81\\.82%\\); 2 of the 11 do not; 1 record without a date excluded from the population\\.$`));
+      });
+      // 3. Completed visits among active learners' visits dated in the period (joint table, not marginals).
+      await record([["operation", "rate"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["populationFieldKey", "field_4"], ["populationValueKey", "value_1"], ["periodFieldKey", "field_5"]], async (definition, saved) => {
+        assert.deepEqual(definition.population, [{ kind: "category", field_key: "field_4", value_key: "value_1" }]);
+        assert.deepEqual([saved.numerator, saved.denominator, saved.percentage], [...expected.activeRate, "87.50"]);
+        assert.equal(saved.definition.population[0].value_label, "active");
+        assert.match(saved.statement, /among the 8 records with field_4 = active and field_5 within the engagement reporting period 2026-01-01 to 2026-02-28 .*7 of 8 \(87\.50%\)/);
+      });
+      // Refusals write nothing: a rate in distinct identifiers, other roles and organizations, and a partial-month period.
+      const countRows = async () => (await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n;
+      const before = await countRows();
+      const rateBody = { definition: { operation: "rate", conditions: [{ kind: "category", field_key: "field_3", value_key: "value_1" }, periodCondition] } };
+      const distinctRate = await adminApi("POST", tabularMeasurementPath(ORG_X, sv, null), { definition: { ...rateBody.definition, unit: { kind: "distinct_key", field_key: "field_2", duplicate_policy: "count_each_key_once" } } });
+      assert.deepEqual([distinctRate.status, distinctRate.body.blockers[0].blocking_reason], [422, "tabular_distinct_key_rate_not_recordable"]);
+      for (const api of [contributorApi, reviewerApi, adminYApi]) {
+        const denied = await api("POST", tabularMeasurementPath(ORG_X, sv, null), rateBody);
+        assert.ok([403, 404].includes(denied.status), `${denied.status}`);
+      }
+      await configureProjectPeriodInUi("2026-01-02", "2026-02-28");
+      const partial = await adminApi("POST", tabularMeasurementPath(ORG_X, sv, null), rateBody);
+      assert.deepEqual([partial.status, partial.body.blockers[0].blocking_reason], [422, "tabular_period_not_whole_months"]);
+      await openCountRecords(sv);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "field controls");
+      for (const [key, value] of [["operation", "rate"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+      await adminPage.waitFor(async () => /calendar month/.test(await textOf(adminPage, `${section} [data-client-derived-problem]`) ?? ""), "partial-month explanation");
+      assert.equal(await disabled(), true);
+      await configureProjectPeriodInUi(period.start, period.end);
+      assert.equal(await countRows(), before, "nothing was written by a refused request");
+
+      // Findings, a generated internal report, saved retrieval and authorized download with zero quality approvals.
+      await openCountRecords(sv);
+      const claims = [];
+      for (const saved of recorded) {
+        const row = `${section} [data-client-derived-recorded="${saved.source_derived_measurement_id}"]`;
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, row)), "recorded measurement listed");
+        await adminPage.clickIn(`${row} [data-client-derived-propose-claim="${saved.evidence_id}"]`, "Propose measurement claim");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${row} [data-client-derived-claim]`)), "derived claim shown");
+        const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [saved.evidence_id]);
+        // composeDerivedMeasurementClaimStatement: the evidence body without its introduction, capitalized when no stated meaning leads it.
+        const body = saved.statement.replace(/^Derived measurement: /, "");
+        assert.equal(claim.statement, `${body[0].toUpperCase()}${body.slice(1)}`, "the claim keeps every figure, period and qualification");
+        claims.push(claim);
+      }
+      const { shown, draft, citations } = await createMeasuredReportInUi(claims.map((claim) => claim.claim_id));
+      for (const claim of claims) assert.ok(shown.includes(claim.statement), `the report retains the exact claim: ${claim.statement}`);
+      for (const token of [sv, "2026-01-01 to 2026-02-28", "81.82%", "87.50%", `${expected.learners} distinct field_2 identifiers`]) assert.ok(shown.includes(token), token);
+      assert.match(shown, /without a date/);
+      assert.deepEqual(new Set(citations.map((citation) => citation.evidence_item_id)), new Set(recorded.map((saved) => saved.evidence_id)));
+      assert.deepEqual(await approvalState(), approvalsBefore, "no evidence/claim/coverage/release decision was needed");
+      results.exactPeriodExcelDates = { sourceVersionId: sv, expected, monthSum, draftId: draft.generated_content_draft_id, download: 200 };
+      console.log(`[kai-customer-xlsx-file-to-report] exactPeriodExcelDates ${J(results.exactPeriodExcelDates)}`);
+    });
+
     await test("N: in Count records the administrator links a participant register, follows the queued job and reloads; a corrected register promoted as its successor marks the linked results not current; refusals", async () => {
       // Synthetic sessions and register: S-ids, learners L01-L15, L16 registered with no session, one unmatched learner L99.
       const sessionRows = [["session_ref", "learner_ref", "track", "held_on", "state"]];

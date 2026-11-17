@@ -11,7 +11,12 @@ import { crc32, deflateRawSync } from "node:zlib";
  * A row is an array of cell values (null/undefined = no cell) or
  * { cells, hidden, styledEmpty } where styledEmpty stores an empty styled
  * cell for every column (as a formatted but empty row is saved). A cell
- * value may be a string, number, boolean, or { formula, value }.
+ * value may be a string, number, boolean, { formula, value }, a styled number
+ * { number, style } (style is a cellXfs index: 0 and 1 are the default
+ * styles, 2.. are `cellFormats` in order), or an ISO date cell { isoDate }.
+ * `cellFormats` ({ numFmtId, formatCode? }) adds number-format cell styles
+ * (a formatCode becomes a custom numFmt); `date1904` sets the workbook's
+ * 1904 date system. Without them the package is exactly as before.
  */
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 export const SYNTHETIC_XLSX_MIME = XLSX_MIME;
@@ -82,6 +87,8 @@ function worksheetXml({ rows, merged = [], hiddenColumns = [] }, sharedString, {
     const cells = spec.cells.map((value, columnOffset) => {
       const ref = `${columnName(columnOffset + 1)}${r}`;
       if (value === null || value === undefined) return spec.styledEmpty ? `<c r="${ref}" s="1"/>` : "";
+      if (typeof value === "object" && "number" in value) return `<c r="${ref}" s="${value.style}"><v>${value.number}</v></c>`;
+      if (typeof value === "object" && "isoDate" in value) return `<c r="${ref}" t="d"><v>${escapeXml(value.isoDate)}</v></c>`;
       if (typeof value === "object") {
         return `<c r="${ref}"${typeof value.value === "string" ? " t=\"str\"" : ""}><f>${escapeXml(value.formula)}</f><v>${escapeXml(value.value)}</v></c>`;
       }
@@ -101,7 +108,7 @@ function worksheetXml({ rows, merged = [], hiddenColumns = [] }, sharedString, {
     + `<dimension ref="A1:${columnName(Math.max(width, 1))}${Math.max(rows.length, 1)}"/>${cols}<sheetData>${rowXml}</sheetData>${merges}</worksheet>`;
 }
 
-export function syntheticXlsxWorkbook({ sheets, inline = false }) {
+export function syntheticXlsxWorkbook({ sheets, inline = false, cellFormats = [], date1904 = false }) {
   const strings = [];
   const index = new Map();
   const sharedString = (text) => {
@@ -112,6 +119,7 @@ export function syntheticXlsxWorkbook({ sheets, inline = false }) {
     return index.get(text);
   };
   const sheetParts = sheets.map((sheet) => worksheetXml(sheet, sharedString, { inline }));
+  const customNumFmts = cellFormats.filter((format) => typeof format.formatCode === "string");
   const main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
   const rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
   const entries = [
@@ -131,7 +139,7 @@ export function syntheticXlsxWorkbook({ sheets, inline = false }) {
     },
     {
       name: "xl/workbook.xml",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="${main}" xmlns:r="${rel}"><sheets>`
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="${main}" xmlns:r="${rel}">${date1904 ? "<workbookPr date1904=\"1\"/>" : ""}<sheets>`
         + sheets.map((sheet, i) => `<sheet name="${escapeXml(sheet.name ?? `Sheet${i + 1}`)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")
         + `</sheets></workbook>`,
     },
@@ -144,8 +152,12 @@ export function syntheticXlsxWorkbook({ sheets, inline = false }) {
     },
     {
       name: "xl/styles.xml",
-      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="${main}"><fonts count="1"><font/></fonts><fills count="1"><fill/></fills>`
-        + `<borders count="1"><border/></borders><cellXfs count="2"><xf/><xf fillId="0"/></cellXfs></styleSheet>`,
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="${main}">`
+        + (customNumFmts.length > 0 ? `<numFmts count="${customNumFmts.length}">${customNumFmts.map((format) => `<numFmt numFmtId="${format.numFmtId}" formatCode="${escapeXml(format.formatCode)}"/>`).join("")}</numFmts>` : "")
+        + `<fonts count="1"><font/></fonts><fills count="1"><fill/></fills>`
+        + `<borders count="1"><border/></borders><cellXfs count="${2 + cellFormats.length}"><xf/><xf fillId="0"/>`
+        + cellFormats.map((format) => `<xf numFmtId="${format.numFmtId}" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>`).join("")
+        + `</cellXfs></styleSheet>`,
     },
     ...sheetParts.map((content, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, content })),
     {

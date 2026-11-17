@@ -339,11 +339,20 @@ export function validateTabularMeasurementDefinition(input) {
       return invalid("tabular_unit_invalid", "The counted unit must be records, or each value of an identifier field counted once.", "Use {kind: records} or {kind: distinct_key, field_key, duplicate_policy: count_each_key_once}.");
     }
   } else {
+    if (isPlainObject(input.unit) && input.unit.kind === "distinct_key") {
+      // The arithmetic exists (deriveTabularDistinctKeyRate), but the recorded
+      // measurement's method/family schema admits record rates only.
+      return invalid(
+        "tabular_distinct_key_rate_not_recordable",
+        "A rate counted in distinct identifiers cannot be recorded yet.",
+        "Record a distinct-identifier count, or a rate over records.",
+      );
+    }
     if (input.unit !== undefined && !(isPlainObject(input.unit) && input.unit.kind === "records" && Object.keys(input.unit).length === 1)) {
       return invalid("tabular_rate_unit_not_supported", "A rate is calculated over records.", "Remove unit, or set it to {kind: records}.");
     }
-    if (categories.length !== 1 || periods.length > 0) {
-      return invalid("tabular_rate_numerator_invalid", "A rate needs exactly one category condition for its numerator and no period condition.", "Select one field value the numerator records have.");
+    if (categories.length !== 1) {
+      return invalid("tabular_rate_numerator_invalid", "A rate needs exactly one category condition for its numerator.", "Select one field value the numerator records have.");
     }
     if (normalizedPopulation.length > 1 || normalizedPopulation.some((condition) => condition.kind !== "category")) {
       return invalid("tabular_rate_population_invalid", "The measured population is all records or the records with one category value.", "Select at most one population category value.");
@@ -374,13 +383,42 @@ function monthBounds({ start, end }) {
 function sumMonths(entries, { first, last, scope }, distinctKey = null) {
   let records = 0;
   let distinct = 0;
+  let largestMonthDistinct = 0;
   for (const [month, count, distinctCounts] of entries) {
     const within = month >= first && month <= last;
     if ((scope === "within") !== within) continue;
     records += count;
-    if (distinctKey) distinct += distinctCounts?.[distinctKey] ?? 0;
+    if (distinctKey) {
+      distinct += distinctCounts?.[distinctKey] ?? 0;
+      largestMonthDistinct = Math.max(largestMonthDistinct, distinctCounts?.[distinctKey] ?? 0);
+    }
   }
-  return { records, distinct };
+  return { records, distinct, largestMonthDistinct };
+}
+
+function recordsOf(entries) {
+  return entries.reduce((total, [, count]) => total + count, 0);
+}
+
+function isWindowTable(table, monthCount) {
+  return isPlainObject(table) && ["within", "outside"].every((part) => Array.isArray(table[part]) && table[part].length === monthCount
+    && table[part].every((row, i) => Array.isArray(row) && row.length === monthCount - i && row.every(isCount)));
+}
+
+/**
+ * The exact number of distinct keys in a whole-month period from a committed
+ * window table: `within`, the keys with a record in a month inside the
+ * period; `outside`, the keys with a dated record in a month outside it. The
+ * period is the run of the field's recorded months that lie inside it.
+ */
+function windowDistinct(table, months, { first, last, scope }) {
+  const start = months.findIndex((month) => month >= first);
+  let end = -1;
+  for (let index = months.length - 1; index >= 0; index -= 1) if (months[index] <= last) { end = index; break; }
+  const covered = start !== -1 && end !== -1 && start <= end;
+  if (scope === "within") return covered ? table.within[start][end - start] : 0;
+  if (covered) return table.outside[start][end - start];
+  return months.length > 0 ? table.within[0][months.length - 1] : 0;
 }
 
 /**
@@ -464,13 +502,58 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
   if (definition.operation === "rate") {
     let denominator = basis.record_count;
     let populationRecord = null;
+    let populationCell = null;
     if (populationCondition) {
       const resolved = categoryValue(populationCondition);
       if (resolved.refusal) return resolved.refusal;
+      populationCell = resolved.cell;
       denominator = resolved.cell.records;
       populationRecord = { kind: "category", field_key: populationCondition.field_key, value_key: populationCondition.value_key, value_label: resolved.entry.label };
     }
-    const numerator = populationCondition ? (cell.by_category?.[populationCondition.field_key]?.[populationCondition.value_key] ?? 0) : cell.records;
+    let numerator = populationCondition ? (cell.by_category?.[populationCondition.field_key]?.[populationCondition.value_key] ?? 0) : cell.records;
+    // A period applies to the measured population: the records (with the
+    // population value, when one is selected) dated in or outside the
+    // period; the numerator is those of them with the numerator value. Each
+    // side is read from a joint aggregate, never multiplied from marginals.
+    let recordsWithoutDate = null;
+    if (period) {
+      const bounds = { ...monthBounds(reportingPeriod), scope: period.scope };
+      const inconsistent = () => refuse("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent.", "Upload the file again as a new intake version.", { objectType: "tabular_measurement_definition" });
+      const allDatesNumerator = numerator;
+      if (populationCondition) {
+        const populationEntries = populationCell.by_date?.[period.field_key] ?? [];
+        denominator = sumMonths(populationEntries, bounds).records;
+        recordsWithoutDate = populationCell.records - recordsOf(populationEntries);
+        const pairs = basis.exact_period_aggregates?.category_pair_months;
+        if (!isPlainObject(pairs)) {
+          return refuse(
+            "tabular_rate_period_population_not_committed",
+            "This source version's profile was committed before KAI kept the records per month for two category values together, so a period cannot be applied to a rate with a population value.",
+            "Upload the file again as a new intake version to calculate it, or measure this rate without a period.",
+            { objectType: "tabular_measurement_definition" },
+          );
+        }
+        if (pairs.status !== "assessed") {
+          return refuse(
+            "tabular_rate_period_population_exceeds_limit",
+            "This table has too many category-value and month combinations for KAI to keep them together, so a period cannot be applied to a rate with a population value.",
+            "Measure this rate without a period, or measure it over all records within the period.",
+            { objectType: "tabular_measurement_definition" },
+          );
+        }
+        // The pair table holds each pair once, the lower field number first.
+        const [lower, higher] = [category, populationCondition].sort((a, b) => Number(a.field_key.slice(6)) - Number(b.field_key.slice(6)));
+        const pairEntries = pairs.cells?.[lower.field_key]?.[lower.value_key]?.[higher.field_key]?.[higher.value_key]?.[period.field_key] ?? [];
+        if (!Array.isArray(pairEntries) || recordsOf(pairEntries) > allDatesNumerator) return inconsistent();
+        numerator = sumMonths(pairEntries, bounds).records;
+      } else {
+        const allEntries = basis.date_cells?.[period.field_key] ?? [];
+        denominator = sumMonths(allEntries, bounds).records;
+        recordsWithoutDate = basis.record_count - recordsOf(allEntries);
+        numerator = sumMonths(cell.by_date?.[period.field_key] ?? [], bounds).records;
+      }
+      if (!isCount(recordsWithoutDate) || numerator > allDatesNumerator) return inconsistent();
+    }
     if (!isCount(numerator) || !isCount(denominator) || numerator > denominator || denominator === 0) {
       return refuse("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent or its population is empty.", "Select a population with records.", { objectType: "tabular_measurement_definition" });
     }
@@ -484,7 +567,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
         calculationMethod: method,
         measurementKey: computeMeasurementKey({ family: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE, calculationMethod: method, definition: def }),
         definition: def,
-        fieldKeys: fieldKeysOf(category.field_key, populationRecord?.field_key),
+        fieldKeys: fieldKeysOf(category.field_key, populationRecord?.field_key, period?.field_key),
         measuredValue: numerator,
         numerator,
         denominator,
@@ -495,8 +578,12 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
           numerator_record_count: numerator,
           other_population_record_count: denominator - numerator,
           exact_duplicate_member_records: duplicates.member_record_count,
+          ...(recordsWithoutDate !== null ? { records_without_date: recordsWithoutDate } : {}),
         }),
-        exclusions: Object.freeze({ records_outside_population: basis.record_count - denominator }),
+        exclusions: Object.freeze({
+          records_outside_population: basis.record_count - denominator,
+          ...(recordsWithoutDate !== null ? { records_without_date: recordsWithoutDate } : {}),
+        }),
         rowLocators: null,
       }),
     };
@@ -509,13 +596,35 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
     const field = fieldOf(basis, distinctKey);
     if (!field?.roles?.includes("identifier")) return notProposed(distinctKey, "identifier");
     identifier = field;
-    if (period && !(basis.single_valued_in?.[distinctKey] ?? []).includes(period.field_key)) {
+  }
+  // Keys occurring in more than one month: a month sum would count a key once
+  // per month, so the committed window table counts each key once instead.
+  let windowTable = null;
+  let windowMonths = null;
+  if (distinctKey && period && !(basis.single_valued_in?.[distinctKey] ?? []).includes(period.field_key)) {
+    const windows = basis.exact_period_aggregates?.distinct_month_windows;
+    if (!isPlainObject(windows)) {
       return refuse(
         "tabular_distinct_not_exact_for_period",
-        `Some ${distinctKey} values have records in more than one month, so KAI cannot count each one once within a period exactly.`,
-        "Choose records as the counted unit, measure distinct keys without a period, or use a source where each identifier belongs to one calendar month.",
+        `Some ${distinctKey} values have records in more than one month, and this source version's profile was committed before KAI kept the counts needed to count each one once within a period.`,
+        "Upload the file again as a new intake version to count each identifier once across months, or count records, or measure distinct keys without a period.",
         { objectType: "tabular_measurement_definition" },
       );
+    }
+    if (windows.status !== "assessed") {
+      return refuse(
+        "tabular_distinct_windows_exceed_limit",
+        `Some ${distinctKey} values have records in more than one month, and this table has too many months and category values for KAI to keep the counts needed to count each one once within a period.`,
+        "Count records within the period, or measure distinct keys without a period.",
+        { objectType: "tabular_measurement_definition" },
+      );
+    }
+    const dateEntry = windows.fields?.[period.field_key];
+    const byIdentifier = dateEntry?.by_identifier?.[distinctKey];
+    windowTable = category ? byIdentifier?.by_category?.[category.field_key]?.[category.value_key] : byIdentifier;
+    windowMonths = Array.isArray(dateEntry?.months) ? dateEntry.months : null;
+    if (!windowMonths || !isWindowTable(windowTable, windowMonths.length)) {
+      return refuse("tabular_counts_inconsistent", "The committed counts for this measurement are inconsistent.", "Upload the file again as a new intake version.", { objectType: "tabular_measurement_definition" });
     }
   }
   let matchingRecords;
@@ -523,9 +632,19 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
   let recordsWithoutDate = null;
   if (period) {
     const dateEntries = category ? (cell.by_date?.[period.field_key] ?? []) : (basis.date_cells?.[period.field_key] ?? []);
-    const summed = sumMonths(dateEntries, { ...monthBounds(reportingPeriod), scope: period.scope }, distinctKey);
+    const bounds = { ...monthBounds(reportingPeriod), scope: period.scope };
+    const summed = sumMonths(dateEntries, bounds, distinctKey);
     matchingRecords = summed.records;
     if (distinctKey) distinctCount = summed.distinct;
+    if (windowTable) {
+      distinctCount = windowDistinct(windowTable, windowMonths, bounds);
+      // A union of the months' key sets is at least its largest month and at
+      // most their sum; a table that disagrees with the month aggregates is
+      // not used.
+      if (!(distinctCount >= summed.largestMonthDistinct && distinctCount <= summed.distinct)) {
+        return refuse("tabular_counts_inconsistent", "The committed counts for this measurement are inconsistent.", "Upload the file again as a new intake version.", { objectType: "tabular_measurement_definition" });
+      }
+    }
     const recordsWithDate = dateEntries.reduce((total, [, count]) => total + count, 0);
     recordsWithoutDate = (category ? cell.records : basis.record_count) - recordsWithDate;
   } else if (category) {
@@ -581,6 +700,63 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
   };
 }
 
+/**
+ * A rate in distinct identifiers, as sets of keys of one identifier field K:
+ *   population P = { k : some record with key k [dated in/outside the period] }
+ *   numerator  N = { k : some record with key k, the numerator value [and so dated] }
+ * N is a subset of P (each record N reads is a record P reads), so
+ * |N| <= |P|; a key with records both with and without the numerator value
+ * is in N once and in P once, and P \ N is the keys none of whose (dated)
+ * records have it. Both sizes come from the exact distinct-count paths
+ * (whole-key counts, month windows), never from month sums of keys.
+ * A population value would need the keys of records carrying two values,
+ * which the profile does not keep, so it is refused.
+ *
+ * Not recordable: kai.source_derived_measurements admits only the record
+ * rate method for the tabular_rate family, so validateTabularMeasurementDefinition
+ * refuses this unit and no route calls this function.
+ */
+export function deriveTabularDistinctKeyRate(profile, worksheetKey, { identifierFieldKey, category, period = null, population = [] }, { reportingPeriod = null } = {}) {
+  if (Array.isArray(population) && population.length > 0) {
+    return refuse(
+      "tabular_distinct_key_rate_population_not_committed",
+      "The profile does not keep the identifiers of records carrying two category values, so a distinct-identifier rate cannot use a population value.",
+      "Use all identifiers as the population.",
+      { objectType: "tabular_measurement_definition" },
+    );
+  }
+  const unit = { kind: "distinct_key", field_key: identifierFieldKey, duplicate_policy: DUPLICATE_POLICY_COUNT_EACH_KEY_ONCE };
+  const count = (conditions) => {
+    const validated = validateTabularMeasurementDefinition({ operation: "count", unit, conditions });
+    return validated.ok ? deriveTabularMeasurement(profile, worksheetKey, validated.definition, { reportingPeriod }) : validated;
+  };
+  const numerator = count([category, ...(period ? [period] : [])]);
+  if (!numerator.ok) return numerator;
+  const denominator = count(period ? [period] : []);
+  if (!denominator.ok) return denominator;
+  const n = numerator.measurement.measuredValue;
+  const d = denominator.measurement.measuredValue;
+  if (!isCount(n) || !isCount(d) || d === 0 || n > d) {
+    return refuse("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent or its population is empty.", "Select a population with identifiers.", { objectType: "tabular_measurement_definition" });
+  }
+  return {
+    ok: true,
+    recordable: false,
+    numerator: n,
+    denominator: d,
+    percentage: formatRate(n, d),
+    componentCounts: Object.freeze({
+      population_distinct_key_count: d,
+      numerator_distinct_key_count: n,
+      other_population_distinct_key_count: d - n,
+      population_record_count: denominator.measurement.componentCounts.matching_record_count,
+      numerator_record_count: numerator.measurement.componentCounts.matching_record_count,
+    }),
+    numeratorDefinition: numerator.measurement.definition,
+    populationDefinition: denominator.measurement.definition,
+  };
+}
+
 /** What a person can select from one table's committed basis (no values beyond listed category labels). */
 export function describeTabularMeasurementOptions(profile, worksheetKey) {
   const located = tabularBasisOf(profile, worksheetKey);
@@ -589,6 +765,21 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
   if (!isPlainObject(basis) || basis.basis_version !== TABULAR_MEASUREMENT_BASIS_VERSION || basis.status !== "assessed") {
     return { ok: true, sheetKey, available: false, reason: basis?.reason ?? "tabular_basis_not_committed" };
   }
+  // Which period calculations this committed profile supports exactly: a
+  // distinct count within a period (a key in one month, or a committed
+  // window table), and a period applied to a rate with a population value.
+  const exact = isPlainObject(basis.exact_period_aggregates) ? basis.exact_period_aggregates : null;
+  const windows = exact?.distinct_month_windows;
+  const distinctPeriodExact = {};
+  for (const field of basis.fields.filter((candidate) => candidate.roles.includes("identifier"))) {
+    const dates = new Set(basis.single_valued_in?.[field.field_key] ?? []);
+    if (windows?.status === "assessed") {
+      for (const [dateKey, entry] of Object.entries(windows.fields || {})) if (entry?.by_identifier?.[field.field_key]) dates.add(dateKey);
+    }
+    distinctPeriodExact[field.field_key] = [...dates].filter((key) => basis.fields.some((candidate) => candidate.field_key === key && candidate.roles.includes("date")))
+      .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
+  }
+  const support = (part) => (!exact ? "not_committed" : part?.status === "assessed" ? "available" : "exceeds_limit");
   return {
     ok: true,
     sheetKey,
@@ -596,6 +787,11 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
     record_count: basis.record_count,
     exact_duplicates: basis.exact_duplicates,
     single_valued_in: basis.single_valued_in || {},
+    distinct_period_exact: distinctPeriodExact,
+    period_support: {
+      distinct_month_windows: support(windows),
+      population_period_rates: support(exact?.category_pair_months),
+    },
     // The profiler does not infer duration semantics. These field positions
     // are available for a person to identify as recorded minutes; no cell
     // values or inferred meaning are exposed here.
@@ -1046,12 +1242,19 @@ function tabularCountBody(row) {
 function tabularRateBody(row) {
   const counts = row.component_counts;
   const definition = row.definition;
-  const numerator = conditionPhrase(definition.conditions[0]);
-  const population = definition.population[0]
-    ? `the ${counts.population_record_count} records with ${conditionPhrase(definition.population[0])}`
+  const numerator = conditionPhrase(definition.conditions.find((condition) => condition.kind === "category"));
+  // A period, when applied, bounds the measured population; a rate without
+  // one is worded exactly as before.
+  const period = definition.conditions.find((condition) => condition.kind === "period") ?? null;
+  const scope = [definition.population[0] ? conditionPhrase(definition.population[0]) : null, period ? conditionPhrase(period) : null].filter(Boolean);
+  const population = scope.length > 0
+    ? `the ${counts.population_record_count} records with ${scope.join(" and ")}`
     : `all ${counts.population_record_count} records`;
+  const dateless = period && Number.isSafeInteger(counts.records_without_date) && counts.records_without_date > 0
+    ? `; ${plural(counts.records_without_date, "record")} without a date excluded from the population`
+    : "";
   return `among ${population} ${where(row)} (the measured population), ${row.numerator} have ${numerator}: `
-    + `${row.numerator} of ${row.denominator} (${row.percentage}%); ${counts.other_population_record_count} of the ${row.denominator} do not.`;
+    + `${row.numerator} of ${row.denominator} (${row.percentage}%); ${counts.other_population_record_count} of the ${row.denominator} do not${dateless}.`;
 }
 
 // The monthly finding states each month's count, so a generated or released

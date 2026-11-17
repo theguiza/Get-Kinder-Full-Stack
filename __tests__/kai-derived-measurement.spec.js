@@ -130,9 +130,21 @@ test("counts, distinct-key counts, category, period and rate calculations agree 
   assert.equal(within.measurement.measuredValue, independent.where(1, "done").filter(independent.inPeriod).length);
   assert.equal(outside.measurement.measuredValue, independent.where(1, "done").filter((row) => !independent.inPeriod(row)).length);
   assert.deepEqual(within.measurement.definition.conditions[1], { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within", period_start: PERIOD.start, period_end: PERIOD.end });
-  // A distinct count across months is refused when an identifier has records in two months.
-  const notExact = derive(profile, { operation: "count", unit: eachRef, conditions: [done, { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] });
-  assert.deepEqual([notExact.ok, notExact.blockers[0].blocking_reason], [false, "tabular_distinct_not_exact_for_period"]);
+  // V07 has done records in two months: within the period it is one identifier, from the committed month windows.
+  const periodWithin = { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" };
+  const acrossMonths = derive(profile, { operation: "count", unit: eachRef, conditions: [done, periodWithin] });
+  const doneInPeriod = independent.where(1, "done").filter(independent.inPeriod);
+  assert.equal(acrossMonths.measurement.measuredValue, independent.distinct(doneInPeriod));
+  // Negative control: a sum of per-month distinct keys counts V07 once per month.
+  const monthSum = [...new Set(doneInPeriod.map((row) => row[2].slice(0, 7)))]
+    .reduce((total, month) => total + independent.distinct(doneInPeriod.filter((row) => row[2].startsWith(month))), 0);
+  assert.notEqual(acrossMonths.measurement.measuredValue, monthSum);
+  // A profile committed before the month windows refuses it rather than approximating.
+  const { exact_period_aggregates: _windows, ...legacyBasis } = profile.tabular_measurement_basis;
+  const legacy = D.deriveTabularMeasurement({ ...profile, tabular_measurement_basis: legacyBasis }, null,
+    D.validateTabularMeasurementDefinition({ operation: "count", unit: eachRef, conditions: [done, periodWithin] }).definition, { reportingPeriod: PERIOD });
+  assert.deepEqual([legacy.ok, legacy.blockers[0].blocking_reason], [false, "tabular_distinct_not_exact_for_period"]);
+  assert.match(legacy.blockers[0].required_fix, /new intake version/);
   // A period that is not whole months is refused, never approximated; the period is never invented.
   const partMonth = derive(profile, { operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }, null, { start: "2025-04-15", end: "2026-03-31" });
   assert.equal(partMonth.blockers[0].blocking_reason, "tabular_period_not_whole_months");
@@ -162,7 +174,11 @@ test("definition refusals: unsupported units, combinations, unlisted values, rol
   assert.equal(reason({ operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_start: "2025-01-01", period_end: "2025-12-31" }] }), "tabular_condition_invalid");
   assert.equal(reason({ operation: "count", conditions: [{ kind: "period", field_key: "field_2", period_source: "engagement_reporting_period", scope: "within" }] }), "tabular_field_role_not_proposed");
   assert.equal(reason({ operation: "rate", conditions: [] }), "tabular_rate_numerator_invalid");
-  assert.equal(reason({ operation: "rate", unit: eachRef, conditions: [category("field_2", "value_1")] }), "tabular_rate_unit_not_supported");
+  // A rate in distinct identifiers has arithmetic (deriveTabularDistinctKeyRate) but no recordable method.
+  assert.equal(reason({ operation: "rate", unit: eachRef, conditions: [category("field_2", "value_1")] }), "tabular_distinct_key_rate_not_recordable");
+  assert.equal(reason({ operation: "rate", unit: { kind: "people" }, conditions: [category("field_2", "value_1")] }), "tabular_rate_unit_not_supported");
+  assert.equal(reason({ operation: "rate", conditions: [category("field_2", "value_1"), { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }), "ok");
+  assert.equal(reason({ operation: "rate", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }), "tabular_rate_numerator_invalid");
   assert.equal(reason({ operation: "rate", conditions: [category("field_2", "value_1")], population: [category("field_2", "value_2")] }), "tabular_rate_population_same_field");
   assert.equal(reason({ operation: "count", population: [category("field_2", "value_1")] }), "tabular_population_not_applicable");
   const { tabular_measurement_basis: _removed, ...legacy } = profile;
@@ -522,7 +538,14 @@ test("period readiness distinguishes lineage, missing dates and invalid dates, w
   }
   assert.equal(tabularFormProblem(form, { tabular, reporting_period: PERIOD }), null);
   assert.match(tabularFormProblem(form, { tabular, reporting_period: { start: "2025-04-02", end: "2026-03-31" } }), /calendar month/);
-  assert.match(tabularFormProblem({ ...form, identifierFieldKey: "field_1" }, { tabular, reporting_period: PERIOD }), /more than one month/);
+  // V07 occurs in two months: this profile's month windows count it once, so the distinct count within the period is ready.
+  assert.deepEqual(tabular.distinct_period_exact.field_1, ["field_3"]);
+  assert.equal(tabularFormProblem({ ...form, identifierFieldKey: "field_1" }, { tabular, reporting_period: PERIOD }), null);
+  // A profile committed before the windows explains the new intake version instead of submitting a refused calculation.
+  const { exact_period_aggregates: _removed, ...legacyBasis } = profile.tabular_measurement_basis;
+  const legacy = D.describeTabularMeasurementOptions({ ...profile, tabular_measurement_basis: legacyBasis }, null);
+  assert.deepEqual([legacy.distinct_period_exact.field_1, legacy.period_support.distinct_month_windows], [[], "not_committed"]);
+  assert.match(tabularFormProblem({ ...form, identifierFieldKey: "field_1" }, { tabular: legacy, reporting_period: PERIOD }), /more than one month.*new intake version/);
 });
 
 

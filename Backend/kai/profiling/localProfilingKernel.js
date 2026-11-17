@@ -607,10 +607,137 @@ function isTrueXmlFlag(value) {
   return value === "1" || value === "true";
 }
 
+// ---------------------------------------------------------------------------
+// Excel date cells. A worksheet stores a date as a serial day number whose
+// meaning comes from two workbook facts: the cell's number format (its style
+// index into styles.xml cellXfs) and the workbook's date system (1900, or
+// 1904 when workbookPr date1904 is set). A number is a date only when its
+// own cell style is a calendar-date format: magnitude never makes it one.
+// ISO date cells (t="d") are dates too. The day is computed in memory for the
+// tabular basis, which keeps only its calendar month.
+
+// Built-in number formats that are calendar dates (ECMA-376 Part 1, 18.8.30):
+// 14 short date, 15 d-mmm-yy, 16 d-mmm, 17 mmm-yy, 22 date and time. The time
+// formats (18-21, 45-47) are not dates. Locale-reserved identifiers
+// (27-36, 50-58) are recognized only through an explicit format code.
+const BUILT_IN_DATE_NUMBER_FORMATS = Object.freeze(new Set([14, 15, 16, 17, 22]));
+const MAX_NUMBER_FORMAT_CODE_LENGTH = 255;
+export const EXCEL_DATE_SYSTEM_1900 = "excel_1900";
+export const EXCEL_DATE_SYSTEM_1904 = "excel_1904";
+const DAY_MS = 86400000;
+const EXCEL_1900_LAST_SERIAL = 2958465; // 9999-12-31
+const EXCEL_1904_LAST_SERIAL = 2957003; // 9999-12-31
+const NUMERIC_CELL_TEXT_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+// The first section of a format code (sections are separated by ";" outside
+// quoted text, escapes and brackets).
+function firstNumberFormatSection(code) {
+  let quoted = false;
+  let bracket = false;
+  for (let index = 0; index < code.length; index += 1) {
+    const character = code[index];
+    if (character === "\\" && !quoted) { index += 1; continue; }
+    if (character === "\"") quoted = !quoted;
+    else if (!quoted && character === "[") bracket = true;
+    else if (!quoted && character === "]") bracket = false;
+    else if (!quoted && !bracket && character === ";") return code.slice(0, index);
+  }
+  return code;
+}
+
+/**
+ * Whether a number format code displays a calendar date. Quoted text,
+ * escaped characters, bracketed colours/conditions/locales, padding and
+ * AM/PM markers are ignored; an elapsed-time bracket ([h], [mm], [ss]) is a
+ * duration, a format with digit, text or fraction placeholders is a number,
+ * and a format with hours, minutes or seconds but no day, month or year is a
+ * time of day. A day or year token, or a month token without hours/seconds,
+ * is a date.
+ */
+export function numberFormatIsCalendarDate(code) {
+  if (typeof code !== "string" || code.length === 0 || code.length > MAX_NUMBER_FORMAT_CODE_LENGTH) return false;
+  const section = firstNumberFormatSection(code);
+  if (/\[(?:h+|m+|s+)\]/i.test(section)) return false;
+  const tokens = section
+    .replace(/"[^"]*"/g, "")
+    .replace(/\\./g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/[_*]./g, "")
+    .replace(/AM\/PM|A\/P/gi, "")
+    .replace(/\.0+/g, "");
+  if (/[0#?@]/.test(tokens) || /general/i.test(tokens) || /e[+-]/i.test(tokens)) return false;
+  if (/[dy]/i.test(tokens)) return true;
+  return /m/i.test(tokens) && !/[hs]/i.test(tokens);
+}
+
+/** Per cellXfs index, whether that cell style is a calendar-date number format. */
+export function parseCellDateStyles(stylesBytes) {
+  const xml = TEXT_DECODER.decode(stylesBytes);
+  const customFormats = new Map();
+  const numFmts = /<(?:\w+:)?numFmts\b[^>]*>([\s\S]*?)<\/(?:\w+:)?numFmts>/.exec(xml);
+  for (const match of (numFmts?.[1] ?? "").matchAll(/<(?:\w+:)?numFmt\b([^>]*?)\/?>/g)) {
+    const id = Number.parseInt(xmlAttribute(match[1], "numFmtId") ?? "", 10);
+    const code = xmlAttribute(match[1], "formatCode");
+    if (Number.isSafeInteger(id) && id >= 0 && code !== null) customFormats.set(id, decodeXmlText(code));
+  }
+  const cellXfs = /<(?:\w+:)?cellXfs\b[^>]*>([\s\S]*?)<\/(?:\w+:)?cellXfs>/.exec(xml);
+  const styles = [];
+  for (const match of (cellXfs?.[1] ?? "").matchAll(/<(?:\w+:)?xf\b([^>]*?)(?:\/>|>[\s\S]*?<\/(?:\w+:)?xf>)/g)) {
+    const id = Number.parseInt(xmlAttribute(match[1], "numFmtId") ?? "0", 10);
+    styles.push(Number.isSafeInteger(id) && (customFormats.has(id) ? numberFormatIsCalendarDate(customFormats.get(id)) : BUILT_IN_DATE_NUMBER_FORMATS.has(id)));
+  }
+  return styles;
+}
+
+/** The workbook's date system, from workbook.xml workbookPr date1904. */
+export function parseWorkbookDateSystem(workbookBytes) {
+  const xml = TEXT_DECODER.decode(workbookBytes);
+  const workbookPr = /<(?:\w+:)?workbookPr\b([^>]*?)\/?>/.exec(xml);
+  return workbookPr && isTrueXmlFlag(xmlAttribute(workbookPr[1], "date1904")) ? EXCEL_DATE_SYSTEM_1904 : EXCEL_DATE_SYSTEM_1900;
+}
+
+/**
+ * The calendar day (YYYY-MM-DD) of an Excel serial under a date system, or
+ * null. The day is the serial's whole part (a time of day is dropped). The
+ * 1900 system counts 1900-01-01 as 1 and keeps Lotus 1-2-3's nonexistent
+ * 1900-02-29 as serial 60, which is no date; serial 0 is no date. The 1904
+ * system counts 1904-01-01 as 0. Negative serials and serials after
+ * 9999-12-31 are not dates.
+ */
+export function excelSerialCalendarDay(serialText, dateSystem) {
+  const text = typeof serialText === "string" ? serialText.trim() : "";
+  if (!NUMERIC_CELL_TEXT_RE.test(text)) return null;
+  const serial = Number(text);
+  if (!Number.isFinite(serial) || serial < 0) return null;
+  const day = Math.floor(serial);
+  let time;
+  if (dateSystem === EXCEL_DATE_SYSTEM_1904) {
+    if (day > EXCEL_1904_LAST_SERIAL) return null;
+    time = Date.UTC(1904, 0, 1) + day * DAY_MS;
+  } else if (dateSystem === EXCEL_DATE_SYSTEM_1900) {
+    if (day < 1 || day === 60 || day > EXCEL_1900_LAST_SERIAL) return null;
+    time = Date.UTC(1899, 11, day < 60 ? 31 : 30) + day * DAY_MS;
+  } else {
+    return null;
+  }
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+const ISO_DATE_CELL_RE = /^(\d{4}-\d{2}-\d{2})(?:[Tt ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)?$/;
+
+function isoDateCellDay(value) {
+  const match = ISO_DATE_CELL_RE.exec(String(value).trim());
+  if (!match) return null;
+  const parsed = new Date(`${match[1]}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === match[1] ? match[1] : null;
+}
+
 // One worksheet's cells, in memory for one call: rows by worksheet row number,
-// each a map of column number to { type, value, present }. Shared by the
-// record-count basis and the paired-outcome basis; never stored or returned.
-function readXlsxWorksheetTable(xmlBytes, sharedStrings) {
+// each a map of column number to { type, value, present } (and `date` and
+// `dateSystem` for a cell established as a date). Shared by the record-count
+// basis, the paired-outcome basis and the tabular basis; never stored or
+// returned. Only the tabular basis reads `date`, and keeps its month only.
+function readXlsxWorksheetTable(xmlBytes, sharedStrings, { dateStyles = [], dateSystem = EXCEL_DATE_SYSTEM_1900 } = {}) {
   const xml = TEXT_DECODER.decode(xmlBytes);
   const rows = new Map();
   const hiddenRows = new Set();
@@ -648,7 +775,18 @@ function readXlsxWorksheetTable(xmlBytes, sharedStrings) {
           value = raw;
         }
       }
-      cells.set(columnIndex, { type, value, present: value.trim().length > 0 });
+      const cell = { type, value, present: value.trim().length > 0 };
+      if (cell.present && type === "n") {
+        const styleIndex = Number.parseInt(xmlAttribute(cellMatch[1], "s") ?? "0", 10);
+        if (Number.isSafeInteger(styleIndex) && dateStyles[styleIndex] === true) {
+          const day = excelSerialCalendarDay(value, dateSystem);
+          if (day) Object.assign(cell, { date: day, dateSystem });
+        }
+      } else if (cell.present && type === "d") {
+        const day = isoDateCellDay(value);
+        if (day) cell.date = day;
+      }
+      cells.set(columnIndex, cell);
     }
     rows.set(rowIndex, cells);
   }
@@ -775,12 +913,17 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
 
     const sharedStringsEntry = entries.get("xl/sharedStrings.xml");
     const sharedStrings = sharedStringsEntry ? parseSharedStrings(inflateEntry(bytes, sharedStringsEntry)) : [];
+    // The number formats and date system that make a serial a date (read in
+    // memory only; no format code or style is stored).
+    const stylesEntry = entries.get("xl/styles.xml");
+    const dateStyles = stylesEntry ? parseCellDateStyles(inflateEntry(bytes, stylesEntry)) : [];
+    const dateSystem = workbookEntry ? parseWorkbookDateSystem(inflateEntry(bytes, workbookEntry)) : EXCEL_DATE_SYSTEM_1900;
     const sheetSummaries = [];
 
     for (const worksheetRef of worksheetRefs) {
       const sheetSummary = createXlsxSheetSummary(worksheetRef.sheet_key, worksheetRef.sheet_name);
       const xmlBytes = inflateEntry(bytes, entries.get(worksheetRef.entry_name));
-      const worksheetTable = readXlsxWorksheetTable(xmlBytes, sharedStrings);
+      const worksheetTable = readXlsxWorksheetTable(xmlBytes, sharedStrings, { dateStyles, dateSystem });
       sheetSummary.recordCountBasis = summarizeXlsxRecordCountBasis(worksheetTable);
       sheetSummary.pairedOutcomeBasis = summarizePairedOutcomeBasis({ rows: worksheetTable.rows, recordCountBasis: sheetSummary.recordCountBasis });
       sheetSummary.tabularMeasurementBasis = summarizeTabularMeasurementBasis({

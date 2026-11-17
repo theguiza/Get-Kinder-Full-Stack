@@ -43,7 +43,8 @@ function fieldLabel(field) {
   const withheld = field.vocabulary_withheld ? ", values withheld" : "";
   const letter = (position) => position > 26 ? `${letter(Math.floor((position - 1) / 26))}${String.fromCharCode(65 + (position - 1) % 26)}` : String.fromCharCode(64 + position);
   const detail = field.role === "identifier" ? `${field.identifier?.distinct_count ?? "unknown"} distinct keys`
-    : field.role === "date" ? `${field.date?.earliest_month || "unknown"} to ${field.date?.latest_month || "unknown"}`
+    : field.role === "date" ? `${field.date?.earliest_month || "unknown"} to ${field.date?.latest_month || "unknown"}${field.date?.excel_date_cell_count
+      ? `, including ${field.date.excel_date_cell_count} Excel date cells${field.date.excel_date_system ? ` (${field.date.excel_date_system === "excel_1904" ? "1904" : "1900"} date system)` : ""}` : ""}`
       : (field.values || []).slice(0, 3).map((value) => value.label).join(", ");
   return `Column ${field.column_position} / ${letter(field.column_position)} (${field.field_key}, ${ROLE_LABELS[field.role] || field.role}${withheld}); ${field.present_count} present, ${field.blank_count} blank${detail ? `; ${detail}` : ""}`;
 }
@@ -230,10 +231,11 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             {select("operation", [<option key="rate" value="rate">Rate (numerator of a measured population)</option>], "Count", { value: form.operation === "rate" ? "rate" : "" })}
           </label>
           {form.operation === "rate" ? <div className="text-muted" data-client-derived-rate-scope="">
-            Rates use records in the selected population across all dates, including duplicate records. The Project reporting period is not applied; this profile does not support date-filtered rates or distinct-person rates.
-          </div> : <div className="text-muted" data-client-derived-date-support="">
-            Date filters use calendar-month aggregates from recognized ISO date values. Numeric Excel serial dates are not recognized. If needed, prepare ISO date text in a new intake version; ordinary numbers must stay numbers.
-          </div>}
+            Rates count records, including duplicate records. With a date field, the Project reporting period limits the measured population to records dated in (or outside) it, and records without a date are excluded and stated. Rates in distinct identifiers cannot be recorded yet.
+          </div> : null}
+          <div className="text-muted" data-client-derived-date-support="">
+            Date filters use whole calendar months of recognized dates: ISO date text, and Excel cells formatted as dates (read with the workbook's own 1900 or 1904 date system). Plain numbers are never read as dates. Files profiled before Excel date cells were recognized need a new intake version.
+          </div>
           {form.operation !== "rate" ? (
             <label className="d-block">
               Count each
@@ -265,28 +267,27 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 </label>
               ) : null}
             </div>
-          ) : (
-            <div className="d-flex flex-wrap gap-2">
+          ) : null}
+          <div className="d-flex flex-wrap gap-2">
+            <label>
+              {form.operation === "rate" ? "Date field limiting the measured population to the reporting period" : "Date field for the reporting period"}
+              {select("periodFieldKey", byRole("date").map((field) => <option key={field.field_key} value={field.field_key}>{fieldLabel(field)}</option>), "no period (all dates)")}
+            </label>
+            {form.periodFieldKey ? (
               <label>
-                Date field for the reporting period
-                {select("periodFieldKey", byRole("date").map((field) => <option key={field.field_key} value={field.field_key}>{fieldLabel(field)}</option>), "no period (all dates)")}
+                Records dated
+                <select className="form-select form-select-sm" value={form.periodScope} onChange={setField("periodScope")} data-client-derived-field="periodScope">
+                  <option value="within">within the engagement reporting period</option>
+                  <option value="outside">outside the engagement reporting period</option>
+                </select>
               </label>
-              {form.periodFieldKey ? (
-                <label>
-                  Records dated
-                  <select className="form-select form-select-sm" value={form.periodScope} onChange={setField("periodScope")} data-client-derived-field="periodScope">
-                    <option value="within">within the engagement reporting period</option>
-                    <option value="outside">outside the engagement reporting period</option>
-                  </select>
-                </label>
-              ) : null}
-            </div>
-          )}
-          {form.operation === "count" && form.periodFieldKey ? (
+            ) : null}
+          </div>
+          {form.periodFieldKey ? (
             <div data-client-derived-period-context="">
               {!data.reporting_period ? <div className="text-warning" data-client-derived-no-period="">{projectPeriodProblem(data.reporting_period_context)}</div>
                 : <div> KAI Project reporting period: {data.reporting_period.start} to {data.reporting_period.end}.</div>}
-              <div>Choose “no period (all dates)” above for a supported count without date filtering. Your field selections will remain.</div>
+              <div>Choose “no period (all dates)” above for a supported calculation without date filtering. Your field selections will remain.</div>
               {data.reporting_period_context?.engagement_id ? <ProjectReportingPeriodEditor organizationId={organizationId}
                 engagementId={data.reporting_period_context.engagement_id} onSaved={load} /> : null}
             </div>
