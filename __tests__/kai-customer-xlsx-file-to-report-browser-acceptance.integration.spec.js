@@ -150,18 +150,28 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   const { sessionId } = await browser.send("Target.attachToTarget", { targetId, flatten: true });
   const requests = [];
   const byId = new Map();
+  let currentLoaderId = null;
+  const useLoader = (loaderId) => {
+    if (!loaderId) return;
+    currentLoaderId = loaderId;
+    for (const entry of requests) if (entry.loaderId && entry.loaderId !== loaderId && !entry.done) {
+      entry.done = true; entry.abandonedOnNavigation = true;
+    }
+  };
   const exceptions = [];
   const listener = (message) => {
     if (message.sessionId !== sessionId) return;
     const { method, params } = message;
     if (method === "Network.requestWillBeSent" && params.type !== "Document" && /\/api\/|\/synthetic-storage\//.test(params.request.url)) {
-      const entry = { url: params.request.url, method: params.request.method, status: null, done: false, requestId: params.requestId, postData: params.request.postData ?? null };
+      const entry = { url: params.request.url, method: params.request.method, status: null, loaderId: params.loaderId, done: Boolean(currentLoaderId && params.loaderId && params.loaderId !== currentLoaderId), requestId: params.requestId, postData: params.request.postData ?? null };
       requests.push(entry);
       byId.set(params.requestId, entry);
     } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
       byId.get(params.requestId).status = params.response.status;
     } else if ((method === "Network.loadingFinished" || method === "Network.loadingFailed") && byId.has(params.requestId)) {
       byId.get(params.requestId).done = true;
+    } else if (method === "Page.frameNavigated" && !params.frame.parentId) {
+      useLoader(params.frame.loaderId);
     } else if (method === "Runtime.exceptionThrown") {
       exceptions.push(params.exceptionDetails?.exception?.description || params.exceptionDetails?.text);
     }
@@ -328,7 +338,8 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       // A new document cancels the previous document's requests. Chrome can
       // omit loadingFailed for those abandoned XHRs; never wait on their old ids.
       for (const request of requests) if (!request.done) { request.done = true; request.abandonedOnNavigation = true; }
-      await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
+      const navigation = await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
+      useLoader(navigation.loaderId);
       await idle();
     },
     async close() {
@@ -2797,7 +2808,7 @@ async function runXlsxAcceptance() {
         assert.deepEqual(saved.definition, response.measurement.definition);
         assert.equal(saved.measured_value, expected);
         await adminPage.waitFor(async () => (await textOf(adminPage, `${p.section} [data-client-derived-recorded="${saved.source_derived_measurement_id}"] [data-client-derived-evidence-statement]`)) === saved.statement, "persisted evidence displayed verbatim");
-        inspect(JSON.parse(req.postData).definition, saved);
+        await inspect(JSON.parse(req.postData).definition, saved);
         p.measurements.push({ ...saved, evidenceId: response.evidenceItem.evidence_item_id });
       };
       p.selectSheet = async (key) => {
@@ -2952,7 +2963,7 @@ async function runXlsxAcceptance() {
       await configureProjectPeriodInUi("2026-01-01", "2026-02-28");
     });
 
-    await test("P4 / C,E,G,H: lineage diagnostics, independent counts, unambiguous paired result and truthful ambiguous-pairing refusal", async () => {
+    await test("P4 / C,E,G,H: lineage diagnostics, independent counts, unambiguous paired result and explicit validated ambiguous-pairing selection", async () => {
       const { getScopedSourceVersionEngagementReportingPeriod } = await import("../Backend/kai/db/kaiIntakeQueries.js");
       const { projectReportingPeriodState } = await import("../shared/kaiProjectReportingPeriod.js");
       const lineage = await getScopedSourceVersionEngagementReportingPeriod({ organizationId: ORG_X, sourceVersionId: p.sv }, seedPool);
@@ -3007,11 +3018,88 @@ async function runXlsxAcceptance() {
       await dispatcher.whenIdle(); const ambiguousSv = (await decideAndPromote(adminApi, ambiguousId)).source_version_id;
       await openCountRecords(ambiguousSv);
       const unavailable = await textOf(adminPage, "[data-client-derived-paired-unavailable]");
-      assert.match(unavailable, /more than one way to pair/); assert.match(unavailable, /one participant, stage and instrument-version field/);
+      assert.match(unavailable, /More than one participant\/stage mapping/);
       assert.equal(await textOf(adminPage, "[data-client-derived-record-paired]"), null);
+      assert.equal(await adminPage.evaluate('document.querySelector("[data-client-derived-record-selected-pairing]").disabled'), true);
       const rejected = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, ambiguousSv, null), {});
       assert.deepEqual([rejected.status, rejected.body.blockers[0].blocking_reason], [422, "paired_outcome_pairing_selection_required"]);
+      const pairing = { participant_field_key: "field_3", stage_field_key: "field_4", instrument_version_field_key: null };
+      const forged = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, ambiguousSv, null), { pairing: { ...pairing, participant_field_key: "field_1" } });
+      assert.deepEqual([forged.status, forged.body.blockers[0].blocking_reason], [422, "paired_outcome_pairing_not_proposed"]);
       assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [ambiguousSv]))[0].n, 0);
+      assert.ok(await setSelect("[data-client-derived-pairing-select]", J(pairing)));
+      await adminPage.clickIn("[data-client-derived-record-selected-pairing]", "Record explicitly selected paired mapping");
+      await adminPage.waitForText("selected paired results kept as evidence");
+      const [selected] = await query(`SELECT m.*, e.statement FROM kai.source_derived_measurements m JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id)
+        JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id WHERE m.source_version_id = $1::uuid`, [ambiguousSv]);
+      assert.deepEqual(selected.definition, { ...pairing, outcome_field_key: "field_5", outcome_column: "E" });
+      assert.deepEqual([Number(selected.numerator), Number(selected.denominator), Number(selected.measured_value)], [6, 6, 6]);
+      assert.match(selected.statement, /6 of 6/); assert.doesNotMatch(selected.statement, /improved|improvement/);
+      await openCountRecords(ambiguousSv);
+      assert.ok(await textOf(adminPage, `[data-client-derived-recorded="${selected.source_derived_measurement_id}"]`));
+      const [selectedEvidence] = await query("SELECT evidence_item_id::text FROM kai.evidence_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [selected.source_derived_measurement_id]);
+      const selectedRow = `[data-client-derived-recorded="${selected.source_derived_measurement_id}"]`;
+      await adminPage.clickIn(`${selectedRow} [data-client-derived-propose-claim="${selectedEvidence.evidence_item_id}"]`, "Propose the selected paired mapping as a finding");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${selectedRow} [data-client-derived-claim]`)), "paired mapping claim recorded");
+      const [selectedClaim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [selectedEvidence.evidence_item_id]);
+      assert.equal(selectedClaim.statement, selected.statement.replace(/^Derived measurement: numeric outcome/, "Numeric outcome"), "the claim changes only the established evidence introduction; every number, pairing scope and limitation is retained");
+      p.selectedPairing = { sourceVersionId: ambiguousSv, evidenceId: selectedEvidence.evidence_item_id, ...selectedClaim };
+    });
+
+    await test("P4b: failed initial and refreshed measurement reads recover without reload or lost selections; partial meaning is preserved until explicitly completed", async () => {
+      await openCountRecords(p.sv);
+      const failNextBasisRead = async (kind) => adminPage.evaluate(`(() => {
+        const original = window.fetch;
+        window.fetch = (input, init) => {
+          const url = String(typeof input === 'string' ? input : input.url);
+          if (url.includes(${J(`/source-versions/${p.sv}/derived-measurements`)}) && (!init?.method || init.method === 'GET')) {
+            window.fetch = original;
+            return ${kind === "network" ? "Promise.reject(new TypeError('Synthetic measurement read unavailable'))" : "Promise.resolve(new Response(JSON.stringify({ok:false,error:{message:'Synthetic basis unavailable'}}), {status:503,headers:{'Content-Type':'application/json'}}))"};
+          }
+          return original(input, init);
+        };
+        return true;
+      })()`);
+      await failNextBasisRead("network");
+      await p.panel.selectWorksheet("sheet_3");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${p.section} [data-client-derived-error]`)), "initial read exposes a retryable network error");
+      assert.equal(await textOf(adminPage, `${p.section} [data-client-derived-loading]`), null);
+      await adminPage.clickIn(`${p.section} [data-client-derived-retry]`, "Retry initial measurement read");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${p.section} [data-client-derived-tabular-form]`)), "retry loaded the selected worksheet");
+      await p.selectSheet("sheet_2");
+      const label = `${p.section} [data-client-derived-meaning="indicatorLabel"]`;
+      const meaning = `${p.section} [data-client-derived-meaning="meaningText"]`;
+      assert.ok(await setInput(adminPage, label, "Completed referral keys"));
+      assert.ok(await setSelect(p.field("operation"), "rate"));
+      assert.ok(await setSelect(p.field("operation"), ""));
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(label)}).value`), "Completed referral keys", "mode changes keep the meaning draft");
+      for (const [key, value] of [["identifierFieldKey", "field_1"], ["categoryFieldKey", "field_2"], ["categoryValueKey", "value_1"]]) assert.ok(await setSelect(p.field(key), value));
+      assert.equal(await p.disabled(), true);
+      assert.match(await textOf(adminPage, `${p.section} [data-client-derived-problem]`), /optional meaning is incomplete/);
+      const mark = adminPage.mark();
+      await adminPage.evaluate(`document.querySelector(${J(`${p.section} [data-client-derived-tabular-form]`)}).dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))`);
+      assert.equal(adminPage.requestsSince(mark).filter((r) => r.method === "POST").length, 0, "partial meaning is not silently omitted from a write");
+      await failNextBasisRead("http");
+      await adminPage.clickIn(`${p.section} [data-client-derived-refresh]`, "Refresh measurements with a synthetic read failure");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${p.section} [data-client-derived-error]`)), "refresh error shown");
+      assert.equal(await p.disabled(), true, "a failed reread cannot submit stale capability data");
+      assert.deepEqual(await adminPage.evaluate(`[${J(p.field("identifierFieldKey"))},${J(p.field("categoryFieldKey"))},${J(p.field("categoryValueKey"))},${J(label)}].map((selector)=>document.querySelector(selector).value)`), ["field_1", "field_2", "value_1", "Completed referral keys"]);
+      await adminPage.clickIn(`${p.section} [data-client-derived-retry]`, "Retry while retaining the definition");
+      await adminPage.waitFor(async () => !(await textOf(adminPage, `${p.section} [data-client-derived-error]`)) && !(await textOf(adminPage, `${p.section} [data-client-derived-loading]`)), "reread recovered without reload");
+      await adminPage.clickIn(`${p.section} [data-client-derived-clear-meaning]`, "Explicitly clear an incomplete meaning draft");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(label)}).value`), "");
+      assert.equal(await p.disabled(), false, "meaning remains optional when explicitly cleared");
+      assert.ok(await setInput(adminPage, label, "Completed referral keys"));
+      assert.ok(await setInput(adminPage, meaning, "Distinct keys among records with the selected completed value."));
+      const expected = new Set(p.rows.filter((row) => row[1] === "completed").map((row) => row[0])).size;
+      await p.recordTabular(expected, async (definition, saved) => {
+        assert.equal(definition.unit.field_key, "field_1");
+        assert.equal(saved.definition.conditions[0].value_label, "completed");
+        assert.match(saved.statement, /Completed referral keys/);
+        const [interpretation] = await query("SELECT meaning_text FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [saved.source_derived_measurement_id]);
+        assert.equal(interpretation.meaning_text, "Distinct keys among records with the selected completed value.");
+        assert.match(await textOf(adminPage, `${p.section} [data-client-derived-recorded="${saved.source_derived_measurement_id}"]`), /Distinct keys among records with the selected completed value/);
+      });
     });
 
     await test("P5 / I: customer field measurement to claim, multiworksheet selection, generated internal report, saved retrieval and authorized download with zero quality approvals", async () => {
@@ -3031,13 +3119,16 @@ async function runXlsxAcceptance() {
       await p.selectSheet("sheet_1");
       const paired = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, p.sv, "sheet_1"))).body.data.recorded.find((entry) => entry.measurement_family === "paired_outcome_change");
       await proposeMeasured(paired.source_derived_measurement_id, paired.evidence.find((entry) => entry.current).evidence_item_id);
-      const selection = [...selectedClaims.map((claim) => claim.claim_id), p.claims.find((entry) => entry.key === "sheet_3").claimId];
+      const selection = [...selectedClaims.map((claim) => claim.claim_id), p.claims.find((entry) => entry.key === "sheet_3").claimId, p.selectedPairing.claim_id];
       const { shown, draft, citations } = await createMeasuredReportInUi(selection);
       for (const claim of selectedClaims) assert.ok(shown.includes(claim.statement), `the report retains the exact measured claim: ${claim.statement}`);
       for (const token of [p.sv, measured.evidenceId, ...selection, "2026-01-01", "2026-02-28", "sheet_2", "sheet_3"]) assert.ok(shown.includes(token), token);
       assert.match(shown, new RegExp(`${p.expected.inPeriod} records`)); assert.match(shown, /6 nonblank data rows/);
       assert.match(shown, /without.*date|valid date|missing.*date/i);
       assert.ok(citations.some((c) => c.evidence_item_id === measured.evidenceId));
+      assert.ok(citations.some((c) => c.evidence_item_id === p.selectedPairing.evidenceId));
+      assert.ok(shown.includes(p.selectedPairing.statement));
+      assert.ok(shown.includes(p.selectedPairing.sourceVersionId));
       assert.deepEqual(await approvalState(), p.approvals, "no evidence/claim/coverage/release decision or followup required");
       modelOverride.text = null;
       results.projectMeasurementJourney = { cases: "A-I plus existing J regressions", sourceVersionId: p.sv, expected: p.expected,
@@ -3070,7 +3161,22 @@ async function runXlsxAcceptance() {
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-cross-source-form]`)), "the linkage form");
       assert.match(await textOf(adminPage, `${section} [data-client-cross-source-period]`), /2025-04-01 to 2026-03-31/);
       assert.match(await textOf(adminPage, `${section} [data-client-cross-source-problem]`), /participant register/);
+      await adminPage.evaluate(`(() => {
+        const original = window.fetch;
+        window.fetch = (input, init) => {
+          const url = String(typeof input === 'string' ? input : input.url);
+          if (url.includes(${J(`/source-versions/${registerSv}/derived-measurements`)}) && (!init?.method || init.method === 'GET')) {
+            window.fetch = original;
+            return Promise.reject(new TypeError('Synthetic register read failure'));
+          }
+          return original(input, init);
+        };
+      })()`);
       assert.ok(await setSelect(field("referenceSourceVersionId"), registerSv), "choose the register version");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-cross-source-register-error]`)), "failed register read is actionable");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-cross-source-submit]`)}).disabled`), true);
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(field("referenceSourceVersionId"))}).value`), registerSv);
+      await adminPage.clickIn(`${section} [data-client-cross-source-register-retry]`, "Retry the selected register read");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, field("registerParticipantFieldKey"))), "the register's fields");
       for (const [key, value] of [["eventIdentifierFieldKey", "field_1"], ["participantIdentifierFieldKey", "field_2"], ["statusFieldKey", "field_5"], ["dateFieldKey", "field_4"], ["groupFieldKey", "field_3"], ["registerParticipantFieldKey", "field_1"]]) {
         assert.ok(await setSelect(field(key), value), key);
@@ -3197,6 +3303,48 @@ async function runXlsxAcceptance() {
       // The superseded register is no longer offered as a linkable version.
       assert.equal(await adminPage.evaluate(`[...document.querySelector(${J(field("referenceSourceVersionId"))}).options].some((o) => o.value === ${J(registerSv)})`), false);
       results.crossSourceControls = { eventsSv, registerSv, expected, jobId, refusedBy, polls: polls.length, claimId, successor: decidedBody.data.source_version.source_version_id };
+    });
+
+    await test("Q: both period editors and the measurement basis refresh together; unsaved dates survive concurrent changes and a stale write remains refused", async () => {
+      const sv = results.crossSourceControls.eventsSv;
+      await openCountRecords(sv);
+      const section = `[data-client-derived-measurements="${sv}"]`;
+      assert.ok(await setSelect(`${section} [data-client-derived-field="periodFieldKey"]`, "field_4"));
+      const tabular = `${section} [data-client-derived-period-context] [data-project-reporting-period]`;
+      const linked = `${section} [data-client-cross-source] [data-project-reporting-period]`;
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${tabular} [data-project-period-current]`)) === "2025-04-01 to 2026-03-31" && (await textOf(adminPage, `${linked} [data-project-period-current]`)) === "2025-04-01 to 2026-03-31", "both current editors loaded");
+      assert.ok(await setInput(adminPage, `${tabular} [data-project-period-start]`, "2025-05-01"));
+      assert.ok(await setInput(adminPage, `${linked} [data-project-period-start]`, "2025-04-02"));
+      await adminPage.clickIn(`${linked} [data-project-period-save]`, "Save linked-source Project period");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${tabular} [data-project-period-current]`)) === "2025-04-02 to 2026-03-31", "other editor reflects persisted period");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${tabular} [data-project-period-start]`)}).value`), "2025-05-01", "background refresh preserves unsaved dates");
+      assert.match(await textOf(adminPage, `${tabular} [data-project-period-draft-stale]`), /unsaved dates are kept/);
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-problem]`))?.includes("calendar month"), "calculation readiness uses the newly persisted dates");
+      const mark = adminPage.mark();
+      await adminPage.clickIn(`${tabular} [data-project-period-save]`, "Attempt stale period draft");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${tabular} [data-project-period-notice]`))?.includes("Project target changed"), "stale save explained");
+      assert.equal(adminPage.requestsSince(mark).find((r) => r.method === "PATCH")?.status, 409);
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${tabular} [data-project-period-start]`)}).value`), "2025-05-01", "409 also preserves unsaved dates");
+      assert.equal((await adminApi("GET", periodPath)).body.data.start, "2025-04-02", "stale draft changed no persisted period");
+      await adminPage.clickIn(`${tabular} [data-project-period-use-current]`, "Use current dates deliberately");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${tabular} [data-project-period-start]`)}).value`), "2025-04-02");
+      assert.ok(await setInput(adminPage, `${linked} [data-project-period-start]`, "2025-04-01"));
+      await adminPage.evaluate(`(() => {
+        const original = window.fetch;
+        window.fetch = (input, init) => {
+          const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
+          if (url.pathname === ${J(`${orgPath()}/engagements`)} && (!init?.method || init.method === 'GET')) {
+            window.fetch = original;
+            return Promise.reject(new TypeError('Synthetic Project list refresh failure'));
+          }
+          return original(input, init);
+        };
+      })()`);
+      await adminPage.clickIn(`${linked} [data-project-period-save]`, "Restore whole-month Project period");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${tabular} [data-project-period-current]`)) === "2025-04-01 to 2026-03-31" && (await textOf(adminPage, `${linked} [data-project-period-current]`)) === "2025-04-01 to 2026-03-31", "all persisted views synchronized");
+      await adminPage.waitFor(async () => !Boolean(await textOf(adminPage, `${section} [data-client-derived-problem]`)), "basis readiness restored");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${linked} [data-project-period-notice]`))?.includes("saved and reread"), "a list refresh failure does not misreport a saved period as failed");
+      assert.match(await textOf(adminPage, `${linked} [data-project-period-notice]`), /affected views could not refresh/);
     });
 
     const CEDAR_PACKAGE = process.env.KAI_CEDAR_BRIDGE_PACKAGE;

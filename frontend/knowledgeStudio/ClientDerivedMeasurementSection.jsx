@@ -1,6 +1,7 @@
 import ProjectReportingPeriodEditor from "../projects/ProjectReportingPeriodEditor.jsx";
 import { projectPeriodProblem } from "../../shared/kaiProjectReportingPeriod.js";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import ProjectReportingContext from "../projects/ProjectReportingContext.js";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
@@ -16,6 +17,7 @@ import {
   derivedMeasurementBasisPath,
   derivedMeasurementInterpretationPath,
   interpretationBody,
+  interpretationFormProblem,
   interpretationFormFrom,
   recordedMeasurementKnownLines,
   measurementFamilyLabel,
@@ -56,8 +58,11 @@ function fieldLabel(field) {
  * numbers. The server calculates and validates everything.
  */
 export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded, linkableVersions = [], versionsById = null, earlierVersionIds = [] }) {
+  const { revision } = useContext(ProjectReportingContext);
+  const lastRevision = useRef(revision);
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "" });
   const [form, setForm] = useState(EMPTY_TABULAR_FORM);
+  const [pairingChoice, setPairingChoice] = useState("");
   const [meaning, setMeaning] = useState(EMPTY_INTERPRETATION_FORM);
   const [clarifying, setClarifying] = useState(null);
   const [clarifyForm, setClarifyForm] = useState(EMPTY_INTERPRETATION_FORM);
@@ -66,22 +71,36 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const seqRef = useRef(0);
 
   const load = useCallback(async () => {
-    seqRef.current += 1;
-    const seq = seqRef.current;
-    const result = await getJson(derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey || null));
-    if (seqRef.current !== seq) return;
-    setBasis(result.statusCode === 200 && result.body?.ok
-      ? { status: "success", data: result.body.data, error: "" }
-      : { status: "error", data: null, error: errorText(result) });
+    const seq = ++seqRef.current;
+    setBasis((current) => ({ ...current, status: current.data ? "refreshing" : "loading", error: "" }));
+    try {
+      const result = await getJson(derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey || null));
+      if (seqRef.current !== seq) return false;
+      if (result.statusCode === 200 && result.body?.ok) {
+        setBasis({ status: "success", data: result.body.data, error: "" });
+        return true;
+      }
+      setBasis((current) => ({ ...current, status: "error", error: errorText(result) }));
+    } catch {
+      if (seqRef.current === seq) setBasis((current) => ({ ...current, status: "error", error: "The measurement basis could not be loaded. Your selections and meaning draft are kept. Retry the read." }));
+    }
+    return false;
   }, [organizationId, sourceVersionId, worksheetKey]);
   useEffect(() => {
     setForm(EMPTY_TABULAR_FORM);
+    setPairingChoice("");
     setMeaning(EMPTY_INTERPRETATION_FORM);
     setClarifying(null);
     setNotice(null);
     load();
     return () => { seqRef.current += 1; };
   }, [load]);
+
+  useEffect(() => {
+    if (lastRevision.current === revision) return;
+    lastRevision.current = revision;
+    load();
+  }, [revision, load]);
 
   const send = async (kind, path, body, success) => {
     if (pending) return;
@@ -90,6 +109,10 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     let result;
     try {
       result = await postJson(path, body);
+    } catch {
+      setNotice({ kind: "warning", text: "KAI could not confirm the write. Your inputs are kept. Refresh measurements to check whether it was recorded before retrying." });
+      await load();
+      return false;
     } finally {
       setPending("");
     }
@@ -106,7 +129,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const fields = data?.tabular?.available ? data.tabular.fields : [];
   const byRole = (role) => fields.filter((field) => field.role === role);
   const valuesOf = (fieldKey) => fields.find((field) => field.field_key === fieldKey)?.values || [];
-  const problem = tabularFormProblem(form, data);
+  const meaningProblem = interpretationFormProblem(meaning);
+  const problem = basis.status !== "success" ? "Load the current measurement basis before recording." : tabularFormProblem(form, data) || meaningProblem;
   const recordTabular = (event) => {
     event.preventDefault();
     if (problem) return;
@@ -129,12 +153,11 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     const value = event.target.value;
     setForm((current) => changeTabularField(current, key, value));
     if (key === "operation") {
-      setMeaning(EMPTY_INTERPRETATION_FORM);
-      setNotice({ kind: "warning", text: "Calculation changed. Choose its fields and values again. Count filters and rate populations are not carried over." });
+      setNotice({ kind: "warning", text: "Calculation changed. Choose its fields and values again and review your retained meaning draft. Count filters and rate populations are not carried over." });
     }
   };
   const select = (key, options, placeholder, extra = {}) => (
-    <select className="form-select form-select-sm" value={form[key]} onChange={setField(key)} data-client-derived-field={key} {...extra}>
+    <select className="form-select form-select-sm" value={form[key]} onChange={setField(key)} disabled={Boolean(pending)} data-client-derived-field={key} {...extra}>
       <option value="">{placeholder}</option>
       {options}
     </select>
@@ -147,8 +170,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         KAI calculates these from the values its profile kept for this source version. A result is kept without any meaning; what it
         represents is your organization's statement, and stating it never changes the numbers.
       </div>
-      {basis.status === "loading" ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
-      {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error}</div> : null}
+      {["loading", "refreshing"].includes(basis.status) ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
+      {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
+      {basis.status !== "loading" ? <button type="button" className="btn btn-sm btn-link" data-client-derived-refresh="" disabled={basis.status === "refreshing" || Boolean(pending)} onClick={load}>Refresh measurements</button> : null}
       {notice ? <div className={`alert alert-${notice.kind} py-2`} data-client-derived-notice={notice.kind}>{notice.text}</div> : null}
 
       {data?.paired?.available ? (
@@ -161,7 +185,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 : `${item.outcome_field_key || "A field"}: ${item.blockers?.[0]?.message || "cannot be measured."}`}
             </div>
           ))}
-          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending) || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
+          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={basis.status !== "success" || Boolean(pending) || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
             onClick={() => send("paired", pairedOutcomeMeasurementsPath(organizationId, sourceVersionId, worksheetKey || null), {},
               (recorded) => `${recorded.measurements.length} proposed results kept as evidence.`)}>
             {pending === "paired" ? "Keeping..." : "Keep these results as evidence"}
@@ -170,7 +194,26 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       ) : null}
 
       {data?.paired && !data.paired.available ? (
-        <div data-client-derived-paired-unavailable="">Paired outcome unavailable: {data.paired.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ")}</div>
+        <div data-client-derived-paired-unavailable="">
+          {data.paired.proposed_pairings?.length ? "Choose a baseline/follow-up mapping: " : "Paired outcome unavailable: "}
+          {data.paired.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ")}
+          {data.paired.proposed_pairings?.length ? <div>
+            <label>Participant and observation fields
+              <select className="form-select form-select-sm" data-client-derived-pairing-select="" disabled={Boolean(pending)} value={pairingChoice} onChange={(event) => setPairingChoice(event.target.value)}>
+                <option value="">Choose the intended mapping</option>
+                {data.paired.proposed_pairings.map((pairing) => <option key={JSON.stringify(pairing)} value={JSON.stringify(pairing)}>
+                  Participant {pairing.participant_field_key}; baseline/follow-up stage {pairing.stage_field_key}; instrument version {pairing.instrument_version_field_key || "not used"}
+                </option>)}
+              </select>
+            </label>
+            <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-record-selected-pairing=""
+              disabled={Boolean(pending) || basis.status !== "success" || !data.paired.proposed_pairings.some((pairing) => JSON.stringify(pairing) === pairingChoice)}
+              onClick={() => send("paired", pairedOutcomeMeasurementsPath(organizationId, sourceVersionId, worksheetKey || null), { pairing: JSON.parse(pairingChoice) },
+                (recorded) => `${recorded.measurements.length} selected paired results kept as evidence; numerical change does not establish improvement.`)}>
+              Calculate and keep selected pairing
+            </button>
+          </div> : null}
+        </div>
       ) : null}
       {data?.tabular && !data.tabular.available ? (
         <div data-client-derived-tabular-unavailable="">Field measurement unavailable: {data.tabular.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ") || TABULAR_UNAVAILABLE_MESSAGES[data.tabular.reason] || "The committed profile has no supported field measurements. Use Count records if available."}</div>
@@ -186,6 +229,11 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             Calculation
             {select("operation", [<option key="rate" value="rate">Rate (numerator of a measured population)</option>], "Count", { value: form.operation === "rate" ? "rate" : "" })}
           </label>
+          {form.operation === "rate" ? <div className="text-muted" data-client-derived-rate-scope="">
+            Rates use records in the selected population across all dates, including duplicate records. The Project reporting period is not applied; this profile does not support date-filtered rates or distinct-person rates.
+          </div> : <div className="text-muted" data-client-derived-date-support="">
+            Date filters use calendar-month aggregates from recognized ISO date values. Numeric Excel serial dates are not recognized. If needed, prepare ISO date text in a new intake version; ordinary numbers must stay numbers.
+          </div>}
           {form.operation !== "rate" ? (
             <label className="d-block">
               Count each
@@ -246,17 +294,17 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           <div className="d-flex flex-wrap gap-2 mt-1">
             <label>
               Meaning (optional): indicator label
-              <input className="form-control form-control-sm" value={meaning.indicatorLabel} data-client-derived-meaning="indicatorLabel"
+              <input className="form-control form-control-sm" value={meaning.indicatorLabel} disabled={Boolean(pending)} data-client-derived-meaning="indicatorLabel"
                 onChange={(event) => setMeaning((current) => ({ ...current, indicatorLabel: event.target.value }))} />
             </label>
             <label>
               What it represents
-              <input className="form-control form-control-sm" value={meaning.meaningText} data-client-derived-meaning="meaningText"
+              <input className="form-control form-control-sm" value={meaning.meaningText} disabled={Boolean(pending)} data-client-derived-meaning="meaningText"
                 onChange={(event) => setMeaning((current) => ({ ...current, meaningText: event.target.value }))} />
             </label>
             <label>
               Where the values come from
-              <select className="form-select form-select-sm" value={meaning.evidenceBasis} data-client-derived-meaning="evidenceBasis"
+              <select className="form-select form-select-sm" value={meaning.evidenceBasis} disabled={Boolean(pending)} data-client-derived-meaning="evidenceBasis"
                 onChange={(event) => setMeaning((current) => ({ ...current, evidenceBasis: event.target.value }))}>
                 <option value="not_established">not stated</option>
                 <option value="self_reported">self-reported by the people recorded</option>
@@ -264,6 +312,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
               </select>
             </label>
           </div>
+          {meaningProblem ? <button type="button" className="btn btn-sm btn-link" data-client-derived-clear-meaning="" disabled={Boolean(pending)} onClick={() => setMeaning(EMPTY_INTERPRETATION_FORM)}>Clear optional meaning</button> : null}
           {problem ? <div data-client-derived-problem="">{problem}</div> : null}
           <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(problem) || Boolean(pending)} data-client-derived-record-tabular="">
             {pending === "tabular" ? "Calculating..." : "Calculate and record"}
@@ -271,7 +320,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         </form>
       ) : null}
       {data?.tabular?.available && !data.tabular.sheetKey ? (
-        <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data}
+        <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data} eventsBasisCurrent={basis.status === "success"}
           onPeriodSaved={load} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}

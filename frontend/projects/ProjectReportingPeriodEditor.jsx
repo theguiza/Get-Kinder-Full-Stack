@@ -12,8 +12,11 @@ export default function ProjectReportingPeriodEditor({ organizationId, engagemen
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   const sequence = useRef(0);
+  const draftDirty = useRef(false);
+  const draftRevision = useRef(null);
+  const [draftChangedElsewhere, setDraftChangedElsewhere] = useState(false);
   const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements/${encodeURIComponent(engagementId)}/reporting-period`;
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ preserveDraft = true, rebaseDraft = false } = {}) => {
     const seq = ++sequence.current;
     setState(null);
     try {
@@ -21,8 +24,16 @@ export default function ProjectReportingPeriodEditor({ organizationId, engagemen
       if (sequence.current !== seq) return false;
       if (result.statusCode === 200 && result.body?.ok) {
         setState(result.body.data);
-        setStart(result.body.data.start);
-        setEnd(result.body.data.end);
+        if (preserveDraft && draftDirty.current) {
+          setDraftChangedElsewhere(!rebaseDraft && draftRevision.current !== result.body.data.target_revision);
+          if (rebaseDraft) draftRevision.current = result.body.data.target_revision;
+        } else {
+          setStart(result.body.data.start);
+          setEnd(result.body.data.end);
+          draftRevision.current = result.body.data.target_revision;
+          draftDirty.current = false;
+          setDraftChangedElsewhere(false);
+        }
         return true;
       }
       setState({ status: "error" });
@@ -35,7 +46,13 @@ export default function ProjectReportingPeriodEditor({ organizationId, engagemen
     }
     return false;
   }, [path]);
-  useEffect(() => { setNotice(""); load(); return () => { sequence.current += 1; }; }, [load]);
+  useEffect(() => { draftDirty.current = false; setNotice(""); load({ preserveDraft: false }); return () => { sequence.current += 1; }; }, [load]);
+  const lastRevision = useRef(context.revision);
+  useEffect(() => {
+    if (lastRevision.current === context.revision) return;
+    lastRevision.current = context.revision;
+    load({ preserveDraft: true });
+  }, [context.revision, load]);
   const valid = isCalendarDate(start) && isCalendarDate(end) && start <= end;
   const save = async (event) => {
     event.preventDefault();
@@ -46,16 +63,18 @@ export default function ProjectReportingPeriodEditor({ organizationId, engagemen
     try {
       const response = await fetch(path, { method: "PATCH", credentials: "same-origin",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ start, end, expected_target_revision: state.target_revision }) });
+        body: JSON.stringify({ start, end, expected_target_revision: draftRevision.current }) });
       const result = { statusCode: response.status, body: await response.json() };
       if (response.ok && result.body?.ok) {
-        const reread = await load();
-        await context.refresh();
-        await onSaved?.();
-        setNotice(reread ? "Project reporting period saved and reread." : "The period was saved, but current values could not be reread. Reload current period to verify.");
+        const reread = await load({ preserveDraft: false });
+        let refreshFailed = false;
+        try { await context.refresh(); } catch { refreshFailed = true; }
+        try { await onSaved?.(); } catch { refreshFailed = true; }
+        setNotice((reread ? "Project reporting period saved and reread." : "The period was saved, but current values could not be reread. Reload current period to verify.")
+          + (refreshFailed ? " Some affected views could not refresh. Retry their reads to display the saved period." : ""));
       } else if (response.status === 409) {
-        const reread = await load();
-        setNotice(reread ? "The Project target changed while you were editing. Current dates have been reloaded. Check them and retry your correction."
+        const reread = await load({ preserveDraft: true, rebaseDraft: true });
+        setNotice(reread ? "The Project target changed while you were editing. Current dates have been reloaded above; your edited dates are kept. Review them before retrying, or use the current dates."
           : "The Project target changed while you were editing. Current dates could not be loaded. Reload current period before retrying.");
       } else setNotice(errorText(result));
     } catch { setNotice("The reporting period could not be saved or reread. Reload the current values before retrying."); }
@@ -72,13 +91,17 @@ export default function ProjectReportingPeriodEditor({ organizationId, engagemen
       <div className="text-muted">Used for supported date-filtered field measurements. Count records does not filter rows by these dates.</div>
       {writable ? (
         <div role="group" aria-label="Edit KAI Project reporting period">
-          <label>Period start<input aria-label="KAI Project period start" data-project-period-start="" type="date" className="form-control form-control-sm" value={start} onChange={(event) => setStart(event.target.value)} /></label>{" "}
-          <label>Period end<input aria-label="KAI Project period end" data-project-period-end="" type="date" className="form-control form-control-sm" value={end} onChange={(event) => setEnd(event.target.value)} /></label>{" "}
+          <label>Period start<input aria-label="KAI Project period start" data-project-period-start="" type="date" className="form-control form-control-sm" value={start} disabled={pending} onChange={(event) => { draftDirty.current = true; setStart(event.target.value); }} /></label>{" "}
+          <label>Period end<input aria-label="KAI Project period end" data-project-period-end="" type="date" className="form-control form-control-sm" value={end} disabled={pending} onChange={(event) => { draftDirty.current = true; setEnd(event.target.value); }} /></label>{" "}
           <button type="button" onClick={save} className="btn btn-sm btn-primary" data-project-period-save="" disabled={!valid || !state?.target_revision || pending}>{pending ? "Saving…" : "Save Project period"}</button>
           {!valid && (start || end) ? <div role="alert">Enter both real calendar dates, with the end on or after the start.</div> : null}
         </div>
       ) : <div>Your organization administrator can set or correct both dates in Projects.</div>}
-      <button type="button" className="btn btn-sm btn-link" data-project-period-reload="" disabled={pending} onClick={load}>Reload current period</button>
+      {draftChangedElsewhere ? <div role="status" data-project-period-draft-stale="">The Project target changed elsewhere. Your unsaved dates are kept. Saving checks the version you edited; review the current period above.</div> : null}
+      {draftDirty.current && state?.target_revision ? <button type="button" className="btn btn-sm btn-link" data-project-period-use-current="" disabled={pending} onClick={() => {
+        setStart(state.start); setEnd(state.end); draftRevision.current = state.target_revision; draftDirty.current = false; setDraftChangedElsewhere(false); setNotice("");
+      }}>Use current dates</button> : null}
+      <button type="button" className="btn btn-sm btn-link" data-project-period-reload="" disabled={pending} onClick={() => load({ preserveDraft: true })}>Reload current period</button>
       {notice ? <div role="status" data-project-period-notice="">{notice}</div> : null}
     </div>
   );

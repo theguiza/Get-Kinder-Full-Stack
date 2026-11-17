@@ -393,10 +393,10 @@ function buildMeasurement({ entry, sheet, alternative, definition, humanSelected
 /**
  * The paired measurements of one worksheet from a committed profile, with any
  * person's definitions applied. Pairing fields, when KAI proposed more than
- * one combination, must be selected by a definition; until then no
- * measurement is available and the proposed pairings are returned.
+ * one combination, must be selected by a definition or an explicit pairing;
+ * until then no measurement is available and proposed pairings are returned.
  */
-export function derivePairedOutcomeMeasurements(profile, selectedWorksheetKey = null, { definitions = [] } = {}) {
+export function derivePairedOutcomeMeasurements(profile, selectedWorksheetKey = null, { definitions = [], pairing = null } = {}) {
   const worksheet = worksheetFor(profile, selectedWorksheetKey);
   if (!worksheet.ok) return worksheet;
   const { sheet } = worksheet;
@@ -432,7 +432,7 @@ export function derivePairedOutcomeMeasurements(profile, selectedWorksheetKey = 
       { objectType: "paired_outcome_definition" },
     );
   }
-  const selection = selectAlternative(basis.alternatives ?? [], definitions);
+  const selection = selectAlternative(basis.alternatives ?? [], [...definitions, ...(pairing ? [{ roles: pairing }] : [])]);
   if (!selection.ok) return selection;
   const pairings = Object.freeze((basis.alternatives ?? []).map((alternative) => Object.freeze({
     participantFieldKey: alternative.participant_field_key,

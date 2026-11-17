@@ -81,11 +81,11 @@ export function tabularFormProblem(form, basis = null) {
       const state = basis.reporting_period_context || (basis.reporting_period ? { status: "recorded", period: basis.reporting_period } : null);
       const missing = projectPeriodProblem(state);
       if (missing) return missing;
-      if (form.identifierFieldKey && !(basis.tabular.single_valued_in?.[form.identifierFieldKey] || []).includes(form.periodFieldKey)) return "Some selected identifiers occur in more than one month. KAI cannot count each key once within a period exactly. Count records or choose no period (all dates).";
+      if (form.identifierFieldKey && !(basis.tabular.single_valued_in?.[form.identifierFieldKey] || []).includes(form.periodFieldKey)) return "Some selected identifiers occur in more than one month. KAI cannot count each key once within a period exactly. Choose record as the counted unit, or choose no period (all dates).";
       const { start, end } = state.period;
       const date = new Date(`${end}T00:00:00Z`);
       date.setUTCDate(date.getUTCDate() + 1);
-      if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. The Project period must start on a month's first day and end on a month's last day. Choose no period (all dates) to measure without date filtering.";
+      if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. This calculation needs a period starting on a month's first day and ending on a month's last day. Keep your actual Project dates; choose no period (all dates) if they are partial months.";
     }
   }
   if (form.operation === "rate" && (form.identifierFieldKey || form.periodFieldKey)) return "Rates use record populations without date filtering or distinct-key instructions. Choose the calculation again.";
@@ -192,6 +192,16 @@ export function sourceHeadingSuggestionOf(value) {
   const label = value && typeof value === "object" ? value.suggested_label ?? value.suggestedLabel : null;
   const from = value && typeof value === "object" ? value.derived_from ?? value.derivedFrom : null;
   return from === "spreadsheet_column_heading" && typeof label === "string" && /^[A-Za-z][A-Za-z0-9 '()-]{0,59}$/.test(label) ? label : null;
+}
+
+/** Optional meaning may be omitted, but entered text is never silently dropped. */
+export function interpretationFormProblem(form) {
+  const label = form.indicatorLabel.trim();
+  const meaning = form.meaningText.trim();
+  const entered = label || meaning || (form.evidenceBasis && form.evidenceBasis !== "not_established") || form.scoreDirection;
+  if (!entered) return null;
+  if (!label || !meaning) return "Your optional meaning is incomplete. Add both a short name and description, or clear the optional meaning to record the numbers alone.";
+  return null;
 }
 
 /** The interpretation body, or null when no label and meaning are given. */

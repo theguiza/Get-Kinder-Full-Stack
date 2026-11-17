@@ -19,6 +19,7 @@ import {
   groupDigits,
   reconciliationHistory,
   interpretationBody,
+  interpretationFormProblem,
   pairedOutcomeMeasurementsPath,
   tabularDefinitionBody,
   tabularFormProblem,
@@ -300,6 +301,30 @@ test("paired outcomes are persistable without a definition; a meaning changes th
   assert.equal(dims.definition_clarity.evidence.assessment_status, "unresolved");
 });
 
+test("an explicit paired mapping is checked against the committed alternatives and retained in calculation identity", async () => {
+  const rows = PAIRED_ROWS.map((row, index) => [...row, index ? `M-${row[1]}` : "member_id"]);
+  const bytes = syntheticXlsxWorkbook({ sheets: [{ name: "Observations", rows }] });
+  const profile = await profileLocalTrustedFile({ extension: ".xlsx", declaredMime: SYNTHETIC_XLSX_MIME, byteSize: bytes.byteLength, bytes });
+  const unselected = D.derivePersistablePairedOutcomes(profile, null);
+  assert.equal(unselected.blockers[0].blocking_reason, "paired_outcome_pairing_selection_required");
+  assert.equal(unselected.proposedPairings.length, 2);
+  const selected = unselected.proposedPairings.map((pairing) => D.derivePersistablePairedOutcomes(profile, null, { pairing }));
+  for (let i = 0; i < selected.length; i++) {
+    assert.equal(selected[i].ok, true);
+    const measurement = selected[i].measurements.find((entry) => entry.definition.outcome_field_key === "field_5");
+    assert.deepEqual([measurement.numerator, measurement.denominator], [2, 4]);
+    for (const [key, value] of Object.entries(unselected.proposedPairings[i])) assert.equal(measurement.definition[key], value);
+    assert.equal(D.derivedMeasurementArithmeticHolds(asRow(measurement)), true);
+    assert.match(D.composeDerivedClaimStatementFromRow(asRow(measurement)), /whether higher is better is not established/);
+  }
+  assert.notEqual(selected[0].measurements[0].measurementKey, selected[1].measurements[0].measurementKey);
+  const forged = { ...unselected.proposedPairings[0], participant_field_key: "field_1" };
+  assert.equal(D.derivePersistablePairedOutcomes(profile, null, { pairing: forged }).blockers[0].blocking_reason, "paired_outcome_pairing_not_proposed");
+  assert.equal(D.validatePairedMeasurementPairing({ ...forged, stage_field_key: "field_1" }).ok, false);
+  assert.equal(D.validatePairedMeasurementPairing({ ...forged, unapproved: true }).ok, false);
+  assert.equal(D.validatePairedMeasurementPairing(null).ok, false);
+});
+
 test("interpretations: required label and meaning, direction only for paired outcomes, no verified basis", () => {
   const paired = { family: "paired_outcome_change" };
   const count = { family: "tabular_count" };
@@ -509,4 +534,16 @@ test("ordinary numeric Excel cells are not ISO dates or a supported period-filte
   assert.equal(options.fields.some((field) => field.role === "date"), false);
   const result = derive(profile, { operation: "count", conditions: [{ kind: "period", field_key: "field_2", period_source: "engagement_reporting_period", scope: "within" }] }, "sheet_1");
   assert.equal(result.blockers[0].blocking_reason, "tabular_field_role_not_proposed");
+});
+
+
+test("optional meaning is absent only by choice; partial labels, descriptions or source basis need completion or explicit clearing", () => {
+  const blank = { indicatorLabel: "", meaningText: "", scoreDirection: "", evidenceBasis: "not_established" };
+  assert.equal(interpretationFormProblem(blank), null);
+  for (const draft of [{ ...blank, indicatorLabel: "Referral records" }, { ...blank, meaningText: "Recorded referrals." }, { ...blank, evidenceBasis: "organization_record" }]) {
+    assert.match(interpretationFormProblem(draft), /optional meaning is incomplete/);
+  }
+  const complete = { ...blank, indicatorLabel: "Referral records", meaningText: "Recorded referrals.", evidenceBasis: "organization_record" };
+  assert.equal(interpretationFormProblem(complete), null);
+  assert.deepEqual(interpretationBody(complete, { paired: false }), { indicator_label: "Referral records", meaning_text: "Recorded referrals.", evidence_basis: "organization_record" });
 });

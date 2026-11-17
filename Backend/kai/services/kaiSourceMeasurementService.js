@@ -8,6 +8,7 @@ import { validatePairedOutcomeDefinition } from "../validators/kaiPairedOutcomeM
 import {
   DERIVED_MEASUREMENT_FAMILIES,
   validateDerivedMeasurementInterpretation,
+  validatePairedMeasurementPairing,
   validateCrossSourceReachMapping,
   validateTabularMeasurementDefinition,
 } from "../validators/kaiDerivedMeasurementValidators.js";
@@ -243,17 +244,24 @@ export async function getDerivedMeasurementBasis(input, dependencies = {}) {
 /**
  * Package A: retain every available paired baseline/follow-up outcome of one
  * worksheet as a proposed numerical result - no meaning, direction or other
- * human definition is required - with its evidence under no interpretation.
+ * human interpretation is required. An ambiguous worksheet needs a complete
+ * mapping selected from the committed alternatives; that choice never defines
+ * a score direction or changes the underlying arithmetic.
  */
 export async function recordPairedOutcomeMeasurements(input, dependencies = {}) {
-  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "actorContext", "now"], ["organizationId", "sourceVersionId", "actorContext", "now"], dependencies);
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "actorContext", "now", "pairing"], ["organizationId", "sourceVersionId", "actorContext", "now"], dependencies);
   if (denied) return denied;
   if (!isNonEmptyString(input.sourceVersionId)) return buildKaiError("validation_blocker");
+  if (input.pairing !== undefined) {
+    const valid = validatePairedMeasurementPairing(input.pairing);
+    if (!valid.ok) return buildKaiError(valid.code, { blockers: valid.blockers });
+  }
   const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
   return repositoryResult(await repository.recordPairedOutcomeMeasurements({
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
     worksheetKey: input.worksheetKey ?? null,
+    pairing: input.pairing ?? null,
     actorUserId: input.actorContext.actorUserId,
     now: input.now,
   }));

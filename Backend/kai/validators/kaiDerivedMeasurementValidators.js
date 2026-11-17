@@ -163,21 +163,40 @@ export function validateDerivedMeasurementInterpretation(input, { family }) {
 // ---------------------------------------------------------------------------
 // Package A: the paired outcome measurements of one worksheet, as persisted.
 
+/** Validate a complete mapping; derivation then checks committed membership. */
+export function validatePairedMeasurementPairing(input) {
+  if (!isPlainObject(input) || Object.keys(input).sort().join(",") !== "instrument_version_field_key,participant_field_key,stage_field_key"
+    || !FIELD_KEY_RE.test(input.participant_field_key ?? "") || !FIELD_KEY_RE.test(input.stage_field_key ?? "")
+    || !(input.instrument_version_field_key === null || FIELD_KEY_RE.test(input.instrument_version_field_key ?? ""))
+    || new Set([input.participant_field_key, input.stage_field_key, input.instrument_version_field_key].filter(Boolean)).size !== (input.instrument_version_field_key ? 3 : 2)) {
+    return refuse("paired_outcome_pairing_invalid", "Choose one complete proposed participant, stage and optional instrument-version mapping.", "Use the pairing fields listed for this worksheet.");
+  }
+  return { ok: true, pairing: { participant_field_key: input.participant_field_key, stage_field_key: input.stage_field_key, instrument_version_field_key: input.instrument_version_field_key } };
+}
+
 /**
  * The persistable paired measurements of one worksheet, from the committed
- * paired basis through the unchanged paired derivation, with no definition:
- * the numerator is always the numeric increase, and no meaning or direction
- * is assumed. A field that cannot be stated is returned unavailable.
+ * paired basis through the paired derivation. An optional complete mapping
+ * chooses one committed alternative. The numerator is always numeric increase;
+ * no meaning or score direction is assumed. An unusable field stays unavailable.
  */
-export function derivePersistablePairedOutcomes(profile, worksheetKey) {
-  const derived = derivePairedOutcomeMeasurements(profile, worksheetKey, { definitions: [] });
+export function derivePersistablePairedOutcomes(profile, worksheetKey, { pairing = null } = {}) {
+  if (pairing !== null) {
+    const valid = validatePairedMeasurementPairing(pairing);
+    if (!valid.ok) return valid;
+  }
+  const derived = derivePairedOutcomeMeasurements(profile, worksheetKey, { pairing: pairing ? {
+    participantFieldKey: pairing.participant_field_key, stageFieldKey: pairing.stage_field_key, instrumentVersionFieldKey: pairing.instrument_version_field_key,
+  } : null });
   if (!derived.ok) return derived;
   if (derived.status !== "available") {
-    return refuse(
+    return { ...refuse(
       "paired_outcome_pairing_selection_required",
-      "KAI proposed more than one way to pair these observations, so it cannot retain a result without a choice.",
-      "Upload a version of the worksheet with one participant, stage and instrument-version field.",
-    );
+      "More than one participant/stage mapping is available. Choose the mapping that represents the intended pairing.",
+      "Select one proposed mapping below; the server checks it against this worksheet's committed profile.",
+    ), proposedPairings: derived.proposedPairings.map((item) => ({
+      participant_field_key: item.participantFieldKey, stage_field_key: item.stageFieldKey, instrument_version_field_key: item.instrumentVersionFieldKey ?? null,
+    })) };
   }
   const sheetKey = derived.worksheet.sheetKey;
   const measurements = derived.measurements.map((entry) => {
@@ -426,7 +445,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
       return refuse(
         "tabular_period_not_whole_months",
         "KAI keeps source dates by calendar month, so it applies a reporting period only when it starts on the first day of a month and ends on the last day of one.",
-        "Record the engagement's reporting period in whole months, or measure without a period.",
+        "Keep the Project's actual reporting dates. This profile cannot calculate partial months; choose a supported measurement without a period instead.",
         { objectType: "tabular_measurement_definition" },
       );
     }
@@ -494,7 +513,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
       return refuse(
         "tabular_distinct_not_exact_for_period",
         `Some ${distinctKey} values have records in more than one month, so KAI cannot count each one once within a period exactly.`,
-        "Count records instead, or use a source where each identifier has one date.",
+        "Choose records as the counted unit, measure distinct keys without a period, or use a source where each identifier belongs to one calendar month.",
         { objectType: "tabular_measurement_definition" },
       );
     }

@@ -591,7 +591,7 @@ export function createPostgresDerivedMeasurementRepository({
             ? { available: true, worksheet: paired.worksheet, measurements: paired.measurements.map((item) => (item.available
               ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts }
               : { available: false, outcome_field_key: item.outcomeFieldKey, blockers: item.blockers })) }
-            : { available: false, blockers: paired.blockers },
+            : { available: false, blockers: paired.blockers, proposed_pairings: paired.proposedPairings || [] },
           tabular: tabular.ok ? tabular : { available: false, blockers: tabular.blockers },
           recorded: [...recorded.values()],
         });
@@ -600,13 +600,13 @@ export function createPostgresDerivedMeasurementRepository({
 
     // Package A: retain every available paired outcome of one worksheet as a
     // proposed numerical result. No meaning or direction is required.
-    async recordPairedOutcomeMeasurements({ organizationId, sourceVersionId, worksheetKey = null, actorUserId, now }) {
+    async recordPairedOutcomeMeasurements({ organizationId, sourceVersionId, worksheetKey = null, pairing = null, actorUserId, now }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       return withCaught(run, async (tx) => {
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
-        const derived = derivePersistablePairedOutcomes(fileProfileRow.profile, worksheetKey);
+        const derived = derivePersistablePairedOutcomes(fileProfileRow.profile, worksheetKey, { pairing });
         if (!derived.ok) return failure(derived.code, derived.blockers);
         const available = derived.measurements.filter((item) => item.available);
         if (available.length === 0) {

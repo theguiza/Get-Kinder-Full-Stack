@@ -1008,8 +1008,8 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
 
   return (
     <ProjectReportingContext.Provider value={{ canEdit: canManageProjects, revision: projectRevision, refresh: async () => {
-      await refetchEngagements(selectedOrganizationId, { preserveSelection: true });
-      setProjectRevision((revision) => revision + 1);
+      try { await refetchEngagements(selectedOrganizationId, { preserveSelection: true }); }
+      finally { setProjectRevision((revision) => revision + 1); }
     } }}>
     <ImpactLibraryShell
       activeSection={activeSection}

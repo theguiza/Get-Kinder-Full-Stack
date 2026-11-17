@@ -3006,11 +3006,13 @@ router.post(
     if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
     const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
     if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+    const payload = requestPayload(req);
+    if (Object.keys(payload).some((key) => key !== "pairing")) return sendKaiError(res, "validation_blocker");
     const actorContext = sprint2MappedActorContext(req);
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getSourceMeasurementService();
-      return service.recordPairedOutcomeMeasurements({ ...identifiers, worksheetKey: worksheetKeyQuery(req), actorContext, now });
+      return service.recordPairedOutcomeMeasurements({ ...identifiers, worksheetKey: worksheetKeyQuery(req), ...(Object.hasOwn(payload, "pairing") ? { pairing: payload.pairing } : {}), actorContext, now });
     });
   },
 );

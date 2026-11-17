@@ -87,8 +87,9 @@ export function CrossSourceActivityDetail({ entry }) {
  * measurements (meaning, limitations, claim proposal). Nothing here reads a
  * record or calculates a number.
  */
-export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, linkableVersions, versionsById, earlierVersionIds = [], onReconciled, onPeriodSaved }) {
+export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, eventsBasisCurrent = true, linkableVersions, versionsById, earlierVersionIds = [], onReconciled, onPeriodSaved }) {
   const [form, setForm] = useState(EMPTY_CROSS_SOURCE_FORM);
+  const [registerReadAttempt, setRegisterReadAttempt] = useState(0);
   const [register, setRegister] = useState({ status: "idle", data: null, error: "" });
   const [job, setJob] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -106,7 +107,12 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   }, []);
 
   const loadJobs = useCallback(async () => {
-    const result = await getJson(crossSourceReconciliationJobsPath(organizationId));
+    let result;
+    try { result = await getJson(crossSourceReconciliationJobsPath(organizationId)); }
+    catch {
+      if (mountedRef.current) setNotice({ kind: "warning", text: "Could not read reconciliation history. Refresh history to try again." });
+      return;
+    }
     if (!mountedRef.current) return;
     if (result.statusCode === 200 && result.body?.ok) {
       setJobs(result.body.data.reconciliationJobs);
@@ -123,17 +129,26 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     let active = true;
     setRegister({ status: "loading", data: null, error: "" });
     (async () => {
-      const result = await getJson(derivedMeasurementBasisPath(organizationId, form.referenceSourceVersionId, null));
-      if (!active || !mountedRef.current) return;
-      setRegister(result.statusCode === 200 && result.body?.ok
-        ? { status: "success", data: result.body.data, error: "" }
-        : { status: "error", data: null, error: errorText(result) });
+      try {
+        const result = await getJson(derivedMeasurementBasisPath(organizationId, form.referenceSourceVersionId, null));
+        if (!active || !mountedRef.current) return;
+        setRegister(result.statusCode === 200 && result.body?.ok
+          ? { status: "success", data: result.body.data, error: "" }
+          : { status: "error", data: null, error: errorText(result) });
+      } catch {
+        if (active && mountedRef.current) setRegister({ status: "error", data: null, error: "Could not read the participant register's fields. Retry to keep working with your selections." });
+      }
     })();
     return () => { active = false; };
-  }, [organizationId, form.referenceSourceVersionId]);
+  }, [organizationId, form.referenceSourceVersionId, registerReadAttempt]);
 
   const poll = useCallback(async (reconciliationJobId) => {
-    const result = await getJson(crossSourceReconciliationJobPath(organizationId, reconciliationJobId));
+    let result;
+    try { result = await getJson(crossSourceReconciliationJobPath(organizationId, reconciliationJobId)); }
+    catch {
+      if (mountedRef.current) setNotice({ kind: "warning", text: "Could not read this reconciliation's progress. Retry progress to check the existing job." });
+      return;
+    }
     if (!mountedRef.current) return;
     if (result.statusCode !== 200 || !result.body?.ok) {
       setNotice({ kind: "warning", text: errorText(result) });
@@ -154,7 +169,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   const byRole = (list, role) => list.filter((field) => field.role === role);
   const statusValues = eventFields.find((field) => field.field_key === form.statusFieldKey)?.values || [];
   const groupFields = byRole(eventFields, "categorical").filter((field) => !field.vocabulary_withheld && (field.values || []).length > 0);
-  const problem = crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period), reportingPeriodContext: eventsBasis?.reporting_period_context });
+  const problem = (!eventsBasisCurrent ? "Read the current service-event measurement basis before requesting reconciliation." : null) || (form.referenceSourceVersionId && register.status !== "success" ? "Read the participant register's fields before requesting reconciliation." : null) || crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period), reportingPeriodContext: eventsBasis?.reporting_period_context });
 
   const durationCandidates = eventsBasis?.tabular?.available ? eventsBasis.tabular.duration_field_candidates || [] : [];
   const history = reconciliationHistory(jobs, sourceVersionId, earlierVersionIds);
@@ -184,6 +199,9 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     let result;
     try {
       result = await postJson(crossSourceMeasurementsPath(organizationId), crossSourceRequestBody(form, sourceVersionId));
+    } catch {
+      if (mountedRef.current) setNotice({ kind: "warning", text: "The reconciliation request's result could not be read. Refresh history to check whether a job was created before requesting it again. Your selections are retained." });
+      return;
     } finally {
       if (mountedRef.current) setPending(false);
     }
@@ -245,7 +263,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
             <label>Programme (optional){select("groupFieldKey", groupFields.map(fieldOption), "no grouping")}</label>
           </div>
           {register.status === "loading" ? <div className="text-muted">Loading the register's fields...</div> : null}
-          {register.status === "error" ? <div className="alert alert-warning py-2" data-client-cross-source-register-error="">{register.error}</div> : null}
+          {register.status === "error" ? <div className="alert alert-warning py-2" data-client-cross-source-register-error="">{register.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-cross-source-register-retry="" onClick={() => setRegisterReadAttempt((value) => value + 1)}>Retry register read</button></div> : null}
           {register.status === "success" ? (
             <label className="d-block">
               Register participant identifier
@@ -291,9 +309,11 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
         </form>
       )}
       {notice ? <div className={`alert alert-${notice.kind} py-2 mt-1`} data-client-cross-source-notice={notice.kind}>{notice.text}</div> : null}
+      <button type="button" className="btn btn-sm btn-link" data-client-cross-source-history-refresh="" onClick={loadJobs}>Refresh reconciliation history</button>
       {job ? (
         <div className="border rounded p-2 mt-1" data-client-cross-source-job={job.reconciliation_job_id} data-client-cross-source-job-state={job.job_state}>
           <div>{reconciliationJobStateText(job)}</div>
+          <button type="button" className="btn btn-sm btn-link" data-client-cross-source-progress-retry="" onClick={() => { clearTimeout(timerRef.current); poll(job.reconciliation_job_id); }}>Retry progress</button>
           {job.error_code ? <div className="text-muted" data-client-cross-source-job-error={job.error_code}>Reason: {job.error_code.replace(/_/g, " ")}.</div> : null}
           {(job.measurements || []).map((entry) => (
             <div key={entry.source_derived_measurement_id}>
