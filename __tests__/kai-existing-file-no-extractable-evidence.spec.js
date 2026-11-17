@@ -173,7 +173,7 @@ test("existing evidence and closed allowed use take precedence over the field co
     row(1, { ...promoted, current_dictionary_field_count: 0, evidence_item_count: 1, evidence_needs_review_count: 1 }),
     row(2, { ...promoted, current_dictionary_field_count: 0, effective_allowed_use_not_allowed: true }),
   ]);
-  assert.deepEqual([fileOf(data, 1).currentStage, fileOf(data, 1).reason], ["evidence_review", "evidence_awaiting_review"]);
+  assert.deepEqual([fileOf(data, 1).currentStage, fileOf(data, 1).reason], [null, "complete"]);
   assert.deepEqual([fileOf(data, 2).currentStage, fileOf(data, 2).reason], ["evidence_extraction", "allowed_use_not_allowed"]);
 });
 
@@ -292,7 +292,7 @@ test("promotion handoff with zero evidence items no longer says evidence is awai
     promotion_decision: { decision_status: "promoted" },
     evidence_extraction_handoff: { status: "created", evidence_item_count: 2 },
     replayed: false,
-  }), /created 2 evidence item\(s\), awaiting Get Kinder evidence review/);
+  }), /created 2 evidence item\(s\)\. See this file's next action for Count records or claim proposal/);
 });
 
 test("the read model selects the current source version's dictionary field count, scoped like every other lineage join", () => {
@@ -301,4 +301,17 @@ test("the read model selects the current source version's dictionary field count
   assert.match(sql, /count\(df\.data_dictionary_field_id\)::int AS current_dictionary_field_count/);
   assert.match(sql, /df\.organization_id = ic\.organization_id\s+AND df\.data_dictionary_id = ic\.data_dictionary_id/);
   assert.match(sql, /HAVING count\(v\.source_version_id\) > 0\s+\) dfc ON true/);
+});
+
+
+test("successful extraction and promotion messages preserve grounding without a mandatory quality-review wait", () => {
+  for (const data of [
+    { evidenceItems: [{}] },
+    { evidenceItems: [{}], documentEvidence: { outcome: "statements_extracted" } },
+  ]) {
+    const text = extractionResultMessage(data);
+    assert.doesNotMatch(text, /awaiting Get Kinder|waiting for.*review/i);
+    assert.match(text, /propose claims/);
+  }
+  assert.match(extractionResultMessage({ evidenceItems: [{}], documentEvidence: { outcome: "statements_extracted" } }), /what the document states, not a verified fact/);
 });

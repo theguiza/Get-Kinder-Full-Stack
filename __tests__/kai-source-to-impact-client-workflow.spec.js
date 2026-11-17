@@ -301,9 +301,9 @@ test("pipeline: the administrator's own steps, and for anyone else in the organi
   // A genuinely missing candidate (not continuable) still says so, for everyone.
   assert.deepEqual(current(row({ source_candidate_count: 0, source_candidate_actionable_count: 0 }), NONE),
     ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_candidate_missing"]);
-  // Get Kinder review gates stay Get Kinder's.
+  // Optional reviews do not hold prepared files.
   assert.deepEqual(current(row({ source_candidate_promoted_count: 1, source_version_count: 1, evidence_item_count: 2, evidence_needs_review_count: 2 }), ADMIN).slice(0, 3),
-    ["evidence_review", "waiting_for_get_kinder", "get_kinder"]);
+    [null, "complete", "none"]);
 });
 
 test("pipeline: an effective allowed use of not_allowed closes the file for everyone, before or after promotion; it is never a Get Kinder wait", () => {
@@ -349,7 +349,7 @@ test("Use for impact: each step is the actor's authorized existing operation or 
   assert.deepEqual(useForImpactStep(file("continue_source_preparation"), access), { kind: "continue" });
   assert.deepEqual(useForImpactStep(file("promote_source"), access), { kind: "confirm_promotion" });
   assert.deepEqual(useForImpactStep(file("extract_evidence", { currentStage: "evidence_extraction" }), access), { kind: "extract" });
-  assert.deepEqual(useForImpactStep(file("none_waiting_for_get_kinder", { currentStage: "evidence_review", currentStatus: "waiting_for_get_kinder" }), access), { kind: "done" });
+  assert.deepEqual(useForImpactStep(file("none", { currentStage: null, currentStatus: "complete" }), access), { kind: "done" });
   // Without the authority, or for a blocked file, the actual next action is reported.
   const blocked = useForImpactStep(file("promote_source"), { ...access, promoteSource: false });
   assert.equal(blocked.kind, "blocked");

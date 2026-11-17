@@ -20,56 +20,16 @@ import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepos
 import { evidenceExtractionCapability } from "../validators/kaiDocumentEvidenceValidators.js";
 
 /**
- * Client-safe evidence pipeline for one organization + engagement/project:
- * where each of the Project's uploaded files currently is in the governed
- * intake -> source -> evidence -> reviewed Impact Fact workflow, who it is
- * waiting on, and the reviewed Impact Facts that descend from those files.
- *
- * Every stage is derived from persisted objects only (the file's upload and
- * policy state, its current parser run, profile, data dictionary,
- * sensitivity profile, current sensitivity decision, source candidates,
- * current source versions, evidence items, claims, and open client
- * follow-ups; see kaiClientEvidencePipelineReadModel.js). No stage is
- * advanced here and no review is performed. The GK review gates stay GK
- * work: the client is told only that a Get Kinder review is pending - except
- * where the requesting actor itself holds the organization-scoped authority
- * for the step (owner decision 2026-10-18): a source candidate a P1-08
- * decision can act on now, for an organization administrator (binding-derived
- * or a delegated stored client_admin grant; owner decisions 2026-10-19), and
- * evidence extraction from a promoted source, for a
- * client_admin. Those become the client's own next action; a source that
- * cannot be promoted (no candidate, or the fail-closed permission predicate
- * no longer holds) keeps a Get Kinder state with its actual reason - except
- * (owner decision 2026-10-19) a reviewed file with no candidate that the
- * committed decision (by any authorized human decider) makes eligible for the
- * source-preparation continuation, which becomes the requesting
- * administrator's next action.
- *
- * Owner decision 2026-10-19: the sensitivity review is the organization
- * administrator's own step (review_sensitivity); a step only the
- * organization's administrator may take, viewed by anyone else in the
- * organization who is not Get Kinder, waits on that administrator
- * (ask_organization_administrator) when the organization has one, rather
- * than on Get Kinder; and a file whose effective allowed use is not_allowed
- * (VAL-KAI-B1A-02-003) is closed (allowed_use_not_allowed), nobody's next
- * action. Get Kinder viewers keep the Get Kinder wording.
- *
- * Never returned: file content, profile/dictionary/sensitivity values,
- * sensitivity decision outcomes, evidence or claim statements for anything
- * not governed-eligible, reviewer identities, notes, queue ids or metadata,
- * source/version/evidence ids, or parser error messages. Parser failures are
- * reduced to a fixed safe category.
- *
- * Reviewed Impact Facts come only from listClientImpactFacts (the same
- * P2-08 governed internal-audience evaluator and projection as the client
- * impact-facts read), intersected with the claims in this Project's file
- * lineage. A failure of that read fails this read closed; it is never
- * reported as zero.
- *
- * Admission reuses the read_intake role set for an active same-org member,
- * then tenant validation, then the engagement is checked against the
- * organization before any file read. No role, membership, or review
- * authority is granted here.
+ * Client-safe file preparation and independent next permitted action for a
+ * Project. Preparation is derived from persisted upload, processing, permission,
+ * source and evidence state; optional quality reviews are not stages.
+ * Usable findings come only from the existing governed impact-facts service,
+ * intersected with this Project's lineage. Its failures fail this read closed.
+ * Admission uses active same-organization read_intake membership, tenant and
+ * engagement checks. Step authority reuses the governing services; every write
+ * re-authorizes. No review or progress state is written here.
+ * Never returns raw content, sensitivity values, review notes or queue metadata.
+ * The current source version id is returned only for this actor's Count records.
  */
 const CLIENT_EVIDENCE_PIPELINE_OPERATION = "read_client_evidence_pipeline";
 const CLIENT_EVIDENCE_PIPELINE_ALLOWED_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.read_intake);
@@ -86,8 +46,6 @@ const PIPELINE_STAGES = Object.freeze([
   "sensitivity_review",
   "source_review",
   "evidence_extraction",
-  "evidence_review",
-  "impact_fact_review",
 ]);
 
 const STAGE_STATUS = Object.freeze({
@@ -164,8 +122,6 @@ const PIPELINE_REASONS = Object.freeze([
   "no_supportable_statements",
   "claim_proposal_ready",
   "source_measurement_ready",
-  "evidence_awaiting_review",
-  "impact_fact_review_pending",
   "not_currently_eligible",
   "source_not_promoted",
   "unknown",
@@ -293,7 +249,7 @@ function stage(key, status, responsible, extra = {}) {
  * first blocking stage are "not_started" (nothing downstream can exist
  * without it); a downstream object that exists anyway is still counted.
  */
-function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLIENT_AUTHORITY) {
+function deriveFileStages(row, clientAuthority = NO_CLIENT_AUTHORITY) {
   const stages = [];
   const upload = row.upload_state;
   if (upload === "confirmed") stages.push(stage("upload", STAGE_STATUS.complete, RESPONSIBLE.none));
@@ -430,11 +386,11 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     documentEvidenceSupported: row.document_evidence_supported,
     documentStatementsNoneFound: row.current_document_statements_none_found,
   });
-  if (evidence > 0) {
-    stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
-  } else if (allowedUseClosed) {
+  if (allowedUseClosed) {
     // A source promoted before its allowed use became not_allowed: P2-01 refuses it.
     stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "allowed_use_not_allowed" }));
+  } else if (evidence > 0) {
+    stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
   } else if (extractionCapability === "document_statements_not_enabled") {
     // A PDF or plain-text document is read for its statements; until the
     // document-evidence schema change is installed that extraction cannot
@@ -456,61 +412,27 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   }
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
-  const evidenceNeedsReview = count(row.evidence_needs_review_count);
-  const unclaimedProposable = count(row.evidence_unclaimed_proposable_count);
-  const openFollowups = count(row.open_client_followup_count);
-  const claims = count(row.claim_count);
-  // Owner prompt 2026-10-26: once a claim from this file is currently
-  // governed-eligible (for example an ordinary measured fact, which needs no
-  // evidence review), the file's other unreviewed evidence (such as its
-  // structural column facts) no longer holds it at Get Kinder's evidence review.
-  if (evidenceNeedsReview > 0 && reviewedImpactFactCount === 0) {
-    // Owner decision 2026-11-05: P2-03 proposes a claim from unreviewed
-    // evidence (VAL-KAI-P2-03-001 only warns), and Get Kinder's evidence and
-    // claim reviews then run together on each claim. So evidence that has no
-    // claim yet is the organization administrator's step (propose_claims),
-    // not a Get Kinder wait, and an open client follow-up on a proposed claim
-    // is client work. Structural column facts are not counted: a claim
-    // restating which columns a source has is never an Impact Fact.
-    if (unclaimedProposable > 0 && clientAuthority.proposeClaims === true) {
-      stages.push(stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client,
-        { count: unclaimedProposable, detail: "claim_proposal_ready" }));
-    } else if (unclaimedProposable > 0 && claims === 0) {
-      stages.push(waitingOnAdministratorOr(row, clientAuthority, "evidence_review",
-        stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })));
-    } else if (unclaimedProposable === 0 && claims === 0 && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)) {
-      // Owner direction 2026-11-16: a spreadsheet's evidence is only its
-      // structural column facts, which are never an Impact Fact, so a Get
-      // Kinder review of them produces nothing usable. The step that does is
-      // the organization's own Count records on the source; its measured
-      // finding needs no review for internal use.
-      stages.push(clientAuthority.recordSourceMeasurement === true
-        ? stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "source_measurement_ready" })
-        : waitingOnAdministratorOr(row, clientAuthority, "evidence_review",
-          stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })));
-    } else if (openFollowups > 0) {
-      stages.push(stage("evidence_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
-    } else {
-      stages.push(stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview }));
-    }
-    return stages;
-  }
-  stages.push(stage("evidence_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: count(row.evidence_reviewed_count) }));
-
-  // Optional questions must not put a report-ready file back into a waiting
-  // stage. The source's usable findings can be reported now.
-  if (reviewedImpactFactCount > 0) {
-    stages.push(stage("impact_fact_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: reviewedImpactFactCount }));
-  } else if (openFollowups > 0) {
-    stages.push(stage("impact_fact_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: openFollowups }));
-  } else if (claims === 0 || count(row.claim_needs_review_count) > 0) {
-    stages.push(stage("impact_fact_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 }));
-  } else {
-    // Every claim is reviewed and none is currently governed-eligible; the
-    // evaluator's blocker detail is GK-internal and is not returned.
-    stages.push(stage("impact_fact_review", STAGE_STATUS.notCurrentlyEligible, RESPONSIBLE.getKinder, { count: 0 }));
-  }
   return stages;
+}
+
+// Preparation and subsequent work are independent. Optional evidence/claim
+// reviews and questions never manufacture an incomplete preparation stage.
+// All writes still enforce their own authority, lineage and permission rules.
+function nextEvidenceWork(row, usableFactCount, clientAuthority) {
+  if (usableFactCount > 0) return null;
+  const proposalReady = count(row.evidence_unclaimed_proposable_count) > 0;
+  const measurementReady = !proposalReady && count(row.claim_count) === 0
+    && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)
+    && isCanonicalUuid(row.current_source_version_id);
+  if (!proposalReady && !measurementReady) return null;
+  const authorized = proposalReady ? clientAuthority.proposeClaims : clientAuthority.recordSourceMeasurement;
+  return {
+    nextAction: authorized ? (proposalReady ? NEXT_ACTION.proposeClaims : NEXT_ACTION.countRecords)
+      : NEXT_ACTION.askOrganizationAdministrator,
+    reason: authorized ? (proposalReady ? "claim_proposal_ready" : "source_measurement_ready")
+      : "organization_administrator_action_ready",
+    responsibleParty: RESPONSIBLE.client,
+  };
 }
 
 function reasonForCurrentStage(current) {
@@ -525,10 +447,6 @@ function reasonForCurrentStage(current) {
   if (key === "sensitivity_review") return "waiting_for_get_kinder_review";
   if (key === "source_review") return status === STAGE_STATUS.closed ? "source_not_promoted" : "waiting_for_source_promotion";
   if (key === "evidence_extraction") return "evidence_extraction_pending";
-  if (key === "evidence_review") return "evidence_awaiting_review";
-  if (key === "impact_fact_review") {
-    return status === STAGE_STATUS.notCurrentlyEligible ? "not_currently_eligible" : "impact_fact_review_pending";
-  }
   return "unknown";
 }
 
@@ -542,8 +460,6 @@ function nextActionFor(current) {
       if (current.detail === "sensitivity_review_ready") return NEXT_ACTION.reviewSensitivity;
       if (current.detail === "organization_administrator_action_ready") return NEXT_ACTION.askOrganizationAdministrator;
       if (current.detail === "security_check_retry_ready") return NEXT_ACTION.retrySecurityCheck;
-      if (current.detail === "claim_proposal_ready") return NEXT_ACTION.proposeClaims;
-      if (current.detail === "source_measurement_ready") return NEXT_ACTION.countRecords;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;
@@ -572,8 +488,10 @@ function projectPipelineFile(row, eligibleClaimIds, clientAuthority = NO_CLIENT_
   }
   const claimIds = Array.isArray(row.claim_ids) ? row.claim_ids : [];
   const reviewedImpactFactClaimIds = claimIds.filter((claimId) => eligibleClaimIds.has(claimId));
-  const stages = deriveFileStages(row, reviewedImpactFactClaimIds.length, clientAuthority);
+  const stages = deriveFileStages(row, clientAuthority);
   const current = stages.find((entry) => entry.status !== STAGE_STATUS.complete) || null;
+  const evidenceWork = current ? null : nextEvidenceWork(row, reviewedImpactFactClaimIds.length, clientAuthority);
+  const nextAction = evidenceWork?.nextAction ?? nextActionFor(current);
   // `detail` is internal to the derivation (it becomes `reason`); stages carry
   // only key, status, responsible, and the optional count / failure category.
   const fullStages = PIPELINE_STAGES.map((key) => stages.find((entry) => entry.key === key)
@@ -587,15 +505,15 @@ function projectPipelineFile(row, eligibleClaimIds, clientAuthority = NO_CLIENT_
       stages: fullStages,
       currentStage: current ? current.key : null,
       currentStatus: current ? current.status : STAGE_STATUS.complete,
-      responsibleParty: current ? current.responsible : RESPONSIBLE.none,
-      nextAction: nextActionFor(current),
+      responsibleParty: current ? current.responsible : (evidenceWork?.responsibleParty ?? RESPONSIBLE.none),
+      nextAction,
       failureCategory: current?.failureCategory || null,
-      reason: reasonForCurrentStage(current),
+      reason: evidenceWork?.reason ?? reasonForCurrentStage(current),
       evidenceItemCount: count(row.evidence_item_count),
       reviewedImpactFactCount: reviewedImpactFactClaimIds.length,
       // Only on this actor's own Count records step: the source version that
       // step opens. No other file or reader receives a source version id.
-      ...(nextActionFor(current) === NEXT_ACTION.countRecords && isCanonicalUuid(row.current_source_version_id)
+      ...(nextAction === NEXT_ACTION.countRecords && isCanonicalUuid(row.current_source_version_id)
         ? { currentSourceVersionId: row.current_source_version_id } : {}),
     },
     reviewedImpactFactClaimIds,

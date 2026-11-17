@@ -778,7 +778,7 @@ export default function ClientEvidenceWorkflow({
   if (preparationFiles.length > 0) {
     attention.push({
       key: "source_preparation",
-      text: `${preparationFiles.length} file(s) in this Project need a step before their evidence can be used.`,
+      text: `${preparationFiles.length} file(s) in this Project have a source or finding step available.`,
       actionLabel: TAKE_ME_TO_STEP_LABEL, onAction: () => goToFileStep(),
     });
   }
@@ -1020,7 +1020,7 @@ export default function ClientEvidenceWorkflow({
                     data-client-step-focused={focusedStepFileId === file.intakeFileId ? "true" : undefined}>
                     <div className="fw-semibold">{file.safeFilename}</div>
                     <div className="text-muted">
-                      {PIPELINE_STAGE_LABELS[file.currentStage]}: {current ? stageStatusLabel(current) : "Unknown"}
+                      {file.currentStage ? `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}` : "File preparation complete"}
                     </div>
                     <div className="mt-1" data-client-preparation-guidance="">{sourcePreparationGuidance(file, access)}</div>
                     {isUseForImpactCandidate(file, access) ? (

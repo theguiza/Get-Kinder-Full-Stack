@@ -247,8 +247,9 @@ export default function ClientKnowledgeStudio({
     <div className="admin-card mb-3" data-client-review-status="">
       <h5 className="mb-2">Review status</h5>
       <div className="small text-muted mb-2">
-        Get Kinder reviewers complete the required reviews of your Project&rsquo;s files: sensitivity review, source
-        review, evidence review, and Impact Fact review.
+        File preparation includes sensitivity &amp; allowed-use decisions and source promotion before evidence creation.
+        Evidence and claim quality reviews are optional for ordinary internal reporting. Specific processing permissions
+        and applicable external-release controls still govern those operations.
       </div>
       <ProjectReviews
         view={reviews}
@@ -472,7 +473,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
       {view.kind === "facts" ? <ReviewedFactList facts={view.facts} /> : null}
       {view.kind === "facts" && view.upstream.length > 0 ? (
         <div className="small mt-2">
-          <div className="fw-semibold mb-1">Other files in this project are still in progress:</div>
+          <div className="fw-semibold mb-1">Other files in this project: preparation and next steps</div>
           <PipelineReasonList reasons={view.upstream} />
         </div>
       ) : null}
@@ -565,7 +566,7 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
               const current = file.stages.find((stage) => stage.key === file.currentStage);
               return (
                 <li key={file.intakeFileId}>
-                  {file.safeFilename}: {PIPELINE_STAGE_LABELS[file.currentStage]} ({stageStatusLabel(current)})
+                  {file.safeFilename}: {file.currentStage ? `${PIPELINE_STAGE_LABELS[file.currentStage]} (${stageStatusLabel(current)})` : "File preparation complete"}
                 </li>
               );
             })}
@@ -581,7 +582,7 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
               const current = file.stages.find((stage) => stage.key === file.currentStage);
               return (
                 <li key={file.intakeFileId}>
-                  {file.safeFilename}: {PIPELINE_STAGE_LABELS[file.currentStage]} ({stageStatusLabel(current)})
+                  {file.safeFilename}: {file.currentStage ? `${PIPELINE_STAGE_LABELS[file.currentStage]} (${stageStatusLabel(current)})` : "File preparation complete"}
                   {GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage] ? (
                     <div className="text-muted">{GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage]}</div>
                   ) : null}

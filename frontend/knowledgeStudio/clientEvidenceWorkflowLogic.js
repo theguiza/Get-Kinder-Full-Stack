@@ -697,7 +697,7 @@ export function sourcePromotionResultMessage(data) {
       return `Source promoted${replayed}. ${NO_EVIDENCE_FROM_PROMOTION_MESSAGE}`;
     }
     if (handoff?.status === "created" || handoff?.status === "replayed") {
-      return `Source promoted${replayed}. Evidence extraction ${handoff.status === "created" ? "created" : "already had"} ${handoff.evidence_item_count ?? 0} evidence item(s), awaiting Get Kinder evidence review.`;
+      return `Source promoted${replayed}. Evidence extraction ${handoff.status === "created" ? "created" : "already had"} ${handoff.evidence_item_count ?? 0} evidence item(s). See this file's next action for Count records or claim proposal.`;
     }
     if (handoff?.status === "not_created") {
       return `Source promoted${replayed}. Evidence was not created automatically (${handoff.error_code || "unknown"}); use "Extract evidence" on the source below.`;
@@ -803,12 +803,12 @@ export function useForImpactStep(file, access) {
   if (action === "promote_source" && access?.promoteSource === true) return { kind: "confirm_promotion" };
   if (action === "extract_evidence" && access?.extractEvidence === true) return { kind: "extract" };
   // Owner decision 2026-11-05: evidence with no claim yet is proposed by the
-  // organization administrator; Get Kinder then reviews each claim with its evidence.
+  // organization administrator; quality reviews remain optional for ordinary reporting.
   if (action === "propose_claims" && access?.proposeClaim === true) return { kind: "propose" };
   // Owner direction 2026-11-16: a promoted spreadsheet's finding comes from
   // Count records on its source, not from a review of its column facts.
   if (action === "count_records" && access?.recordSourceMeasurement === true) return { kind: "measure" };
-  if (file.currentStatus === "complete" || ["evidence_review", "impact_fact_review"].includes(file.currentStage)) {
+  if (file.currentStatus === "complete") {
     return { kind: "done" };
   }
   return { kind: "blocked", text: nextActionText(file) };

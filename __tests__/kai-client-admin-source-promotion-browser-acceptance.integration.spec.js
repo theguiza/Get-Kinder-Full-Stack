@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 /**
  * Assembled acceptance of client-admin source preparation (owner decision
@@ -393,22 +395,22 @@ async function runBrowserAcceptance() {
    * Project file, as the P1 worker writes them (upload, scan, parsing, and
    * profiling are not executed). `sensitivity` overrides the P1-05 row.
    */
-  async function seedProfiledFile({ organizationId, engagementId, batchId, intakeFileId, name, checksumChar, sensitivity = {} }) {
-    const checksum = checksumChar.repeat(64);
+  async function seedProfiledFile({ organizationId, engagementId, batchId, intakeFileId, name, checksumChar, sensitivity = {}, suppliedProfile = null, suppliedChecksum = null, mime = "text/csv" }) {
+    const checksum = suppliedChecksum || checksumChar.repeat(64);
     await query(
       `INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
          checksum, hash_algorithm, upload_state, object_version_id, verified_checksum, verified_size_bytes, verified_at,
          mime_type, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $5, $6, 'sha256', 'confirmed', 'synthetic-v1', $6, 512, now(),
-         'text/csv', 512, 'clean', 'not_reviewed', 'passed', now())`,
-      [intakeFileId, batchId, organizationId, engagementId, name, checksum],
+         $7, 512, 'clean', 'not_reviewed', 'passed', now())`,
+      [intakeFileId, batchId, organizationId, engagementId, name, checksum, mime],
     );
     const [run] = await query(
       `INSERT INTO kai.intake_parser_runs (organization_id, intake_file_id, parser_name, parser_version, checksum, parser_status, started_at)
        VALUES ($1::uuid, $2::uuid, 'kai_local_profiling_kernel', '1.0.0', $3, 'running', now()) RETURNING parser_run_id::text`,
       [organizationId, intakeFileId, checksum],
     );
-    const profile = {
+    const profile = suppliedProfile || {
       status: "profiled", format: "csv",
       counts: { row_count: 1, column_count: FIELD_KEYS.length, field_count: FIELD_KEYS.length },
       fields: FIELD_KEYS.map((key) => ({ field_key: key })),
@@ -426,7 +428,7 @@ async function runBrowserAcceptance() {
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4) RETURNING data_dictionary_id::text`,
       [organizationId, intakeFileId, fileProfile.file_profile_id, fileProfile.profile_canonical_sha256],
     );
-    for (const key of FIELD_KEYS) {
+    for (const key of (suppliedProfile ? suppliedProfile.fields.map((field) => field.field_key) : FIELD_KEYS)) {
       await query(
         `INSERT INTO kai.data_dictionary_fields (data_dictionary_id, organization_id, file_profile_id, profile_field_key, field_label_safe, data_type)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $4, 'number')`,
@@ -747,7 +749,7 @@ async function runBrowserAcceptance() {
       // From Impact (the default view), with several files waiting: the first
       // file this administrator can act on is opened at its step, in view.
       await adminPage.clickTab("Impact");
-      await adminPage.waitForText("file(s) in this Project need a step before their evidence can be used.");
+      await adminPage.waitForText("file(s) in this Project have a source or finding step available.");
       await adminPage.clickButton("Take me to this step");
       await adminPage.waitFor(async () => (await sourcesActive())
         && Boolean(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-step-focused="true"]'))`)), "Sources at a focused step");
@@ -992,9 +994,11 @@ async function runBrowserAcceptance() {
       // Owner direction 2026-11-16: a promoted spreadsheet whose evidence is
       // only its column facts is the administrator's Count records step - not
       // a Get Kinder evidence-review wait (production 04_surveys_referrals_and_targets.xlsx).
-      assert.deepEqual(currentOf(main), ["evidence_review", "waiting_for_client", "client", "count_records", "source_measurement_ready"]);
+      assert.deepEqual(currentOf(main), [null, "complete", "client", "count_records", "source_measurement_ready"]);
       assert.equal(main.currentSourceVersionId, ids.sourceVersionId);
       assert.equal(main.evidenceItemCount, 2);
+      assert.equal(main.stages.length, 8);
+      assert.ok(main.stages.every((stage) => stage.status === "complete"));
       assert.deepEqual(main.stages.slice(5, 8).map((stage) => [stage.key, stage.status]),
         [["sensitivity_review", "complete"], ["source_review", "complete"], ["evidence_extraction", "complete"]]);
       await adminPage.waitForText(ids.sourceCode);
@@ -1003,6 +1007,8 @@ async function runBrowserAcceptance() {
       const statusText = await adminPage.evaluate(`document.querySelector('[data-pipeline-file="${FILE.main}"]')?.innerText || ""`);
       assert.ok(statusText.includes("Use Count records on its source (Sources > Data Sources)"), statusText);
       assert.ok(!statusText.includes("Waiting for Get Kinder"), statusText);
+      assert.ok(statusText.includes("File preparation complete"), statusText);
+      assert.doesNotMatch(statusText, /Evidence review|Impact Fact review/);
       // "Take me to this step" opens Count records on this file's source version, in view; nothing is written.
       const MEASURE = `[data-client-source-measurement="${ids.sourceVersionId}"]`;
       const stepMark = adminPage.mark();
@@ -1143,6 +1149,77 @@ async function runBrowserAcceptance() {
       assert.equal(lookup.body.data?.intake_source_candidate_id ?? null, null);
       results.pipeline_with_prohibited_file_status = (await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X))).status;
       results.allowed_use = "PASS: 3 prohibited snapshots 422; reviewed not_allowed recorded (200), P1-07 handoff not_created validation_blocker; 0 candidates/promotions/sources/evidence";
+    });
+
+    await test("CSV/XLSX preparation complete: real synthetic profiles, zero quality decisions, Count records and Take me to this step reach the current source's measurement control", async () => {
+      const { profileLocalTrustedFile } = await import("../Backend/kai/profiling/localProfilingKernel.js");
+      for (const [index, format] of ["csv", "xlsx"].entries()) {
+        const bytes = format === "csv" ? new TextEncoder().encode("record_id,month\nA1,September\nA2,October\n")
+          : syntheticXlsxWorkbook({ sheets: [{ name: "Records", rows: [["record_id", "month"], ["A1", "September"], ["A2", "October"]] }] });
+        const profile = await profileLocalTrustedFile({ extension: `.${format}`, declaredMime: format === "csv" ? "text/csv" : SYNTHETIC_XLSX_MIME,
+          byteSize: bytes.byteLength, bytes });
+        assert.equal(profile.status, "profiled");
+        const intakeFileId = `2d000000-0000-4000-8000-0000000000f${index}`;
+        const seeded = await seedProfiledFile({ organizationId: ORG_X, engagementId: PROJECT_X, batchId: BATCH_X,
+          intakeFileId, name: `prepared-records.${format}`, suppliedChecksum: createHash("sha256").update(bytes).digest("hex"), suppliedProfile: profile, mime: format === "csv" ? "text/csv" : SYNTHETIC_XLSX_MIME });
+        assert.equal((await runWorker(ORG_X, intakeFileId, seeded)).ok, true);
+        const [item] = await sensitivityQueue(ORG_X, seeded.intakeSensitivityProfileId);
+        const decision = await adminPage.api("POST", sensitivityDecisionPath(ORG_X, seeded.intakeSensitivityProfileId), {
+          expected_updated_at: new Date(item.updated_at).toISOString(), review_queue_item_id: item.review_queue_item_id,
+          decision: "reviewed", reviewed_snapshot: REVIEWED_SNAPSHOT,
+        });
+        assert.equal(decision.status, 200, JSON.stringify(decision));
+        const candidate = await adminPage.api("GET", lookupPath(ORG_X, PROJECT_X, intakeFileId));
+        const promoted = await adminPage.api("POST", decisionPath(ORG_X, candidate.body.data.intake_source_candidate_id), PROMOTE);
+        assert.equal(promoted.body.ok, true, JSON.stringify(promoted));
+        const pipeline = await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
+        const file = fileOf(pipeline, intakeFileId);
+        assert.deepEqual(currentOf(file), [null, "complete", "client", "count_records", "source_measurement_ready"]);
+        assert.deepEqual(file.stages.map((stage) => stage.key), ["upload", "security_check", "processing", "data_dictionary",
+          "sensitivity_classification", "sensitivity_review", "source_review", "evidence_extraction"]);
+        assert.ok(file.stages.every((stage) => stage.status === "complete"));
+        const [version] = await query(`SELECT v.source_version_id::text FROM kai.source_versions v JOIN kai.intake_source_candidates c
+          ON c.intake_source_candidate_id = v.intake_source_candidate_id AND c.organization_id = v.organization_id
+          WHERE c.intake_file_id = $1::uuid AND v.is_current = true`, [intakeFileId]);
+        assert.equal(file.currentSourceVersionId, version.source_version_id);
+        const evidence = await query("SELECT evidence_type FROM kai.evidence_items WHERE source_version_id = $1::uuid", [version.source_version_id]);
+        assert.ok(evidence.length > 0 && evidence.every((row) => row.evidence_type === "dictionary_field_presence_fact"));
+        assert.equal((await counts(ORG_X)).evidence_decisions, 0);
+        assert.equal((await counts(ORG_X)).claims, 0);
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.claim_review_decisions WHERE organization_id = $1::uuid", [ORG_X]))[0].n, 0);
+        const beforeNavigation = await counts(ORG_X);
+        for (const page of [contributorPage, reviewerPage]) {
+          const forbidden = fileOf(await page.api("GET", pipelinePath(ORG_X, PROJECT_X)), intakeFileId);
+          assert.deepEqual(currentOf(forbidden), [null, "complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]);
+          assert.equal(Object.hasOwn(forbidden, "currentSourceVersionId"), false);
+        }
+        await adminPage.goto("/impact-library");
+        await adminPage.waitForText("Knowledge Studio");
+        await adminPage.clickNav("Knowledge Studio");
+        await adminPage.selectProject(PROJECT_X);
+        await adminPage.clickTab("Sources");
+        const row = `[data-client-preparation-file="${intakeFileId}"]`;
+        await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector('${row} [data-client-open-file-measurement]'))`)), "file's Count records button");
+        assert.match(await adminPage.evaluate(`document.querySelector('${row}').innerText`), /File preparation complete/);
+        await adminPage.pointerClick(`${row} [data-client-open-file-measurement]`, "Count records on file");
+        const measure = `[data-client-source-measurement="${version.source_version_id}"]`;
+        await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector('${measure} [data-client-source-measurement-counted]'))`)), "actual measurement counts");
+        assert.equal(await adminPage.evaluate(`document.querySelector('${measure} [data-client-source-measurement-counted]').innerText`), "2");
+        await adminPage.clickIn(`${measure} button`, "Close Count records");
+        const status = `[data-pipeline-file="${intakeFileId}"]`;
+        await adminPage.pointerClick(`${status} [data-client-open-file-step]`, "Take me to this step");
+        await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector('${measure}'))`)), "navigation to exact current version");
+        assert.equal(await adminPage.evaluate(`(() => { const el = document.querySelector('[data-client-source-version="${version.source_version_id}"]');
+          const top = el.getBoundingClientRect().top; return top > -2 && top < innerHeight; })()`), true);
+        await adminPage.clickIn(`${status} button`, "Processing detail");
+        const text = await adminPage.evaluate(`document.querySelector('${status}').innerText`);
+        assert.match(text, /File preparation complete/);
+        assert.doesNotMatch(text, /Evidence review|Impact Fact review|Waiting for Get Kinder|No action required/);
+        assert.equal(await adminPage.evaluate(`document.querySelectorAll('${status} tbody tr').length`), 8);
+        assert.deepEqual(adminPage.exceptions, []);
+        assert.deepEqual(await counts(ORG_X), beforeNavigation, "Count records and navigation do not create review decisions or findings");
+      }
+      results.prepared_spreadsheets = "CSV and XLSX: eight complete stages, no quality decisions, role-safe guidance; file Count records and Take me to this step open correct current version with actual count 2";
     });
 
     console.log(`[client-admin-source-promotion-browser] results ${JSON.stringify(results)}`);

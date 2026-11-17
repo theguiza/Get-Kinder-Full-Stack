@@ -759,11 +759,11 @@ export function evidenceExtractionResultMessage(data) {
   if (outcome === "statements_extracted") {
     return data?.replayed === true
       ? `These document statements were already extracted (${count} evidence item(s)). Nothing new was written.`
-      : `Evidence extracted from the document's text: ${count} statement(s), each quoted with its page or line location and awaiting Get Kinder evidence review. Each is what the document states, not a verified fact.`;
+      : `Evidence extracted from the document's text: ${count} statement(s), each quoted with its page or line location. You can propose claims from these statements. Each is what the document states, not a verified fact.`;
   }
   return data?.replayed === true
     ? `Evidence was already extracted from this source version (${count} evidence item(s)). Nothing new was written.`
-    : `Evidence extracted: ${count} evidence item(s) created, awaiting Get Kinder evidence review.`;
+    : `Evidence extracted: ${count} evidence item(s) created. Count records or propose claims as applicable; quality review is optional for ordinary internal reporting.`;
 }
 
 export function evidenceCoverageAssessmentPath(organizationId, sourceVersionId) {

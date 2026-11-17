@@ -34,7 +34,7 @@ const STATUS_BADGE = Object.freeze({
  * through the existing upload confirmation (the server authorizes it again).
  *
  * Each file is one compact row with one primary status - its current stage
- * and that stage's status, or "Processing complete" - and its next action;
+ * and that stage's status, or "File preparation complete" - and its next action;
  * the per-stage list is "Processing detail", on request (display only; the
  * stages and their statuses are unchanged).
  */
@@ -43,7 +43,7 @@ function primaryStage(file) {
 }
 
 function primaryStatusText(file) {
-  if (!file.currentStage) return "Processing complete";
+  if (!file.currentStage) return "File preparation complete";
   const current = primaryStage(file);
   return `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}`;
 }

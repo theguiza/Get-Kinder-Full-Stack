@@ -24,8 +24,6 @@ export const PIPELINE_STAGE_LABELS = Object.freeze({
   sensitivity_review: "Sensitivity review",
   source_review: "Source review",
   evidence_extraction: "Evidence creation",
-  evidence_review: "Evidence review",
-  impact_fact_review: "Impact Fact review",
 });
 
 const STAGE_KEYS = Object.keys(PIPELINE_STAGE_LABELS);
@@ -82,8 +80,6 @@ export const PIPELINE_REASONS = Object.freeze([
   "no_supportable_statements",
   "claim_proposal_ready",
   "source_measurement_ready",
-  "evidence_awaiting_review",
-  "impact_fact_review_pending",
   "not_currently_eligible",
   "source_not_promoted",
   "unknown",
@@ -124,6 +120,7 @@ function projectFile(file) {
   if (!PIPELINE_NEXT_ACTIONS.includes(file.nextAction) || !PIPELINE_REASONS.includes(file.reason)) return null;
   if (!STAGE_STATUSES.has(file.currentStatus) || !RESPONSIBLE_PARTIES.has(file.responsibleParty)) return null;
   if (file.currentStage !== null && !STAGE_KEYS.includes(file.currentStage)) return null;
+  if (file.nextAction === "count_records" && !isRouteUuid(file.currentSourceVersionId)) return null;
   return {
     intakeFileId: file.intakeFileId,
     safeFilename: typeof file.safeFilename === "string" && file.safeFilename ? file.safeFilename : "Unnamed file",
@@ -136,7 +133,7 @@ function projectFile(file) {
     reason: file.reason,
     evidenceItemCount: isCount(file.evidenceItemCount) ? file.evidenceItemCount : 0,
     reviewedImpactFactCount: isCount(file.reviewedImpactFactCount) ? file.reviewedImpactFactCount : 0,
-    currentSourceVersionId: isRouteUuid(file.currentSourceVersionId) ? file.currentSourceVersionId : null,
+    currentSourceVersionId: file.nextAction === "count_records" && isRouteUuid(file.currentSourceVersionId) ? file.currentSourceVersionId : null,
   };
 }
 
@@ -239,7 +236,7 @@ export function pipelineFileStatusText(request, intakeFileId, stageKey = null) {
     const stage = file.stages.find((entry) => entry.key === stageKey);
     return stage ? stageStatusLabel(stage) : "not available";
   }
-  if (!file.currentStage) return "Complete";
+  if (!file.currentStage) return "File preparation complete";
   const current = file.stages.find((entry) => entry.key === file.currentStage);
   return `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}`;
 }
@@ -285,7 +282,7 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
         + "reports without any review.";
     case "propose_claims":
       return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Sources > Files that need a step proposes them "
-        + "(structural column facts are skipped); Get Kinder then reviews each claim with its evidence.";
+        + "(structural column facts are skipped). Evidence-quality reviews are optional for ordinary internal reporting.";
     case "review_sensitivity":
       return "Your action is needed: review this file's sensitivity & allowed use in Sources > Files that need a step. Your recorded decision governs how its content may be used.";
     case "retry_security_check":
@@ -293,7 +290,9 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
         ? "Check security again when the scanner is available. Nothing is processed until the check succeeds."
         : "A client admin in your organization can check this file's security again. Nothing is processed until the check succeeds.";
     case "ask_organization_administrator":
-      return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Sources > Files that need a step.`;
+      return file.currentStage
+        ? `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Sources > Files that need a step.`
+        : "File preparation is complete. Your organization's administrator can count records or propose claims from this source in Sources.";
     default:
       if (file.reason === "no_extractable_evidence") {
         return "No action required from you. This file's source is promoted, but KAI cannot create evidence from it: "
@@ -310,12 +309,15 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
       if (file.reason === "allowed_use_not_allowed") {
         return "This file's recorded allowed use is not_allowed, so it is not used as a source or for evidence, claims, or drafts. Only a new sensitivity & allowed-use review can change this.";
       }
-      return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
+      if (file.currentStatus === "complete") return file.reviewedImpactFactCount > 0
+        ? "Usable findings from this file are available for your reports."
+        : "File preparation is complete. Preparation alone does not create an Impact Fact; see Sources and Impact for findings and their limitations.";
+      return "No action required from you.";
   }
 }
 
 const REASON_MESSAGES = Object.freeze({
-  waiting_for_client: (n) => `${pluralFiles(n)} need an answer from a client reviewer in your organization before evidence can be used.`,
+  waiting_for_client: (n) => `${pluralFiles(n)} need an upload or source-preparation step from your organization.`,
   security_check_retry_ready: (n) => `${pluralFiles(n)} could not be security-checked because the scanner was not available. See Files to check again.`,
   failed: (n) => `${pluralFiles(n)} could not be processed. See Files for details.`,
   processing: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} still being processed by KAI.`,
@@ -334,13 +336,11 @@ const REASON_MESSAGES = Object.freeze({
   document_evidence_not_enabled: (n) => `The source from ${pluralFiles(n)} has been promoted. Evidence from document text is not yet available in this KAI installation, so no evidence can be created from ${n === 1 ? "it" : "them"} yet.`,
   no_supportable_statements: (n) => `The source from ${pluralFiles(n)} has been promoted. KAI read ${n === 1 ? "its" : "their"} text and found no complete statement it could cite as evidence, so no evidence was created.`,
   source_measurement_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} promoted, with nothing counted from ${n === 1 ? "it" : "them"} yet. Use Count records on ${n === 1 ? "its source" : "their sources"} (Sources > Data Sources); a measured finding can be used in your reports without any review.`,
-  claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Sources > Files that need a step (Use for impact); Get Kinder then reviews each claim with its evidence.`,
-  evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
-  impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
-  not_currently_eligible: (n) => `Evidence from ${pluralFiles(n)} was reviewed but is not currently usable as an Impact Fact. Contact Get Kinder for details.`,
+  claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Sources > Files that need a step (Use for impact); evidence-quality reviews are optional for ordinary internal reporting.`,
+  not_currently_eligible: (n) => `No currently usable Impact Fact is available from ${pluralFiles(n)}. See the affected findings for their specific limitations.`,
   source_not_promoted: (n) => `${pluralFiles(n)} ${n === 1 ? "was" : "were"} reviewed by Get Kinder and not promoted as a source, so no evidence will be created from ${n === 1 ? "it" : "them"}.`,
   unknown: (n) => `The status of ${pluralFiles(n)} could not be determined.`,
-  complete: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} reviewed evidence shown here.`,
+  complete: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} completed file preparation. See Sources and Impact for available findings.`,
 });
 
 // The supported re-attempt of a security check that could not run: the
@@ -371,8 +371,6 @@ export const GET_KINDER_STAGE_DESCRIPTIONS = Object.freeze({
   sensitivity_review: "Get Kinder confirms how the file's information may be used (sensitivity, consent, and allowed use) before it can become a source. This is not an Evidence or Impact Fact review.",
   source_review: "Get Kinder decides whether the file becomes a source that evidence can be created from.",
   evidence_extraction: "Get Kinder creates evidence from the file's promoted source.",
-  evidence_review: "Get Kinder reviews the evidence created from the file.",
-  impact_fact_review: "Get Kinder reviews whether the file's reviewed evidence supports an Impact Fact.",
 });
 
 /**
@@ -423,7 +421,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "client_followups",
       heading: "Your action is needed",
-      detail: `Get Kinder sent follow-up questions about evidence from ${pluralFiles(clientCount)} in this project. Evidence cannot be used until they are answered.`,
+      detail: `Get Kinder sent follow-up questions about evidence from ${pluralFiles(clientCount)} in this project. Answering them can improve the affected findings; optional questions do not block ordinary reporting.`,
     });
   }
   if (sensitivityCount > 0) {
@@ -445,7 +443,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "source_work",
       heading: "Your action is needed",
-      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for sensitivity review, source preparation, source promotion, or evidence extraction, which your role can complete in Sources > Files that need a step.`,
+      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for sensitivity review, source preparation, source promotion, evidence extraction, claim proposal, or Count records, which your role can complete in Sources > Files that need a step.`,
     });
   }
   if (clientCount === 0 && sensitivityCount === 0 && sourceCount === 0) {
@@ -467,7 +465,7 @@ export function evidenceTabView(request) {
   if (files.length === 0 && reviewedImpactFacts.length === 0) return { kind: "no_files" };
   const upstream = reasons.filter((entry) => entry.reason !== "complete");
   if (reviewedImpactFacts.length > 0) return { kind: "facts", facts: reviewedImpactFacts, upstream };
-  return { kind: "explained_empty", upstream };
+  return { kind: "explained_empty", upstream: reasons };
 }
 
 // Files the client's own organization must act on, and files waiting on Get Kinder.

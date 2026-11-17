@@ -932,7 +932,8 @@ async function runBrowserAcceptance() {
       const entry = await reviewer.pipelineFileText(FILE.alpha);
       // Optional questions never put a report-ready file back into a waiting
       // stage; the client reviewer can still answer them from Reviews.
-      assert.match(entry, /Impact Fact review\s+Complete/);
+      assert.match(entry, /File preparation complete/);
+      assert.doesNotMatch(entry, /Evidence review|Impact Fact review/);
       assert.match(entry, /Usable Impact Facts from this file: 2/);
       await reviewer.clickTab("Reviews");
       await reviewer.waitFor(async () => (await reviewer.linkHrefs()).some(([label]) => label === "Answer follow-up questions"), "the follow-up action");

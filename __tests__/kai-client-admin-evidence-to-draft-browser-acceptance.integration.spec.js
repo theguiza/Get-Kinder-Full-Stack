@@ -559,7 +559,7 @@ async function runBrowserAcceptance() {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-source-version="${ids.x.sourceVersionId}"] button`, "Extract evidence");
-      await adminPage.waitForText("Evidence extracted: 2 evidence item(s) created, awaiting Get Kinder evidence review.");
+      await adminPage.waitForText("Evidence extracted: 2 evidence item(s) created. Count records or propose claims as applicable; quality review is optional for ordinary internal reporting.");
       await adminPage.idle();
       const posts = adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]);
       assert.deepEqual(posts, [[evidenceExtractionPath(ORG_X, ids.x.sourceVersionId), 200]]);

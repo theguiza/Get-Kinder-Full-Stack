@@ -258,16 +258,16 @@ test("stages: automatic processing, failures, and every human gate map to the re
     13: ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"],
     14: ["source_review", "closed", "none", "none", "source_not_promoted"],
     15: ["evidence_extraction", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_extraction_pending"],
-    16: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
-    17: ["impact_fact_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "impact_fact_review_pending"],
-    18: ["impact_fact_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "impact_fact_review_pending"],
-    19: ["impact_fact_review", "waiting_for_client", "client", "answer_client_followups", "waiting_for_client"],
-    20: ["impact_fact_review", "not_currently_eligible", "get_kinder", "none_waiting_for_get_kinder", "not_currently_eligible"],
+    16: [null, "complete", "none", "none", "complete"],
+    17: [null, "complete", "none", "none", "complete"],
+    18: [null, "complete", "none", "none", "complete"],
+    19: [null, "complete", "none", "none", "complete"],
+    20: [null, "complete", "none", "none", "complete"],
     21: [null, "complete", "none", "none", "complete"],
     // Optional follow-ups do not hold an already-usable source.
     23: [null, "complete", "none", "none", "complete"],
     25: [null, "complete", "none", "none", "complete"],
-    27: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
+    27: [null, "complete", "none", "none", "complete"],
   };
   for (const [n, [stage, status, responsible, next, reason]] of Object.entries(expected)) {
     assert.deepEqual(Object.values(currentOf(result, Number(n))).slice(0, 5), [stage, status, responsible, next, reason], `file ${n}`);
@@ -275,13 +275,13 @@ test("stages: automatic processing, failures, and every human gate map to the re
   assert.equal(currentOf(result, 7).file.failureCategory, "file_could_not_be_read");
   assert.equal(currentOf(result, 8).file.failureCategory, "processing_failed", "unknown parser codes are reduced to the generic category");
   assert.equal(currentOf(result, 2).file.failureCategory, "upload_not_completed");
-  // Every file lists all ten stages; stages after the blocking one are not_started.
+  // Every file lists all eight preparation stages; stages after the blocking one are not_started.
   for (const file of result.data.files) assert.deepEqual(file.stages.map((s) => s.key), [...contract.PIPELINE_STAGES]);
-  assert.deepEqual(currentOf(result, 10).file.stages.slice(6).map((s) => s.status), ["not_started", "not_started", "not_started", "not_started"]);
+  assert.deepEqual(currentOf(result, 10).file.stages.slice(6).map((s) => s.status), ["not_started", "not_started"]);
   assert.equal(currentOf(result, 21).file.reviewedImpactFactCount, 1);
   assert.equal(currentOf(result, 23).file.reviewedImpactFactCount, 1);
   assert.equal(currentOf(result, 25).file.reviewedImpactFactCount, 1);
-  assert.equal(currentOf(result, 25).file.stages.find((s) => s.key === "evidence_review").status, "complete");
+  assert.ok(currentOf(result, 25).file.stages.every((s) => s.status === "complete"));
   // Summary reasons are counted in the canonical order.
   assert.deepEqual(result.data.summary.reasons.map((r) => r.reason), PIPELINE_REASONS.filter((r) => result.data.summary.reasons.some((x) => x.reason === r)));
   assert.equal(result.data.summary.reasons.find((r) => r.reason === "failed").fileCount, 4);
@@ -311,7 +311,7 @@ test("stages: a security-assessment execution failure is Get Kinder's to resolve
   }
   const securityStage = currentOf(result, 4).file.stages.find((s) => s.key === "security_check");
   assert.deepEqual(securityStage, { key: "security_check", status: "failed", responsible: "get_kinder", failureCategory: "security_check_failed" });
-  assert.deepEqual(currentOf(result, 4).file.stages.slice(2).map((s) => s.status), Array(8).fill("not_started"), "nothing downstream of a failed check is shown as reached");
+  assert.deepEqual(currentOf(result, 4).file.stages.slice(2).map((s) => s.status), Array(6).fill("not_started"), "nothing downstream of a failed check is shown as reached");
 });
 
 // ---------------------------------------------------------------------------
@@ -464,14 +464,14 @@ test("frontend Evidence tab: distinguishes loading, error, no files, each upstre
   const cases = [
     [row(1, { parser_status: "running", file_profile_complete: false }), "processing", /still being processed/],
     [row(1, { parser_status: "failed", file_profile_complete: false }), "failed", /could not be processed/],
-    [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)], open_client_followup_count: 1 }), "waiting_for_client", /client reviewer/],
+    [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)], open_client_followup_count: 1 }), "complete", /completed file preparation/],
     [row(1), "waiting_for_get_kinder_review", /^Your data has been processed and is waiting for Get Kinder review/],
     [row(1, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_actionable_count: 1 }), "waiting_for_source_promotion", /promoted source/],
     [row(1, { sensitivity_decision_outcome: "reviewed" }), "source_candidate_missing", /no source candidate was created/],
     [row(1, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_actionable_count: 1, sensitivity_permission_predicate: false }), "source_promotion_blocked", /cannot be promoted/],
     [row(1, promoted), "evidence_extraction_pending", /has been promoted\. Get Kinder has not yet created evidence/],
-    [row(1, extracted), "evidence_awaiting_review", /waiting for Get Kinder evidence review/],
-    [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)] }), "not_currently_eligible", /not currently usable/],
+    [row(1, extracted), "complete", /completed file preparation/],
+    [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)] }), "complete", /completed file preparation/],
     [row(1, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_rejected_count: 1 }), "source_not_promoted", /not promoted as a source/],
   ];
   for (const [lineage, reason, message] of cases) {
@@ -496,12 +496,12 @@ test("frontend Reviews tab and next actions: client work only for client reviewe
     row(3, { parser_status: "failed", file_profile_complete: false }),
   ]), ENGAGEMENT);
   const view = reviewsTabView({ status: PIPELINE_REQUEST_STATUS.SUCCESS_WITH_DATA, data });
-  assert.deepEqual(view.waitingForClient.map((f) => f.intakeFileId), [fileId(1)]);
+  assert.deepEqual(view.waitingForClient, [], "optional questions do not block file progress");
   assert.deepEqual(view.waitingForGetKinder.map((f) => f.intakeFileId), [fileId(2)], "a failure is not listed as waiting for review");
   assert.deepEqual(reviewsTabView({ status: PIPELINE_REQUEST_STATUS.ERROR }), { kind: "error" });
   const [followup, gk, failed] = data.files;
-  assert.match(nextActionText(followup, { canReviewFollowups: true }), /^Answer the follow-up questions/);
-  assert.match(nextActionText(followup, { canReviewFollowups: false }), /^A client reviewer in your organization needs to answer/);
+  assert.match(nextActionText(followup, { canReviewFollowups: true }), /File preparation is complete/);
+  assert.match(nextActionText(followup, { canReviewFollowups: false }), /File preparation is complete/);
   assert.equal(nextActionText(gk), "No action required from you. Waiting for Get Kinder sensitivity review.");
   assert.equal(nextActionText(failed), "Contact Get Kinder. Processing cannot be retried from here.");
   assert.equal(stageStatusLabel(gk.stages[5]), "Waiting for Get Kinder");
@@ -551,7 +551,7 @@ test("stages: a security check that could not run is an actionable, quarantined 
         `file ${n}`,
       );
       // Nothing downstream is reached while the file is unchecked.
-      assert.deepEqual(current.file.stages.slice(2).map((s) => s.status), Array(8).fill("not_started"));
+      assert.deepEqual(current.file.stages.slice(2).map((s) => s.status), Array(6).fill("not_started"));
     }
     assert.deepEqual(Object.values(currentOf(result, 4)).slice(0, 5), ["security_check", "in_progress", "kai", "none_waiting_for_kai_processing", "processing"]);
     assert.deepEqual(Object.values(currentOf(result, 5)).slice(0, 5), ["security_check", "failed", "get_kinder", "contact_get_kinder", "failed"]);
@@ -671,13 +671,14 @@ test("frontend source: Sources shows the status card; Evidence uses the Project 
 });
 
 test("frontend Reviews tab: each Get Kinder-owned stage is described, and a file sensitivity review is never presented as Evidence or Impact Fact review", () => {
-  const gkStages = ["sensitivity_review", "source_review", "evidence_extraction", "evidence_review", "impact_fact_review"];
+  const gkStages = ["sensitivity_review", "source_review", "evidence_extraction"];
   assert.deepEqual(Object.keys(GET_KINDER_STAGE_DESCRIPTIONS), gkStages);
   for (const key of gkStages) assert.ok(Object.hasOwn(PIPELINE_STAGE_LABELS, key), key);
   assert.match(GET_KINDER_STAGE_DESCRIPTIONS.sensitivity_review, /sensitivity, consent, and allowed use/);
   assert.match(GET_KINDER_STAGE_DESCRIPTIONS.sensitivity_review, /This is not an Evidence or Impact Fact review\./);
   assert.doesNotMatch(studioSource, /Evidence and Impact Fact reviews are completed by Get Kinder reviewers\./);
-  assert.match(studioSource, /sensitivity review, source\s+review, evidence review, and Impact Fact review/);
+  assert.match(studioSource, /Evidence and claim quality reviews are optional for ordinary internal reporting/);
+  assert.doesNotMatch(studioSource, /complete the required reviews/);
   // Client-safe: no GK control vocabulary or decision values in the new copy.
   for (const text of [...Object.values(GET_KINDER_STAGE_DESCRIPTIONS), ...["allowed", "not_allowed", "unknown"].flatMap((a) => [true, false].map((m) => getKinderReviewAccessText(a, m)))]) {
     assert.doesNotMatch(text, /Sensitivity & allowed-use review|Review cockpit|Submit review|reviewed_|needs_more_information/);
@@ -760,7 +761,7 @@ test("Reviews messages: an offered sensitivity review is action-required, never 
   assert.doesNotMatch(said(elsewhere), /No action is currently required|Your action is needed|Answer the follow-up/, "the GK reviewer is not told to answer client questions");
   const both = reviewsTabMessages(view([followup(1), followup(2)], [atSensitivity(1)]), { canReviewSensitivity: true, canReviewFollowups: true });
   assert.deepEqual(keys(both), ["client_followups", "sensitivity_review"]);
-  assert.equal(both[0].detail, "Get Kinder sent follow-up questions about evidence from 2 files in this project. Evidence cannot be used until they are answered.");
+  assert.equal(both[0].detail, "Get Kinder sent follow-up questions about evidence from 2 files in this project. Answering them can improve the affected findings; optional questions do not block ordinary reporting.");
   assert.doesNotMatch(said(both), /No action is currently required/);
 
   // Unchanged for actors without the sensitivity action.
@@ -940,7 +941,7 @@ test("source review: a promotable candidate is the binding-derived administrator
     // P2-01 normally runs as the promotion's handoff; if it did not, the
     // administrator can extract.
     6: ["evidence_extraction", "waiting_for_client", "client", "extract_evidence", "evidence_extraction_ready"],
-    7: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
+    7: [null, "complete", "none", "none", "complete"],
     // The sensitivity review is the administrator's own step (owner decision 2026-10-19).
     8: ["sensitivity_review", "waiting_for_client", "client", "review_sensitivity", "sensitivity_review_ready"],
   };
@@ -986,7 +987,7 @@ test("frontend: source work is listed for the actor and never counted as client 
   const data = projectClientEvidencePipeline(result.data, ENGAGEMENT);
   assert.ok(data, "the new vocabulary projects");
   const view = reviewsTabView({ status: PIPELINE_REQUEST_STATUS.SUCCESS_WITH_DATA, data });
-  assert.deepEqual(view.waitingForClient.map((f) => f.intakeFileId), [fileId(2)]);
+  assert.deepEqual(view.waitingForClient, [], "optional questions do not block file progress");
   assert.deepEqual(view.sourceWork.map((f) => f.intakeFileId), [fileId(1)]);
   assert.deepEqual(view.waitingForGetKinder.map((f) => f.intakeFileId), [fileId(3)]);
   const promote = data.files.find((f) => f.intakeFileId === fileId(1));

@@ -946,7 +946,8 @@ async function runBrowserAcceptance() {
       assert.equal(pipeline.status, 200, JSON.stringify(pipeline.body));
       const sessionFile = pipeline.body.data.files.find((file) => file.intakeFileId === FILE_X);
       assert.equal(sessionFile.reviewedImpactFactCount, 2, "both current source claims are usable without review");
-      assert.equal(sessionFile.stages.find((stage) => stage.key === "evidence_review").status, "complete", "not held at Get Kinder's evidence review");
+      assert.equal(sessionFile.stages.length, 8);
+      assert.ok(sessionFile.stages.every((stage) => stage.status === "complete"), "preparation complete without optional reviews");
       // Optional questions on another claim do not hold the usable source.
       assert.deepEqual([sessionFile.currentStage, sessionFile.responsibleParty, sessionFile.nextAction], [null, "none", "none"], JSON.stringify(sessionFile));
       assert.notEqual(sessionFile.reason, "evidence_awaiting_review");
@@ -1529,6 +1530,15 @@ async function runBrowserAcceptance() {
         actorContext: gkReviewerService, now: new Date().toISOString() }, { env: ENV, documentEvidenceRepository: documentRepository });
       assert.equal(extracted.ok, true, JSON.stringify(extracted));
       const docEvidenceId = extracted.data.evidenceItems[0].evidence_item_id;
+      // A traceable document statement remains an actionable proposal after preparation,
+      // without an evidence-review stage or fabricated claim.
+      const pipeline = await adminPage.api("GET", `${BASE_PATH}/admin/organizations/${ORG_X}/engagements/${PROJECT_X}/client-evidence-pipeline`);
+      const preparedDocument = pipeline.body.data.files.find((file) => file.intakeFileId === fileId);
+      assert.deepEqual([preparedDocument.currentStage, preparedDocument.currentStatus, preparedDocument.nextAction, preparedDocument.reason],
+        [null, "complete", "propose_claims", "claim_proposal_ready"]);
+      assert.ok(preparedDocument.stages.every((stage) => stage.status === "complete"));
+      assert.equal(preparedDocument.stages.length, 8);
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.claims WHERE evidence_item_id = $1::uuid", [docEvidenceId]))[0].n, 0);
       const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, docEvidenceId), {});
       created(proposed, "unprepared document claim");
       const docClaimId = proposed.body.data.claim.claim_id;

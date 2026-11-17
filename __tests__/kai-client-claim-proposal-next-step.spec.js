@@ -111,26 +111,25 @@ const current = (result, n) => {
 test("pipeline: the reported PDF (29 unreviewed statements, no claim) is the administrator's propose_claims step, not a Get Kinder wait", async () => {
   const result = await read([row(1)], memberActor("client_admin"));
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(current(result, 1), ["evidence_review", "waiting_for_client", "client", "propose_claims", "claim_proposal_ready"]);
-  const evidenceStage = result.data.files[0].stages.find((entry) => entry.key === "evidence_review");
-  assert.equal(evidenceStage.count, 29, "the count is the evidence still without a claim");
-  assert.equal(result.data.files[0].stages.find((entry) => entry.key === "impact_fact_review").status, "not_started");
+  assert.deepEqual(current(result, 1), [null, "complete", "client", "propose_claims", "claim_proposal_ready"]);
+  assert.ok(result.data.files[0].stages.every((entry) => entry.status === "complete"));
+  assert.equal(result.data.files[0].evidenceItemCount, 29);
   assert.deepEqual(result.data.summary.reasons, [{ reason: "claim_proposal_ready", fileCount: 1 }]);
   assert.equal(JSON.stringify(result).includes("unclaimed"), false, "the internal count field is never returned");
 });
 
 test("pipeline: who sees what for the same unclaimed evidence", async () => {
   const cases = [
-    ["client_admin", memberActor("client_admin"), ["waiting_for_client", "client", "propose_claims", "claim_proposal_ready"]],
+    ["client_admin", memberActor("client_admin"), ["complete", "client", "propose_claims", "claim_proposal_ready"]],
     ["client_reviewer with an administrator", memberActor("client_reviewer"),
-      ["waiting_for_client", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
+      ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
     ["client_contributor with an administrator", memberActor("client_contributor"),
-      ["waiting_for_client", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
-    ["gk_operator member", memberActor("gk_operator"), ["waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]],
+      ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
+    ["gk_operator member", memberActor("gk_operator"), ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
     // Holds the organization's client_admin membership, which P2-03 admits,
     // exactly as the extraction authority treats it.
     ["global gk_reviewer over a client_admin membership", memberActor("client_admin", { kaiRoles: ["gk_reviewer"] }),
-      ["waiting_for_client", "client", "propose_claims", "claim_proposal_ready"]],
+      ["complete", "client", "propose_claims", "claim_proposal_ready"]],
   ];
   for (const [label, actor, expected] of cases) {
     const result = await read([row(1)], actor);
@@ -138,15 +137,15 @@ test("pipeline: who sees what for the same unclaimed evidence", async () => {
     assert.deepEqual(current(result, 1).slice(1), expected, label);
   }
   const noAdministrator = await read([row(1, { organization_administrator_available: false })], memberActor("client_reviewer"));
-  assert.deepEqual(current(noAdministrator, 1).slice(1), ["waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]);
+  assert.deepEqual(current(noAdministrator, 1).slice(1), ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]);
 });
 
 test("pipeline: proposed claims, open follow-ups, structural-only evidence, and a usable fact", async () => {
   const actor = memberActor("client_admin");
   const result = await read([
-    // Every claimable item proposed, claims awaiting Get Kinder: a genuine Get Kinder wait.
+    // Every claimable item proposed: optional reviews do not hold preparation.
     row(1, { evidence_unclaimed_proposable_count: 0, claim_count: 29, claim_needs_review_count: 29, claim_ids: [claimId(1)] }),
-    // An open client follow-up on a proposed claim is the client's work, not hidden behind Get Kinder's review.
+    // Optional follow-ups remain recorded without blocking preparation.
     row(2, { evidence_unclaimed_proposable_count: 0, claim_count: 2, claim_needs_review_count: 2, claim_ids: [claimId(2)], open_client_followup_count: 3 }),
     // An interrupted bulk proposal: some claims exist, the rest can still be proposed.
     row(3, { evidence_unclaimed_proposable_count: 12, claim_count: 17, claim_needs_review_count: 17, claim_ids: [claimId(3)] }),
@@ -156,10 +155,10 @@ test("pipeline: proposed claims, open follow-ups, structural-only evidence, and 
     row(5, { evidence_unclaimed_proposable_count: 4, claim_count: 1, claim_ids: [claimId(5)] }),
   ], actor, [{ claimId: claimId(5), statement: "Usable", claimType: "finding", limitationDimensionKeys: [] }]);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(current(result, 1), ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]);
-  assert.deepEqual(current(result, 2), ["evidence_review", "waiting_for_client", "client", "answer_client_followups", "waiting_for_client"]);
-  assert.deepEqual(current(result, 3), ["evidence_review", "waiting_for_client", "client", "propose_claims", "claim_proposal_ready"]);
-  assert.deepEqual(current(result, 4), ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]);
+  assert.deepEqual(current(result, 1), [null, "complete", "none", "none", "complete"]);
+  assert.deepEqual(current(result, 2), [null, "complete", "none", "none", "complete"]);
+  assert.deepEqual(current(result, 3), [null, "complete", "client", "propose_claims", "claim_proposal_ready"]);
+  assert.deepEqual(current(result, 4), [null, "complete", "none", "none", "complete"]);
   assert.deepEqual(current(result, 5), [null, "complete", "none", "none", "complete"]);
 });
 
@@ -256,7 +255,7 @@ test("Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only 
   for (const format of ["xlsx", "csv"]) {
     const result = await read([spreadsheet(1, format)], memberActor("client_admin"));
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.deepEqual(current(result, 1), ["evidence_review", "waiting_for_client", "client", "count_records", "source_measurement_ready"], format);
+    assert.deepEqual(current(result, 1), [null, "complete", "client", "count_records", "source_measurement_ready"], format);
     assert.equal(result.data.files[0].currentSourceVersionId, VERSION, "the step opens Count records on this version");
     assert.deepEqual(result.data.summary.reasons, [{ reason: "source_measurement_ready", fileCount: 1 }]);
     const projected = projectClientEvidencePipeline(result.data, ENGAGEMENT);
@@ -273,9 +272,9 @@ test("Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only 
 
   // Who sees what: someone who cannot count records waits on the organization's administrator; Get Kinder is never the step.
   for (const [label, actor, expected] of [
-    ["client_reviewer", memberActor("client_reviewer"), ["waiting_for_client", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
-    ["client_contributor", memberActor("client_contributor"), ["waiting_for_client", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
-    ["gk_operator member", memberActor("gk_operator"), ["waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]],
+    ["client_reviewer", memberActor("client_reviewer"), ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
+    ["client_contributor", memberActor("client_contributor"), ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
+    ["gk_operator member", memberActor("gk_operator"), ["complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"]],
   ]) {
     const result = await read([spreadsheet(1, "xlsx")], actor);
     assert.deepEqual(current(result, 1).slice(1), expected, label);
@@ -287,8 +286,8 @@ test("Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only 
     { ...spreadsheet(3, "xlsx"), claim_count: 1, claim_needs_review_count: 1, claim_ids: [claimId(3)] },
     { ...spreadsheet(4, "xlsx"), claim_count: 1, claim_ids: [claimId(4)] },
   ], memberActor("client_admin"), [{ claimId: claimId(4), statement: "Usable", claimType: "finding", limitationDimensionKeys: [] }]);
-  assert.deepEqual(current(unchanged, 2), ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"]);
-  assert.deepEqual(current(unchanged, 3).slice(3), ["none_waiting_for_get_kinder", "evidence_awaiting_review"]);
+  assert.deepEqual(current(unchanged, 2), [null, "complete", "none", "none", "complete"]);
+  assert.deepEqual(current(unchanged, 3).slice(3), ["none", "complete"]);
   assert.deepEqual(current(unchanged, 4), [null, "complete", "none", "none", "complete"]);
   // As proposeClaims: the organization's client_admin, including one who also holds a global Get Kinder role.
   assert.equal(contract.resolveClientAuthority(memberActor("client_admin"), ORG).recordSourceMeasurement, true);
@@ -296,4 +295,83 @@ test("Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only 
   for (const actor of [memberActor("client_reviewer"), memberActor("client_contributor"), memberActor("gk_operator")]) {
     assert.equal(contract.resolveClientAuthority(actor, ORG).recordSourceMeasurement, false);
   }
+});
+
+test("file preparation contract: completed CSV/XLSX preparation coexists with Count records, without review stages", async () => {
+  const expectedStages = ["upload", "security_check", "processing", "data_dictionary", "sensitivity_classification", "sensitivity_review", "source_review", "evidence_extraction"];
+  for (const format of ["csv", "xlsx"]) {
+    const result = await read([row(1, { current_profile_format: format, current_source_version_id: VERSION,
+      evidence_unclaimed_proposable_count: 0 })], memberActor("client_admin"));
+    const file = result.data.files[0];
+    assert.deepEqual(file.stages.map(({ key }) => key), expectedStages);
+    assert.ok(file.stages.every(({ status }) => status === "complete"));
+    assert.deepEqual(current(result, 1), [null, "complete", "client", "count_records", "source_measurement_ready"]);
+    assert.equal(file.currentSourceVersionId, VERSION);
+    assert.ok(projectClientEvidencePipeline(result.data, ENGAGEMENT));
+  }
+});
+
+test("post-preparation authority: every non-counting role gets administrator guidance without version disclosure or a review wait", async () => {
+  for (const role of ["client_reviewer", "client_contributor", "gk_admin", "gk_operator", "gk_reviewer"]) {
+    for (const administratorAvailable of [true, false]) {
+      const result = await read([row(1, { current_profile_format: "xlsx", current_source_version_id: VERSION,
+        evidence_unclaimed_proposable_count: 0, organization_administrator_available: administratorAvailable })], memberActor(role));
+      assert.deepEqual(current(result, 1), [null, "complete", "client", "ask_organization_administrator", "organization_administrator_action_ready"], role);
+      assert.equal(Object.hasOwn(result.data.files[0], "currentSourceVersionId"), false);
+      const file = projectClientEvidencePipeline(result.data, ENGAGEMENT).files[0];
+      assert.match(nextActionText(file), /organization's administrator can count records or propose claims/);
+      assert.doesNotMatch(nextActionText(file), /Waiting for Get Kinder|evidence.review/i);
+      assert.equal(useForImpactStep(file, { recordSourceMeasurement: false }).kind, "done");
+    }
+  }
+});
+
+test("permitted next actions: security, parser, promotion, currentness and allowed-use restrictions prevent Count records and proposal", async () => {
+  const prepared = { current_profile_format: "csv", current_source_version_id: VERSION, evidence_unclaimed_proposable_count: 0 };
+  for (const [overrides, expectedStage, expectedReason] of [
+    [{ file_policy_status: "pending" }, "security_check", "processing"],
+    [{ parser_status: "failed", file_profile_complete: false }, "processing", "failed"],
+    [{ source_candidate_promoted_count: 0, source_version_count: 0 }, "source_review", "source_promotion_blocked"],
+    [{ source_version_count: 0, current_source_version_id: null }, "source_review", "source_promotion_blocked"],
+    [{ effective_allowed_use_not_allowed: true }, "evidence_extraction", "allowed_use_not_allowed"],
+  ]) {
+    const result = await read([row(1, { ...prepared, ...overrides })], memberActor("client_admin"));
+    const file = result.data.files[0];
+    assert.equal(file.currentStage, expectedStage);
+    assert.equal(file.reason, expectedReason);
+    assert.ok(!["count_records", "propose_claims"].includes(file.nextAction));
+    assert.equal(Object.hasOwn(file, "currentSourceVersionId"), false);
+  }
+  for (const currentVersion of [null, "not-a-version"]) {
+    const result = await read([row(1, { ...prepared, current_source_version_id: currentVersion })], memberActor("client_admin"));
+    assert.notEqual(result.data.files[0].nextAction, "count_records", "no unusable Count records control without a current version id");
+  }
+  const prohibitedDocument = await read([row(1, { effective_allowed_use_not_allowed: true })], memberActor("client_admin"));
+  assert.equal(prohibitedDocument.data.files[0].reason, "allowed_use_not_allowed");
+  assert.notEqual(prohibitedDocument.data.files[0].nextAction, "propose_claims");
+});
+
+test("usable measured finding: absent approvals, unanswered questions and coverage limitations do not downgrade preparation or findings", async () => {
+  const result = await read([row(1, { current_profile_format: "csv", current_source_version_id: VERSION,
+    evidence_unclaimed_proposable_count: 0, claim_count: 1, claim_needs_review_count: 1,
+    claim_ids: [claimId(1)], open_client_followup_count: 3 })], memberActor("client_admin"),
+    [{ claimId: claimId(1), statement: "2 programme records", claimType: "finding", limitationDimensionKeys: ["time_period_clarity"] }]);
+  assert.deepEqual(current(result, 1), [null, "complete", "none", "none", "complete"]);
+  assert.equal(result.data.files[0].reviewedImpactFactCount, 1);
+  assert.deepEqual(result.data.reviewedImpactFacts[0].limitationDimensionKeys, ["time_period_clarity"]);
+  assert.match(nextActionText(result.data.files[0]), /Usable findings/);
+  assert.deepEqual(reviewsTabView({ status: PIPELINE_REQUEST_STATUS.SUCCESS_WITH_DATA,
+    data: projectClientEvidencePipeline(result.data, ENGAGEMENT) }).waitingForGetKinder, []);
+});
+
+
+test("DTO: only Count records carries a source version; missing version and obsolete mandatory stages are rejected", async () => {
+  const result = await read([row(1, { current_profile_format: "csv", current_source_version_id: VERSION,
+    evidence_unclaimed_proposable_count: 0 })], memberActor("client_admin"));
+  const dtoWith = (file) => ({ ...result.data, files: [file] });
+  const file = result.data.files[0];
+  assert.equal(projectClientEvidencePipeline(dtoWith({ ...file, currentSourceVersionId: null }), ENGAGEMENT), null);
+  assert.equal(projectClientEvidencePipeline(dtoWith({ ...file, stages: [...file.stages,
+    { key: "evidence_review", status: "waiting_for_get_kinder", responsible: "get_kinder" }] }), ENGAGEMENT), null);
+  assert.equal(projectClientEvidencePipeline(dtoWith({ ...file, nextAction: "ask_organization_administrator" }), ENGAGEMENT).files[0].currentSourceVersionId, null);
 });
