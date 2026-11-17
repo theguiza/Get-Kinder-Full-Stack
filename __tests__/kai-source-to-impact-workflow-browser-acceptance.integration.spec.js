@@ -861,7 +861,8 @@ async function runBrowserAcceptance() {
       ids.histEvidence = await query("SELECT evidence_item_id::text FROM kai.evidence_items WHERE organization_id = $1::uuid AND source_version_id = $2::uuid ORDER BY statement",
         [ORG_X, version.source_version_id]);
       const pipeline = await adminBPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
-      assert.equal(fileOf(pipeline, FILE.hist).currentStage, "evidence_review");
+      assert.equal(fileOf(pipeline, FILE.hist).currentStage, null);
+      assert.equal(fileOf(pipeline, FILE.hist).nextAction, "count_records");
       assert.equal(await has(adminBPage, `[data-client-use-for-impact="${FILE.hist}"]`), false, "no further action offered");
       results.steps2_3 = "PASS: B continued A's review (decision unchanged), explicit authorization required, promoted by B; 1 candidate/source/current version, 2 evidence";
     });
@@ -958,7 +959,9 @@ async function runBrowserAcceptance() {
       assert.deepEqual(delta(await counts(ORG_X), legacyBefore), ZERO);
       const pipeline = await adminBPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       assert.equal(pipeline.status, 200, "the pipeline stays readable with a refused claim in the Project");
-      assert.deepEqual(currentOf(fileOf(pipeline, FILE.later)).slice(0, 2), ["evidence_review", "waiting_for_get_kinder"], "existing evidence is never hidden");
+      assert.deepEqual(currentOf(fileOf(pipeline, FILE.later)).slice(0, 2), ["evidence_extraction", "closed"], "explicit prohibited use remains closed after evidence exists");
+      assert.equal(fileOf(pipeline, FILE.later).reason, "allowed_use_not_allowed");
+      assert.ok(fileOf(pipeline, FILE.later).evidenceItemCount > 0, "historical evidence is still counted");
       results.step6 = "PASS: continuation, P2-01, P2-03, P2-04, both drafts 422 allowed_use_not_allowed; direct P1-07 refused; legacy candidate P1-08 422; zero writes; 0 model calls";
     });
 
@@ -1271,12 +1274,14 @@ async function runBrowserAcceptance() {
       assert.deepEqual(stateOf("rereview"), ["source_review", "waiting_for_client", "client", "promote_source"], "reviewed, open candidate");
       assert.deepEqual(stateOf("notAllowed"), ["source_review", "closed", "none", "none"], "reviewed not_allowed, closed");
       for (const key of ["ui", "hist", "later"]) {
-        // Promoted and past source preparation: at evidence review, or complete
-        // once its claim is usable internally (a72413e6).
+        // Promoted preparation is complete unless a later explicit permission
+        // prohibits use. Count records is independent of preparation stages.
         const promotedFile = fileOf(pipeline, FILE[key]);
-        assert.ok([null, "evidence_review", "impact_fact_review"].includes(promotedFile.currentStage), `${key}: promoted, past source preparation (${promotedFile.currentStage})`);
+        assert.equal(promotedFile.currentStage, key === "later" ? "evidence_extraction" : null, key);
+        if (key === "later") assert.equal(promotedFile.reason, "allowed_use_not_allowed");
         assert.equal(promotedFile.stages.find((stage) => stage.key === "source_review").status, "complete", `${key}: source review complete`);
-        assert.equal(await has(adminBPage, `[data-client-preparation-file="${FILE[key]}"]`), false, `${key} is not in Source preparation`);
+        assert.equal(await has(adminBPage, `[data-client-preparation-file="${FILE[key]}"]`), promotedFile.nextAction === "count_records",
+          `${key}: completed preparation stays listed only when Count records is available`);
       }
       // Pending stays reviewable as before; the unresolved, failed-policy, and other organization's files are not offered.
       assert.equal(await has(adminBPage, `[data-client-open-sensitivity-review="${FILE.pending}"]`), true, "pending review unchanged");

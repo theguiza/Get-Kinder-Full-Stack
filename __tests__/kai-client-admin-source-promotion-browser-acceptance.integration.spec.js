@@ -1185,7 +1185,10 @@ async function runBrowserAcceptance() {
         const evidence = await query("SELECT evidence_type FROM kai.evidence_items WHERE source_version_id = $1::uuid", [version.source_version_id]);
         assert.ok(evidence.length > 0 && evidence.every((row) => row.evidence_type === "dictionary_field_presence_fact"));
         assert.equal((await counts(ORG_X)).evidence_decisions, 0);
-        assert.equal((await counts(ORG_X)).claims, 0);
+        assert.equal((await query(`SELECT count(*)::int AS n FROM kai.claims c JOIN kai.evidence_items e
+          ON e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id
+          WHERE e.organization_id = $1::uuid AND e.source_version_id = $2::uuid`, [ORG_X, version.source_version_id]))[0].n, 0);
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND source_version_id = $2::uuid", [ORG_X, version.source_version_id]))[0].n, 0);
         assert.equal((await query("SELECT count(*)::int AS n FROM kai.claim_review_decisions WHERE organization_id = $1::uuid", [ORG_X]))[0].n, 0);
         const beforeNavigation = await counts(ORG_X);
         for (const page of [contributorPage, reviewerPage]) {
@@ -1218,8 +1221,47 @@ async function runBrowserAcceptance() {
         assert.equal(await adminPage.evaluate(`document.querySelectorAll('${status} tbody tr').length`), 8);
         assert.deepEqual(adminPage.exceptions, []);
         assert.deepEqual(await counts(ORG_X), beforeNavigation, "Count records and navigation do not create review decisions or findings");
+        // Complete the actual control's write journey without changing tabs,
+        // reloading, or pressing Refresh: every display must advance with it.
+        for (const [field, value] of [
+          ["countedUnit", "programme record"], ["unitLabel", "programme records"],
+          ["definitionText", "Each data row is one programme record."],
+          ["inclusionRule", "Every non-empty data row after the header."],
+          ["exclusionRule", "The header and empty rows."],
+        ]) {
+          assert.equal(await adminPage.evaluate(`(() => {
+            const el = document.querySelector('${measure} [data-client-source-measurement-field="${field}"]');
+            if (!el) return false;
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            return true;
+          })()`), true, field);
+        }
+        await adminPage.pointerClick(`${measure} [data-client-source-measurement-submit]`, "Record definition and count");
+        await adminPage.waitForText("Measurement: 2 source records");
+        await adminPage.idle();
+        const counted = fileOf(await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X)), intakeFileId);
+        assert.deepEqual(currentOf(counted), [null, "complete", "client", "propose_claims", "claim_proposal_ready"]);
+        assert.equal(await adminPage.evaluate(`document.querySelector('${row}')?.dataset.clientPreparationNext`), "propose_claims",
+          "recording refreshes the displayed file action without a reload");
+        const [measurement] = await query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND source_version_id = $2::uuid", [ORG_X, version.source_version_id]);
+        assert.equal(Number(measurement.measured_value), 2);
+        await adminPage.pointerClick(`${measure} [data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose the recorded finding");
+        await adminPage.waitForText("Claim: The promoted source has 2 source records");
+        await adminPage.idle();
+        const usable = fileOf(await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X)), intakeFileId);
+        assert.deepEqual(currentOf(usable), [null, "complete", "none", "none", "complete"]);
+        assert.equal(usable.reviewedImpactFactCount, 1);
+        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('${row}'))`), false,
+          "the completed source leaves Files that need a step without a reload");
+        const finishedText = await adminPage.evaluate(`document.querySelector('${status}').innerText`);
+        assert.match(finishedText, /Usable findings from this file are available/);
+        assert.doesNotMatch(finishedText, /nothing is counted|no proposed claims yet|Waiting for Get Kinder|Evidence review|Impact Fact review/);
+        assert.equal((await counts(ORG_X)).evidence_decisions, 0);
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.claim_review_decisions WHERE organization_id = $1::uuid", [ORG_X]))[0].n, 0);
+        assert.deepEqual(adminPage.exceptions, []);
       }
-      results.prepared_spreadsheets = "CSV and XLSX: eight complete stages, no quality decisions, role-safe guidance; file Count records and Take me to this step open correct current version with actual count 2";
+      results.prepared_spreadsheets = "CSV and XLSX: eight complete stages, no quality decisions, role-safe guidance; file Count records and Take me to this step open correct current version with actual count 2; record and proposal advance all file displays without reload or quality decisions";
     });
 
     console.log(`[client-admin-source-promotion-browser] results ${JSON.stringify(results)}`);

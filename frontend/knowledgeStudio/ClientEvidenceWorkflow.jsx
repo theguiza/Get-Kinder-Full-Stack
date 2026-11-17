@@ -251,7 +251,12 @@ export default function ClientEvidenceWorkflow({
   fileStepRequest = null,
 }) {
   const [refreshToken, setRefreshToken] = useState(0);
-  const refresh = () => setRefreshToken((value) => value + 1);
+  // A source/measurement/claim write changes the file's next permitted action
+  // as well as its libraries. Refresh both views of the same persisted state.
+  const refresh = () => {
+    setRefreshToken((value) => value + 1);
+    onPipelineRefresh?.();
+  };
   // Owner direction 2026-11-06: with a Project selected, Sources, Evidence and
   // Claims are that Project's working view (its own files plus evidence
   // explicitly reused in its drafts), filtered on the server before paging.

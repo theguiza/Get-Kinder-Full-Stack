@@ -1539,6 +1539,20 @@ async function runBrowserAcceptance() {
       assert.ok(preparedDocument.stages.every((stage) => stage.status === "complete"));
       assert.equal(preparedDocument.stages.length, 8);
       assert.equal((await query("SELECT count(*)::int AS n FROM kai.claims WHERE evidence_item_id = $1::uuid", [docEvidenceId]))[0].n, 0);
+      await openDataSources();
+      await adminPage.clickControl(`[data-pipeline-file="${fileId}"] [data-client-open-file-step]`);
+      await adminPage.idle();
+      const proposalControl = await adminPage.evaluate(`(() => {
+        const row = document.querySelector('[data-client-preparation-file="${fileId}"]');
+        const button = row?.querySelector('[data-client-use-for-impact]');
+        return { action: row?.dataset.clientPreparationNext, text: row?.innerText || "",
+          button: button?.innerText, enabled: Boolean(button && !button.disabled && button.offsetParent !== null) };
+      })()`);
+      assert.equal(proposalControl.action, "propose_claims");
+      assert.match(proposalControl.text, /File preparation complete/);
+      assert.equal(proposalControl.button, "Use for impact");
+      assert.equal(proposalControl.enabled, true, "document proposal is an actual available control after preparation");
+      assert.doesNotMatch(proposalControl.text, /Evidence review:|Impact Fact review:|Waiting for Get Kinder/);
       const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, docEvidenceId), {});
       created(proposed, "unprepared document claim");
       const docClaimId = proposed.body.data.claim.claim_id;

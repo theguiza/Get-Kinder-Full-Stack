@@ -195,7 +195,9 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   const pointOf = (selector, label = null) => evaluate(`(() => {
     const el = ${finder(selector, label)};
     if (!el || el.disabled || el.offsetParent === null || el.closest("[hidden]")) return null;
-    el.scrollIntoView({ block: "center", inline: "nearest" });
+    // Bootstrap may enable smooth scrolling. CDP must click at a settled
+    // position, rather than coordinates that move before mouseReleased.
+    el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
     const rect = el.getBoundingClientRect();
     const x = rect.x + Math.min(rect.width / 2, 20), y = rect.y + rect.height / 2;
     const target = document.elementFromPoint(x, y);
@@ -675,6 +677,9 @@ async function runBrowserAcceptance() {
         assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "navigation writes nothing");
         await adminPage.tab("Impact");
         await adminPage.idle();
+        // Returning to Impact revalidates file progress. Network quiet can
+        // precede React's confirmed-empty render; loading is correctly neutral.
+        await adminPage.waitFor(() => visible(adminPage, "[data-impact-empty-project]"), "confirmed empty Project after returning to Impact");
         assert.equal(await visible(adminPage, "[data-impact-empty-project]"), true);
         assert.ok((await layoutAudit(adminPage)).overflowX <= 1);
       }
