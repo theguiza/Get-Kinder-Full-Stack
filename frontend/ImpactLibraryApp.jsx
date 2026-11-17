@@ -1,3 +1,4 @@
+import ProjectReportingContext from "./projects/ProjectReportingContext.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx";
@@ -229,6 +230,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   // already resolved - not only the currently active one.
   const [organizationProfiles, setOrganizationProfiles] = useState({});
 
+  const [projectRevision, setProjectRevision] = useState(0);
   const [engagements, setEngagements] = useState([]);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [selectedEngagementId, setSelectedEngagementId] = useState("");
@@ -973,6 +975,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     sectionContent = (
       <ProjectsView
         key={selectedOrganizationId}
+        organizationId={selectedOrganizationId}
         engagements={engagements}
         engagementsLoaded={engagementsLoaded}
         selectedEngagementId={selectedEngagementId}
@@ -1004,6 +1007,10 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   }
 
   return (
+    <ProjectReportingContext.Provider value={{ canEdit: canManageProjects, revision: projectRevision, refresh: async () => {
+      await refetchEngagements(selectedOrganizationId, { preserveSelection: true });
+      setProjectRevision((revision) => revision + 1);
+    } }}>
     <ImpactLibraryShell
       activeSection={activeSection}
       onNavigate={(section) => {
@@ -1065,5 +1072,6 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       ) : null}
       {sectionContent}
     </ImpactLibraryShell>
+    </ProjectReportingContext.Provider>
   );
 }

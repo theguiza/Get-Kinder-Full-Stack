@@ -15,7 +15,7 @@ test("Projects consumes the same shared engagements list/selection ImpactLibrary
   assert.match(appSource, /import ProjectsView from "\.\/projects\/ProjectsView\.jsx";/);
   assert.match(
     appSource,
-    /<ProjectsView\s*\n\s*key=\{selectedOrganizationId\}\s*\n\s*engagements=\{engagements\}\s*\n\s*engagementsLoaded=\{engagementsLoaded\}\s*\n\s*selectedEngagementId=\{selectedEngagementId\}\s*\n\s*onSelectEngagement=\{setSelectedEngagementId\}/,
+    /<ProjectsView\s*\n\s*key=\{selectedOrganizationId\}\s*\n\s*organizationId=\{selectedOrganizationId\}\s*\n\s*engagements=\{engagements\}\s*\n\s*engagementsLoaded=\{engagementsLoaded\}\s*\n\s*selectedEngagementId=\{selectedEngagementId\}\s*\n\s*onSelectEngagement=\{setSelectedEngagementId\}/,
   );
   assert.doesNotMatch(projectsViewSource, /useEffect|getJson\(engagementsPath/);
 });
@@ -24,12 +24,12 @@ test("selecting a Project updates the same shared selectedEngagementId Knowledge
   assert.match(projectsViewSource, /onClick=\{\(\) => onSelectEngagement\(engagement\.engagement_id\)\}/);
 });
 
-test("Projects shows only real engagement fields - name/code, type, status - and never a fabricated reporting period", () => {
+test("Projects shows real engagement fields and the scoped KAI Project target period editor", () => {
   assert.match(projectsViewSource, /engagement\.engagement_code \|\| engagement\.engagement_id/);
   assert.match(projectsViewSource, /engagement\.engagement_type \|\| "Type not set"/);
   assert.match(projectsViewSource, /engagement\.engagement_status/);
   const renderedSource = projectsViewSource.replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.doesNotMatch(renderedSource, /reporting.?period|reportingPeriod/i);
+  assert.match(renderedSource, /<ProjectReportingPeriodEditor organizationId=\{organizationId\} engagementId=\{engagement.engagement_id\} canEdit=\{canCreate\}/);
 });
 
 test("+ New Project is wired to the real, newly-authorized create-engagement action - not a dead button", () => {

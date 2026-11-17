@@ -7,6 +7,7 @@ import * as D from "../Backend/kai/validators/kaiDerivedMeasurementValidators.js
 import { composeEvidenceSummaryMeasurementDisclosures, validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
 import { syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 import {
+  changeTabularField,
   EMPTY_CROSS_SOURCE_FORM,
   crossSourceActivityDetail,
   crossSourceExclusionText,
@@ -458,4 +459,54 @@ test("Package 2 client: the linked exclusion summary names every applied step; C
     blockers: [{ blocking_reason: "cross_source_value_not_listed", message: "value_99 is not a listed value of field_6.", required_fix: "Select the listed value that means a completed service." }] } };
   assert.equal(measurementFailureMessage(refused), "value_99 is not a listed value of field_6. Select the listed value that means a completed service.");
   assert.equal(measurementFailureMessage({ statusCode: 409, body: { ok: false, error: { message: "The source changed." } } }), "The source changed.");
+});
+
+
+test("field-local value_1 cannot survive category/population changes or count/rate mode changes", async () => {
+  const profile = await csvProfile();
+  const basis = D.describeTabularMeasurementOptions(profile, null);
+  const first = basis.fields.find((field) => field.field_key === "field_2");
+  const second = basis.fields.find((field) => field.field_key === "field_4");
+  assert.equal(first.values[0].value_key, "value_1");
+  assert.equal(second.values[0].value_key, "value_1");
+  assert.notEqual(first.values[0].label, second.values[0].label);
+  let form = { ...EMPTY_TABULAR_FORM, categoryFieldKey: first.field_key, categoryValueKey: "value_1" };
+  form = changeTabularField(form, "categoryFieldKey", second.field_key);
+  assert.equal(form.categoryValueKey, "");
+  assert.ok(tabularFormProblem(form, { tabular: basis }));
+  form = changeTabularField(form, "categoryValueKey", "value_1");
+  assert.equal(tabularFormProblem(form, { tabular: basis }), null);
+  assert.equal(derive(profile, tabularDefinitionBody(form)).measurement.definition.conditions[0].value_label, second.values[0].label);
+  form = changeTabularField(form, "operation", "rate");
+  assert.deepEqual(form, { ...EMPTY_TABULAR_FORM, operation: "rate" });
+  form = { ...form, categoryFieldKey: "field_2", categoryValueKey: "value_1", populationFieldKey: "field_4", populationValueKey: "value_1" };
+  form = changeTabularField(form, "populationFieldKey", "field_2");
+  assert.equal(form.populationValueKey, "");
+  assert.ok(tabularFormProblem(form, { tabular: basis }));
+  form = changeTabularField(form, "operation", "count");
+  assert.deepEqual(form, EMPTY_TABULAR_FORM);
+});
+
+test("period readiness distinguishes lineage, missing dates and invalid dates, whole-month precision and distinct-key limits", async () => {
+  const profile = await csvProfile();
+  const tabular = D.describeTabularMeasurementOptions(profile, null);
+  const form = { ...EMPTY_TABULAR_FORM, periodFieldKey: "field_3" };
+  for (const [status, expected] of [["source_project_unresolved", /cannot resolve/], ["not_recorded", /no recorded/], ["invalid", /incomplete or invalid/]]) {
+    assert.match(tabularFormProblem(form, { tabular, reporting_period_context: { status } }), expected);
+    assert.equal(tabularFormProblem(EMPTY_TABULAR_FORM, { tabular, reporting_period_context: { status } }), null, "no period needed for all-date counts");
+  }
+  assert.equal(tabularFormProblem(form, { tabular, reporting_period: PERIOD }), null);
+  assert.match(tabularFormProblem(form, { tabular, reporting_period: { start: "2025-04-02", end: "2026-03-31" } }), /calendar month/);
+  assert.match(tabularFormProblem({ ...form, identifierFieldKey: "field_1" }, { tabular, reporting_period: PERIOD }), /more than one month/);
+});
+
+
+test("ordinary numeric Excel cells are not ISO dates or a supported period-filter field", async () => {
+  const bytes = syntheticXlsxWorkbook({ sheets: [{ name: "Serials", rows: [["record_ref", "date_serial"], ["R01", 46053], ["R02", 46054]] }] });
+  const profile = await profileLocalTrustedFile({ extension: ".xlsx", declaredMime: SYNTHETIC_XLSX_MIME, byteSize: bytes.byteLength, bytes });
+  const options = D.describeTabularMeasurementOptions(profile, "sheet_1");
+  assert.equal(options.available, true);
+  assert.equal(options.fields.some((field) => field.role === "date"), false);
+  const result = derive(profile, { operation: "count", conditions: [{ kind: "period", field_key: "field_2", period_source: "engagement_reporting_period", scope: "within" }] }, "sheet_1");
+  assert.equal(result.blockers[0].blocking_reason, "tabular_field_role_not_proposed");
 });

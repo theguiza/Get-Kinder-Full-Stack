@@ -122,6 +122,7 @@ const PIPELINE_REASONS = Object.freeze([
   "no_supportable_statements",
   "claim_proposal_ready",
   "source_measurement_ready",
+  "worksheet_measurement_remaining",
   "not_currently_eligible",
   "source_not_promoted",
   "unknown",
@@ -419,9 +420,10 @@ function deriveFileStages(row, clientAuthority = NO_CLIENT_AUTHORITY) {
 // reviews and questions never manufacture an incomplete preparation stage.
 // All writes still enforce their own authority, lineage and permission rules.
 function nextEvidenceWork(row, usableFactCount, clientAuthority) {
-  if (usableFactCount > 0) return null;
+  const remainingWorksheets = count(row.unmeasured_worksheet_count) > 0;
+  if (usableFactCount > 0 && !remainingWorksheets) return null;
   const proposalReady = count(row.evidence_unclaimed_proposable_count) > 0;
-  const measurementReady = !proposalReady && count(row.claim_count) === 0
+  const measurementReady = !proposalReady && (count(row.claim_count) === 0 || remainingWorksheets)
     && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)
     && isCanonicalUuid(row.current_source_version_id);
   if (!proposalReady && !measurementReady) return null;
@@ -429,7 +431,7 @@ function nextEvidenceWork(row, usableFactCount, clientAuthority) {
   return {
     nextAction: authorized ? (proposalReady ? NEXT_ACTION.proposeClaims : NEXT_ACTION.countRecords)
       : NEXT_ACTION.askOrganizationAdministrator,
-    reason: authorized ? (proposalReady ? "claim_proposal_ready" : "source_measurement_ready")
+    reason: authorized ? (proposalReady ? "claim_proposal_ready" : remainingWorksheets && count(row.claim_count) > 0 ? "worksheet_measurement_remaining" : "source_measurement_ready")
       : "organization_administrator_action_ready",
     responsibleParty: RESPONSIBLE.client,
   };

@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION } from "../validators/kaiSourceMeasurementValidators.js";
 import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL, documentStatementsNoneFoundSql } from "../validators/kaiDocumentEvidenceValidators.js";
 
 /**
@@ -136,6 +137,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             -- the document-statement path can write it.
             dfc.current_profile_format,
             dfc.current_source_version_id,
+            COALESCE(ws.unmeasured_worksheet_count, 0)::int AS unmeasured_worksheet_count,
             ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
             -- Every current version's text was already read by this
             -- extractor method and held no complete statement (its audit).
@@ -265,6 +267,35 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
          HAVING count(v.source_version_id) > 0
        ) dfc ON true
+       LEFT JOIN LATERAL (
+         SELECT count(*) AS unmeasured_worksheet_count
+           FROM kai.source_versions v
+           JOIN kai.intake_source_candidates ic ON ic.organization_id = v.organization_id AND ic.intake_source_candidate_id = v.intake_source_candidate_id
+           JOIN kai.intake_file_profiles fp ON fp.organization_id = ic.organization_id AND fp.file_profile_id = ic.file_profile_id
+           CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(fp.profile->'sheets') = 'array' THEN fp.profile->'sheets' ELSE '[]'::jsonb END) sh
+          WHERE v.organization_id = files.organization_id AND v.source_version_id::text = dfc.current_source_version_id AND v.is_current = true
+            AND fp.profile->>'format' = 'xlsx'
+            AND sh->>'sheet_key' ~ '^sheet_[1-9][0-9]{0,3}$'
+            AND sh->'record_count_basis'->>'basis_version' = '${MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION}'
+            AND sh->'record_count_basis'->>'header_row_established' = 'true'
+            AND sh->'record_count_basis'->>'header_row_position' = '1'
+            AND sh->'record_count_basis' @> '{"formula_cell_count":0,"merged_range_count":0,"hidden_row_count":0,"hidden_column_count":0,"values_outside_header_columns_count":0,"unresolved_value_count":0}'::jsonb
+            AND jsonb_typeof(sh->'record_count_basis'->'data_record_count') = 'number'
+            AND sh->'record_count_basis'->>'data_record_count' ~ '^[0-9]+$'
+            AND jsonb_typeof(sh->'record_count_basis'->'blank_record_count') = 'number'
+            AND sh->'record_count_basis'->>'blank_record_count' ~ '^[0-9]+$'
+            AND jsonb_typeof(sh->'record_count_basis'->'duplicate_record_count') = 'number'
+            AND sh->'record_count_basis'->>'duplicate_record_count' ~ '^[0-9]+$'
+            AND sh->'record_count_basis'->'blank_record_count' <= sh->'record_count_basis'->'data_record_count'
+            AND sh->'record_count_basis'->'duplicate_record_count' <= sh->'record_count_basis'->'data_record_count'
+            AND NOT EXISTS (
+              SELECT 1 FROM kai.evidence_items ei
+              JOIN kai.source_locators sl ON sl.organization_id = ei.organization_id AND sl.source_locator_id = ei.source_locator_id AND sl.source_version_id = ei.source_version_id
+               WHERE ei.organization_id = v.organization_id AND ei.source_version_id = v.source_version_id
+                 AND ei.evidence_type IN ('source_record_count_measurement', 'source_derived_measurement')
+                 AND sl.coordinates->>'sheet_key' = sh->>'sheet_key'
+            )
+       ) ws ON true
        LEFT JOIN LATERAL (
          SELECT count(*) AS evidence_count,
                 count(*) FILTER (WHERE ei.evidence_review_status = 'needs_gk_review') AS evidence_needs_review_count,

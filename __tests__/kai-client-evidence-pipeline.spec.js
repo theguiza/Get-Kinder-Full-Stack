@@ -89,6 +89,7 @@ function row(n, overrides = {}) {
     evidence_needs_review_count: 0,
     evidence_reviewed_count: 0,
     evidence_unclaimed_proposable_count: 0,
+    unmeasured_worksheet_count: 0,
     claim_count: 0,
     claim_needs_review_count: 0,
     claim_ids: [],
@@ -1028,4 +1029,18 @@ test("an authorization or tenant refusal is shown with the server's client-safe 
   const permission = { statusCode: 422, body: { ok: false, error: { code: "validation_blocker", message: "Request failed KAI validation." },
     blockers: [{ message: "This source's current decision does not permit AI processing.", required_fix: "Record a review that permits AI processing." }] } };
   assert.equal(errorText(permission), "This source's current decision does not permit AI processing. Record a review that permits AI processing.");
+});
+
+
+test("a usable claim does not hide other unmeasured worksheets or create a preparation stage", async () => {
+  const rows = [row(1, { ...reviewed, current_profile_format: "xlsx", current_source_version_id: fileId(9),
+    claim_count: 1, claim_ids: [claimId(1)], unmeasured_worksheet_count: 2 })];
+  const { result } = await read(rows, { actor: boundAdminActor(), facts: [fact(1)] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const current = currentOf(result, 1);
+  assert.equal(current.stage, null);
+  assert.equal(current.status, "complete");
+  assert.equal(current.next, "count_records");
+  assert.equal(current.reason, "worksheet_measurement_remaining");
+  assert.match(JSON.stringify(projectClientEvidencePipeline(result.data, ENGAGEMENT)), /worksheet_measurement_remaining/);
 });

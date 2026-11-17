@@ -1,3 +1,5 @@
+import ProjectReportingPeriodEditor from "../projects/ProjectReportingPeriodEditor.jsx";
+import { projectPeriodProblem } from "../../shared/kaiProjectReportingPeriod.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
@@ -85,7 +87,7 @@ export function CrossSourceActivityDetail({ entry }) {
  * measurements (meaning, limitations, claim proposal). Nothing here reads a
  * record or calculates a number.
  */
-export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, linkableVersions, versionsById, earlierVersionIds = [], onReconciled }) {
+export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, linkableVersions, versionsById, earlierVersionIds = [], onReconciled, onPeriodSaved }) {
   const [form, setForm] = useState(EMPTY_CROSS_SOURCE_FORM);
   const [register, setRegister] = useState({ status: "idle", data: null, error: "" });
   const [job, setJob] = useState(null);
@@ -152,7 +154,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   const byRole = (list, role) => list.filter((field) => field.role === role);
   const statusValues = eventFields.find((field) => field.field_key === form.statusFieldKey)?.values || [];
   const groupFields = byRole(eventFields, "categorical").filter((field) => !field.vocabulary_withheld && (field.values || []).length > 0);
-  const problem = crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period) });
+  const problem = crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period), reportingPeriodContext: eventsBasis?.reporting_period_context });
 
   const durationCandidates = eventsBasis?.tabular?.available ? eventsBasis.tabular.duration_field_candidates || [] : [];
   const history = reconciliationHistory(jobs, sourceVersionId, earlierVersionIds);
@@ -278,8 +280,10 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
           <div className="text-muted" data-client-cross-source-period="">
             {eventsBasis?.reporting_period
               ? `Reporting period: ${eventsBasis.reporting_period.start} to ${eventsBasis.reporting_period.end} (the engagement's recorded period, applied by service date).`
-              : "This source's engagement has no recorded reporting period yet."}
+              : projectPeriodProblem(eventsBasis?.reporting_period_context)}
           </div>
+          {eventsBasis?.reporting_period_context?.engagement_id ? <ProjectReportingPeriodEditor organizationId={organizationId}
+            engagementId={eventsBasis.reporting_period_context.engagement_id} onSaved={onPeriodSaved} /> : null}
           {problem ? <div data-client-cross-source-problem="">{problem}</div> : null}
           <button type="submit" className="btn btn-sm btn-primary mt-1" disabled={Boolean(problem) || pending} data-client-cross-source-submit="">
             {pending ? "Requesting..." : "Reconcile and record"}

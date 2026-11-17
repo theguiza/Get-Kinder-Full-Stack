@@ -1,3 +1,4 @@
+import { projectPeriodProblem } from "../../shared/kaiProjectReportingPeriod.js";
 import { BASE_PATH } from "../impactEvidenceLibraryLogic.js";
 
 /**
@@ -55,8 +56,40 @@ export const EMPTY_INTERPRETATION_FORM = Object.freeze({
   evidenceBasis: "not_established",
 });
 
+/** Field-local value keys and calculation-specific instructions never carry across changes. */
+export function changeTabularField(current, key, value) {
+  if (key === "operation") return { ...EMPTY_TABULAR_FORM, operation: value === "rate" ? "rate" : "count" };
+  return { ...current, [key]: value,
+    ...(key === "categoryFieldKey" ? { categoryValueKey: "" } : {}),
+    ...(key === "populationFieldKey" ? { populationValueKey: "" } : {}),
+  };
+}
+
 /** Why the tabular form cannot be sent yet, or null. */
-export function tabularFormProblem(form) {
+export function tabularFormProblem(form, basis = null) {
+  if (!["count", "rate"].includes(form.operation)) return "Choose Count or Rate.";
+  if (basis) {
+    const fields = basis.tabular?.fields || [];
+    const field = (key, role) => fields.find((item) => item.field_key === key && item.role === role);
+    for (const [key, role] of [["categoryFieldKey", "categorical"], ["populationFieldKey", "categorical"], ["identifierFieldKey", "identifier"], ["periodFieldKey", "date"]]) {
+      if (form[key] && !field(form[key], role)) return "Choose a field listed for this worksheet and calculation.";
+    }
+    for (const [key, value] of [["categoryFieldKey", "categoryValueKey"], ["populationFieldKey", "populationValueKey"]]) {
+      if (form[value] && !field(form[key], "categorical")?.values?.some((entry) => entry.value_key === form[value])) return "Choose a listed value of the selected field.";
+    }
+    if (form.operation === "count" && form.periodFieldKey) {
+      const state = basis.reporting_period_context || (basis.reporting_period ? { status: "recorded", period: basis.reporting_period } : null);
+      const missing = projectPeriodProblem(state);
+      if (missing) return missing;
+      if (form.identifierFieldKey && !(basis.tabular.single_valued_in?.[form.identifierFieldKey] || []).includes(form.periodFieldKey)) return "Some selected identifiers occur in more than one month. KAI cannot count each key once within a period exactly. Count records or choose no period (all dates).";
+      const { start, end } = state.period;
+      const date = new Date(`${end}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + 1);
+      if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. The Project period must start on a month's first day and end on a month's last day. Choose no period (all dates) to measure without date filtering.";
+    }
+  }
+  if (form.operation === "rate" && (form.identifierFieldKey || form.periodFieldKey)) return "Rates use record populations without date filtering or distinct-key instructions. Choose the calculation again.";
+  if (form.operation === "count" && (form.populationFieldKey || form.populationValueKey)) return "Counts do not use a rate population. Choose the calculation again.";
   if (form.categoryFieldKey && !form.categoryValueKey) return "Choose the value the counted records have.";
   if (form.operation === "rate") {
     if (!form.categoryFieldKey) return "A rate needs the value its numerator records have.";
@@ -217,7 +250,7 @@ export const EMPTY_CROSS_SOURCE_FORM = Object.freeze({
 });
 
 /** Why the linkage form cannot be sent yet, or null. */
-export function crossSourceFormProblem(form, { reportingPeriodRecorded }) {
+export function crossSourceFormProblem(form, { reportingPeriodRecorded, reportingPeriodContext }) {
   if (!form.referenceSourceVersionId) return "Choose the participant register source version to link.";
   if (!form.eventIdentifierFieldKey) return "Choose the field that identifies each service event.";
   if (!form.participantIdentifierFieldKey) return "Choose the field that identifies the participant of each event.";
@@ -226,7 +259,7 @@ export function crossSourceFormProblem(form, { reportingPeriodRecorded }) {
   if (!form.dateFieldKey) return "Choose the service date field.";
   if (!form.registerParticipantFieldKey) return "Choose the register field holding the same participant identifier.";
   if (form.durationFieldKey && !form.durationConfirmed) return "Confirm that the duration column records each service's duration in minutes.";
-  if (!reportingPeriodRecorded) return "This source's engagement has no recorded reporting period yet.";
+  if (!reportingPeriodRecorded) return reportingPeriodContext ? projectPeriodProblem(reportingPeriodContext) : "This source's engagement has no recorded reporting period yet.";
   return null;
 }
 
@@ -257,7 +290,7 @@ const JOB_STATE_TEXT = Object.freeze({
   queued: "Queued: KAI will reconcile the two source versions shortly.",
   in_progress: "Reconciling the two source versions...",
   retry_scheduled: "A temporary problem interrupted the reconciliation; KAI will try again.",
-  succeeded: "Reconciled. The measurements below are recorded; their evidence still needs review.",
+  succeeded: "Reconciled. The measurements below are recorded; you can state their meaning and propose findings.",
   failed: "KAI could not reconcile these source versions.",
   exhausted: "KAI could not reach the source files after several attempts. Request it again later.",
 });

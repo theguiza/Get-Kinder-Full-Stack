@@ -576,6 +576,7 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
     available: true,
     record_count: basis.record_count,
     exact_duplicates: basis.exact_duplicates,
+    single_valued_in: basis.single_valued_in || {},
     // The profiler does not infer duration semantics. These field positions
     // are available for a person to identify as recorded minutes; no cell
     // values or inferred meaning are exposed here.

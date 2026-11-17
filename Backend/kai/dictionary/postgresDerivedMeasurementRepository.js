@@ -1,3 +1,4 @@
+import { projectReportingPeriodState, projectPeriodProblem } from "../../../shared/kaiProjectReportingPeriod.js";
 import { createHash } from "node:crypto";
 import {
   getScopedEvidenceItemByStatementFingerprint,
@@ -354,7 +355,7 @@ async function writeAudit(insertAuditEvent, tx, { operation, reasonCode, organiz
 
 async function readReportingPeriod(tx, { organizationId, sourceVersionId }) {
   const row = await getScopedSourceVersionEngagementReportingPeriod({ organizationId, sourceVersionId }, tx);
-  return row?.period_start && row?.period_end ? { start: row.period_start, end: row.period_end, engagementId: row.engagement_id } : null;
+  return projectReportingPeriodState({ engagementId: row?.engagement_id, start: row?.period_start, end: row?.period_end });
 }
 
 function measurementRecord(row) {
@@ -402,7 +403,9 @@ async function admitCrossSourceVersions(tx, { organizationId, primarySourceVersi
   if (!primary.ok) return primary;
   const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
   if (!reference.ok) return reference;
-  const reportingPeriod = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
+  const periodState = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
+  if (periodState.status !== "recorded") return { ok: false, failure: refusal("validation_blocker", periodState.status, projectPeriodProblem(periodState), "Resolve this source's Project reporting period before linking sources.") };
+  const reportingPeriod = periodState.period;
   const resolved = resolveCrossSourceReachMapping({
     eventsProfile: primary.fileProfileRow.profile, registerProfile: reference.fileProfileRow.profile, mapping, reportingPeriod,
   });
@@ -557,6 +560,7 @@ export function createPostgresDerivedMeasurementRepository({
           const current = (row.interpretation_id ?? null) === (row.current_interpretation_id ?? null);
           entry.evidence.push({
             evidence_item_id: row.evidence_item_id,
+            statement: labelsAdmitted ? row.evidence_statement : null,
             interpretation: row.interpretation_id
               ? { interpretation_id: row.interpretation_id, indicator_label: row.indicator_label, meaning_text: row.meaning_text, score_direction: row.score_direction, evidence_basis: row.evidence_basis }
               : null,
@@ -570,6 +574,7 @@ export function createPostgresDerivedMeasurementRepository({
           });
           recorded.set(row.source_derived_measurement_id, entry);
         }
+        const periodContext = await readReportingPeriod(tx, { organizationId, sourceVersionId });
         return success({
           sourceVersion: rowToSourceVersionRecord(sourceVersionRow),
           source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code, reviewed_source_type: sourceRow.reviewed_source_type },
@@ -580,7 +585,8 @@ export function createPostgresDerivedMeasurementRepository({
             file_profile_id: fileProfileRow.file_profile_id,
             profile_canonical_sha256: fileProfileRow.profile_canonical_sha256,
           },
-          reporting_period: await readReportingPeriod(tx, { organizationId, sourceVersionId }),
+          reporting_period_context: periodContext,
+          reporting_period: periodContext.period,
           paired: paired === null ? null : paired.ok
             ? { available: true, worksheet: paired.worksheet, measurements: paired.measurements.map((item) => (item.available
               ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts }
@@ -628,9 +634,12 @@ export function createPostgresDerivedMeasurementRepository({
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
         // The engagement's period is read only when the definition applies one.
-        const reportingPeriod = definition.conditions.some((condition) => condition.kind === "period")
-          ? await readReportingPeriod(tx, { organizationId, sourceVersionId })
-          : null;
+        const needsPeriod = definition.conditions.some((condition) => condition.kind === "period");
+        const periodState = needsPeriod ? await readReportingPeriod(tx, { organizationId, sourceVersionId }) : null;
+        if (needsPeriod && periodState.status !== "recorded") {
+          return refusal("validation_blocker", periodState.status, projectPeriodProblem(periodState), "Resolve this source's KAI Project period, or measure without a period.");
+        }
+        const reportingPeriod = periodState?.period ?? null;
         const derived = deriveTabularMeasurement(fileProfileRow.profile, worksheetKey, definition, { reportingPeriod });
         if (!derived.ok) return failure(derived.code, derived.blockers);
         const recorded = await recordMeasurements(tx, {

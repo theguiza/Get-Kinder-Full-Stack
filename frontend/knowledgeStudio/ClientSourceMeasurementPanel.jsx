@@ -164,6 +164,10 @@ export default function ClientSourceMeasurementPanel({
           ))}
         </div>
       ) : null}
+      {data && data.counts.measurable ? <div data-client-worksheet-measurement-state="">
+        {recorded ? "Raw count recorded for this worksheet." : "Profiled; raw Count records is available for this worksheet and has not been recorded."}
+        {" "}Its optional attested dates and inclusion/exclusion explanation are context; KAI does not apply them as row filters or change the KAI Project period.
+      </div> : null}
       {data && data.counts.measurable ? (
         <div className="small mb-2" data-client-source-measurement-counts="">
           {data.counts.worksheet ? (
@@ -266,7 +270,7 @@ export default function ClientSourceMeasurementPanel({
       ) : null}
       {/* Measurement MVP: field-value measurements of the same version (and selected worksheet). */}
       {worksheetOptions.length > 1 && !selectedWorksheetKey ? null : (
-        <ClientDerivedMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
+        <ClientDerivedMeasurementSection key={`${sourceVersionId}:${selectedWorksheetKey || ""}`} organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
           canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds} />
       )}
     </div>

@@ -2076,6 +2076,8 @@ router.post(
 let engagementContextServicePromise = null;
 async function getEngagementContextService() {
   if (
+    intakeServiceOverride?.getEngagementReportingPeriod ||
+    intakeServiceOverride?.updateEngagementReportingPeriod ||
     intakeServiceOverride?.listAuthorizedEngagements ||
     intakeServiceOverride?.updateEngagementRequirementTarget ||
     intakeServiceOverride?.classifyEngagementFunderRequirementsState
@@ -2508,6 +2510,25 @@ router.post(
     });
   },
 );
+
+for (const method of ["get", "patch"]) {
+  router[method]("/admin/organizations/:organizationId/engagements/:engagementId/reporting-period", async (req, res) => {
+    const { organizationId, engagementId } = req.params;
+    if (![organizationId, engagementId].every((id) => KAI_SPRINT2_P0_PATTERNS.uuid.test(id) && id === id.toLowerCase())) {
+      return sendKaiError(res, "validation_blocker");
+    }
+    const payload = requestPayload(req);
+    if (method === "patch" && (Object.keys(payload).sort().join(",") !== "end,expected_target_revision,start")) {
+      return sendKaiError(res, "validation_blocker");
+    }
+    return invokeService(res, async () => {
+      const service = await getEngagementContextService();
+      const input = { organizationId, engagementId, req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) } };
+      return method === "get" ? service.getEngagementReportingPeriod(input)
+        : service.updateEngagementReportingPeriod({ ...input, start: payload.start, end: payload.end, expectedTargetRevision: payload.expected_target_revision });
+    });
+  });
+}
 
 router.put("/admin/organizations/:organizationId/engagements/:engagementId/requirement-target", async (req, res) => {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";

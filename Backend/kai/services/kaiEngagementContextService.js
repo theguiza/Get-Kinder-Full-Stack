@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { projectReportingPeriodState } from "../../../shared/kaiProjectReportingPeriod.js";
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
@@ -192,6 +194,9 @@ function normalizeEngagementRequirementTarget(value = {}) {
     if (result.value !== null) target[key] = result.value;
   }
 
+  if (Boolean(target.reporting_period_start) !== Boolean(target.reporting_period_end)) {
+    return { ok: false, blockers: [validationBlocker("target_reporting_period_incomplete", "reporting_period_start", "Provide both reporting period dates, or neither.")] };
+  }
   if (target.reporting_period_start && target.reporting_period_end) {
     if (target.reporting_period_start > target.reporting_period_end) {
       return {
@@ -590,6 +595,80 @@ export async function updateEngagementRequirementTarget(input, dependencies = {}
     error: null,
   };
 }
+
+// A scoped operation: the existing requirement-target PUT still replaces the full target.
+// Compare the raw target under the row lock; preserve every other metadata key.
+function reportingPeriodDto(row) {
+  const raw = readProjectMetadata(row)[ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY] ?? {};
+  return {
+    ...projectReportingPeriodState({ engagementId: row.engagement_id, start: raw.reporting_period_start, end: raw.reporting_period_end }),
+    start: typeof raw.reporting_period_start === "string" ? raw.reporting_period_start : "",
+    end: typeof raw.reporting_period_end === "string" ? raw.reporting_period_end : "",
+    target_revision: createHash("sha256").update(JSON.stringify(canonicalObject(raw) ?? raw)).digest("hex"),
+  };
+}
+
+async function projectPeriodOperation(input, dependencies, writing) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  const allowed = new Set(["organizationId", "engagementId", "req", "actorContext", ...(writing ? ["start", "end", "expectedTargetRevision"] : [])]);
+  if (!isPlainObject(input) || Object.keys(input).some((key) => !allowed.has(key))
+    || !isNonEmptyString(input.organizationId) || !isNonEmptyString(input.engagementId)
+    || (!isPlainObject(input.req) && !isPlainObject(input.actorContext))) return buildKaiError("validation_blocker");
+  if (writing) {
+    const normalized = normalizeEngagementRequirementTarget({ reporting_period_start: input.start, reporting_period_end: input.end });
+    if (!normalized.ok || !normalized.target.reporting_period_start || !/^[a-f0-9]{64}$/.test(input.expectedTargetRevision ?? "")) {
+      return buildKaiError("validation_blocker", { blockers: normalized.blockers || [validationBlocker("target_reporting_period_incomplete", "reporting_period_start", "Provide both dates and the current target revision.")] });
+    }
+    input = { ...input, start: normalized.target.reporting_period_start, end: normalized.target.reporting_period_end };
+  }
+  const actor = await resolveAuthorizedHumanActor(input, writing ? UPDATE_ENGAGEMENT_TARGET_OPERATION : LIST_ENGAGEMENTS_OPERATION,
+    writing ? UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES : LIST_ENGAGEMENTS_ALLOWED_ROLES, dependencies);
+  if (!actor.ok) return actor;
+  const read = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+  const execute = async (tx) => {
+    const row = await read({ organizationId: input.organizationId, engagementId: input.engagementId, lockForUpdate: writing }, tx);
+    if (!row) return buildKaiError("not_found");
+    const tenant = validateTenantBoundaryConsistency({ expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId }, engagementRecord: row });
+    if (tenant.severity === "blocker") return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    if (!writing) return { ok: true, data: reportingPeriodDto(row), error: null };
+    if (reportingPeriodDto(row).target_revision !== input.expectedTargetRevision) {
+      return buildKaiError("conflict_current_state_changed", { blockers: [validationBlocker("project_target_changed", "engagement_requirement_target", "Reload the current Project period and retry your correction.")] });
+    }
+    const metadata = readProjectMetadata(row);
+    const updated = await (dependencies.updateEngagementProjectMetadata || updateEngagementProjectMetadata)({
+      organizationId: input.organizationId, engagementId: input.engagementId,
+      projectMetadata: { ...metadata, [ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY]: {
+        ...(isPlainObject(metadata[ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY]) ? metadata[ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY] : {}),
+        reporting_period_start: input.start, reporting_period_end: input.end,
+      } },
+    }, tx);
+    if (!updated) throw new Error("Locked Project disappeared during period update");
+    const audit = await (dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent)({
+      operation: UPDATE_ENGAGEMENT_TARGET_OPERATION, operation_type: UPDATE_ENGAGEMENT_TARGET_OPERATION,
+      reason_code: "engagement_reporting_period_updated", object_type: "other", target_object_type: "engagement",
+      object_id: input.engagementId, organization_id: input.organizationId, engagement_id: input.engagementId,
+      actor_type: actor.actorContext.actorType, actor_user_id: actor.actorContext.actorUserId,
+      created_by_service: "kaiEngagementContextService", metadata_only: true,
+    }, tx);
+    if (!audit?.ok) {
+      const error = new Error("Required Project period audit rejected");
+      error.kaiErrorCode = "audit_payload_rejected";
+      throw error;
+    }
+    // Reread persisted state inside the same transaction.
+    return { ok: true, data: reportingPeriodDto(await read({ organizationId: input.organizationId, engagementId: input.engagementId }, tx)), error: null };
+  };
+  try {
+    return writing ? await (dependencies.runInTransaction || withTransaction)(execute) : await execute(undefined);
+  } catch (error) {
+    if (error.kaiErrorCode) return buildKaiError(error.kaiErrorCode);
+    throw error;
+  }
+}
+
+export const getEngagementReportingPeriod = (input, dependencies = {}) => projectPeriodOperation(input, dependencies, false);
+export const updateEngagementReportingPeriod = (input, dependencies = {}) => projectPeriodOperation(input, dependencies, true);
 
 function isCreateEngagementInput(value) {
   const allowedKeys = new Set([

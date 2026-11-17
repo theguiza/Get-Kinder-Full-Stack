@@ -336,6 +336,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/engagements/:engagementId/project-details",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.
+    "/admin/organizations/:organizationId/engagements/:engagementId/reporting-period",
     "/admin/organizations/:organizationId/engagements/:engagementId/requirement-set-applicability-proposals",
     // KAI Package 2B: authorized human review/approval (2B-A) and governed
     // replacement (2B-B) of the current decision for one governed identity.
@@ -1488,4 +1489,26 @@ test("sendServiceResult leaves successful upload-url responses unchanged", () =>
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ok, true);
   assert.equal(res.body.data.upload_url, "https://storage.googleapis.com/signed");
+});
+
+
+test("Project period routes validate scoped bodies and delegate the authenticated identity and target revision", async () => {
+  const calls = [];
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    getEngagementReportingPeriod: async (input) => { calls.push(input); return { ok: true, data: { status: "not_recorded" }, error: null }; },
+    updateEngagementReportingPeriod: async (input) => { calls.push(input); return { ok: true, data: { status: "recorded" }, error: null }; },
+  });
+  try {
+    const path = "/admin/organizations/:organizationId/engagements/:engagementId/reporting-period";
+    const params = { organizationId: "11111111-2222-4333-8444-555555555555", engagementId: "22222222-3333-4444-8555-666666666666" };
+    const user = { id: 17, email: "synthetic@example.test" };
+    assert.equal((await invokeRoute(path, "get", { params, user })).statusCode, 200);
+    const body = { start: "2026-01-01", end: "2026-01-31", expected_target_revision: "a".repeat(64) };
+    assert.equal((await invokeRoute(path, "patch", { params, user, body })).statusCode, 200);
+    assert.equal(calls[1].expectedTargetRevision, body.expected_target_revision);
+    assert.equal(calls[1].req.user.id, 17);
+    assert.equal((await invokeRoute(path, "patch", { params, user, body: { ...body, target: {} } })).statusCode, 422);
+    assert.equal((await invokeRoute(path, "patch", { params, user, body: { start: body.start } })).statusCode, 422);
+    assert.equal(calls.length, 2);
+  } finally { restore(); }
 });

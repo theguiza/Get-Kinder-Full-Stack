@@ -6,6 +6,8 @@ import {
   classifyEngagementFunderRequirementsState,
   listAuthorizedEngagements,
   updateEngagementRequirementTarget,
+  getEngagementReportingPeriod,
+  updateEngagementReportingPeriod,
   __engagementContextServiceContract,
   __engagementContextServiceTestables,
 } from "../Backend/kai/services/kaiEngagementContextService.js";
@@ -726,4 +728,61 @@ test("classifier rejects an engagement resolved under another organization befor
   assert.equal(harness.calls.engagementReads.length, 1);
   assert.equal(harness.calls.authorityReads.length, 0);
   assert.equal(harness.calls.applicabilityReads.length, 0);
+});
+
+
+test("scoped Project period update preserves the complete raw target, rereads, locks, audits and refuses stale target edits", async () => {
+  let stored = { engagement_id: ENGAGEMENT_A, organization_id: ORG_A,
+    project_metadata: { use_case_type: "annual", untouched: { enabled: true }, engagement_requirement_target: { ...validTarget, future_controlled_key: "keep" } } };
+  const before = structuredClone(stored.project_metadata);
+  const harness = createHarness();
+  harness.dependencies.getEngagementForOrganization = async (input, tx) => { harness.calls.read.push({ input, tx }); return stored; };
+  harness.dependencies.updateEngagementProjectMetadata = async (input, tx) => { harness.calls.update.push({ input, tx }); stored = { ...stored, project_metadata: input.projectMetadata }; return stored; };
+  const context = { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: clientAdminActor };
+  const current = await getEngagementReportingPeriod(context, harness.dependencies);
+  assert.equal(current.data.status, "recorded");
+  const update = { ...context, start: "2024-02-01", end: "2024-02-29", expectedTargetRevision: current.data.target_revision };
+  const saved = await updateEngagementReportingPeriod(update, harness.dependencies);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.data.start, update.start);
+  assert.equal(harness.calls.read.at(-2).input.lockForUpdate, true);
+  assert.equal(harness.calls.read.length, 3, "read + locked read + persisted reread");
+  assert.equal(harness.calls.audit.length, 1);
+  assert.deepEqual(stored.project_metadata, { ...before, engagement_requirement_target: { ...before.engagement_requirement_target, reporting_period_start: update.start, reporting_period_end: update.end } });
+  const stale = await updateEngagementReportingPeriod(update, harness.dependencies);
+  assert.equal(stale.error.code, "conflict_current_state_changed");
+  assert.equal(harness.calls.update.length, 1);
+  const fresh = await getEngagementReportingPeriod(context, harness.dependencies);
+  stored.project_metadata.engagement_requirement_target.report_identity = "Concurrent report correction";
+  assert.equal((await updateEngagementReportingPeriod({ ...update, expectedTargetRevision: fresh.data.target_revision }, harness.dependencies)).error.code, "conflict_current_state_changed");
+  assert.equal(harness.calls.audit.length, 1);
+});
+
+test("both target replacement and scoped period writes reject incomplete, impossible and reversed dates; replacement semantics remain", async () => {
+  for (const dates of [{ reporting_period_start: "2026-01-01" }, { reporting_period_end: "2026-01-31" },
+    { reporting_period_start: "2026-02-29", reporting_period_end: "2026-03-31" },
+    { reporting_period_start: "2026-03-01", reporting_period_end: "2026-02-28" }]) {
+    const harness = createHarness();
+    const context = { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: clientAdminActor };
+    assert.equal((await updateEngagementRequirementTarget({ ...context, target: dates }, harness.dependencies)).ok, false);
+    assert.equal((await updateEngagementReportingPeriod({ ...context, start: dates.reporting_period_start, end: dates.reporting_period_end, expectedTargetRevision: "a".repeat(64) }, harness.dependencies)).ok, false);
+    assert.equal(harness.calls.update.length, 0);
+  }
+  const harness = createHarness({ initialMetadata: { engagement_requirement_target: validTarget, other: true } });
+  const replaced = await updateEngagementRequirementTarget({ organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: clientAdminActor, target: { report_identity: "Replacement" } }, harness.dependencies);
+  assert.deepEqual(replaced.data.requirement_target, { report_identity: "Replacement" });
+});
+
+test("scoped period correction refuses wrong roles and tenants and rolls back on audit refusal", async () => {
+  for (const actorContext of [crossOrganizationActor, { ...clientAdminActor, organizationMemberships: [{ organization_id: ORG_A, membership_status: "active", role_name: "client_reviewer" }] }]) {
+    const harness = createHarness();
+    const result = await updateEngagementReportingPeriod({ organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext, start: "2026-01-01", end: "2026-01-31", expectedTargetRevision: "a".repeat(64) }, harness.dependencies);
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(harness.calls.transactions, 0);
+  }
+  const harness = createHarness({ auditResult: { ok: false } });
+  const context = { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: clientAdminActor };
+  const read = await getEngagementReportingPeriod(context, harness.dependencies);
+  const result = await updateEngagementReportingPeriod({ ...context, start: "2026-01-01", end: "2026-01-31", expectedTargetRevision: read.data.target_revision }, harness.dependencies);
+  assert.equal(result.error.code, "audit_payload_rejected", "error thrown inside transaction for rollback");
 });

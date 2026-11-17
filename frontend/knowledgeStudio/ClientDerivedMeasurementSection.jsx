@@ -1,9 +1,12 @@
+import ProjectReportingPeriodEditor from "../projects/ProjectReportingPeriodEditor.jsx";
+import { projectPeriodProblem } from "../../shared/kaiProjectReportingPeriod.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
 import ClientCrossSourceMeasurementSection, { CrossSourceActivityDetail } from "./ClientCrossSourceMeasurementSection.jsx";
 import {
+  changeTabularField,
   EMPTY_INTERPRETATION_FORM,
   EMPTY_TABULAR_FORM,
   contributingSourcesCurrent,
@@ -24,13 +27,23 @@ import {
 } from "./clientDerivedMeasurementLogic.js";
 import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 
+const TABULAR_UNAVAILABLE_MESSAGES = Object.freeze({
+  table_not_established: "The profile does not establish one unambiguous table. Keep one table with a header for every column and upload it again as a new intake version.",
+  no_data_records: "This worksheet has no data records to measure.",
+  joint_aggregates_exceed_limit: "This table exceeds the field measurement aggregate limit. Use Count records, or upload a smaller table to measure field values.",
+  tabular_basis_not_committed: "This source was profiled without field measurement aggregates. Upload it again as a new intake version to measure field values.",
+});
 const ROLE_LABELS = Object.freeze({ identifier: "identifier", categorical: "category", date: "date" });
 
 function fieldLabel(field) {
   // A field whose values describe a person, a sensitive attribute or free text
   // keeps no labels in the profile, so it can be counted only as a whole.
   const withheld = field.vocabulary_withheld ? ", values withheld" : "";
-  return `Column ${field.column_position} (${field.field_key}, ${ROLE_LABELS[field.role] || field.role}${withheld})`;
+  const letter = (position) => position > 26 ? `${letter(Math.floor((position - 1) / 26))}${String.fromCharCode(65 + (position - 1) % 26)}` : String.fromCharCode(64 + position);
+  const detail = field.role === "identifier" ? `${field.identifier?.distinct_count ?? "unknown"} distinct keys`
+    : field.role === "date" ? `${field.date?.earliest_month || "unknown"} to ${field.date?.latest_month || "unknown"}`
+      : (field.values || []).slice(0, 3).map((value) => value.label).join(", ");
+  return `Column ${field.column_position} / ${letter(field.column_position)} (${field.field_key}, ${ROLE_LABELS[field.role] || field.role}${withheld}); ${field.present_count} present, ${field.blank_count} blank${detail ? `; ${detail}` : ""}`;
 }
 
 /**
@@ -67,6 +80,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     setClarifying(null);
     setNotice(null);
     load();
+    return () => { seqRef.current += 1; };
   }, [load]);
 
   const send = async (kind, path, body, success) => {
@@ -92,7 +106,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const fields = data?.tabular?.available ? data.tabular.fields : [];
   const byRole = (role) => fields.filter((field) => field.role === role);
   const valuesOf = (fieldKey) => fields.find((field) => field.field_key === fieldKey)?.values || [];
-  const problem = tabularFormProblem(form);
+  const problem = tabularFormProblem(form, data);
   const recordTabular = (event) => {
     event.preventDefault();
     if (problem) return;
@@ -111,7 +125,14 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       .then((ok) => { if (ok) { setClarifying(null); setClarifyForm(EMPTY_INTERPRETATION_FORM); } });
   };
 
-  const setField = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
+  const setField = (key) => (event) => {
+    const value = event.target.value;
+    setForm((current) => changeTabularField(current, key, value));
+    if (key === "operation") {
+      setMeaning(EMPTY_INTERPRETATION_FORM);
+      setNotice({ kind: "warning", text: "Calculation changed. Choose its fields and values again. Count filters and rate populations are not carried over." });
+    }
+  };
   const select = (key, options, placeholder, extra = {}) => (
     <select className="form-select form-select-sm" value={form[key]} onChange={setField(key)} data-client-derived-field={key} {...extra}>
       <option value="">{placeholder}</option>
@@ -140,7 +161,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 : `${item.outcome_field_key || "A field"}: ${item.blockers?.[0]?.message || "cannot be measured."}`}
             </div>
           ))}
-          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending)} data-client-derived-record-paired=""
+          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={Boolean(pending) || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
             onClick={() => send("paired", pairedOutcomeMeasurementsPath(organizationId, sourceVersionId, worksheetKey || null), {},
               (recorded) => `${recorded.measurements.length} proposed results kept as evidence.`)}>
             {pending === "paired" ? "Keeping..." : "Keep these results as evidence"}
@@ -148,6 +169,12 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         </div>
       ) : null}
 
+      {data?.paired && !data.paired.available ? (
+        <div data-client-derived-paired-unavailable="">Paired outcome unavailable: {data.paired.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ")}</div>
+      ) : null}
+      {data?.tabular && !data.tabular.available ? (
+        <div data-client-derived-tabular-unavailable="">Field measurement unavailable: {data.tabular.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ") || TABULAR_UNAVAILABLE_MESSAGES[data.tabular.reason] || "The committed profile has no supported field measurements. Use Count records if available."}</div>
+      ) : null}
       {data?.tabular?.available ? (
         <form className="mb-2" onSubmit={recordTabular} data-client-derived-tabular-form="">
           <div className="fw-semibold">Define a count or rate</div>
@@ -207,11 +234,14 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
               ) : null}
             </div>
           )}
-          {form.periodFieldKey && !data.reporting_period ? (
-            <div className="text-warning" data-client-derived-no-period="">This source's engagement has no recorded reporting period yet.</div>
-          ) : null}
-          {form.periodFieldKey && data.reporting_period ? (
-            <div className="text-muted">Engagement reporting period: {data.reporting_period.start} to {data.reporting_period.end}.</div>
+          {form.operation === "count" && form.periodFieldKey ? (
+            <div data-client-derived-period-context="">
+              {!data.reporting_period ? <div className="text-warning" data-client-derived-no-period="">{projectPeriodProblem(data.reporting_period_context)}</div>
+                : <div> KAI Project reporting period: {data.reporting_period.start} to {data.reporting_period.end}.</div>}
+              <div>Choose “no period (all dates)” above for a supported count without date filtering. Your field selections will remain.</div>
+              {data.reporting_period_context?.engagement_id ? <ProjectReportingPeriodEditor organizationId={organizationId}
+                engagementId={data.reporting_period_context.engagement_id} onSaved={load} /> : null}
+            </div>
           ) : null}
           <div className="d-flex flex-wrap gap-2 mt-1">
             <label>
@@ -242,14 +272,10 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       ) : null}
       {data?.tabular?.available && !data.tabular.sheetKey ? (
         <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data}
-          linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
+          onPeriodSaved={load} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
-      {data?.tabular && !data.tabular.available ? (
-        <div className="text-muted mb-2" data-client-derived-tabular-unavailable="">
-          {data.tabular.blockers?.[0]?.message || "KAI kept no field values it can measure for this source version. Upload it again as a new intake version to measure field values."}
-        </div>
-      ) : null}
+
 
       {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
         const current = currentEvidenceOf(recorded);
@@ -284,6 +310,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             {current?.interpretation
               ? <div data-client-derived-meaning-state="stated">Meaning stated by your organization: {current.interpretation.indicator_label}. {current.interpretation.meaning_text}</div>
               : <div data-client-derived-meaning-state="proposed">Meaning proposed, not stated by your organization.</div>}
+            {current?.statement ? <div data-client-derived-evidence-statement="">{current.statement}</div> : null}
             {current ? (
               <ul className="mb-1">
                 {current.limitations.map((entry) => <li key={entry.code} data-client-derived-limitation={entry.code}>{entry.description}</li>)}

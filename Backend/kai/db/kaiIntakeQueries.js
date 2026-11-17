@@ -1513,6 +1513,7 @@ export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizatio
 
 const DERIVED_MEASUREMENT_ROW_COLUMNS = `
             l.evidence_item_id::text AS evidence_item_id,
+            ei.statement AS evidence_statement,
             l.organization_id::text AS organization_id,
             l.source_version_id::text AS source_version_id,
             l.interpretation_id::text AS interpretation_id,
@@ -1553,6 +1554,7 @@ const DERIVED_MEASUREMENT_ROW_COLUMNS = `
 
 const DERIVED_MEASUREMENT_ROW_FROM = `
        FROM kai.evidence_derived_measurements l
+       JOIN kai.evidence_items ei ON ei.organization_id = l.organization_id AND ei.evidence_item_id = l.evidence_item_id AND ei.source_version_id = l.source_version_id
        JOIN kai.source_derived_measurements m
          ON m.organization_id = l.organization_id
         AND m.source_derived_measurement_id = l.source_derived_measurement_id
@@ -1660,12 +1662,9 @@ export async function listScopedDerivedMeasurementRowsBySourceVersion({ organiza
   return rows;
 }
 
-/**
- * The reporting period recorded on the engagement a promoted source version
- * was uploaded to (its intake file's engagement), tenant-scoped, or null.
- * The intake file's engagement is read through to_jsonb so an installation
- * whose intake_files has no engagement_id column answers "no period" rather
- * than failing. Read-only.
+/** The source's tenant-scoped intake Project, including an unresolved lineage result.
+ * The file's recorded Project and its batch must agree. On older supported
+ * shapes without a file Project column, the batch supplies the association.
  */
 export async function getScopedSourceVersionEngagementReportingPeriod({ organizationId, sourceVersionId }, db = pool) {
   const { rows } = await db.query(
@@ -1673,15 +1672,19 @@ export async function getScopedSourceVersionEngagementReportingPeriod({ organiza
             e.project_metadata->'engagement_requirement_target'->>'reporting_period_start' AS period_start,
             e.project_metadata->'engagement_requirement_target'->>'reporting_period_end' AS period_end
        FROM kai.source_versions sv
-       JOIN kai.intake_source_candidates c
+       LEFT JOIN kai.intake_source_candidates c
          ON c.organization_id = sv.organization_id
         AND c.intake_source_candidate_id = sv.intake_source_candidate_id
-       JOIN kai.intake_files f
+       LEFT JOIN kai.intake_files f
          ON f.organization_id = c.organization_id
         AND f.intake_file_id = c.intake_file_id
-       JOIN kai.engagements e
-         ON e.organization_id = f.organization_id
-        AND e.engagement_id::text = to_jsonb(f)->>'engagement_id'
+       LEFT JOIN kai.intake_batches b
+         ON b.organization_id = f.organization_id
+        AND b.intake_batch_id = f.intake_batch_id
+       LEFT JOIN kai.engagements e
+         ON e.organization_id = b.organization_id
+        AND e.engagement_id = b.engagement_id
+        AND (to_jsonb(f)->>'engagement_id' IS NULL OR e.engagement_id::text = to_jsonb(f)->>'engagement_id')
       WHERE sv.organization_id = $1::uuid
         AND sv.source_version_id = $2::uuid`,
     [organizationId, sourceVersionId],

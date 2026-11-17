@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import ProjectReportingPeriodEditor from "./ProjectReportingPeriodEditor.jsx";
 import ProjectCreatedDialog from "./ProjectCreatedDialog.jsx";
 
 const COLORS = Object.freeze({
@@ -19,8 +20,7 @@ const COLORS = Object.freeze({
  *
  * Only real engagement fields are shown (engagement_code as the Project
  * name, engagement_type as its type, use_case_type, engagement_status/
- * project_status). No "reporting period" is shown - kai.engagements has no
- * such column today; inventing one was avoided rather than fabricated.
+ * project_status), plus the reporting period in controlled Project target metadata.
  *
  * "+ New Project" is wired to the real, newly-authorized create-engagement
  * capability (Package F) - never a dead button - and is offered only when
@@ -28,6 +28,7 @@ const COLORS = Object.freeze({
  * member can view and select Projects.
  */
 export default function ProjectsView({
+  organizationId,
   engagements,
   engagementsLoaded,
   selectedEngagementId,
@@ -182,6 +183,7 @@ export default function ProjectsView({
                   {engagement.engagement_status ? ` • ${engagement.engagement_status}` : ""}
                 </div>
               </div>
+              <ProjectReportingPeriodEditor organizationId={organizationId} engagementId={engagement.engagement_id} canEdit={canCreate} />
               {active ? (
                 <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.coral }}>Active</span>
               ) : null}

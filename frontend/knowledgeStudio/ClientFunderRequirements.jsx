@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import ProjectReportingContext from "../projects/ProjectReportingContext.js";
+import React, { useContext, useEffect, useState } from "react";
 
 import {
   clientFollowupReviewHref,
@@ -39,6 +40,7 @@ function targetSummary(target) {
  * capability.
  */
 export default function ClientFunderRequirements({ organizationId, engagementId, canReviewFollowups = false }) {
+  const { revision } = useContext(ProjectReportingContext);
   const [state, setState] = useState({ key: "", status: "idle", data: null });
   const key = organizationId && engagementId ? `${organizationId}:${engagementId}` : "";
 
@@ -58,7 +60,7 @@ export default function ClientFunderRequirements({ organizationId, engagementId,
     return () => {
       cancelled = true;
     };
-  }, [key, organizationId, engagementId]);
+  }, [key, organizationId, engagementId, revision]);
 
   const current = state.key === key ? state : { status: key ? "loading" : "idle", data: null };
   const data = current.data;
