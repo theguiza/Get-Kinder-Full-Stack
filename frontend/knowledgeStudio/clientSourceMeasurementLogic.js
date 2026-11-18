@@ -24,7 +24,7 @@ export const RECORD_COUNT_SCOPE_NOTE = "Count records counts every non-blank dat
   + "rules or a reporting period, does not remove duplicates and does not link another source, so its result is not a count of "
   + "completed contacts or of distinct people. To count completed service events in the Project's reporting period that are "
   + "linked to a participant register, and the distinct people they reached, use \"Link to a participant register\" under "
-  + "Measure field values (a CSV service-event source linked to a CSV participant register).";
+  + "Measure field values (CSV files or workbook worksheets, including two worksheets of the same workbook).";
 
 const isCount = (value) => Number.isInteger(value) && value >= 0;
 const isText = (value) => typeof value === "string";

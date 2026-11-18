@@ -219,6 +219,7 @@ export function derivePersistablePairedOutcomes(profile, worksheetKey, { pairing
       outcome_field_key: entry.outcomeFieldKey,
       outcome_column: entry.outcomeColumn,
       participant_field_key: entry.participantFieldKey,
+      ...(entry.matchingUnit === "household" ? { matching_unit: "household" } : {}),
       stage_field_key: entry.stageFieldKey,
       instrument_version_field_key: entry.instrumentVersionFieldKey ?? null,
     });
@@ -1552,11 +1553,12 @@ function pairedBody(row, interpretation) {
     : interpretation?.score_direction === "lower_is_better"
       ? "the organization states lower is better"
       : "whether higher is better is not established";
-  const rule = definition.instrument_version_field_key ? "the same participant and instrument version" : "the same participant (no instrument version recorded)";
+  const unit = definition.matching_unit === "household" ? "household" : "participant";
+  const rule = definition.instrument_version_field_key ? `the same ${unit} and instrument version` : `the same ${unit} (no instrument version recorded)`;
   return `numeric outcome ${definition.outcome_field_key} (column ${definition.outcome_column}), ${where(row)}, baseline to follow-up, no reporting period: `
-    + `${row.numerator} of ${row.denominator} comparable participant pairs (${row.percentage}%) have a numerically higher follow-up value, `
+    + `${row.numerator} of ${row.denominator} comparable ${unit} pairs (${row.percentage}%) have a numerically higher follow-up value, `
     + `${counts.unchanged_count} the same, ${counts.decreased_count} lower; ${direction}. `
-    + `Pairs need ${rule}; ${counts.excluded_participant_count} of ${counts.participant_count} participants excluded as not comparable.`;
+    + `Pairs need ${rule}; ${counts.excluded_participant_count} of ${counts.participant_count} ${unit}s excluded as not comparable.`;
 }
 
 function tabularCountBody(row) {

@@ -4201,6 +4201,77 @@ async function runXlsxAcceptance() {
     });
 
 
+    await test("W: original Willow Quay household surveys recover on the existing old-profile version, display real outcomes first, and reach a saved report", {
+      skip: !process.env.KAI_WILLOW_QUAY_PACKAGE ? "set KAI_WILLOW_QUAY_PACKAGE to the original synthetic package" : false,
+    }, async () => {
+      const originalPath = join(process.env.KAI_WILLOW_QUAY_PACKAGE, "01_UPLOAD_TO_KAI/04_Surveys_Referrals_and_Targets.xlsx");
+      const file = customerFile("04_surveys_referrals_and_targets.xlsx", readFileSync(originalPath));
+      // The earlier revision's own profiler establishes the production failure,
+      // without hand-editing a committed profile or changing the source bytes.
+      const fileId = await apiUpload(preExactAdmin, file, ids.batchId);
+      await preExactDispatcher.whenIdle();
+      const promoted = await decideAndPromote(adminApi, fileId);
+      const sv = promoted.source_version_id;
+      const originalProfile = await profileRowOf(promoted.file_profile_id);
+      assert.deepEqual(originalProfile.profile.sheets.map((sheet) => sheet.record_count_basis.data_record_count), [121, 49, 6]);
+      assert.deepEqual([originalProfile.profile.sheets[0].paired_outcome_basis.status, originalProfile.profile.sheets[0].paired_outcome_basis.reason], ["no_candidate", "participant_identifier_not_found"]);
+      const approvalBefore = await approvalState();
+      const rowsOf = async () => (await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n;
+      assert.equal(await rowsOf(), 0);
+      const read = await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"));
+      assert.equal(read.status, 200, J(read.body));
+      assert.equal(read.body.data.paired.available, true, J(read.body.data.paired));
+      assert.deepEqual(read.body.data.paired.measurements.map((m) => [m.numerator, m.denominator, m.percentage]), [[32, 43, "74.42"], [31, 41, "75.61"]]);
+      assert.deepEqual(read.body.data.paired.measurements.map((m) => m.source_heading_suggestion.suggested_label), ["Food planning confidence (1-5)", "Affordable meal confidence (1-5)"]);
+      const { createPostgresSourceMeasurementRepository } = await import("../Backend/kai/dictionary/postgresSourceMeasurementRepository.js");
+      const sourceOnlyRead = await createPostgresSourceMeasurementRepository().readPairedOutcomeMeasurementBasis({ organizationId: ORG_X, sourceVersionId: sv, worksheetKey: "sheet_1" });
+      assert.equal(sourceOnlyRead.data.paired.measurable, true, J(sourceOnlyRead));
+      assert.equal(await rowsOf(), 0, "opening results records no evidence or approvals");
+      assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile, "recovery never rewrites the committed profile or checksum binding");
+      await openCountRecords(sv);
+      const panel = countRecordsPanelFor(sv);
+      await panel.selectWorksheet("sheet_1");
+      const section = `[data-client-derived-measurements="${sv}"]`;
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-paired]`))?.includes("32 of 43 comparable pairs (74.42%)"), "the existing source calculates without renaming columns, re-uploading or defining a metric");
+      assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /31 of 41 comparable pairs \(75.61%\)/);
+      assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /Food planning confidence \(1-5\)/);
+      assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /do not apply the Project reporting period/);
+      assert.equal(await adminPage.evaluate(`(() => {
+        const results = document.querySelector(${J(`${section} [data-client-derived-paired]`)});
+        const raw = document.querySelector(${J(`[data-client-source-measurement="${sv}"] [data-client-source-measurement-field]`)});
+        return Boolean(results && raw && (results.compareDocumentPosition(raw) & Node.DOCUMENT_POSITION_FOLLOWING));
+      })()`), true, "calculated outcomes precede the raw-count administration form");
+      const mark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Keep calculated results");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("2 proposed results kept as evidence"), "two calculated outcomes saved without entering a meaning");
+      const request = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/paired-outcome-measurements"));
+      assert.deepEqual(JSON.parse(request.postData), {}, "no manually configured count, mapping, meaning or score direction");
+      const saved = await query(`SELECT m.source_derived_measurement_id::text AS id, m.definition, m.numerator::int, m.denominator::int, m.percentage::text,
+        e.evidence_item_id::text AS evidence_id, e.statement FROM kai.source_derived_measurements m
+        JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id)
+        JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id
+        WHERE m.source_version_id = $1::uuid ORDER BY m.definition->>'outcome_field_key'`, [sv]);
+      assert.deepEqual(saved.map((m) => [m.numerator, m.denominator, m.percentage]), [[32, 43, "74.42"], [31, 41, "75.61"]]);
+      const claimIds = [];
+      for (const m of saved) {
+        assert.equal(m.definition.matching_unit, "household");
+        assert.match(m.statement, /comparable household pairs/);
+        assert.doesNotMatch(m.statement, /participant pairs|people|caused|improved/);
+        const proposed = await adminApi("POST", claimProposalPath(ORG_X, m.evidence_id), {});
+        assert.equal(proposed.status, 200, J(proposed.body));
+        claimIds.push(proposed.body.data.claim.claim_id);
+      }
+      const { shown, draft } = await createMeasuredReportInUi(claimIds);
+      for (const m of saved) assert.ok(shown.includes(m.statement), "the saved/downloaded report retains the exact calculated finding");
+      assert.ok(shown.includes(sv));
+      assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile);
+      assert.deepEqual(await approvalState(), approvalBefore, "the complete journey requires zero evidence-quality approval decisions");
+      const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, sv, "sheet_1"), {});
+      assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 2]);
+      assert.equal((await adminYApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 403);
+      results.householdSurveyRecovery = { sv, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false };
+    });
+
     await test("summary", async () => {
       results.story = ids.story && {
         initialBlockers: ids.story.initialBlockers, generationRefusal: ids.story.generationRefusal, reviewed: ids.story.reviewed, report: ids.story.report,

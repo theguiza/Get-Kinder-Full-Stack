@@ -216,6 +216,7 @@ function worksheetFor(profile, selectedWorksheetKey) {
 }
 
 const BASIS_STATUS_REFUSALS = Object.freeze({
+  verified_workbook_unavailable: "KAI could not recalculate the survey from this version's verified workbook. The saved source and existing results are unchanged; retry Refresh measurements.",
   worksheet_table_not_established: "The worksheet is not one table with a header row, so its observations cannot be paired.",
   participant_identifier_not_found: "KAI found no field that identifies the same participant across observations.",
   baseline_followup_stage_not_found: "KAI found no field that marks observations as baseline or follow-up.",
@@ -286,9 +287,11 @@ export function composePairedOutcomeEvidenceStatement(measurement) {
     : measurement.scoreDirection === "lower_is_better"
       ? `${down} of ${denominator} comparable participant pairs${rateText} improved to a lower follow-up score, the organization defining lower as better; ${same} unchanged and ${up} higher`
       : `${up} of ${denominator} comparable participant pairs${rateText} have a numerically higher follow-up value, ${same} the same and ${down} lower; whether higher is better is not established`;
-  const rule = measurement.instrumentVersionFieldKey ? "the same participant and instrument version" : "the same participant (no instrument version recorded)";
-  return `${subject}, baseline to follow-up in worksheet ${measurement.sheetKey} ${periodPhrase(measurement)}: ${change}. `
-    + `Each pair needs ${rule}; ${measurement.excludedParticipantCount} of ${measurement.participantCount} participants are excluded as not comparable.`;
+  const unit = measurement.matchingUnit === "household" ? "household" : "participant";
+  const rule = measurement.instrumentVersionFieldKey ? `the same ${unit} and instrument version` : `the same ${unit} (no instrument version recorded)`;
+  const statementChange = unit === "household" ? change.replaceAll("participant pairs", "household pairs") : change;
+  return `${subject}, baseline to follow-up in worksheet ${measurement.sheetKey} ${periodPhrase(measurement)}: ${statementChange}. `
+    + `Each pair needs ${rule}; ${measurement.excludedParticipantCount} of ${measurement.participantCount} ${unit}s are excluded as not comparable.`;
 }
 
 function limitationCodes({ entry, definition, humanSelectedRoles, instrumentVersionFieldKey }) {
@@ -327,6 +330,7 @@ function buildMeasurement({ entry, sheet, alternative, definition, humanSelected
     outcomeFieldKey: entry.outcome_field_key,
     outcomeColumn: column,
     participantFieldKey: alternative.participant_field_key,
+    matchingUnit: alternative.matching_unit === "household" ? "household" : "participant",
     stageFieldKey: alternative.stage_field_key,
     instrumentVersionFieldKey: alternative.instrument_version_field_key,
     comparabilityRule: alternative.comparability_rule,
@@ -412,7 +416,9 @@ export function derivePairedOutcomeMeasurements(profile, selectedWorksheetKey = 
     return refuse(
       `paired_outcome_${basis.reason ?? "not_available"}`,
       BASIS_STATUS_REFUSALS[basis.reason] ?? "This worksheet has no paired outcome measurement.",
-      "Select the worksheet whose rows are baseline and follow-up observations of the same participants.",
+      basis.reason === "verified_workbook_unavailable"
+        ? "Retry Refresh measurements. If the retained upload is unavailable, its exact bytes must be restored before this calculation can run."
+        : "Select the worksheet whose rows are baseline and follow-up observations of the same participants.",
     );
   }
   const byField = new Map();

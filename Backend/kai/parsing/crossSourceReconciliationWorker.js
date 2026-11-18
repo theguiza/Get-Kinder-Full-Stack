@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { getScopedIntakeFileParserProfileEligibilityFacts, lockKaiP1EligibleIntakeFileForShare } from "../db/kaiIntakeQueries.js";
-import { readTrustedCsvRecords, readTrustedWorksheetRecords } from "../profiling/localProfilingKernel.js";
+import { profileLocalTrustedFile, readTrustedCsvRecords, readTrustedWorksheetRecords } from "../profiling/localProfilingKernel.js";
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
 
@@ -22,6 +22,9 @@ import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./cross
  * transaction: `reconcile` returns only the counts and source row numbers of
  * reconcileLinkedReach. The caller supplies identities and the validated
  * mapping, never bytes, facts or a storage path.
+ * A failed earlier survey discovery can also be recalculated on demand for
+ * one admitted workbook. This uses the same bounded parser and exact-version
+ * checks, returns aggregates only and never rewrites the committed profile.
  */
 function refusal(reason) {
   return { ok: false, reason };
@@ -39,7 +42,7 @@ export function createCrossSourceReconciliationWorker({
   readEligibilityFacts = getScopedIntakeFileParserProfileEligibilityFacts,
   lockEligibleIntakeFile = lockKaiP1EligibleIntakeFileForShare,
 } = {}) {
-  async function readRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {
+  async function readVerifiedUpload(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {
     if (!(await lockEligibleIntakeFile({ organizationId, intakeFileId, verifiedChecksum: checksum }, tx))) {
       return refusal("cross_source_upload_not_eligible");
     }
@@ -75,6 +78,14 @@ export function createCrossSourceReconciliationWorker({
     // Bytes that are not the profiled version are never reconciled or retried.
     if (sha256(bytes) !== checksum) return refusal("cross_source_checksum_mismatch");
     const trusted = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    return { ok: true, trusted, facts };
+  }
+
+  async function readRecords(tx, input) {
+    const read = await readVerifiedUpload(tx, input);
+    if (!read.ok) return read;
+    const { trusted, facts } = read;
+    const worksheetKey = input.worksheetKey ?? null;
     const records = facts.file_extension === ".xlsx"
       ? await readTrustedWorksheetRecords({ bytes: trusted, sheetKey: worksheetKey, declaredMime: facts.mime_type })
       : readTrustedCsvRecords({ bytes: trusted, declaredMime: facts.mime_type });
@@ -83,6 +94,21 @@ export function createCrossSourceReconciliationWorker({
   }
 
   return Object.freeze({
+    // Repair an earlier failed discovery from the SAME verified upload. Only
+    // aggregate pairing counts/locators leave this worker; no profile is rewritten.
+    async readPairedOutcomeBasis(tx, input) {
+      const read = await readVerifiedUpload(tx, input);
+      if (!read.ok) return read;
+      if (read.facts.file_extension !== ".xlsx") return refusal("paired_outcome_source_not_workbook");
+      const profile = await profileLocalTrustedFile({
+        extension: ".xlsx", declaredMime: read.facts.mime_type,
+        byteSize: read.trusted.byteLength, bytes: read.trusted,
+      });
+      const sheet = input.worksheetKey == null && profile.sheets?.length === 1
+        ? profile.sheets[0] : profile.sheets?.find((item) => item.sheet_key === input.worksheetKey);
+      if (!sheet?.paired_outcome_basis) return refusal("paired_outcome_worksheet_not_readable");
+      return { ok: true, sheetKey: sheet.sheet_key, basis: sheet.paired_outcome_basis, recordCountBasis: sheet.record_count_basis };
+    },
     // One version's verified records, for a calculation in this same worker transaction.
     async readSourceRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {
       return readRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey });

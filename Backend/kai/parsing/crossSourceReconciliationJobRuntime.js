@@ -107,15 +107,24 @@ export async function processCrossSourceReconciliationJob({ organizationId, reco
 
 // The measurement repository with the reconciliation worker, composed from the
 // P1 parser-reader dependencies only (the one composition that may read bytes).
-async function createDefaultCrossSourceRepository() {
-  const [{ createPostgresDerivedMeasurementRepository }, { createCrossSourceReconciliationWorker }, { getKaiIntakeParserReadDependencies }] = await Promise.all([
-    import("../dictionary/postgresDerivedMeasurementRepository.js"),
+async function createDefaultCrossSourceWorker() {
+  const [{ createCrossSourceReconciliationWorker }, { getKaiIntakeParserReadDependencies }] = await Promise.all([
     import("./crossSourceReconciliationWorker.js"),
     import("../services/kaiIntakeRuntimeService.js"),
   ]);
-  return createPostgresDerivedMeasurementRepository({
-    crossSourceReconciliationWorker: createCrossSourceReconciliationWorker(getKaiIntakeParserReadDependencies()),
-  });
+  return createCrossSourceReconciliationWorker(getKaiIntakeParserReadDependencies());
+}
+
+// The normal measurement loader has already admitted this source/actor. A
+// failed legacy discovery can be recalculated on demand without re-uploading
+// or mutating its committed profile. The worker retains all byte-read checks.
+export async function readCurrentPairedOutcomeBasis(tx, input) {
+  return (await createDefaultCrossSourceWorker()).readPairedOutcomeBasis(tx, input);
+}
+
+async function createDefaultCrossSourceRepository() {
+  const { createPostgresDerivedMeasurementRepository } = await import("../dictionary/postgresDerivedMeasurementRepository.js");
+  return createPostgresDerivedMeasurementRepository({ crossSourceReconciliationWorker: await createDefaultCrossSourceWorker() });
 }
 
 /** The sweep: every due job (queued, retry due, lease expired), one attempt each. */

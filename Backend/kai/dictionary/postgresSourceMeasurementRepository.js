@@ -1,3 +1,4 @@
+import { profileWithCurrentPairedBasis } from "./pairedOutcomeBasisRecovery.js";
 import { createHash } from "node:crypto";
 import {
   getScopedSourceVersionById,
@@ -426,7 +427,8 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
     // Read-only (Measurement MVP): the paired baseline/follow-up measurements
     // of one worksheet of the exact promoted, current, permitted version,
     // derived from its committed profile under the same loader as the record
-    // count, with any person's definitions applied. Writes nothing; a
+    // count. An earlier failed discovery is retried from the exact verified
+    // workbook by the parser worker. Any person's definitions are applied. A
     // definition given here is applied to this answer and is not recorded.
     async readPairedOutcomeMeasurementBasis({ organizationId, sourceVersionId, worksheetKey = null, definitions = [] }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
@@ -437,7 +439,8 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           });
           if (!measurable.ok) return measurable.failure;
           const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
-          const derived = derivePairedOutcomeMeasurements(fileProfileRow.profile, worksheetKey, { definitions });
+          const profile = await profileWithCurrentPairedBasis(tx, { organizationId, fileProfileRow, worksheetKey });
+          const derived = derivePairedOutcomeMeasurements(profile, worksheetKey, { definitions });
           // A definition the caller sent that cannot apply is the caller's
           // error; a worksheet with nothing to pair is an answer.
           if (!derived.ok && derived.blockers.some((item) => item.object_type === "paired_outcome_definition")) {

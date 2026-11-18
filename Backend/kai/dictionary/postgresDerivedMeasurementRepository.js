@@ -9,6 +9,7 @@ import {
 } from "../db/kaiIntakeQueries.js";
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { committedOutcomeHeadingSuggestion } from "../profiling/outcomeHeadingSuggestion.js";
+import { profileWithCurrentPairedBasis } from "./pairedOutcomeBasisRecovery.js";
 import { __evidenceLineageRepositorySharedWrites } from "./postgresEvidenceLineageRepository.js";
 import { __sourceMeasurementRepositoryShared } from "./postgresSourceMeasurementRepository.js";
 import {
@@ -561,7 +562,7 @@ export function createPostgresDerivedMeasurementRepository({
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_READ_OPERATION });
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
-        const profile = fileProfileRow.profile;
+        const profile = await profileWithCurrentPairedBasis(tx, { organizationId, fileProfileRow, worksheetKey, worker: crossSourceReconciliationWorker });
         const paired = profile?.format === "xlsx" ? derivePersistablePairedOutcomes(profile, worksheetKey) : null;
         const tabular = describeTabularMeasurementOptions(profile, worksheetKey);
         const rows = await listScopedDerivedMeasurementRowsBySourceVersion({ organizationId, sourceVersionId }, tx);
@@ -647,7 +648,8 @@ export function createPostgresDerivedMeasurementRepository({
           period_month_coverage: periodContext.period ? describePeriodMonthCoverage(profile, worksheetKey, periodContext.period) : null,
           paired: paired === null ? null : paired.ok
             ? { available: true, worksheet: paired.worksheet, measurements: paired.measurements.map((item) => (item.available
-              ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts }
+              ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts,
+                source_heading_suggestion: committedOutcomeHeadingSuggestion(profile, { worksheetKey: item.sheetKey, outcomeFieldKey: item.definition.outcome_field_key }) }
               : { available: false, outcome_field_key: item.outcomeFieldKey, blockers: item.blockers })) }
             : { available: false, blockers: paired.blockers, proposed_pairings: paired.proposedPairings || [] },
           tabular: tabular.ok ? tabular : { available: false, blockers: tabular.blockers },
@@ -668,7 +670,8 @@ export function createPostgresDerivedMeasurementRepository({
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
-        const derived = derivePersistablePairedOutcomes(fileProfileRow.profile, worksheetKey, { pairing });
+        const profile = await profileWithCurrentPairedBasis(tx, { organizationId, fileProfileRow, worksheetKey, worker: crossSourceReconciliationWorker });
+        const derived = derivePersistablePairedOutcomes(profile, worksheetKey, { pairing });
         if (!derived.ok) return failure(derived.code, derived.blockers);
         const available = derived.measurements.filter((item) => item.available);
         if (available.length === 0) {

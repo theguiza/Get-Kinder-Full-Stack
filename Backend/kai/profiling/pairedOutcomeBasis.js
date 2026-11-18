@@ -27,6 +27,7 @@
 import { summarizeOutcomeHeadingSuggestions } from "./outcomeHeadingSuggestion.js";
 
 export const PAIRED_OUTCOME_BASIS_VERSION = "kai_xlsx_paired_outcome_basis_v1";
+export const PAIRED_OUTCOME_DISCOVERY_VERSION = 2;
 export const PAIRED_OUTCOME_CALCULATION_METHOD = "p1_xlsx_paired_baseline_followup_numeric_change_v1";
 export const MAX_PAIRED_OUTCOME_LOCATOR_ROWS = 1000;
 const MAX_ROLE_ALTERNATIVES = 8;
@@ -52,11 +53,11 @@ export const PAIRED_OUTCOME_ROW_EXCLUSION_REASONS = Object.freeze([
 
 const PERSON_TOKENS = new Set([
   "participant", "client", "person", "member", "student", "learner", "respondent", "individual",
-  "customer", "patient", "attendee", "youth", "beneficiary",
+  "customer", "patient", "attendee", "youth", "beneficiary", "household",
 ]);
 const IDENTIFIER_TOKENS = new Set(["id", "identifier", "code", "number", "no", "ref", "reference", "key"]);
 const VERSION_TOKENS = new Set(["version", "ver"]);
-const SCORE_TOKENS = new Set(["score", "scores", "rating", "rated", "scale", "index", "points", "level"]);
+const SCORE_TOKENS = new Set(["score", "scores", "rating", "rated", "scale", "index", "points", "level", "confidence"]);
 const BASELINE_STAGE_VALUES = new Set(["baseline", "base", "pre", "pretest", "preassessment", "presurvey", "intake", "entry", "initial"]);
 const FOLLOWUP_STAGE_VALUES = new Set(["followup", "post", "posttest", "postassessment", "postsurvey", "exit", "final"]);
 const NUMBER_RE = /^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/i;
@@ -120,7 +121,7 @@ function sortedRows(rows) {
 }
 
 function notAssessed(status, reason, candidates = null) {
-  return Object.freeze({ basis_version: PAIRED_OUTCOME_BASIS_VERSION, status, reason, candidates, alternatives: Object.freeze([]) });
+  return Object.freeze({ basis_version: PAIRED_OUTCOME_BASIS_VERSION, discovery_version: PAIRED_OUTCOME_DISCOVERY_VERSION, status, reason, candidates, alternatives: Object.freeze([]) });
 }
 
 function tableIsEstablished(basis) {
@@ -300,6 +301,7 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
         const grouped = groupObservations(records, { participant: participantPosition, stage: stagePosition, version: versionPosition }, columnCount);
         alternatives.push(Object.freeze({
           participant_field_key: fieldKey(participantPosition),
+          ...(headers.find((header) => header.position === participantPosition)?.tokens.includes("household") ? { matching_unit: "household" } : {}),
           stage_field_key: fieldKey(stagePosition),
           instrument_version_field_key: versionPosition === null ? null : fieldKey(versionPosition),
           comparability_rule: versionPosition === null ? "same_participant_instrument_version_not_recorded" : "same_participant_same_instrument_version",
@@ -316,6 +318,7 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
   }
   return Object.freeze({
     basis_version: PAIRED_OUTCOME_BASIS_VERSION,
+    discovery_version: PAIRED_OUTCOME_DISCOVERY_VERSION,
     status: alternatives.length === 1 ? "proposed" : "role_selection_required",
     reason: null,
     candidates,

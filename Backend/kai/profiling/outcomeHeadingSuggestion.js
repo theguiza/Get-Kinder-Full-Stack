@@ -78,7 +78,7 @@ const DESCRIPTION_WORDS = new Set([
   "activity", "fitness", "exercise", "functioning", "optimism", "hopefulness", "satisfaction", "quality", "life",
   "substance", "use", "recovery", "sobriety", "harm", "reduction", "symptom", "symptoms", "severity",
   // Housing, food and money.
-  "housing", "tenancy", "stability", "stable", "homelessness", "food", "security", "insecurity", "nutrition",
+  "housing", "tenancy", "stability", "stable", "homelessness", "food", "security", "insecurity", "nutrition", "planning", "affordable", "meal",
   "income", "financial", "finances", "adequacy", "budgeting", "savings", "money", "debt", "poverty",
   // Social connection, family and community.
   "social", "connection", "connectedness", "isolation", "loneliness", "belonging", "community", "engagement",
@@ -161,7 +161,7 @@ export function suggestOutcomeHeading(heading) {
   if (words.some((word) => REFUSED_WORDS.has(word))) return null;
   if (words.some((word) => !DESCRIPTION_WORDS.has(word) && !SCORE_WORDS.has(word) && !CONNECTOR_WORDS.has(word))) return null;
   if (words.some((word) => !CONNECTOR_WORDS.has(word) && (word.length < 2 || word.length > 24))) return null;
-  if (!words.some((word) => SCORE_WORDS.has(word))) return null;
+  if (!words.some((word) => SCORE_WORDS.has(word)) && !words.includes("confidence")) return null;
   if (!words.some((word) => !SCORE_WORDS.has(word) && !CONNECTOR_WORDS.has(word))) return null;
   if (CONNECTOR_WORDS.has(words[0])) return null;
   const text = `${words[0][0].toUpperCase()}${words[0].slice(1)}${words.length > 1 ? ` ${words.slice(1).join(" ")}` : ""}${rangeText}`;

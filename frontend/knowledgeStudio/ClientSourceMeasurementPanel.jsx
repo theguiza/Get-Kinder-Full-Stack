@@ -124,7 +124,7 @@ export default function ClientSourceMeasurementPanel({
   return (
     <div className="border rounded p-2 mt-2" data-client-source-measurement={sourceVersionId}>
       <div className="d-flex align-items-center mb-2">
-        <h6 className="mb-0">Count the records in this source</h6>
+        <h6 className="mb-0">Measurements from this source</h6>
         <button type="button" className="btn btn-sm btn-link ms-auto" onClick={onClose}>Close</button>
       </div>
       {view.status === "loading" ? <div className="text-muted small" data-client-source-measurement-loading={selectedWorksheetKey}>Loading the source's counts...</div> : null}
@@ -133,7 +133,7 @@ export default function ClientSourceMeasurementPanel({
       {worksheetOptions.length > 1 ? (
         <div className="small mb-2" data-client-source-measurement-worksheet-selector="">
           <label className="d-block mb-1">
-            Worksheet to count
+            Worksheet to measure
             <select className="form-select form-select-sm" value={selectedWorksheetKey} data-client-source-measurement-worksheet-select=""
               onChange={(event) => selectWorksheet(event.target.value)}>
               <option value="">Choose one worksheet</option>
@@ -164,6 +164,11 @@ export default function ClientSourceMeasurementPanel({
           ))}
         </div>
       ) : null}
+      {/* Measurement MVP: field-value measurements of the same version (and selected worksheet). */}
+      {worksheetOptions.length > 1 && !selectedWorksheetKey ? null : (
+        <ClientDerivedMeasurementSection key={`${sourceVersionId}:${selectedWorksheetKey || ""}`} organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
+          canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds} />
+      )}
       {data && data.counts.measurable ? <div data-client-worksheet-measurement-state="">
         {recorded ? "Raw count recorded for this worksheet." : "Profiled; raw Count records is available for this worksheet and has not been recorded."}
         {" "}Its optional attested dates and inclusion/exclusion explanation are context; KAI does not apply them as row filters or change the KAI Project period.
@@ -268,11 +273,6 @@ export default function ClientSourceMeasurementPanel({
           </button>
         </form>
       ) : null}
-      {/* Measurement MVP: field-value measurements of the same version (and selected worksheet). */}
-      {worksheetOptions.length > 1 && !selectedWorksheetKey ? null : (
-        <ClientDerivedMeasurementSection key={`${sourceVersionId}:${selectedWorksheetKey || ""}`} organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
-          canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds} />
-      )}
     </div>
   );
 }

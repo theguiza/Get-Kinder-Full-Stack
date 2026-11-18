@@ -234,8 +234,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     <div className="border-top pt-2 mt-2 small" data-client-derived-measurements={sourceVersionId}>
       <h6 className="mb-1">Measure field values</h6>
       <div className="text-muted mb-1">
-        KAI calculates these from the values its profile kept for this source version. A result is kept without any meaning; what it
-        represents is your organization's statement, and stating it never changes the numbers.
+        KAI calculates the numbers from this source. You can save calculated results without entering a definition.
+        An optional description explains what they mean; it does not change the calculation.
       </div>
       {["loading", "refreshing"].includes(basis.status) ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
       {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
@@ -247,12 +247,15 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
 
       {data?.paired?.available ? (
         <div className="mb-2" data-client-derived-paired="">
-          <div className="fw-semibold">Proposed baseline/follow-up results</div>
+          <div className="fw-semibold">Calculated baseline/follow-up results</div>
+          <div className="text-muted">These comparisons use all survey dates. They do not apply the Project reporting period.</div>
           {data.paired.measurements.map((item) => (
             <div key={item.outcome_field_key} data-client-derived-paired-field={item.outcome_field_key}>
+              {item.source_heading_suggestion ? <div className="fw-semibold" data-client-derived-preview-heading="">{item.source_heading_suggestion.suggested_label} <span className="fw-normal text-muted">(from the column heading)</span></div> : null}
               {item.available
                 ? `Numeric outcome ${item.outcome_field_key} (column ${item.outcome_column}): ${item.numerator} of ${item.denominator} comparable pairs (${item.percentage}%) have a numerically higher follow-up value; whether higher is better is not established.`
                 : `${item.outcome_field_key || "A field"}: ${item.blockers?.[0]?.message || "cannot be measured."}`}
+              {item.available ? <div className="text-muted">{item.component_counts.unchanged_count} unchanged; {item.component_counts.decreased_count} lower; {item.component_counts.excluded_participant_count} excluded because their observations cannot be compared. No user-entered definition is needed to calculate these numbers.</div> : null}
             </div>
           ))}
           <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={basis.status !== "success" || Boolean(pending) || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
