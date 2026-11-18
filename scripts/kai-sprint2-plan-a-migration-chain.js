@@ -103,6 +103,7 @@ export const MIGRATION_CHAIN = [
   "kai_sprint2_document_statement_evidence",
   "kai_sprint2_measurement_calculation_completion",
   "kai_sprint2_measurement_targets",
+  "kai_sprint2_source_planned_targets",
 ];
 
 export const PRODUCTION_HISTORY_ONLY = new Map([
