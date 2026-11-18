@@ -29,6 +29,11 @@ import {
   describeTabularMeasurementOptions,
   describePeriodMonthCoverage,
   SCHEMA_ADMITTED_DERIVED_METHODS,
+  calculateTabularMeasurementFromRecords,
+  composeMeasurementTargetComparison,
+  validateMeasurementTargetInput,
+  resolveTabularDefinitionForSourceRecords,
+  validateTabularMeasurementDefinition,
   derivedMeasurementLabelsAdmitted,
   withholdDerivedMeasurementLabels,
   resolveCrossSourceReachMapping,
@@ -56,6 +61,7 @@ const {
 
 export const DERIVED_MEASUREMENT_RECORD_OPERATION = "record_source_derived_measurement";
 export const DERIVED_MEASUREMENT_INTERPRETATION_OPERATION = "record_source_derived_measurement_interpretation";
+export const MEASUREMENT_TARGET_OPERATION = "record_measurement_target";
 const DERIVED_MEASUREMENT_READ_OPERATION = "read_source_derived_measurement_basis";
 
 const MEASUREMENT_COLUMNS = `
@@ -364,16 +370,47 @@ function measurementRecord(row) {
   return { ...row, created_at: asIso(row.created_at) };
 }
 
+const TARGET_COLUMNS = `
+  measurement_target_id::text AS measurement_target_id, engagement_id::text AS engagement_id, source_id::text AS source_id,
+  worksheet_key, measurement_key, measurement_family, target_unit, target_value::text AS target_value, comparison,
+  set_on_measurement_id::text AS set_on_measurement_id, supersedes_target_id::text AS supersedes_target_id, created_at`;
+
+// The current (not superseded) targets of one source on one Project.
+async function readCurrentTargets(tx, { organizationId, engagementId, sourceId, lock = false }) {
+  const { rows } = await tx.query(
+    `SELECT ${TARGET_COLUMNS} FROM kai.measurement_targets t
+      WHERE t.organization_id = $1::uuid AND t.engagement_id = $2::uuid AND t.source_id = $3::uuid
+        AND NOT EXISTS (SELECT 1 FROM kai.measurement_targets n WHERE n.organization_id = t.organization_id AND n.supersedes_target_id = t.measurement_target_id)
+      ORDER BY t.created_at${lock ? " FOR UPDATE" : ""}`,
+    [organizationId, engagementId, sourceId],
+  );
+  return rows.map((row) => ({ ...row, created_at: asIso(row.created_at) }));
+}
+
+// A stored numeric(14,2) target ("40.00") and a validated one ("40", "75.50") compared exactly, in hundredths.
+function sameTargetValue(stored, validated) {
+  const hundredths = (value) => {
+    const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value ?? ""));
+    return match ? BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0") || "0") : null;
+  };
+  const a = hundredths(stored);
+  return a !== null && a === hundredths(validated);
+}
+
+function targetFor(targets, row) {
+  return targets.find((target) => target.measurement_key === row.measurement_key && (target.worksheet_key ?? null) === (row.worksheet_key ?? null)) ?? null;
+}
+
 const CONTRIBUTING_SOURCE_COLUMNS = `
-  source_version_id::text AS source_version_id, source_role, profile_canonical_sha256, field_keys`;
+  source_version_id::text AS source_version_id, source_role, profile_canonical_sha256, field_keys, worksheet_key`;
 
 async function insertContributingSourceIfAbsent(tx, { organizationId, measurementId, source }) {
   await tx.query(
     `INSERT INTO kai.source_derived_measurement_sources (
-       source_derived_measurement_id, organization_id, source_version_id, source_role, profile_canonical_sha256, field_keys
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)
+       source_derived_measurement_id, organization_id, source_version_id, source_role, profile_canonical_sha256, field_keys, worksheet_key
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7)
      ON CONFLICT DO NOTHING`,
-    [measurementId, organizationId, source.sourceVersionId, source.role, source.profileCanonicalSha256, JSON.stringify(source.fieldKeys)],
+    [measurementId, organizationId, source.sourceVersionId, source.role, source.profileCanonicalSha256, JSON.stringify(source.fieldKeys), source.worksheetKey ?? null],
   );
 }
 
@@ -394,22 +431,24 @@ function sameContributingSources(rows, sources) {
   return rows.length === expected.length && rows.every((row, index) => row.source_version_id === expected[index].sourceVersionId
     && row.source_role === expected[index].role
     && row.profile_canonical_sha256 === expected[index].profileCanonicalSha256
+    && (row.worksheet_key ?? null) === (expected[index].worksheetKey ?? null)
     && canonicalJson(row.field_keys) === canonicalJson(expected[index].fieldKeys));
 }
 
 // Maps a reconciliation worker refusal to the shared blocker shape.
 // Both cross-source versions through the shared loader, and the person's
 // mapping resolved against both committed profiles and the recorded period.
-async function admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping }) {
-  const primary = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: primarySourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+async function admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, primaryWorksheetKey = null, referenceWorksheetKey = null }) {
+  const primary = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: primarySourceVersionId, worksheetKey: primaryWorksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
   if (!primary.ok) return primary;
-  const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+  const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, worksheetKey: referenceWorksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
   if (!reference.ok) return reference;
   const periodState = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
   if (periodState.status !== "recorded") return { ok: false, failure: refusal("validation_blocker", periodState.status, projectPeriodProblem(periodState), "Resolve this source's Project reporting period before linking sources.") };
   const reportingPeriod = periodState.period;
   const resolved = resolveCrossSourceReachMapping({
     eventsProfile: primary.fileProfileRow.profile, registerProfile: reference.fileProfileRow.profile, mapping, reportingPeriod,
+    eventsWorksheetKey: primaryWorksheetKey, registerWorksheetKey: referenceWorksheetKey, sameVersion: primarySourceVersionId === referenceSourceVersionId,
   });
   if (!resolved.ok) return { ok: false, failure: failure(resolved.code, resolved.blockers) };
   return { ok: true, primary, reference, resolved };
@@ -418,7 +457,7 @@ async function admitCrossSourceVersions(tx, { organizationId, primarySourceVersi
 const WORKER_REFUSALS = Object.freeze({
   cross_source_upload_not_eligible: ["A linked source's upload is no longer a confirmed, passed upload of the profiled file.", "Upload the file again as a new intake version."],
   cross_source_bytes_unavailable: ["KAI could not read a linked source version's verified bytes.", "Try again; if it persists, upload the file again as a new intake version."],
-  cross_source_csv_not_readable: ["A linked source version could not be read as the CSV table KAI profiled.", "Upload the file again as a new intake version."],
+  cross_source_csv_not_readable: ["A source version could not be read as the table KAI profiled.", "Upload the file again as a new intake version."],
   cross_source_checksum_mismatch: ["A linked source version's stored bytes do not match the file KAI profiled.", "Upload the file again as a new intake version."],
   cross_source_duration_precision_unsupported: ["A duration value exceeds the supported numeric precision.", "Correct the source value and upload a new source version."],
 });
@@ -581,6 +620,16 @@ export function createPostgresDerivedMeasurementRepository({
           recorded.set(row.source_derived_measurement_id, entry);
         }
         const periodContext = await readReportingPeriod(tx, { organizationId, sourceVersionId });
+        // The organization's planned targets for these measurements on this Project, compared with each recorded actual.
+        const targets = periodContext.engagement_id
+          ? await readCurrentTargets(tx, { organizationId, engagementId: periodContext.engagement_id, sourceId: sourceRow.source_id })
+          : [];
+        for (const entry of recorded.values()) {
+          const row = rows.find((candidate) => candidate.source_derived_measurement_id === entry.source_derived_measurement_id);
+          const target = row ? targetFor(targets, row) : null;
+          entry.target = target ? { measurement_target_id: target.measurement_target_id, target_unit: target.target_unit, target_value: target.target_value, comparison: target.comparison } : null;
+          entry.target_comparison = target ? composeMeasurementTargetComparison({ measurementRow: row, target }) : null;
+        }
         return success({
           sourceVersion: rowToSourceVersionRecord(sourceVersionRow),
           source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code, reviewed_source_type: sourceRow.reviewed_source_type },
@@ -602,6 +651,10 @@ export function createPostgresDerivedMeasurementRepository({
               : { available: false, outcome_field_key: item.outcomeFieldKey, blockers: item.blockers })) }
             : { available: false, blockers: paired.blockers, proposed_pairings: paired.proposedPairings || [] },
           tabular: tabular.ok ? tabular : { available: false, blockers: tabular.blockers },
+          // A workbook's worksheets, so a linkage can name the register worksheet.
+          worksheets: profile?.format === "xlsx" && Array.isArray(profile.sheets)
+            ? profile.sheets.map((sheet) => ({ sheet_key: sheet.sheet_key, sheet_name: sheet.safe_sheet_name ?? sheet.sheet_key }))
+            : [],
           recorded: [...recorded.values()],
         });
       });
@@ -636,7 +689,7 @@ export function createPostgresDerivedMeasurementRepository({
 
     // Package B: one content-aware tabular count or rate under a person's
     // field selection, with an optional interpretation recorded with it.
-    async recordTabularMeasurement({ organizationId, sourceVersionId, worksheetKey = null, definition, interpretation = null, actorUserId, now }) {
+    async recordTabularMeasurement({ organizationId, sourceVersionId, worksheetKey = null, definition, interpretation = null, actorUserId, now, enqueueExactPeriod = null }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       return withCaught(run, async (tx) => {
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
@@ -650,6 +703,18 @@ export function createPostgresDerivedMeasurementRepository({
         }
         const reportingPeriod = periodState?.period ?? null;
         const derived = deriveTabularMeasurement(fileProfileRow.profile, worksheetKey, definition, { reportingPeriod });
+        // Exact days the profile does not hold: queue the calculation from the
+        // verified uploaded file (owner authorization 2026-11-18). No byte is read here.
+        if (!derived.ok && derived.needsSourceRecords && enqueueExactPeriod) {
+          const resolved = resolveTabularDefinitionForSourceRecords(fileProfileRow.profile, worksheetKey, definition, { reportingPeriod });
+          if (!resolved.ok) return failure(resolved.code, resolved.blockers);
+          const queued = await enqueueExactPeriod(tx, {
+            primaryProfileCanonicalSha256: fileProfileRow.profile_canonical_sha256,
+            worksheetKey: resolved.resolved.sheetKey,
+            mapping: { definition, period: { period_start: reportingPeriod.start, period_end: reportingPeriod.end } },
+          });
+          return success({ sourceVersion: rowToSourceVersionRecord(sourceVersionRow), queued: true, ...queued });
+        }
         if (!derived.ok) return failure(derived.code, derived.blockers);
         const recorded = await recordMeasurements(tx, {
           organizationId, sourceVersionId, measurements: [derived.measurement], sourceRow, profileCanonicalSha256: fileProfileRow.profile_canonical_sha256, interpretation, actorUserId, now,
@@ -670,20 +735,77 @@ export function createPostgresDerivedMeasurementRepository({
     // profile) and the mapping resolves against both committed profiles and
     // the recorded period - no byte is read - and then, in the same
     // transaction, `enqueue` records the reconciliation job.
-    async requestCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, enqueue }) {
+    async requestCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, primaryWorksheetKey = null, referenceWorksheetKey = null, mapping, enqueue }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
-      if (primarySourceVersionId === referenceSourceVersionId) {
-        return refusal("validation_blocker", "cross_source_same_version", "A cross-source measurement links two different source versions.", "Select the service-event version and the participant register version.", "cross_source_mapping");
+      // One version is linked only as two different worksheets of a workbook (the worker applies the same rule).
+      if (primarySourceVersionId === referenceSourceVersionId && (!primaryWorksheetKey || !referenceWorksheetKey || primaryWorksheetKey === referenceWorksheetKey)) {
+        return refusal("validation_blocker", "cross_source_same_version", "A linkage links two different source versions, or two different worksheets of one workbook.", "Select the service-event table and the participant register table.", "cross_source_mapping");
       }
       return withCaught(run, async (tx) => {
-        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping });
+        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, primaryWorksheetKey, referenceWorksheetKey });
         if (!admitted.ok) return admitted.failure;
         const { primary, reference, resolved } = admitted;
         return success(await enqueue(tx, {
           primaryProfileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256,
           referenceProfileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256,
           period: resolved.resolved.period,
+          primaryWorksheetKey: resolved.resolved.events_worksheet_key ?? null,
+          referenceWorksheetKey: resolved.resolved.register_worksheet_key ?? null,
         }));
+      });
+    },
+
+    // The exact-period worker side: in one transaction, `fence.before`
+    // re-asserts the job claim, the shared loader revalidates the version
+    // (lineage, currentness, effective allowed use, bound profile), the
+    // Project period and profile must be the ones the job was requested
+    // under, the worker reads and checks the verified bytes, and the
+    // measurement (with the person's interpretation) and `fence.after`
+    // commit together or not at all.
+    async recordExactPeriodTabularMeasurement({ organizationId, sourceVersionId, worksheetKey = null, definition, period, interpretation = null, actorUserId, now, fence = null }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      if (!crossSourceReconciliationWorker) return failure("validation_blocker");
+      return withCaught(run, async (tx) => {
+        if (fence) {
+          const fenced = await fence.before(tx);
+          if (fenced) return fenced;
+        }
+        const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+        if (!measurable.ok) return measurable.failure;
+        const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
+        const periodState = await readReportingPeriod(tx, { organizationId, sourceVersionId });
+        const reportingPeriod = periodState.status === "recorded" ? periodState.period : null;
+        if (!reportingPeriod || reportingPeriod.start !== period?.period_start || reportingPeriod.end !== period?.period_end
+          || (fence && !fence.profilesMatch({ primary: fileProfileRow.profile_canonical_sha256, reference: null, period }))) {
+          return refusal("conflict_current_state_changed", "exact_period_source_changed", "The source version or its Project period changed after the calculation was requested.", "Request the measurement again.", "tabular_measurement_definition");
+        }
+        const validated = validateTabularMeasurementDefinition(definition);
+        if (!validated.ok) return failure(validated.code, validated.blockers);
+        const resolved = resolveTabularDefinitionForSourceRecords(fileProfileRow.profile, worksheetKey, validated.definition, { reportingPeriod });
+        if (!resolved.ok) return failure(resolved.code, resolved.blockers);
+        const read = await crossSourceReconciliationWorker.readSourceRecords(tx, {
+          organizationId, intakeFileId: fileProfileRow.intake_file_id, checksum: fileProfileRow.checksum,
+          worksheetKey: fileProfileRow.profile?.format === "xlsx" ? resolved.resolved.sheetKey : null,
+        });
+        if (!read.ok) {
+          const [message, fix] = WORKER_REFUSALS[read.reason] ?? ["KAI could not read the uploaded file.", "Upload the file again as a new intake version."];
+          return refusal("conflict_current_state_changed", read.reason, message, fix, "tabular_measurement_definition");
+        }
+        const calculated = calculateTabularMeasurementFromRecords({ profile: fileProfileRow.profile, worksheetKey, resolved: resolved.resolved, records: read.records });
+        if (!calculated.ok) return failure(calculated.code, calculated.blockers);
+        let stated = null;
+        if (interpretation) {
+          const checked = validateDerivedMeasurementInterpretation(interpretation, { family: calculated.measurement.family });
+          if (!checked.ok) return failure(checked.code, checked.blockers);
+          stated = checked.interpretation;
+        }
+        const recorded = await recordMeasurements(tx, {
+          organizationId, sourceVersionId, measurements: [calculated.measurement], sourceRow, profileCanonicalSha256: fileProfileRow.profile_canonical_sha256,
+          interpretation: stated, actorUserId, now,
+        });
+        if (recorded.refused) return recorded.refused;
+        if (fence) await fence.after(tx, recorded.results.map((entry) => entry.measurement.source_derived_measurement_id));
+        return success({ sourceVersion: rowToSourceVersionRecord(sourceVersionRow), ...recorded.results[0], replayed: recorded.replayed });
       });
     },
 
@@ -692,20 +814,22 @@ export function createPostgresDerivedMeasurementRepository({
     // revalidates both versions, the reconciliation worker reads and checks
     // their bytes, and the measurements and `fence.after` (the job's
     // completion) commit together or not at all.
-    async recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, actorUserId, now, fence = null }) {
+    async recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, primaryWorksheetKey = null, referenceWorksheetKey = null, mapping, actorUserId, now, fence = null }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       if (!crossSourceReconciliationWorker) return failure("validation_blocker");
-      if (primarySourceVersionId === referenceSourceVersionId) {
-        return refusal("validation_blocker", "cross_source_same_version", "A cross-source measurement links two different source versions.", "Select the service-event version and the participant register version.", "cross_source_mapping");
+      if (primarySourceVersionId === referenceSourceVersionId && (!primaryWorksheetKey || !referenceWorksheetKey || primaryWorksheetKey === referenceWorksheetKey)) {
+        return refusal("validation_blocker", "cross_source_same_version", "A linkage links two different source versions, or two different worksheets of one workbook.", "Select the service-event table and the participant register table.", "cross_source_mapping");
       }
       return withCaught(run, async (tx) => {
         if (fence) {
           const fenced = await fence.before(tx);
           if (fenced) return fenced;
         }
-        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping });
+        const admitted = await admitCrossSourceVersions(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, primaryWorksheetKey, referenceWorksheetKey });
         if (!admitted.ok) return admitted.failure;
         const { primary, reference, resolved } = admitted;
+        const eventsSheet = resolved.resolved.events_worksheet_key ?? null;
+        const registerSheet = resolved.resolved.register_worksheet_key ?? null;
         if (fence && !fence.profilesMatch({
           primary: primary.fileProfileRow.profile_canonical_sha256, reference: reference.fileProfileRow.profile_canonical_sha256, period: resolved.resolved.period,
         })) {
@@ -713,8 +837,8 @@ export function createPostgresDerivedMeasurementRepository({
         }
         const reconciled = await crossSourceReconciliationWorker.reconcile(tx, {
           organizationId,
-          events: { intakeFileId: primary.fileProfileRow.intake_file_id, checksum: primary.fileProfileRow.checksum },
-          register: { intakeFileId: reference.fileProfileRow.intake_file_id, checksum: reference.fileProfileRow.checksum },
+          events: { intakeFileId: primary.fileProfileRow.intake_file_id, checksum: primary.fileProfileRow.checksum, worksheetKey: eventsSheet },
+          register: { intakeFileId: reference.fileProfileRow.intake_file_id, checksum: reference.fileProfileRow.checksum, worksheetKey: registerSheet },
           mapping: crossSourceWorkerMapping(resolved.resolved),
         });
         if (!reconciled.ok) {
@@ -737,8 +861,8 @@ export function createPostgresDerivedMeasurementRepository({
           actorUserId,
           now,
           contributingSources: [
-            { role: "primary", sourceVersionId: primarySourceVersionId, profileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256, fieldKeys: resolved.eventFieldKeys },
-            { role: "reference", sourceVersionId: referenceSourceVersionId, profileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256, fieldKeys: [mapping.register.participant_identifier_field_key] },
+            { role: "primary", sourceVersionId: primarySourceVersionId, profileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256, fieldKeys: resolved.eventFieldKeys, worksheetKey: eventsSheet },
+            { role: "reference", sourceVersionId: referenceSourceVersionId, profileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256, fieldKeys: [mapping.register.participant_identifier_field_key], worksheetKey: registerSheet },
           ],
         });
         if (recorded.refused) return recorded.refused;
@@ -749,6 +873,54 @@ export function createPostgresDerivedMeasurementRepository({
           measurements: recorded.results,
           replayed: recorded.replayed,
         });
+      });
+    },
+
+    // The organization's planned target for a recorded measurement's metric
+    // identity on its Project (source, worksheet, measurement key): appended,
+    // superseding the current target of that identity; the same target again
+    // writes nothing. The measurement is never changed.
+    async recordMeasurementTarget({ organizationId, measurementId, targetInput, actorUserId, now }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      return withCaught(run, async (tx) => {
+        const measurementRow = await readMeasurementById(tx, { organizationId, measurementId });
+        if (!measurementRow) return failure("not_found");
+        const validated = validateMeasurementTargetInput(targetInput, { family: measurementRow.measurement_family });
+        if (!validated.ok) return failure(validated.code, validated.blockers);
+        const measurable = await loadMeasurableSourceVersion(tx, {
+          organizationId, sourceVersionId: measurementRow.source_version_id, worksheetKey: measurementRow.worksheet_key, operation: MEASUREMENT_TARGET_OPERATION,
+        });
+        if (!measurable.ok) return measurable.failure;
+        const { sourceRow, fileProfileRow } = measurable;
+        if (fileProfileRow.profile_canonical_sha256 !== measurementRow.profile_canonical_sha256 || !derivedMeasurementArithmeticHolds(measurementRow)) {
+          return failure("conflict_current_state_changed");
+        }
+        const periodContext = await readReportingPeriod(tx, { organizationId, sourceVersionId: measurementRow.source_version_id });
+        if (!periodContext.engagement_id) {
+          return refusal("validation_blocker", periodContext.status, projectPeriodProblem(periodContext), "Resolve this source's KAI Project before setting a target.", "measurement_target");
+        }
+        const current = targetFor(await readCurrentTargets(tx, { organizationId, engagementId: periodContext.engagement_id, sourceId: sourceRow.source_id, lock: true }), measurementRow);
+        const { target } = validated;
+        if (current && sameTargetValue(current.target_value, target.targetValue) && current.comparison === target.comparison) {
+          return success({ target: current, comparison: composeMeasurementTargetComparison({ measurementRow, target: current }), replayed: true });
+        }
+        const { rows } = await tx.query(
+          `INSERT INTO kai.measurement_targets (
+             organization_id, engagement_id, source_id, worksheet_key, measurement_key, measurement_family, target_unit, target_value,
+             comparison, set_on_measurement_id, supersedes_target_id, created_by, created_by_type, created_at
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::numeric, $9, $10::uuid, $11::uuid, $12::uuid, 'human', $13::timestamptz)
+           RETURNING ${TARGET_COLUMNS}`,
+          [organizationId, periodContext.engagement_id, sourceRow.source_id, measurementRow.worksheet_key, measurementRow.measurement_key, measurementRow.measurement_family,
+            target.unit, target.targetValue, target.comparison, measurementId, current?.measurement_target_id ?? null, actorUserId, now],
+        );
+        const recorded = { ...rows[0], created_at: asIso(rows[0].created_at) };
+        const audit = await insertAuditEvent({
+          operation: MEASUREMENT_TARGET_OPERATION, operation_type: MEASUREMENT_TARGET_OPERATION, actor_user_id: actorUserId, actor_type: "human",
+          organization_id: organizationId, object_type: "measurement_target", target_object_type: "measurement_target", object_id: recorded.measurement_target_id,
+          reason_code: current ? "measurement_target_superseded" : "measurement_target_recorded", validator_key: DERIVED_MEASUREMENT_VALIDATOR_KEY, created_at: now,
+        }, tx);
+        if (audit?.ok !== true) throw new RequiredMeasurementAuditRejectedError();
+        return success({ target: recorded, comparison: composeMeasurementTargetComparison({ measurementRow, target: recorded }), replayed: false });
       });
     },
 
@@ -832,5 +1004,7 @@ export function createPostgresDerivedMeasurementRepository({
 export const __derivedMeasurementRepositoryContract = Object.freeze({
   DERIVED_MEASUREMENT_RECORD_OPERATION,
   DERIVED_MEASUREMENT_INTERPRETATION_OPERATION,
+  MEASUREMENT_TARGET_OPERATION,
   families: DERIVED_MEASUREMENT_FAMILIES,
+  sameTargetValue,
 });

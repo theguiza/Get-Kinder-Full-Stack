@@ -1214,6 +1214,57 @@ export function readTrustedCsvRecords({ bytes, extension = ".csv", declaredMime 
 }
 
 /**
+ * One worksheet of trusted workbook bytes as text records, read exactly as
+ * the profiler reads it (the same file checks, worksheet selection, header
+ * row, data rows through the last row with a value, and Excel date cells
+ * under the workbook's own date system), or null when the profiler would not
+ * establish one table there. Record 0 is the header row; each value is the
+ * cell's stored text, a date cell as its YYYY-MM-DD day, a blank cell "".
+ * Only a worker that already holds a source version's verified bytes calls
+ * this; nothing it returns is persisted by this module.
+ */
+export async function readTrustedWorksheetRecords({ bytes, sheetKey = null, extension = ".xlsx", declaredMime = XLSX_MIME } = {}) {
+  if (!(bytes instanceof Uint8Array)) return null;
+  try {
+    if (detectP0FileTypeAgreement({ extension, declaredMime, bytes }).policy !== "allow") return null;
+    if (await detectOoxmlArchiveResourceLimitPolicy({ extension, declaredMime, bytes })) return null;
+    if (await detectXlsxSheetCellLimitPolicy({ extension, declaredMime, bytes })) return null;
+    const entries = parseZipEntries(bytes);
+    const relationshipEntry = entries.get("xl/_rels/workbook.xml.rels");
+    const workbookEntry = entries.get("xl/workbook.xml");
+    const workbookSheets = workbookEntry ? parseWorkbookSheets(inflateEntry(bytes, workbookEntry)) : [];
+    const relationships = relationshipEntry ? parseWorkbookRelationships(inflateEntry(bytes, relationshipEntry)) : new Map();
+    const discoveredWorksheetEntries = [...entries.keys()].filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort();
+    const worksheetRefs = workbookSheets.length > 0
+      ? workbookSheets.map((sheet, index) => ({ sheet_key: sheet.sheet_key, entry_name: relationships.get(sheet.relationshipId) ?? discoveredWorksheetEntries[index] }))
+        .filter((sheet) => typeof sheet.entry_name === "string" && entries.has(sheet.entry_name))
+      : discoveredWorksheetEntries.map((entry_name, index) => ({ sheet_key: `sheet_${index + 1}`, entry_name }));
+    const ref = sheetKey === null ? (worksheetRefs.length === 1 ? worksheetRefs[0] : null) : worksheetRefs.find((candidate) => candidate.sheet_key === sheetKey);
+    if (!ref) return null;
+    const sharedStringsEntry = entries.get("xl/sharedStrings.xml");
+    const sharedStrings = sharedStringsEntry ? parseSharedStrings(inflateEntry(bytes, sharedStringsEntry)) : [];
+    const stylesEntry = entries.get("xl/styles.xml");
+    const dateStyles = stylesEntry ? parseCellDateStyles(inflateEntry(bytes, stylesEntry)) : [];
+    const dateSystem = workbookEntry ? parseWorkbookDateSystem(inflateEntry(bytes, workbookEntry)) : EXCEL_DATE_SYSTEM_1900;
+    const table = readXlsxWorksheetTable(inflateEntry(bytes, entries.get(ref.entry_name)), sharedStrings, { dateStyles, dateSystem });
+    const recordBasis = summarizeXlsxRecordCountBasis(table);
+    if (!worksheetTableIsEstablished(recordBasis)) return null;
+    const columns = recordBasis.field_missing_counts.length;
+    const records = [];
+    for (let rowIndex = 1; rowIndex <= recordBasis.data_record_count + 1; rowIndex += 1) {
+      const cells = table.rows.get(rowIndex) ?? new Map();
+      records.push(Array.from({ length: columns }, (_, index) => {
+        const cell = cells.get(index + 1);
+        return cell?.present ? (cell.date ?? cell.value) : "";
+      }));
+    }
+    return records;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The lines of trusted plain-text bytes, decoded exactly as the profiler
  * decodes them (the same file-type agreement and strict UTF-8), or null
  * when the profiler would refuse them. Line numbers are the profiler's

@@ -286,7 +286,8 @@ export async function recordTabularMeasurement(input, dependencies = {}) {
     interpretation = validated.interpretation;
   }
   const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
-  return repositoryResult(await repository.recordTabularMeasurement({
+  const jobs = dependencies.reconciliationJobRepository || (await createDefaultReconciliationJobRepository());
+  const result = await repository.recordTabularMeasurement({
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
     worksheetKey: input.worksheetKey ?? null,
@@ -294,7 +295,31 @@ export async function recordTabularMeasurement(input, dependencies = {}) {
     interpretation,
     actorUserId: input.actorContext.actorUserId,
     now: input.now,
-  }));
+    // A Project period whose exact days the profile does not hold is calculated
+    // from the verified uploaded file by the queued calculation job.
+    enqueueExactPeriod: (tx, admitted) => jobs.enqueueInTransaction(tx, {
+      jobKind: "tabular_exact_period",
+      organizationId: input.organizationId,
+      primarySourceVersionId: input.sourceVersionId,
+      primaryProfileCanonicalSha256: admitted.primaryProfileCanonicalSha256,
+      primaryWorksheetKey: admitted.worksheetKey,
+      mapping: admitted.mapping,
+      interpretation: input.interpretation ?? null,
+      requestedBy: input.actorContext.actorUserId,
+      now: input.now,
+    }),
+  });
+  if (!result.ok || result.data?.queued !== true) return repositoryResult(result);
+  const { job, fresh, requeued } = result.data;
+  if (["queued", "retry_scheduled", "in_progress"].includes(job.job_state)) {
+    try {
+      const dispatcher = dependencies.reconciliationDispatcher || (await defaultReconciliationDispatcher());
+      dispatcher.dispatch({ organizationId: input.organizationId, reconciliationJobId: job.reconciliation_job_id }, { env: dependencies.env || process.env });
+    } catch {
+      // The job is committed; the scheduled sweep remains its recovery path.
+    }
+  }
+  return { ok: true, data: { sourceVersion: result.data.sourceVersion, queued: true, calculationJob: publicReconciliationJob(job), fresh, requeued }, error: null };
 }
 
 /**
@@ -322,9 +347,13 @@ export async function recordTabularMeasurement(input, dependencies = {}) {
  * commits the measurements. Their evidence stays review-gated.
  */
 export async function requestCrossSourceReachMeasurements(input, dependencies = {}) {
-  const denied = admitDerivedInput(input, ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "mapping", "actorContext", "now"], ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "mapping", "actorContext", "now"], dependencies);
+  const denied = admitDerivedInput(input, ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "primaryWorksheetKey", "referenceWorksheetKey", "mapping", "actorContext", "now"], ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "mapping", "actorContext", "now"], dependencies);
   if (denied) return denied;
   if (!UUID_RE.test(input.primarySourceVersionId ?? "") || !UUID_RE.test(input.referenceSourceVersionId ?? "")) return buildKaiError("validation_blocker");
+  // A workbook side names its worksheet; a CSV side names none.
+  for (const key of ["primaryWorksheetKey", "referenceWorksheetKey"]) {
+    if (input[key] !== undefined && input[key] !== null && !/^sheet_[1-9][0-9]{0,3}$/.test(input[key])) return buildKaiError("validation_blocker");
+  }
   const mapping = validateCrossSourceReachMapping(input.mapping);
   if (!mapping.ok) return buildKaiError(mapping.code, { blockers: mapping.blockers });
   const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
@@ -333,6 +362,8 @@ export async function requestCrossSourceReachMeasurements(input, dependencies = 
     organizationId: input.organizationId,
     primarySourceVersionId: input.primarySourceVersionId,
     referenceSourceVersionId: input.referenceSourceVersionId,
+    primaryWorksheetKey: input.primaryWorksheetKey ?? null,
+    referenceWorksheetKey: input.referenceWorksheetKey ?? null,
     mapping: mapping.mapping,
     enqueue: (tx, admitted) => jobs.enqueueInTransaction(tx, {
       organizationId: input.organizationId,
@@ -340,6 +371,8 @@ export async function requestCrossSourceReachMeasurements(input, dependencies = 
       referenceSourceVersionId: input.referenceSourceVersionId,
       primaryProfileCanonicalSha256: admitted.primaryProfileCanonicalSha256,
       referenceProfileCanonicalSha256: admitted.referenceProfileCanonicalSha256,
+      primaryWorksheetKey: admitted.primaryWorksheetKey,
+      referenceWorksheetKey: admitted.referenceWorksheetKey,
       mapping: { ...mapping.mapping, period: admitted.period },
       requestedBy: input.actorContext.actorUserId,
       now: input.now,
@@ -373,7 +406,7 @@ export async function getCrossSourceReconciliationJob(input, dependencies = {}) 
   let measurements = [];
   if (job.job_state === "succeeded") {
     const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
-    const basis = await repository.readDerivedMeasurementBasis({ organizationId: input.organizationId, sourceVersionId: job.primary_source_version_id, worksheetKey: null });
+    const basis = await repository.readDerivedMeasurementBasis({ organizationId: input.organizationId, sourceVersionId: job.primary_source_version_id, worksheetKey: job.primary_worksheet_key ?? null });
     // A version no longer readable (for example superseded) still names what the job committed.
     measurements = basis.ok ? basis.data.recorded.filter((entry) => job.measurement_ids.includes(entry.source_derived_measurement_id)) : [];
   }
@@ -402,6 +435,25 @@ export async function recordDerivedMeasurementInterpretation(input, dependencies
     organizationId: input.organizationId,
     measurementId: input.measurementId,
     interpretationInput: input.interpretation,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
+  }));
+}
+
+/**
+ * The organization's planned numerical target for a recorded measurement's
+ * metric identity on its Project (kai.measurement_targets): the same
+ * admission as every measurement write; the measurement is never changed.
+ */
+export async function recordMeasurementTarget(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "measurementId", "target", "actorContext", "now"], ["organizationId", "measurementId", "target", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  if (!UUID_RE.test(input.measurementId ?? "") || !isPlainObject(input.target)) return buildKaiError("validation_blocker");
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.recordMeasurementTarget({
+    organizationId: input.organizationId,
+    measurementId: input.measurementId,
+    targetInput: input.target,
     actorUserId: input.actorContext.actorUserId,
     now: input.now,
   }));

@@ -254,7 +254,7 @@ test("aggregates over their bound are omitted with a reason, never truncated; th
   assert.equal(D.describeTabularMeasurementOptions(profile, null).period_support.distinct_month_windows, "exceeds_limit");
 });
 
-test("rates in distinct identifiers: both population kinds are exact key sets with the numerator a subset; they are calculated but not recordable", async () => {
+test("rates in distinct identifiers: both population kinds are exact key sets with the numerator a subset, recordable under their own method", async () => {
   const profile = await csvProfile();
   const EXITED = { kind: "category", field_key: F.cohort, value_key: "value_2" };
   // Oracle: P and N as sets of learners from the explicit records ("has a record" = at least one).
@@ -291,8 +291,11 @@ test("rates in distinct identifiers: both population kinds are exact key sets wi
   const separateRecords = new Set([...expected.P].filter((key) => ROWS.some((row) => row[1] === key && oracle.completed(row))));
   assert.deepEqual([exited.measurement.numerator, exited.measurement.denominator, exited.measurement.percentage], [expected.N.size, expected.P.size, "60.00"]);
   assert.notEqual(separateRecords.size, expected.N.size, "the same-record rule is what is calculated");
-  assert.deepEqual([exited.recordable, exited.measurement.calculationMethod], [false, "kai_tabular_conditional_distinct_key_rate_v1"]);
-  assert.equal(D.SCHEMA_ADMITTED_DERIVED_METHODS.has(exited.measurement.calculationMethod), false);
+  assert.deepEqual([exited.recordable, exited.measurement.calculationMethod], [true, "kai_tabular_conditional_distinct_key_rate_v1"]);
+  assert.equal(D.SCHEMA_ADMITTED_DERIVED_METHODS.has(exited.measurement.calculationMethod), true);
+  // The record route reaches the same calculation through deriveTabularMeasurement.
+  const routed = derive(profile, { operation: "rate", unit: eachLearner, conditions: [COMPLETED], population: [EXITED] }, null);
+  assert.deepEqual(routed.measurement, exited.measurement);
   assert.equal(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: asRow(exited.measurement) }),
     "Derived measurement: among the 5 distinct field_2 identifiers with a record with field_4 = exited in the CSV data records (the measured population, each identifier counted once), 3 have at least one record with field_3 = completed on a record that also has field_4 = exited: 3 of 5 (60.00%); 2 of the 5 do not.");
   // Negative arithmetic control: a tampered numerator fails the persisted-arithmetic check.
@@ -305,8 +308,8 @@ test("rates in distinct identifiers: both population kinds are exact key sets wi
   const older = { ...profile, tabular_measurement_basis: { ...profile.tabular_measurement_basis, exact_period_aggregates: olderAggregates } };
   assert.equal(D.deriveTabularDistinctKeyRate(older, null, { identifierFieldKey: F.learner, category: COMPLETED, population: [EXITED] }, {}).blockers[0].blocking_reason, "tabular_distinct_key_rate_population_not_committed");
   assert.equal(D.deriveTabularDistinctKeyRate(older, null, { identifierFieldKey: F.learner, category: COMPLETED }, {}).ok, true);
-  // The record route refuses the unit before any calculation.
-  assert.equal(D.validateTabularMeasurementDefinition({ operation: "rate", unit: eachLearner, conditions: [COMPLETED] }).blockers[0].blocking_reason, "tabular_distinct_key_rate_not_recordable");
+  // Any other rate unit is refused before any calculation.
+  assert.equal(D.validateTabularMeasurementDefinition({ operation: "rate", unit: { kind: "people" }, conditions: [COMPLETED] }).blockers[0].blocking_reason, "tabular_rate_unit_not_supported");
 });
 
 test("readings: a distinct count reads as identifiers counted once, a period rate names its period; record counts read as before", async () => {
@@ -333,7 +336,9 @@ test("the measurement form sends period-filtered rates and exact cross-month dis
   const countForm = { ...EMPTY_TABULAR_FORM, identifierFieldKey: F.learner, categoryFieldKey: F.status, categoryValueKey: "value_1", periodFieldKey: F.date };
   assert.equal(tabularFormProblem(countForm, ready), null);
   assert.match(tabularFormProblem(rateForm, { ...ready, reporting_period: { start: "2025-01-02", end: "2025-03-31" } }), /calendar month/);
-  assert.match(tabularFormProblem({ ...rateForm, identifierFieldKey: F.learner }, ready), /distinct identifiers cannot be recorded yet/);
+  // An identifier rate is sent with its unit; with a population value it needs the profile's pair keys.
+  assert.equal(tabularFormProblem({ ...rateForm, identifierFieldKey: F.learner }, ready), null);
+  assert.deepEqual(tabularDefinitionBody({ ...rateForm, identifierFieldKey: F.learner }).unit, eachLearner);
   const { exact_period_aggregates: _removed, ...legacyBasis } = profile.tabular_measurement_basis;
   const legacy = { tabular: D.describeTabularMeasurementOptions({ ...profile, tabular_measurement_basis: legacyBasis }, null), reporting_period: ready.reporting_period };
   assert.match(tabularFormProblem(rateForm, legacy), /predates period-filtered rates.*new intake version/);
@@ -487,6 +492,7 @@ test("a partial-month period gives the exact day-range answer when its partly co
     const refused = derive(profile, input, period);
     assert.equal(refused.blockers[0].blocking_reason, "tabular_period_not_whole_months", JSON.stringify(input));
     assert.match(refused.blockers[0].message, /2025-04 only in part/);
+    assert.equal(refused.needsSourceRecords, true, "the profile path hands these to the exact calculation from the file");
   }
   // A period inside one month without records: exactly zero records, and an empty rate population is refused.
   const quiet = { start: "2025-10-05", end: "2025-10-20" };
@@ -500,8 +506,9 @@ test("a partial-month period gives the exact day-range answer when its partly co
   const basis = { tabular: D.describeTabularMeasurementOptions(profile, null), reporting_period: period, period_month_coverage: coverage };
   const countForm = { ...EMPTY_TABULAR_FORM, categoryFieldKey: F.cohort, categoryValueKey: "value_2", periodFieldKey: F.date };
   assert.equal(tabularFormProblem(countForm, basis), null);
-  assert.match(tabularFormProblem({ ...countForm, categoryValueKey: "value_1" }, basis), /calendar month.*2025-04 only in part, and 4 of the records/);
-  assert.match(tabularFormProblem({ ...countForm, categoryFieldKey: "", categoryValueKey: "" }, basis), /calendar month/);
+  // Records in the partly covered month are calculated from the verified uploaded file (queued), so the form sends them too.
+  assert.equal(tabularFormProblem({ ...countForm, categoryValueKey: "value_1" }, basis), null);
+  assert.equal(tabularFormProblem({ ...countForm, categoryFieldKey: "", categoryValueKey: "" }, basis), null);
   assert.equal(tabularFormProblem({ ...EMPTY_TABULAR_FORM, operation: "rate", categoryFieldKey: F.status, categoryValueKey: "value_1", populationFieldKey: F.cohort, populationValueKey: "value_2", periodFieldKey: F.date }, basis), null);
 });
 function active(row) { return row[3] === "active"; }

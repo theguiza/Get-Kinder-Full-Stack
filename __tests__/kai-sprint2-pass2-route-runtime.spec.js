@@ -179,6 +179,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Measurement MVP: a person's interpretation of a source-derived
     // measurement (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/derived-measurements/:measurementId/interpretations",
+    "/admin/organizations/:organizationId/derived-measurements/:measurementId/targets",
     // KAI P2-08 human eligible-claims-for-audience read surface (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/eligible-claims",

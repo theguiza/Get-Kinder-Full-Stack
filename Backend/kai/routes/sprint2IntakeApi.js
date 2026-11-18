@@ -3027,9 +3027,11 @@ router.post(
     const payload = requestPayload(req);
     const actorContext = sprint2MappedActorContext(req);
     const now = new Date().toISOString();
-    return invokeService(res, async () => {
+    // A period whose exact days the profile does not hold is queued (202) and
+    // calculated from the verified uploaded file; the job is read until it settles.
+    try {
       const service = await getSourceMeasurementService();
-      return service.recordTabularMeasurement({
+      const result = await service.recordTabularMeasurement({
         ...identifiers,
         worksheetKey: worksheetKeyQuery(req),
         definition: payload?.definition,
@@ -3037,7 +3039,11 @@ router.post(
         actorContext,
         now,
       });
-    });
+      return sendServiceResult(res, result, result?.ok === true && result.data?.queued === true ? 202 : 200);
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
   },
 );
 
@@ -3055,7 +3061,7 @@ router.post(
     const primarySourceVersionId = typeof payload?.primary_source_version_id === "string" ? payload.primary_source_version_id : "";
     const referenceSourceVersionId = typeof payload?.reference_source_version_id === "string" ? payload.reference_source_version_id : "";
     if (![organizationId, primarySourceVersionId, referenceSourceVersionId].every((value) => KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase())
-      || !Object.keys(payload || {}).every((key) => ["primary_source_version_id", "reference_source_version_id", "mapping"].includes(key))) {
+      || !Object.keys(payload || {}).every((key) => ["primary_source_version_id", "reference_source_version_id", "primary_worksheet_key", "reference_worksheet_key", "mapping"].includes(key))) {
       return sendKaiError(res, "validation_blocker", {
         blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_ids")],
       });
@@ -3064,7 +3070,11 @@ router.post(
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getSourceMeasurementService();
-      return service.requestCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping: payload?.mapping, actorContext, now });
+      return service.requestCrossSourceReachMeasurements({
+        organizationId, primarySourceVersionId, referenceSourceVersionId, mapping: payload?.mapping, actorContext, now,
+        ...(payload?.primary_worksheet_key !== undefined ? { primaryWorksheetKey: payload.primary_worksheet_key } : {}),
+        ...(payload?.reference_worksheet_key !== undefined ? { referenceWorksheetKey: payload.reference_worksheet_key } : {}),
+      });
     }, 202);
   },
 );
@@ -3119,6 +3129,28 @@ router.post(
     return invokeService(res, async () => {
       const service = await getSourceMeasurementService();
       return service.recordDerivedMeasurementInterpretation({ organizationId, measurementId, interpretation: requestPayload(req), actorContext, now });
+    });
+  },
+);
+
+// The organization's planned target for a recorded measurement (a plan, never a result).
+router.post(
+  "/admin/organizations/:organizationId/derived-measurements/:measurementId/targets",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const measurementId = typeof req.params?.measurementId === "string" ? req.params.measurementId : "";
+    if (![organizationId, measurementId].every((value) => KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase())) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_measurement_id")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordMeasurementTarget({ organizationId, measurementId, target: requestPayload(req), actorContext, now });
     });
   },
 );

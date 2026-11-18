@@ -221,8 +221,12 @@ function tabularRateReading(row, interpretation) {
   const selfReported = interpretation.evidence_basis === "self_reported";
   const period = (row.definition?.conditions || []).find((condition) => condition?.kind === "period");
   const periodScope = period ? ` (records dated ${period.scope === "outside" ? "outside" : "within"} the reporting period ${period.period_start} to ${period.period_end})` : "";
+  // A rate over identifiers counts each identifier once (not necessarily a person).
+  const keyed = row.definition?.unit?.kind === "distinct_key";
+  const others = keyed ? c.other_population_distinct_key_count : c.other_population_record_count;
+  const unit = keyed ? ` distinct ${row.definition.unit.field_key} identifiers, each counted once,` : "";
   const text = [
-    `${label}: ${row.numerator} of ${row.denominator} (${row.percentage}%) in the measured population${periodScope}; ${c.other_population_record_count} of the ${row.denominator} do not.`,
+    `${label}: ${row.numerator} of ${row.denominator}${unit} (${row.percentage}%) in the measured population${periodScope}; ${others} of the ${row.denominator} do not.`,
     meaningSentence(label, interpretation),
     basisSentence(interpretation),
     "It describes only the measured population named in the measurement, not everyone the organization served.",

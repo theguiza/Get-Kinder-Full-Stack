@@ -219,7 +219,10 @@ test("mapping refusals: shape, roles KAI did not propose, unlisted or withheld v
   // A group field whose vocabulary the profiler withheld cannot group people.
   const withheld = await profile(EVENT_ROWS.map((row, index) => (index === 0 ? ["ref", "person_ref", "Gender", "held_on", "state", "minutes"] : row)));
   assert.equal(reason(MAPPING, { events: withheld }), "cross_source_group_vocabulary_withheld");
-  assert.equal(reason(MAPPING, { events: { ...eventsProfile, format: "xlsx" } }), "cross_source_source_not_csv");
+  // A linkage side is a CSV or one worksheet of a workbook (owner authorization 2026-11-18); other formats are refused,
+  // and a workbook without the named worksheet is refused rather than guessed.
+  assert.equal(reason(MAPPING, { events: { ...eventsProfile, format: "txt" } }), "cross_source_source_not_csv");
+  assert.equal(reason(MAPPING, { events: { ...eventsProfile, format: "xlsx", sheets: [] } }), "tabular_worksheet_selection_invalid");
   const { tabular_measurement_basis: _removed, ...legacy } = registerProfile;
   assert.equal(reason(MAPPING, { register: legacy }), "cross_source_basis_not_committed");
 });
@@ -428,7 +431,9 @@ test("the reconciliation worker reads only verified, eligible bytes and returns 
   // Bytes that are not the profiled version are refused as a checksum mismatch (never retried); an unreadable object is retryable.
   assert.equal((await make({ bytes: (key) => (key === "events" ? bytesOf(EVENT_ROWS.slice(0, 5)) : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_checksum_mismatch");
   assert.equal((await make({ bytes: (key) => (key === "events" ? null : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_bytes_unavailable");
-  assert.equal((await make({ factOverrides: { events: { file_extension: ".xlsx" } } }).reconcile(null, input)).reason, "cross_source_upload_not_eligible");
+  // Only a CSV or workbook upload is read; bytes that are not the workbook the extension names are not readable as one.
+  assert.equal((await make({ factOverrides: { events: { file_extension: ".pdf" } } }).reconcile(null, input)).reason, "cross_source_upload_not_eligible");
+  assert.equal((await make({ factOverrides: { events: { file_extension: ".xlsx" } } }).reconcile(null, input)).reason, "cross_source_csv_not_readable");
   const extreme = EVENT_ROWS.map((row) => [...row]);
   extreme.find((row) => row[0] === "E10")[5] = "1e1001";
   const extremeBytes = bytesOf(extreme);

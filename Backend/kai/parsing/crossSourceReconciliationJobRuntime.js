@@ -1,5 +1,5 @@
 import { areKaiSprint2WorkerFeaturesEnabled } from "../config/kaiSprint2Config.js";
-import { createPostgresCrossSourceReconciliationJobRepository } from "./postgresCrossSourceReconciliationJobRepository.js";
+import { JOB_KINDS, createPostgresCrossSourceReconciliationJobRepository } from "./postgresCrossSourceReconciliationJobRepository.js";
 
 /**
  * KAI cross-source reconciliation worker runtime: the queued half of a
@@ -35,7 +35,7 @@ export function reconciliationFailureCode(result) {
 }
 
 function samePeriod(a, b) {
-  return a?.period_start === b?.period_start && a?.period_end === b?.period_end && a?.precision === b?.precision;
+  return a?.period_start === b?.period_start && a?.period_end === b?.period_end && (a?.precision ?? null) === (b?.precision ?? null);
 }
 
 /**
@@ -54,28 +54,43 @@ export async function processCrossSourceReconciliationJob({ organizationId, reco
   if (claimed.decision !== "claimed") return { outcome: claimed.decision, code: claimed.job?.last_error_code ?? null, job: claimed.job };
   const job = claimed.job;
   const { period, ...mapping } = job.mapping;
+  const fence = {
+    async before(tx) {
+      const held = await jobs.fenceInTransaction(tx, { organizationId, reconciliationJobId, claimToken: job.claim_token, now: nowFn() });
+      return held ? null : { ok: false, data: null, error: { code: "reconciliation_claim_lost", status: 409 } };
+    },
+    profilesMatch: ({ primary, reference, period: currentPeriod }) => primary === job.primary_profile_canonical_sha256
+      && (reference ?? null) === (job.reference_profile_canonical_sha256 ?? null) && samePeriod(currentPeriod, period),
+    async after(tx, measurementIds) {
+      await jobs.completeSucceededInTransaction(tx, { organizationId, reconciliationJobId, claimToken: job.claim_token, measurementIds, now: nowFn() });
+    },
+  };
 
   let result;
   try {
-    result = await measurements.recordCrossSourceReachMeasurements({
-      organizationId,
-      primarySourceVersionId: job.primary_source_version_id,
-      referenceSourceVersionId: job.reference_source_version_id,
-      mapping,
-      actorUserId: job.requested_by,
-      now: nowFn(),
-      fence: {
-        async before(tx) {
-          const held = await jobs.fenceInTransaction(tx, { organizationId, reconciliationJobId, claimToken: job.claim_token, now: nowFn() });
-          return held ? null : { ok: false, data: null, error: { code: "reconciliation_claim_lost", status: 409 } };
-        },
-        profilesMatch: ({ primary, reference, period: currentPeriod }) => primary === job.primary_profile_canonical_sha256
-          && reference === job.reference_profile_canonical_sha256 && samePeriod(currentPeriod, period),
-        async after(tx, measurementIds) {
-          await jobs.completeSucceededInTransaction(tx, { organizationId, reconciliationJobId, claimToken: job.claim_token, measurementIds, now: nowFn() });
-        },
-      },
-    });
+    result = job.job_kind === JOB_KINDS.TABULAR_EXACT_PERIOD
+      ? await measurements.recordExactPeriodTabularMeasurement({
+        organizationId,
+        sourceVersionId: job.primary_source_version_id,
+        worksheetKey: job.primary_worksheet_key,
+        definition: mapping.definition,
+        period,
+        interpretation: job.interpretation,
+        actorUserId: job.requested_by,
+        now: nowFn(),
+        fence,
+      })
+      : await measurements.recordCrossSourceReachMeasurements({
+        organizationId,
+        primarySourceVersionId: job.primary_source_version_id,
+        referenceSourceVersionId: job.reference_source_version_id,
+        primaryWorksheetKey: job.primary_worksheet_key,
+        referenceWorksheetKey: job.reference_worksheet_key,
+        mapping,
+        actorUserId: job.requested_by,
+        now: nowFn(),
+        fence,
+      });
   } catch {
     result = { ok: false, data: null, error: { code: "system_error" } };
   }

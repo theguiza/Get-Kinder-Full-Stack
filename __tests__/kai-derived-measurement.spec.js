@@ -179,8 +179,8 @@ test("definition refusals: unsupported units, combinations, unlisted values, rol
   assert.equal(reason({ operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_start: "2025-01-01", period_end: "2025-12-31" }] }), "tabular_condition_invalid");
   assert.equal(reason({ operation: "count", conditions: [{ kind: "period", field_key: "field_2", period_source: "engagement_reporting_period", scope: "within" }] }), "tabular_field_role_not_proposed");
   assert.equal(reason({ operation: "rate", conditions: [] }), "tabular_rate_numerator_invalid");
-  // A rate in distinct identifiers has arithmetic (deriveTabularDistinctKeyRate) but no recordable method.
-  assert.equal(reason({ operation: "rate", unit: eachRef, conditions: [category("field_2", "value_1")] }), "tabular_distinct_key_rate_not_recordable");
+  // A rate in distinct identifiers is a recordable rate (kai_sprint2_measurement_calculation_completion); other units are not.
+  assert.equal(reason({ operation: "rate", unit: eachRef, conditions: [category("field_2", "value_1")] }), "ok");
   assert.equal(reason({ operation: "rate", unit: { kind: "people" }, conditions: [category("field_2", "value_1")] }), "tabular_rate_unit_not_supported");
   assert.equal(reason({ operation: "rate", conditions: [category("field_2", "value_1"), { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }), "ok");
   assert.equal(reason({ operation: "rate", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }), "tabular_rate_numerator_invalid");

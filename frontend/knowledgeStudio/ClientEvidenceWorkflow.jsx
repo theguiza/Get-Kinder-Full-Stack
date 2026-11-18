@@ -1151,7 +1151,8 @@ export default function ClientEvidenceWorkflow({
                             initialWorksheetKey={measuring.worksheetKey || ""}
                             onWorksheetChange={(worksheetKey) => setMeasuring((current) => (current ? { ...current, worksheetKey } : current))}
                             onClose={() => setMeasuring(null)} onRecorded={refresh}
-                            linkableVersions={currentVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && candidate.profileFormat === "csv")}
+                            linkableVersions={currentVersions.filter((candidate) => ["csv", "xlsx"].includes(candidate.profileFormat)
+                              && (candidate.sourceVersionId !== version.sourceVersionId || candidate.profileFormat === "xlsx"))}
                             versionsById={versionsById}
                             earlierVersionIds={source.sourceVersions.filter((candidate) => candidate.sourceVersionId !== version.sourceVersionId && !candidate.isCurrent).map((candidate) => candidate.sourceVersionId)} />
                         </div>

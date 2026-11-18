@@ -455,19 +455,22 @@ function analysisLines(model) {
     lines.push(`- ${refs(fact.citationRefs)} **${DOCUMENT_ROLE_LABELS.source_method_or_instruction}:** the source states that "${observationText(fact)}" `
       + "This is the source's own method, requirement or recommendation; it does not show that the step was carried out. Any calculation KAI performed is cited and described separately.");
   }
+  // The organization's planned target beside a measured fact: a plan compared with the recorded actual.
+  const targetLine = (fact) => (fact.derivedMeasurement?.targetComparison?.text
+    ? [`  - **Planned target:** ${text(fact.derivedMeasurement.targetComparison.text)}`] : []);
   for (const fact of paired) {
     const p = pairedOutcomeOf(fact);
     if (readingOf(fact)) {
-      lines.push(`- ${refs(fact.citationRefs)} **Outcome result (baseline and follow-up comparison):** ${text(readingOf(fact).text)}`);
+      lines.push(`- ${refs(fact.citationRefs)} **Outcome result (baseline and follow-up comparison):** ${text(readingOf(fact).text)}`, ...targetLine(fact));
       continue;
     }
     lines.push(`- ${refs(fact.citationRefs)} **Outcome measurement (derived baseline and follow-up comparison):** ${pairedResult(p)}. ${pairedCoverage(p)}. `
-      + `${directionText(fact)} It is a change observed among the comparable pairs and does not by itself show that the programme caused it.`);
+      + `${directionText(fact)} It is a change observed among the comparable pairs and does not by itself show that the programme caused it.`, ...targetLine(fact));
   }
   for (const fact of otherDerived) {
     lines.push(readingOf(fact)
       ? `- ${refs(fact.citationRefs)} **${readingOf(fact).kind === "rate" ? "Reported result" : readingOf(fact).kind === "reach" ? "Reach" : "Derived measurement"}:** ${text(readingOf(fact).text)}`
-      : `- ${refs(fact.citationRefs)} **Derived measurement:** ${text(fact.claimStatement)} It is reported with its recorded limitations.`);
+      : `- ${refs(fact.citationRefs)} **Derived measurement:** ${text(fact.claimStatement)} It is reported with its recorded limitations.`, ...targetLine(fact));
   }
   if (lines.length === 0) lines.push("- The cited claims are reported as recorded; no measured value is available for further analysis.");
   if (counts.some((fact) => fact.countOnly)) {

@@ -84,7 +84,9 @@ test("one attempt commits the measurements and the job's completion together und
   assert.deepEqual(jobs.calls[2][1].measurementIds, ["m1"]);
   // The worker passes the job's own mapping (without the period) and the requester as actor; never a byte, path or fact.
   assert.deepEqual(measurements.calls[0].mapping, MAPPING);
-  assert.deepEqual(Object.keys(measurements.calls[0]).sort(), ["actorUserId", "fence", "mapping", "now", "organizationId", "primarySourceVersionId", "referenceSourceVersionId"]);
+  // The job's worksheets (none for a CSV linkage) are passed with the versions.
+  assert.deepEqual(Object.keys(measurements.calls[0]).sort(), ["actorUserId", "fence", "mapping", "now", "organizationId", "primarySourceVersionId", "primaryWorksheetKey", "referenceSourceVersionId", "referenceWorksheetKey"]);
+  assert.deepEqual([measurements.calls[0].primaryWorksheetKey ?? null, measurements.calls[0].referenceWorksheetKey ?? null], [null, null]);
 });
 
 test("failures: infrastructure is retried within the budget; a refusal about the sources, the bytes' identity or a changed source fails at once", async () => {
@@ -145,9 +147,15 @@ test("the request identity: the same request in any key order is one job; anothe
     { ...base, primarySourceVersionId: "5a000000-0000-4000-8000-000000000003" },
     { ...base, referenceProfileCanonicalSha256: "c".repeat(64) },
     { ...base, mapping: { ...base.mapping, period: { ...PERIOD, period_end: "2026-02-28" } } },
+    // Worksheets and another job kind are other requests.
+    { ...base, primaryWorksheetKey: "sheet_1", referenceWorksheetKey: "sheet_2" },
+    { ...base, jobKind: "tabular_exact_period" },
   ]) assert.notEqual(reconciliationRequestFingerprint(changed), reconciliationRequestFingerprint(base));
+  // A CSV linkage request keeps exactly its original identity (an existing job is found again).
+  assert.equal(reconciliationRequestFingerprint({ ...base, jobKind: "cross_source_reach", primaryWorksheetKey: null, referenceWorksheetKey: null, interpretation: null }), reconciliationRequestFingerprint(base));
   assert.deepEqual(Object.keys(publicReconciliationJob(claimedJob())).sort(),
-    ["attempt_count", "completed_at", "created_at", "error_code", "job_state", "measurement_ids", "next_eligible_at", "primary_source_version_id", "reconciliation_job_id", "reference_source_version_id"]);
+    ["attempt_count", "completed_at", "created_at", "error_code", "job_kind", "job_state", "measurement_ids", "next_eligible_at", "primary_source_version_id", "primary_worksheet_key",
+      "reconciliation_job_id", "reference_source_version_id", "reference_worksheet_key"]);
 });
 
 test("the HTTP request admits and queues in one transaction, hands the job to the dispatcher, and never reads a byte", async () => {

@@ -7,7 +7,7 @@ import { evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGener
 import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
 import { MEASUREMENT_EVIDENCE_TYPE, countedDuplicateGroups, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
-import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, composeMeasurementTargetComparison, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import { DOCUMENT_EVIDENCE_TYPE, documentGenerationLimitationCodes } from "../validators/kaiDocumentEvidenceValidators.js";
 import { composeImpactFindingReading } from "../services/kaiImpactFindingReading.js";
@@ -64,6 +64,30 @@ async function readDefinition(tx, { organizationId, sourceMeasurementDefinitionI
   return rows[0] || null;
 }
 
+// The current planned target of a derived measurement's metric identity on
+// its source's Project (kai.measurement_targets), or null.
+// The organization's planned target for this metric identity on the report's
+// Project, as it stood when the report was generated: a later change of
+// target never rewrites a saved report.
+async function readTargetAsGenerated(tx, { organizationId, generatedContentDraftId, derivedRow }) {
+  if (!derivedRow?.measurement_key || !generatedContentDraftId) return null;
+  const { rows } = await tx.query(
+    `SELECT t.target_unit, t.target_value::text AS target_value, t.comparison
+       FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r ON r.organization_id = d.organization_id AND r.generation_run_id = d.generation_run_id
+       JOIN kai.measurement_targets t ON t.organization_id = d.organization_id AND t.engagement_id = r.engagement_id
+       JOIN kai.source_versions sv ON sv.organization_id = t.organization_id AND sv.source_id = t.source_id
+      WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid
+        AND sv.source_version_id = $3::uuid AND t.measurement_key = $4
+        AND COALESCE(t.worksheet_key, '') = COALESCE($5, '') AND t.created_at <= d.created_at
+        AND NOT EXISTS (SELECT 1 FROM kai.measurement_targets n
+                         WHERE n.organization_id = t.organization_id AND n.supersedes_target_id = t.measurement_target_id AND n.created_at <= d.created_at)
+      ORDER BY t.created_at DESC LIMIT 1`,
+    [organizationId, generatedContentDraftId, derivedRow.source_version_id ?? derivedRow.measurement_source_version_id, derivedRow.measurement_key, derivedRow.worksheet_key ?? null],
+  );
+  return rows[0] || null;
+}
+
 async function readSourceVersion(tx, { organizationId, sourceVersionId }) {
   const { rows } = await tx.query(
     `SELECT created_at, profile_canonical_sha256
@@ -79,7 +103,7 @@ async function readSourceVersion(tx, { organizationId, sourceVersionId }) {
 // measured claim, the limitation codes it carries, and whether its internal
 // authority is a recorded review decision or the ordinary measurement (no
 // identity is ever read).
-async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
+async function readClaimFacts(tx, { organizationId, generatedContentDraftId, citation, citationRefs }) {
   const traceability = await evaluateClaimTraceabilityInTransaction(tx, {
     organizationId,
     claimId: citation.claimId,
@@ -155,6 +179,8 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         // stated meaning and direction with KAI's arithmetic (null when the
         // governed statement says all there is to say).
         reading: composeImpactFindingReading(derivedRow),
+        // The organization's planned target compared with this recorded actual (a plan, not a result).
+        targetComparison: composeMeasurementTargetComparison({ measurementRow: derivedRow, target: await readTargetAsGenerated(tx, { organizationId, generatedContentDraftId, derivedRow }) }),
       }
       : null,
     // Every other source version a cross-source measurement combines, cited
@@ -229,7 +255,7 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
 
           const facts = [];
           for (const [index, citation] of citations.entries()) {
-            const fact = await readClaimFacts(tx, { organizationId, citation, citationRefs: [toCitationRef(index)] });
+            const fact = await readClaimFacts(tx, { organizationId, generatedContentDraftId, citation, citationRefs: [toCitationRef(index)] });
             if (!fact) return failure("conflict_current_state_changed");
             facts.push(fact);
           }

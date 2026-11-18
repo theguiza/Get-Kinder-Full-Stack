@@ -28,6 +28,16 @@ export function tabularMeasurementPath(organizationId, sourceVersionId, workshee
   return sourceVersionPath(organizationId, sourceVersionId, "tabular-measurements", worksheetKey);
 }
 
+export function measurementTargetPath(organizationId, measurementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/derived-measurements/${encodeURIComponent(measurementId)}/targets`;
+}
+
+/** A target's unit by measurement family: a percentage for rates and paired outcomes, otherwise a count. */
+export function measurementTargetUnit(family) {
+  return family === "tabular_rate" || family === "paired_outcome_change" ? "percent" : "count";
+}
+
 export function derivedMeasurementInterpretationPath(organizationId, measurementId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/derived-measurements/${encodeURIComponent(measurementId)}/interpretations`;
@@ -82,7 +92,7 @@ export function tabularFormProblem(form, basis = null) {
       const missing = projectPeriodProblem(state);
       if (missing) return missing;
       const support = basis.tabular.period_support || {};
-      if (form.operation === "count" && form.identifierFieldKey) {
+      if (form.identifierFieldKey) {
         const exact = basis.tabular.distinct_period_exact?.[form.identifierFieldKey] ?? basis.tabular.single_valued_in?.[form.identifierFieldKey] ?? [];
         if (!exact.includes(form.periodFieldKey)) {
           return support.distinct_month_windows === "exceeds_limit"
@@ -95,22 +105,10 @@ export function tabularFormProblem(form, basis = null) {
           ? "This table has too many value and month combinations for KAI to apply a period to a rate with a population value. Choose all records as the population, or no period (all dates)."
           : "This source version's profile predates period-filtered rates with a population value. Upload the file again as a new intake version, or choose all records as the population or no period (all dates).";
       }
-      const coverage = basis.period_month_coverage;
-      if (coverage) {
-        // A month the period covers only in part is exact only when the records this calculation reads (a rate's
-        // population, or a count's selected value) have none in it; the server's month aggregates say how many do.
-        const months = coverage.partially_covered_months || [];
-        if (months.length > 0) {
-          const counts = coverage.date_fields?.[form.periodFieldKey];
-          const selected = form.operation === "rate"
-            ? (form.populationFieldKey && form.populationValueKey ? [form.populationFieldKey, form.populationValueKey] : null)
-            : (form.categoryFieldKey && form.categoryValueKey ? [form.categoryFieldKey, form.categoryValueKey] : null);
-          const held = !counts ? null : selected ? counts.by_category?.[selected[0]]?.[selected[1]] : counts.records;
-          if (!Number.isSafeInteger(held) || held > 0) {
-            return `KAI keeps these dates by calendar month. The Project period covers ${months.join(" and ")} only in part${Number.isSafeInteger(held) ? `, and ${held} of the records this calculation reads fall there` : ""}. Keep your actual Project dates; choose no period (all dates), or a calculation whose records have none in ${months.length === 1 ? "that month" : "those months"}.`;
-          }
-        }
-      } else {
+      // With the server's month coverage, a partly covered month is answered from the month aggregates when the records
+      // this calculation reads have none in it, and otherwise calculated from the verified uploaded file (queued):
+      // the actual dates apply either way. Without it (an older server), only whole months are sent.
+      if (!basis.period_month_coverage) {
         const { start, end } = state.period;
         const date = new Date(`${end}T00:00:00Z`);
         date.setUTCDate(date.getUTCDate() + 1);
@@ -118,7 +116,12 @@ export function tabularFormProblem(form, basis = null) {
       }
     }
   }
-  if (form.operation === "rate" && form.identifierFieldKey) return "Rates are calculated over records; a rate in distinct identifiers cannot be recorded yet. Choose the calculation again.";
+  if (form.operation === "rate" && form.identifierFieldKey && form.populationFieldKey && basis?.tabular?.period_support
+    && basis.tabular.period_support.population_distinct_key_rates !== "available") {
+    return basis.tabular.period_support.population_distinct_key_rates === "exceeds_limit"
+      ? "This table has too many value pairs and months for KAI to count identifiers within a population value. Choose all identifiers as the population."
+      : "This source version's profile predates identifier rates within a population value. Upload the file again as a new intake version, or choose all identifiers as the population.";
+  }
   if (form.operation === "count" && (form.populationFieldKey || form.populationValueKey)) return "Counts do not use a rate population. Choose the calculation again.";
   if (form.categoryFieldKey && !form.categoryValueKey) return "Choose the value the counted records have.";
   if (form.operation === "rate") {
@@ -139,6 +142,7 @@ export function tabularDefinitionBody(form) {
   if (form.operation === "rate") {
     return {
       operation: "rate",
+      ...(form.identifierFieldKey ? { unit: { kind: "distinct_key", field_key: form.identifierFieldKey, duplicate_policy: "count_each_key_once" } } : {}),
       conditions,
       population: form.populationFieldKey && form.populationValueKey ? [{ kind: "category", field_key: form.populationFieldKey, value_key: form.populationValueKey }] : [],
     };
@@ -275,6 +279,8 @@ export function crossSourceReconciliationJobPath(organizationId, reconciliationJ
 
 export const EMPTY_CROSS_SOURCE_FORM = Object.freeze({
   referenceSourceVersionId: "",
+  // The register's worksheet, when the register is a workbook (it may be another worksheet of this workbook).
+  referenceWorksheetKey: "",
   eventIdentifierFieldKey: "",
   participantIdentifierFieldKey: "",
   statusFieldKey: "",
@@ -290,8 +296,9 @@ export const EMPTY_CROSS_SOURCE_FORM = Object.freeze({
 });
 
 /** Why the linkage form cannot be sent yet, or null. */
-export function crossSourceFormProblem(form, { reportingPeriodRecorded, reportingPeriodContext }) {
+export function crossSourceFormProblem(form, { reportingPeriodRecorded, reportingPeriodContext, registerNeedsWorksheet = false }) {
   if (!form.referenceSourceVersionId) return "Choose the participant register source version to link.";
+  if (registerNeedsWorksheet && !form.referenceWorksheetKey) return "Choose the participant register worksheet.";
   if (!form.eventIdentifierFieldKey) return "Choose the field that identifies each service event.";
   if (!form.participantIdentifierFieldKey) return "Choose the field that identifies the participant of each event.";
   if (form.eventIdentifierFieldKey === form.participantIdentifierFieldKey) return "The event and participant fields must be different fields.";
@@ -304,10 +311,12 @@ export function crossSourceFormProblem(form, { reportingPeriodRecorded, reportin
 }
 
 /** The POST body: both version ids and the person's mapping; nothing else is sent. */
-export function crossSourceRequestBody(form, primarySourceVersionId) {
+export function crossSourceRequestBody(form, primarySourceVersionId, primaryWorksheetKey = null) {
   return {
     primary_source_version_id: primarySourceVersionId,
     reference_source_version_id: form.referenceSourceVersionId,
+    ...(primaryWorksheetKey ? { primary_worksheet_key: primaryWorksheetKey } : {}),
+    ...(form.referenceWorksheetKey ? { reference_worksheet_key: form.referenceWorksheetKey } : {}),
     mapping: {
       events: {
         event_identifier_field_key: form.eventIdentifierFieldKey,

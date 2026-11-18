@@ -8,6 +8,8 @@ import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
 import ClientCrossSourceMeasurementSection, { CrossSourceActivityDetail } from "./ClientCrossSourceMeasurementSection.jsx";
 import {
   changeTabularField,
+  crossSourceReconciliationJobPath,
+  reconciliationJobSettled,
   EMPTY_INTERPRETATION_FORM,
   EMPTY_TABULAR_FORM,
   contributingSourcesCurrent,
@@ -26,6 +28,8 @@ import {
   tabularDefinitionBody,
   tabularFormProblem,
   tabularMeasurementPath,
+  measurementTargetPath,
+  measurementTargetUnit,
 } from "./clientDerivedMeasurementLogic.js";
 import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 
@@ -69,6 +73,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const [clarifyForm, setClarifyForm] = useState(EMPTY_INTERPRETATION_FORM);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
+  // A queued calculation (exact Project-period days from the verified uploaded file), read until it settles.
+  const [calculationJob, setCalculationJob] = useState(null);
   const seqRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -93,9 +99,38 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     setMeaning(EMPTY_INTERPRETATION_FORM);
     setClarifying(null);
     setNotice(null);
+    setCalculationJob(null);
     load();
     return () => { seqRef.current += 1; };
   }, [load]);
+
+  useEffect(() => {
+    if (!calculationJob || reconciliationJobSettled(calculationJob)) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await getJson(crossSourceReconciliationJobPath(organizationId, calculationJob.reconciliation_job_id));
+        if (cancelled) return;
+        const job = result.statusCode === 200 ? result.body?.data?.reconciliationJob : null;
+        if (!job) {
+          setCalculationJob({ ...calculationJob });
+          return;
+        }
+        setCalculationJob(job);
+        if (job.job_state === "succeeded") {
+          const recorded = result.body.data.measurements?.[0];
+          setNotice({ kind: "success", text: `Measurement recorded from the uploaded file: ${recorded?.measured_value ?? ""}${recorded?.percentage ? ` (${recorded.percentage}%)` : ""}.` });
+          onRecorded?.();
+          load();
+        } else if (["failed", "exhausted"].includes(job.job_state)) {
+          setNotice({ kind: "warning", text: `KAI could not calculate this from the uploaded file (${job.error_code || "unknown reason"}). Nothing was recorded; check the source version and its Project period, then try again.` });
+        }
+      } catch {
+        if (!cancelled) setCalculationJob({ ...calculationJob });
+      }
+    }, 1200);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [calculationJob, organizationId, load, onRecorded]);
 
   useEffect(() => {
     if (lastRevision.current === revision) return;
@@ -116,6 +151,11 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       return false;
     } finally {
       setPending("");
+    }
+    if (result.statusCode === 202 && result.body?.ok && result.body.data?.queued) {
+      setCalculationJob(result.body.data.calculationJob);
+      setNotice({ kind: "info", text: "Calculating with the Project period's exact dates from the verified uploaded file. The result appears here when it is recorded." });
+      return true;
     }
     const ok = (result.statusCode === 200 || result.statusCode === 201) && result.body?.ok;
     setNotice(ok ? { kind: "success", text: result.body.data?.replayed ? "Already recorded; nothing changed." : success(result.body.data) } : { kind: "warning", text: errorText(result) });
@@ -150,6 +190,30 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       .then((ok) => { if (ok) { setClarifying(null); setClarifyForm(EMPTY_INTERPRETATION_FORM); } });
   };
 
+  // The organization's planned target per recorded measurement (a plan, compared with the recorded actual).
+  const [targetDrafts, setTargetDrafts] = useState({});
+  const setTargetDraft = (recorded, change) => setTargetDrafts((drafts) => ({
+    ...drafts,
+    [recorded.source_derived_measurement_id]: {
+      value: drafts[recorded.source_derived_measurement_id]?.value ?? recorded.target?.target_value?.replace(/\.00$/, "") ?? "",
+      comparison: drafts[recorded.source_derived_measurement_id]?.comparison ?? recorded.target?.comparison ?? "at_least",
+      ...change,
+    },
+  }));
+  const setTarget = (event, recorded) => {
+    event.preventDefault();
+    const draft = targetDrafts[recorded.source_derived_measurement_id];
+    const value = (draft?.value ?? "").trim();
+    if (!value) {
+      setNotice({ kind: "warning", text: "Enter the planned target value first." });
+      return;
+    }
+    send("target", measurementTargetPath(organizationId, recorded.source_derived_measurement_id),
+      { target_value: value, comparison: draft?.comparison ?? recorded.target?.comparison ?? "at_least" },
+      (saved) => (saved.replayed ? "Target unchanged." : `Target recorded. ${saved.comparison?.text ?? ""}`))
+      .then((ok) => { if (ok) setTargetDrafts((drafts) => { const next = { ...drafts }; delete next[recorded.source_derived_measurement_id]; return next; }); });
+  };
+
   const setField = (key) => (event) => {
     const value = event.target.value;
     setForm((current) => changeTabularField(current, key, value));
@@ -175,6 +239,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
       {basis.status !== "loading" ? <button type="button" className="btn btn-sm btn-link" data-client-derived-refresh="" disabled={basis.status === "refreshing" || Boolean(pending)} onClick={load}>Refresh measurements</button> : null}
       {notice ? <div className={`alert alert-${notice.kind} py-2`} data-client-derived-notice={notice.kind}>{notice.text}</div> : null}
+      {calculationJob ? <div className="text-muted" data-client-derived-calculation-job={calculationJob.job_state}>
+        Exact-period calculation: {calculationJob.job_state.replace(/_/g, " ")}.
+      </div> : null}
 
       {data?.paired?.available ? (
         <div className="mb-2" data-client-derived-paired="">
@@ -231,17 +298,15 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             {select("operation", [<option key="rate" value="rate">Rate (numerator of a measured population)</option>], "Count", { value: form.operation === "rate" ? "rate" : "" })}
           </label>
           {form.operation === "rate" ? <div className="text-muted" data-client-derived-rate-scope="">
-            Rates count records, including duplicate records. With a date field, the Project reporting period limits the measured population to records dated in (or outside) it, and records without a date are excluded and stated. Rates in distinct identifiers cannot be recorded yet.
+            Rates count records (duplicates included), or each identifier value once: an identifier is in the numerator when at least one of its records has the numerator value (on a record that also has the population value, when one is chosen). With a date field, the Project reporting period limits the measured population to records dated in (or outside) it; records without a date are excluded and stated.
           </div> : null}
           <div className="text-muted" data-client-derived-date-support="">
-            Date filters use whole calendar months of recognized dates: ISO date text, and Excel cells formatted as dates (read with the workbook's own 1900 or 1904 date system). Plain numbers are never read as dates. Files profiled before Excel date cells were recognized need a new intake version.
+            Date filters apply the Project period's actual dates to recognized dates: ISO date text, and Excel cells formatted as dates (read with the workbook's own 1900 or 1904 date system). Plain numbers are never read as dates. Files profiled before Excel date cells were recognized need a new intake version.
           </div>
-          {form.operation !== "rate" ? (
-            <label className="d-block">
-              Count each
-              {select("identifierFieldKey", byRole("identifier").map((field) => <option key={field.field_key} value={field.field_key}>{`${fieldLabel(field)} value once`}</option>), "record")}
-            </label>
-          ) : null}
+          <label className="d-block">
+            {form.operation === "rate" ? "Rate counted in" : "Count each"}
+            {select("identifierFieldKey", byRole("identifier").map((field) => <option key={field.field_key} value={field.field_key}>{`${fieldLabel(field)} value once`}</option>), form.operation === "rate" ? "records" : "record")}
+          </label>
           <div className="d-flex flex-wrap gap-2">
             <label>
               {form.operation === "rate" ? "Numerator: records where" : "Only records where"}
@@ -288,7 +353,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
               {!data.reporting_period ? <div className="text-warning" data-client-derived-no-period="">{projectPeriodProblem(data.reporting_period_context)}</div>
                 : <div> KAI Project reporting period: {data.reporting_period.start} to {data.reporting_period.end}.</div>}
               {data.period_month_coverage?.partially_covered_months?.length ? <div data-client-derived-partial-months="">
-                The period covers {data.period_month_coverage.partially_covered_months.join(" and ")} only in part. KAI applies the actual dates exactly when none of the records a calculation reads fall in {data.period_month_coverage.partially_covered_months.length === 1 ? "that month" : "those months"}; otherwise it explains why it cannot.
+                The period covers {data.period_month_coverage.partially_covered_months.join(" and ")} only in part. KAI applies the actual dates exactly: from its month counts when none of the records a calculation reads fall in {data.period_month_coverage.partially_covered_months.length === 1 ? "that month" : "those months"}, otherwise by recalculating from the verified uploaded file (it takes a moment).
               </div> : null}
               <div>Choose “no period (all dates)” above for a supported calculation without date filtering. Your field selections will remain.</div>
               {data.reporting_period_context?.engagement_id ? <ProjectReportingPeriodEditor organizationId={organizationId}
@@ -323,8 +388,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           </button>
         </form>
       ) : null}
-      {data?.tabular?.available && !data.tabular.sheetKey ? (
-        <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsBasis={data} eventsBasisCurrent={basis.status === "success"}
+      {data?.tabular?.available ? (
+        <ClientCrossSourceMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} eventsWorksheetKey={data.tabular.sheetKey || null}
+          eventsBasis={data} eventsBasisCurrent={basis.status === "success"}
           onPeriodSaved={load} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
@@ -390,6 +456,25 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 pending={pending === "clarify"} onSubmit={(event) => clarify(event, recorded)}
                 onCancel={() => { setClarifying(null); setClarifyForm(interpretationFormFrom(current?.interpretation)); }} />
             ) : null}
+            {recorded.target_comparison ? <div data-client-derived-target-comparison={recorded.target_comparison.met ? "met" : "not_met"}>{recorded.target_comparison.text}</div> : null}
+            <form className="d-flex flex-wrap gap-1 align-items-end mt-1" data-client-derived-target-form={recorded.source_derived_measurement_id}
+              onSubmit={(event) => setTarget(event, recorded)}>
+              <label>
+                Planned target{measurementTargetUnit(recorded.measurement_family) === "percent" ? " (%)" : ""}
+                <input className="form-control form-control-sm" inputMode="decimal" disabled={Boolean(pending)} data-client-derived-target-value=""
+                  value={targetDrafts[recorded.source_derived_measurement_id]?.value ?? recorded.target?.target_value?.replace(/\.00$/, "") ?? ""}
+                  onChange={(event) => setTargetDraft(recorded, { value: event.target.value })} />
+              </label>
+              <select className="form-select form-select-sm w-auto" disabled={Boolean(pending)} data-client-derived-target-comparison-select=""
+                value={targetDrafts[recorded.source_derived_measurement_id]?.comparison ?? recorded.target?.comparison ?? "at_least"}
+                onChange={(event) => setTargetDraft(recorded, { comparison: event.target.value })}>
+                <option value="at_least">at least</option>
+                <option value="at_most">at most</option>
+              </select>
+              <button type="submit" className="btn btn-sm btn-outline-secondary" disabled={Boolean(pending)} data-client-derived-set-target={recorded.source_derived_measurement_id}>
+                {recorded.target ? "Change target" : "Set target"}
+              </button>
+            </form>
           </div>
         );
       })}

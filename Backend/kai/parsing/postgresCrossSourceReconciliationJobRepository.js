@@ -23,6 +23,10 @@ export const RECONCILIATION_RETRY_COOLDOWN_SECONDS = Object.freeze({ 1: 60, 2: 3
 export const RECONCILIATION_CLAIM_LEASE_SECONDS = 300;
 export const RECONCILIATION_LEASE_EXPIRED_ERROR_CODE = "attempt_lease_expired";
 export const RECONCILIATION_SWEEP_LIMIT = 25;
+// Job kinds (kai_sprint2_measurement_calculation_completion): a linked-reach
+// reconciliation of two sources or worksheets, or one source version's
+// tabular measurement with the Project period's exact days.
+export const JOB_KINDS = Object.freeze({ CROSS_SOURCE_REACH: "cross_source_reach", TABULAR_EXACT_PERIOD: "tabular_exact_period" });
 
 const SAFE_CODE_RE = /^[a-z0-9_]{1,64}$/;
 
@@ -33,6 +37,10 @@ const JOB_COLUMNS = `
   reference_source_version_id::text AS reference_source_version_id,
   primary_profile_canonical_sha256,
   reference_profile_canonical_sha256,
+  job_kind,
+  primary_worksheet_key,
+  reference_worksheet_key,
+  interpretation,
   mapping,
   job_state,
   attempt_count,
@@ -65,6 +73,10 @@ function rowToJob(row) {
     reference_source_version_id: row.reference_source_version_id,
     primary_profile_canonical_sha256: row.primary_profile_canonical_sha256,
     reference_profile_canonical_sha256: row.reference_profile_canonical_sha256,
+    job_kind: row.job_kind,
+    primary_worksheet_key: row.primary_worksheet_key ?? null,
+    reference_worksheet_key: row.reference_worksheet_key ?? null,
+    interpretation: row.interpretation ?? null,
     mapping: row.mapping,
     job_state: row.job_state,
     attempt_count: Number(row.attempt_count),
@@ -94,7 +106,12 @@ function canonicalJson(value) {
  * under, the mapping and the period. Repeating the request finds this job;
  * a change to either source or to the period is another request.
  */
-export function reconciliationRequestFingerprint({ primarySourceVersionId, referenceSourceVersionId, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256, mapping }) {
+export function reconciliationRequestFingerprint({
+  primarySourceVersionId, referenceSourceVersionId, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256, mapping,
+  jobKind = JOB_KINDS.CROSS_SOURCE_REACH, primaryWorksheetKey = null, referenceWorksheetKey = null, interpretation = null,
+}) {
+  // A CSV linked-reach request keeps exactly its original identity; worksheets,
+  // another job kind and an interpretation are part of the request when present.
   return createHash("sha256").update(canonicalJson({
     contract: "kai_cross_source_reconciliation_request_v1",
     primarySourceVersionId,
@@ -102,6 +119,10 @@ export function reconciliationRequestFingerprint({ primarySourceVersionId, refer
     primaryProfileCanonicalSha256,
     referenceProfileCanonicalSha256,
     mapping,
+    ...(jobKind !== JOB_KINDS.CROSS_SOURCE_REACH ? { jobKind } : {}),
+    ...(primaryWorksheetKey ? { primaryWorksheetKey } : {}),
+    ...(referenceWorksheetKey ? { referenceWorksheetKey } : {}),
+    ...(interpretation ? { interpretation } : {}),
   })).digest("hex");
 }
 
@@ -125,20 +146,26 @@ export function createPostgresCrossSourceReconciliationJobRepository({ runInTran
      * person's explicit retry, under the same job identity. A queued,
      * running, retrying or succeeded job is returned as it is.
      */
-    async enqueueInTransaction(tx, { organizationId, primarySourceVersionId, referenceSourceVersionId, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256, mapping, requestedBy, now }) {
+    async enqueueInTransaction(tx, {
+      organizationId, primarySourceVersionId, referenceSourceVersionId = null, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256 = null, mapping, requestedBy, now,
+      jobKind = JOB_KINDS.CROSS_SOURCE_REACH, primaryWorksheetKey = null, referenceWorksheetKey = null, interpretation = null,
+    }) {
       const requestFingerprint = reconciliationRequestFingerprint({
         primarySourceVersionId, referenceSourceVersionId, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256, mapping,
+        jobKind, primaryWorksheetKey, referenceWorksheetKey, interpretation,
       });
       const inserted = await tx.query(
         `INSERT INTO kai.cross_source_reconciliation_jobs (
            organization_id, primary_source_version_id, reference_source_version_id,
            primary_profile_canonical_sha256, reference_profile_canonical_sha256,
-           request_fingerprint, mapping, job_state, attempt_count, requested_by, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, 'queued', 0, $8::uuid, $9::timestamptz, $9::timestamptz)
+           request_fingerprint, mapping, job_state, attempt_count, requested_by, created_at, updated_at,
+           job_kind, primary_worksheet_key, reference_worksheet_key, interpretation
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, 'queued', 0, $8::uuid, $9::timestamptz, $9::timestamptz, $10, $11, $12, $13::jsonb)
          ON CONFLICT (organization_id, request_fingerprint) DO NOTHING
          RETURNING ${JOB_COLUMNS}`,
         [organizationId, primarySourceVersionId, referenceSourceVersionId, primaryProfileCanonicalSha256, referenceProfileCanonicalSha256,
-          requestFingerprint, JSON.stringify(mapping), requestedBy, now],
+          requestFingerprint, JSON.stringify(mapping), requestedBy, now, jobKind, primaryWorksheetKey, referenceWorksheetKey,
+          interpretation ? JSON.stringify(interpretation) : null],
       );
       if (inserted.rows[0]) return { job: rowToJob(inserted.rows[0]), fresh: true, requeued: false };
       const { rows } = await tx.query(

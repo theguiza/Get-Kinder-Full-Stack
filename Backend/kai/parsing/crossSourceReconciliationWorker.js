@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { getScopedIntakeFileParserProfileEligibilityFacts, lockKaiP1EligibleIntakeFileForShare } from "../db/kaiIntakeQueries.js";
-import { readTrustedCsvRecords } from "../profiling/localProfilingKernel.js";
+import { readTrustedCsvRecords, readTrustedWorksheetRecords } from "../profiling/localProfilingKernel.js";
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
 
@@ -15,10 +15,13 @@ import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./cross
  * P1 eligibility share lock on the intake file (still a confirmed, passed
  * upload of the profiled checksum), re-reads its stored object-version facts,
  * reads the bytes, re-checks their sha256 against the profiled checksum, and
- * parses them with the profiler's own CSV reader. The bytes and parsed
- * records never leave this module: `reconcile` returns only the counts and
- * source row numbers of reconcileLinkedReach. The caller supplies identities
- * and the validated mapping, never bytes, facts or a storage path.
+ * parses them with the profiler's own reader: a CSV, or the selected
+ * worksheet of a workbook (with Excel date cells as their days). The bytes
+ * and parsed records never leave this module except as `readSourceRecords`
+ * hands one version's records to the calculation running in the same worker
+ * transaction: `reconcile` returns only the counts and source row numbers of
+ * reconcileLinkedReach. The caller supplies identities and the validated
+ * mapping, never bytes, facts or a storage path.
  */
 function refusal(reason) {
   return { ok: false, reason };
@@ -36,12 +39,13 @@ export function createCrossSourceReconciliationWorker({
   readEligibilityFacts = getScopedIntakeFileParserProfileEligibilityFacts,
   lockEligibleIntakeFile = lockKaiP1EligibleIntakeFileForShare,
 } = {}) {
-  async function readRecords(tx, { organizationId, intakeFileId, checksum }) {
+  async function readRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {
     if (!(await lockEligibleIntakeFile({ organizationId, intakeFileId, verifiedChecksum: checksum }, tx))) {
       return refusal("cross_source_upload_not_eligible");
     }
     const facts = await readEligibilityFacts({ organizationId, intakeFileId }, tx);
-    if (!facts || facts.organization_id !== organizationId || facts.verified_checksum !== checksum || facts.file_extension !== ".csv") {
+    if (!facts || facts.organization_id !== organizationId || facts.verified_checksum !== checksum || ![".csv", ".xlsx"].includes(facts.file_extension)
+      || (facts.file_extension === ".csv" && worksheetKey !== null)) {
       return refusal("cross_source_upload_not_eligible");
     }
     const byteSource = createP1ObjectVersionByteSource({
@@ -70,12 +74,19 @@ export function createCrossSourceReconciliationWorker({
     if (!bytes) return refusal("cross_source_bytes_unavailable");
     // Bytes that are not the profiled version are never reconciled or retried.
     if (sha256(bytes) !== checksum) return refusal("cross_source_checksum_mismatch");
-    const records = readTrustedCsvRecords({ bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), declaredMime: facts.mime_type });
+    const trusted = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const records = facts.file_extension === ".xlsx"
+      ? await readTrustedWorksheetRecords({ bytes: trusted, sheetKey: worksheetKey, declaredMime: facts.mime_type })
+      : readTrustedCsvRecords({ bytes: trusted, declaredMime: facts.mime_type });
     if (!records) return refusal("cross_source_csv_not_readable");
     return { ok: true, records };
   }
 
   return Object.freeze({
+    // One version's verified records, for a calculation in this same worker transaction.
+    async readSourceRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {
+      return readRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey });
+    },
     async reconcile(tx, { organizationId, events, register, mapping }) {
       const eventRead = await readRecords(tx, { organizationId, ...events });
       if (!eventRead.ok) return eventRead;

@@ -87,7 +87,7 @@ export function CrossSourceActivityDetail({ entry }) {
  * measurements (meaning, limitations, claim proposal). Nothing here reads a
  * record or calculates a number.
  */
-export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsBasis, eventsBasisCurrent = true, linkableVersions, versionsById, earlierVersionIds = [], onReconciled, onPeriodSaved }) {
+export default function ClientCrossSourceMeasurementSection({ organizationId, sourceVersionId, eventsWorksheetKey = null, eventsBasis, eventsBasisCurrent = true, linkableVersions, versionsById, earlierVersionIds = [], onReconciled, onPeriodSaved }) {
   const [form, setForm] = useState(EMPTY_CROSS_SOURCE_FORM);
   const [registerReadAttempt, setRegisterReadAttempt] = useState(0);
   const [register, setRegister] = useState({ status: "idle", data: null, error: "" });
@@ -120,7 +120,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   }, [organizationId]);
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
-  // The register's committed fields, read through the same basis route.
+  // The register's committed fields (and, for a workbook, its worksheets), read through the same basis route.
   useEffect(() => {
     if (!form.referenceSourceVersionId) {
       setRegister({ status: "idle", data: null, error: "" });
@@ -130,7 +130,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     setRegister({ status: "loading", data: null, error: "" });
     (async () => {
       try {
-        const result = await getJson(derivedMeasurementBasisPath(organizationId, form.referenceSourceVersionId, null));
+        const result = await getJson(derivedMeasurementBasisPath(organizationId, form.referenceSourceVersionId, form.referenceWorksheetKey || null));
         if (!active || !mountedRef.current) return;
         setRegister(result.statusCode === 200 && result.body?.ok
           ? { status: "success", data: result.body.data, error: "" }
@@ -140,7 +140,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
       }
     })();
     return () => { active = false; };
-  }, [organizationId, form.referenceSourceVersionId, registerReadAttempt]);
+  }, [organizationId, form.referenceSourceVersionId, form.referenceWorksheetKey, registerReadAttempt]);
 
   const poll = useCallback(async (reconciliationJobId) => {
     let result;
@@ -166,10 +166,16 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
 
   const eventFields = eventsBasis?.tabular?.available ? eventsBasis.tabular.fields : [];
   const registerFields = register.data?.tabular?.available ? register.data.tabular.fields : [];
+  // This workbook is offered as its own register only when it has another worksheet.
+  const offeredVersions = linkableVersions.filter((version) => version.sourceVersionId !== sourceVersionId || (eventsBasis?.worksheets || []).length > 1);
+  // A workbook register is one worksheet: never the service-event worksheet itself.
+  const registerWorksheets = (register.data?.worksheets || [])
+    .filter((sheet) => !(form.referenceSourceVersionId === sourceVersionId && sheet.sheet_key === eventsWorksheetKey));
+  const registerNeedsWorksheet = (register.data?.worksheets || []).length > 1 || form.referenceSourceVersionId === sourceVersionId;
   const byRole = (list, role) => list.filter((field) => field.role === role);
   const statusValues = eventFields.find((field) => field.field_key === form.statusFieldKey)?.values || [];
   const groupFields = byRole(eventFields, "categorical").filter((field) => !field.vocabulary_withheld && (field.values || []).length > 0);
-  const problem = (!eventsBasisCurrent ? "Read the current service-event measurement basis before requesting reconciliation." : null) || (form.referenceSourceVersionId && register.status !== "success" ? "Read the participant register's fields before requesting reconciliation." : null) || crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period), reportingPeriodContext: eventsBasis?.reporting_period_context });
+  const problem = (!eventsBasisCurrent ? "Read the current service-event measurement basis before requesting reconciliation." : null) || (form.referenceSourceVersionId && register.status !== "success" ? "Read the participant register's fields before requesting reconciliation." : null) || crossSourceFormProblem(form, { reportingPeriodRecorded: Boolean(eventsBasis?.reporting_period), reportingPeriodContext: eventsBasis?.reporting_period_context, registerNeedsWorksheet });
 
   const durationCandidates = eventsBasis?.tabular?.available ? eventsBasis.tabular.duration_field_candidates || [] : [];
   const history = reconciliationHistory(jobs, sourceVersionId, earlierVersionIds);
@@ -177,7 +183,8 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   const setField = (key) => (event) => {
     const value = event.target.value;
     setForm((current) => ({ ...current, [key]: value, ...(key === "statusFieldKey" ? { completedValueKey: "" } : {}),
-      ...(key === "referenceSourceVersionId" ? { registerParticipantFieldKey: "" } : {}), ...(key === "durationFieldKey" ? { durationConfirmed: false } : {}) }));
+      ...(key === "referenceSourceVersionId" ? { registerParticipantFieldKey: "", referenceWorksheetKey: "" } : {}),
+      ...(key === "referenceWorksheetKey" ? { registerParticipantFieldKey: "" } : {}), ...(key === "durationFieldKey" ? { durationConfirmed: false } : {}) }));
   };
   const setChecked = (key) => (event) => {
     const { checked } = event.target;
@@ -198,7 +205,7 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     clearTimeout(timerRef.current);
     let result;
     try {
-      result = await postJson(crossSourceMeasurementsPath(organizationId), crossSourceRequestBody(form, sourceVersionId));
+      result = await postJson(crossSourceMeasurementsPath(organizationId), crossSourceRequestBody(form, sourceVersionId, eventsWorksheetKey));
     } catch {
       if (mountedRef.current) setNotice({ kind: "warning", text: "The reconciliation request's result could not be read. Refresh history to check whether a job was created before requesting it again. Your selections are retained." });
       return;
@@ -231,20 +238,31 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
     <div className="border-top pt-2 mt-2" data-client-cross-source={sourceVersionId}>
       <h6 className="mb-1">Link to a participant register</h6>
       <div className="text-muted mb-1">
-        Count eligible service encounters and the distinct registered people they reached by linking this service-event source
-        version to a participant register. Choose the fields KAI lists; KAI reads both files in its reconciliation worker and keeps
-        counts only.
+        Count eligible service encounters and the distinct registered people they reached by linking this service-event
+        {eventsWorksheetKey ? " worksheet" : " source version"} to a participant register: another CSV file, a worksheet of another
+        workbook, or another worksheet of this workbook. Choose the fields KAI lists; KAI reads both tables in its reconciliation
+        worker and keeps counts only.
       </div>
-      {linkableVersions.length === 0 ? (
-        <div className="text-muted" data-client-cross-source-none="">No other current CSV source version can be linked.</div>
+      {offeredVersions.length === 0 ? (
+        <div className="text-muted" data-client-cross-source-none="">No other current CSV file or workbook worksheet can be linked.</div>
       ) : (
         <form onSubmit={submit} data-client-cross-source-form="">
           <label className="d-block">
             Participant register source version
-            {select("referenceSourceVersionId", linkableVersions.map((version) => (
-              <option key={version.sourceVersionId} value={version.sourceVersionId}>{version.safeFilename || version.sourceVersionId}</option>
+            {select("referenceSourceVersionId", offeredVersions.map((version) => (
+              <option key={version.sourceVersionId} value={version.sourceVersionId}>
+                {version.sourceVersionId === sourceVersionId ? "This workbook (another worksheet)" : (version.safeFilename || version.sourceVersionId)}
+              </option>
             )), "choose a source version")}
           </label>
+          {form.referenceSourceVersionId && registerNeedsWorksheet ? (
+            <label className="d-block">
+              Participant register worksheet
+              {select("referenceWorksheetKey", registerWorksheets.map((sheet) => (
+                <option key={sheet.sheet_key} value={sheet.sheet_key}>{`${sheet.sheet_name} (${sheet.sheet_key})`}</option>
+              )), "choose a worksheet")}
+            </label>
+          ) : null}
           <div className="d-flex flex-wrap gap-2">
             <label>Event identifier{select("eventIdentifierFieldKey", byRole(eventFields, "identifier").map(fieldOption), "choose a field")}</label>
             <label>Participant identifier{select("participantIdentifierFieldKey", byRole(eventFields, "identifier").map(fieldOption), "choose a field")}</label>
