@@ -2,7 +2,7 @@ import { describeDocumentLimitationCode } from "./kaiDocumentEvidenceValidators.
 import { createHash } from "node:crypto";
 import { CROSS_SOURCE_REACH_BASIS_VERSION, CROSS_SOURCE_REACH_METHOD } from "../parsing/crossSourceReachReconciliation.js";
 import { PAIRED_OUTCOME_CALCULATION_METHOD } from "../profiling/pairedOutcomeBasis.js";
-import { TABULAR_MEASUREMENT_BASIS_VERSION, categoryVocabularyWithheldReason } from "../profiling/tabularMeasurementBasis.js";
+import { TABULAR_MEASUREMENT_BASIS_VERSION, categoryVocabularyWithheldReason, headerIndicatesPersonalAttribute } from "../profiling/tabularMeasurementBasis.js";
 import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
 import { derivePairedOutcomeMeasurements } from "./kaiPairedOutcomeMeasurementValidators.js";
 import {
@@ -977,10 +977,16 @@ export function calculateTabularMeasurementFromRecords({ profile, worksheetKey, 
   const { basis } = tabularBasisOf(profile, worksheetKey);
   const mismatch = () => refuse("tabular_source_records_mismatch", "The uploaded file no longer matches the profile KAI recorded for this source version.", "Upload the file again as a new intake version.");
   if (!Array.isArray(records) || records.length < 1) return mismatch();
+  // Exact days are never applied to a date describing a person (a date of birth): the profile keeps such a date by
+  // month only, and day-level counts of it could single people out. Its header is read here and never kept.
+  const { positions, labels, scope } = resolved;
+  if (headerIndicatesPersonalAttribute(typeof records[0]?.[positions.date - 1] === "string" ? records[0][positions.date - 1] : "")) {
+    return refuse("tabular_period_field_personal_attribute", "The selected date field describes a person (for example a date of birth), so KAI does not apply a period's exact days to it.",
+      "Choose the service or activity date field, or measure without a period.", { objectType: "tabular_measurement_definition" });
+  }
   const text = (record, position) => (position && typeof record[position - 1] === "string" ? record[position - 1].trim() : "");
   const dataRecords = records.slice(1).filter((record) => record.some((value) => typeof value === "string" && value.trim().length > 0));
   if (dataRecords.length !== basis.record_count) return mismatch();
-  const { positions, labels, scope } = resolved;
   const periodCondition = resolved.definition.conditions.find((condition) => condition.kind === "period");
   const monthly = new Map();
   for (const record of dataRecords) {

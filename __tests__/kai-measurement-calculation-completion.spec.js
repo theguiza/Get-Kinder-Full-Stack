@@ -273,3 +273,22 @@ test("an unchanged target is recognized against its stored numeric(14,2) value, 
     assert.equal(sameTargetValue(stored, validated), same, `${stored} vs ${validated}`);
   }
 });
+
+test("exact days are never applied to a date describing a person: a date-of-birth period field is refused by the file path", async () => {
+  // [ref, birth date, visit date]; the profile keeps both dates by month only.
+  const rows = [["ref", "date_of_birth", "visit_date"], ["R1", "2010-02-03", "2025-02-14"], ["R2", "2011-02-20", "2025-02-27"], ["R3", "2010-03-01", "2025-03-03"], ["R4", "2012-02-11", "2025-02-02"]];
+  const bytes = new TextEncoder().encode(`${rows.map((row) => row.join(",")).join("\n")}\n`);
+  const profile = await profileLocalTrustedFile({ extension: ".csv", declaredMime: "text/csv", byteSize: bytes.byteLength, bytes });
+  const records = readTrustedCsvRecords({ bytes });
+  const exact = (fieldKey, period) => {
+    const condition = { kind: "period", field_key: fieldKey, period_source: "engagement_reporting_period", scope: "within" };
+    const resolved = D.resolveTabularDefinitionForSourceRecords(profile, null, D.validateTabularMeasurementDefinition({ operation: "count", conditions: [condition] }).definition, { reportingPeriod: period });
+    assert.equal(resolved.ok, true, fieldKey);
+    return D.calculateTabularMeasurementFromRecords({ profile, worksheetKey: null, resolved: resolved.resolved, records });
+  };
+  const birth = exact("field_2", { start: "2010-02-05", end: "2011-02-28" });
+  assert.deepEqual([birth.ok, birth.blockers[0].blocking_reason], [false, "tabular_period_field_personal_attribute"]);
+  // The visit date is applied by day: R1 and R2 fall in 2025-02-10..2025-02-28, R4 (02-02) does not.
+  const visits = exact("field_3", { start: "2025-02-10", end: "2025-02-28" });
+  assert.equal(visits.measurement.measuredValue, rows.slice(1).filter((row) => row[2] >= "2025-02-10" && row[2] <= "2025-02-28").length);
+});

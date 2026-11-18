@@ -1428,14 +1428,23 @@ async function runXlsxAcceptance() {
       await selectWorksheet("sheet_3");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-measurement-counts]")), "Service_Events counts");
       await adminPage.idle();
-      assert.deepEqual(adminPage.requestsSince(mark).map((request) => {
+      const selectionReads = adminPage.requestsSince(mark).map((request) => {
         const url = new URL(request.url);
         return [request.method, url.pathname + url.search, request.status];
-      }), [
+      });
+      assert.deepEqual(selectionReads.slice(0, 2), [
         ["GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), 200],
         // Measurement MVP: the same panel reads that worksheet's field-value measurement basis.
         ["GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"), 200],
       ], "the selection reads the existing P2-01M route and the derived-measurement basis with the worksheet key");
+      // This workbook's other worksheets can be linked as a participant register, so the linkage form is offered: it
+      // reads the Project period it edits and the reconciliation history. Nothing else is read and nothing is written.
+      assert.deepEqual(selectionReads.slice(2).sort(), [
+        ["GET", crossSourceReconciliationJobsPath(ORG_X), 200],
+        ["GET", `${orgPath()}/engagements/${PROJECT_X}/reporting-period`, 200],
+      ], "the worksheet's linkage form reads only its Project period and history");
+      assert.equal(await adminPage.evaluate(`[...document.querySelector('[data-client-cross-source="${sv}"] [data-client-cross-source-field="referenceSourceVersionId"]').options]
+        .find((option) => option.textContent === "This workbook (another worksheet)")?.value ?? null`), sv, "another worksheet of this workbook is offered as a register");
       assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Service_Events \(sheet_3\)/);
       assert.equal(await textOf(adminPage, "[data-client-source-measurement-counted]"), String(independent.counted), "two exact duplicates included, the blank row excluded");
 
@@ -3014,15 +3023,19 @@ async function runXlsxAcceptance() {
       const exactCount = p.rows.filter((row) => dayOf(row) && dayOf(row) >= exactPeriod.start && dayOf(row) <= exactPeriod.end).length;
       assert.deepEqual([exactCount, p.expected.inPeriod], [0, 9], "R01-R08 and the R03 copy are all dated 2026-01-10");
       await configureProjectPeriodInUi(exactPeriod.start, exactPeriod.end);
-      await openCountRecords(p.sv); await p.selectSheet("sheet_2");
-      assert.ok(await setSelect(p.field("periodFieldKey"), "field_4"));
-      await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${p.section} [data-client-derived-partial-months]`) ?? ""), "partial-month note");
-      const queuedP3 = await recordQueuedInUi(p.section, p.sv, "sheet_2");
-      assert.deepEqual(queuedP3.request, { definition: { operation: "count", conditions: [{ kind: "period", field_key: "field_4", period_source: "engagement_reporting_period", scope: "within" }] } });
-      assert.deepEqual([queuedP3.saved.measured_value, queuedP3.saved.definition.conditions[0].period_start, queuedP3.saved.definition.conditions[0].period_end], [exactCount, exactPeriod.start, exactPeriod.end]);
-      assert.equal(queuedP3.saved.exclusions.records_without_date, 1, "the ordinary numeric Excel cell is still not a date when the file is read");
-      assert.match(queuedP3.saved.statement, /2026-01-11 to 2026-02-28/);
-      await configureProjectPeriodInUi("2026-01-01", "2026-02-28");
+      try {
+        await openCountRecords(p.sv); await p.selectSheet("sheet_2");
+        assert.ok(await setSelect(p.field("periodFieldKey"), "field_4"));
+        await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${p.section} [data-client-derived-partial-months]`) ?? ""), "partial-month note");
+        const queuedP3 = await recordQueuedInUi(p.section, p.sv, "sheet_2");
+        assert.deepEqual(queuedP3.request, { definition: { operation: "count", unit: { kind: "records" }, conditions: [{ kind: "period", field_key: "field_4", period_source: "engagement_reporting_period", scope: "within" }] } });
+        assert.deepEqual([queuedP3.saved.measured_value, queuedP3.saved.definition.conditions[0].period_start, queuedP3.saved.definition.conditions[0].period_end], [exactCount, exactPeriod.start, exactPeriod.end]);
+        assert.equal(queuedP3.saved.exclusions.records_without_date, 1, "the ordinary numeric Excel cell is still not a date when the file is read");
+        assert.match(queuedP3.saved.statement, /2026-01-11 to 2026-02-28/);
+      } finally {
+        // Later cases start from the whole-month period whatever happened here.
+        await configureProjectPeriodInUi("2026-01-01", "2026-02-28");
+      }
     });
 
     await test("P4 / C,E,G,H: lineage diagnostics, independent counts, unambiguous paired result and explicit validated ambiguous-pairing selection", async () => {
@@ -3339,17 +3352,21 @@ async function runXlsxAcceptance() {
       assert.deepEqual(expected.partialRate, [7, 9], "W02 (01-10) and W04 (01-05) fall before the period");
       assert.notDeepEqual(expected.partialRate, expected.allRate, "rounding to whole months is another answer");
       await configureProjectPeriodInUi(partial.start, partial.end);
-      await openCountRecords(sv);
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "field controls");
-      for (const [key, value] of [["operation", "rate"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
-      await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${section} [data-client-derived-partial-months]`) ?? ""), "partial-month note");
-      const exact = await recordQueuedInUi(section, sv, null, "sheet_1");
+      let exact;
+      try {
+        await openCountRecords(sv);
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "field controls");
+        for (const [key, value] of [["operation", "rate"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+        await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${section} [data-client-derived-partial-months]`) ?? ""), "partial-month note");
+        exact = await recordQueuedInUi(section, sv, null, "sheet_1");
+      } finally {
+        await configureProjectPeriodInUi(period.start, period.end);
+      }
       assert.deepEqual(exact.request, { definition: { operation: "rate", conditions: [{ kind: "category", field_key: "field_3", value_key: "value_1" }, periodCondition], population: [] } });
       assert.deepEqual([exact.saved.numerator, exact.saved.denominator, exact.saved.percentage], [...expected.partialRate, "77.78"]);
       assert.deepEqual([exact.saved.definition.conditions[1].period_start, exact.saved.definition.conditions[1].period_end], [partial.start, partial.end]);
       assert.match(exact.saved.statement, /among the 9 records with field_5 within the engagement reporting period 2026-01-11 to 2026-02-28 in selected worksheet sheet_1 \(the measured population\), 7 have field_3 = completed: 7 of 9 \(77\.78%\); 2 of the 9 do not; 1 record without a date excluded from the population\.$/);
       recorded.push(exact.saved);
-      await configureProjectPeriodInUi(period.start, period.end);
 
       // 6. Planned targets set in the UI: compared with the recorded actual in exact arithmetic, never stated as a result.
       await openCountRecords(sv);
@@ -3536,52 +3553,56 @@ async function runXlsxAcceptance() {
 
       // 4. A partial-month Project period through the real UI: exited visits (none in January) from the month counts, every visit from the verified file.
       await configureProjectPeriodInUi("2026-01-10", "2026-02-28");
-      const partial = { start: "2026-01-10", end: "2026-02-28" };
-      assert.equal(visitsS.filter((row) => exited(row) && row[4].startsWith("2026-01")).length, 0);
-      await openCountRecords(newSv);
-      const section = `[data-client-derived-measurements="${newSv}"]`;
-      const field = (key) => `${section} [data-client-derived-field="${key}"]`;
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "successor field controls");
-      for (const [key, value] of [["categoryFieldKey", "field_4"], ["categoryValueKey", "value_2"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-partial-months]`)), "partial-month note");
-      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)}).disabled`)) === false, "exact partial-month count ready");
-      const mark = adminPage.mark();
-      await adminPage.clickIn(`${section} [data-client-derived-record-tabular]`, "Calculate and record");
-      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Measurement recorded:"), "partial-month measurement saved");
-      const req = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/tabular-measurements"));
-      const saved = (await adminPage.responseBody(req)).data.measurement;
-      const [persisted] = await query(`SELECT m.measured_value::int, m.definition, m.component_counts, e.statement FROM kai.source_derived_measurements m
-        JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id) JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id
-        WHERE m.source_derived_measurement_id = $1::uuid`, [saved.source_derived_measurement_id]);
-      assert.equal(persisted.measured_value, visitsS.filter((row) => exited(row) && inPeriod(row, partial)).length);
-      assert.deepEqual([persisted.definition.conditions[1].period_start, persisted.definition.conditions[1].period_end], [partial.start, partial.end]);
-      assert.deepEqual([persisted.component_counts.partially_covered_months, persisted.component_counts.partially_covered_month_records], [["2026-01"], 0]);
-      assert.match(persisted.statement, /field_5 within the engagement reporting period 2026-01-10 to 2026-02-28/);
-      // Negative control: rounding the period to January-February would count the same exited visits but every visit differently.
-      assert.notEqual(visitsS.filter((row) => inPeriod(row, partial)).length, expected.allRate[1]);
-      // Every visit in the same period: January holds visits the month counts cannot place by day, so KAI recalculates from the verified file.
-      const allInPartial = visitsS.filter((row) => inPeriod(row, partial)).length;
-      assert.deepEqual([allInPartial, expected.allRate[1]], [7, 8], "S01 (01-05) falls before the period");
-      for (const [key, value] of [["categoryFieldKey", ""], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
-      await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${section} [data-client-derived-partial-months]`) ?? ""), "all-visit partial-month note");
-      // The meaning stated with the request travels with the queued calculation.
-      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="indicatorLabel"]`, "Visits in the Project period"));
-      assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="meaningText"]`, "Every recorded learner visit dated in the Project period."));
-      const allPartial = await recordQueuedInUi(section, newSv, null, "sheet_1");
-      assert.deepEqual(allPartial.request.definition, { operation: "count", conditions: [within()] });
-      assert.deepEqual([allPartial.request.interpretation.indicator_label, allPartial.request.interpretation.meaning_text], ["Visits in the Project period", "Every recorded learner visit dated in the Project period."]);
-      assert.equal(allPartial.saved.measured_value, allInPartial);
-      const [stated] = await query("SELECT meaning_text FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [allPartial.saved.source_derived_measurement_id]);
-      assert.equal(stated?.meaning_text, "Every recorded learner visit dated in the Project period.", "the job records the stated meaning");
-      assert.match(allPartial.saved.statement, new RegExp(`^Derived measurement: Visits in the Project period \\(meaning stated by the organization\\): ${allInPartial} records `));
-      // The same request again names the same settled calculation: no second job and no second measurement.
-      const rowsAfterExact = await rowsOf(newSv);
-      const repeated = await adminApi("POST", tabularMeasurementPath(ORG_X, newSv, null), allPartial.request);
-      assert.deepEqual([repeated.status, repeated.body.data.fresh, repeated.body.data.calculationJob.reconciliation_job_id, repeated.body.data.calculationJob.job_state],
-        [202, false, allPartial.jobId, "succeeded"], J(repeated.body));
-      await dispatcher.whenIdle();
-      assert.equal(await rowsOf(newSv), rowsAfterExact, "the same exact calculation is not recorded twice");
-      await configureProjectPeriodInUi(period.start, period.end);
+      let persisted;
+      try {
+        const partial = { start: "2026-01-10", end: "2026-02-28" };
+        assert.equal(visitsS.filter((row) => exited(row) && row[4].startsWith("2026-01")).length, 0);
+        await openCountRecords(newSv);
+        const section = `[data-client-derived-measurements="${newSv}"]`;
+        const field = (key) => `${section} [data-client-derived-field="${key}"]`;
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "successor field controls");
+        for (const [key, value] of [["categoryFieldKey", "field_4"], ["categoryValueKey", "value_2"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-partial-months]`)), "partial-month note");
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)}).disabled`)) === false, "exact partial-month count ready");
+        const mark = adminPage.mark();
+        await adminPage.clickIn(`${section} [data-client-derived-record-tabular]`, "Calculate and record");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Measurement recorded:"), "partial-month measurement saved");
+        const req = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/tabular-measurements"));
+        const saved = (await adminPage.responseBody(req)).data.measurement;
+        [persisted] = await query(`SELECT m.measured_value::int, m.definition, m.component_counts, e.statement FROM kai.source_derived_measurements m
+          JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id) JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id
+          WHERE m.source_derived_measurement_id = $1::uuid`, [saved.source_derived_measurement_id]);
+        assert.equal(persisted.measured_value, visitsS.filter((row) => exited(row) && inPeriod(row, partial)).length);
+        assert.deepEqual([persisted.definition.conditions[1].period_start, persisted.definition.conditions[1].period_end], [partial.start, partial.end]);
+        assert.deepEqual([persisted.component_counts.partially_covered_months, persisted.component_counts.partially_covered_month_records], [["2026-01"], 0]);
+        assert.match(persisted.statement, /field_5 within the engagement reporting period 2026-01-10 to 2026-02-28/);
+        // Negative control: rounding the period to January-February would count the same exited visits but every visit differently.
+        assert.notEqual(visitsS.filter((row) => inPeriod(row, partial)).length, expected.allRate[1]);
+        // Every visit in the same period: January holds visits the month counts cannot place by day, so KAI recalculates from the verified file.
+        const allInPartial = visitsS.filter((row) => inPeriod(row, partial)).length;
+        assert.deepEqual([allInPartial, expected.allRate[1]], [7, 8], "S01 (01-05) falls before the period");
+        for (const [key, value] of [["categoryFieldKey", ""], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+        await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${section} [data-client-derived-partial-months]`) ?? ""), "all-visit partial-month note");
+        // The meaning stated with the request travels with the queued calculation.
+        assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="indicatorLabel"]`, "Visits in the Project period"));
+        assert.ok(await setInput(adminPage, `${section} [data-client-derived-meaning="meaningText"]`, "Every recorded learner visit dated in the Project period."));
+        const allPartial = await recordQueuedInUi(section, newSv, null, "sheet_1");
+        assert.deepEqual(allPartial.request.definition, { operation: "count", unit: { kind: "records" }, conditions: [within()] });
+        assert.deepEqual([allPartial.request.interpretation.indicator_label, allPartial.request.interpretation.meaning_text], ["Visits in the Project period", "Every recorded learner visit dated in the Project period."]);
+        assert.equal(allPartial.saved.measured_value, allInPartial);
+        const [stated] = await query("SELECT meaning_text FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [allPartial.saved.source_derived_measurement_id]);
+        assert.equal(stated?.meaning_text, "Every recorded learner visit dated in the Project period.", "the job records the stated meaning");
+        assert.match(allPartial.saved.statement, new RegExp(`^Derived measurement: Visits in the Project period \\(meaning stated by the organization\\): ${allInPartial} records `));
+        // The same request again names the same settled calculation: no second job and no second measurement.
+        const rowsAfterExact = await rowsOf(newSv);
+        const repeated = await adminApi("POST", tabularMeasurementPath(ORG_X, newSv, null), allPartial.request);
+        assert.deepEqual([repeated.status, repeated.body.data.fresh, repeated.body.data.calculationJob.reconciliation_job_id, repeated.body.data.calculationJob.job_state],
+          [202, false, allPartial.jobId, "succeeded"], J(repeated.body));
+        await dispatcher.whenIdle();
+        assert.equal(await rowsOf(newSv), rowsAfterExact, "the same exact calculation is not recorded twice");
+      } finally {
+        await configureProjectPeriodInUi(period.start, period.end);
+      }
 
       // 5. A later explicit allowed-use prohibition (a re-review of the same profile) closes the new calculations; tenant and role refusals.
       for (const api of [contributorApi, reviewerApi, adminYApi]) {

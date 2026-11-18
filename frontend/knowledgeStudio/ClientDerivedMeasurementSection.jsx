@@ -123,7 +123,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           onRecorded?.();
           load();
         } else if (["failed", "exhausted"].includes(job.job_state)) {
-          setNotice({ kind: "warning", text: `KAI could not calculate this from the uploaded file (${job.error_code || "unknown reason"}). Nothing was recorded; check the source version and its Project period, then try again.` });
+          setNotice({ kind: "warning", text: job.error_code === "tabular_period_field_personal_attribute"
+            ? "The selected date field describes a person (for example a date of birth), so KAI does not apply a period's exact days to it. Nothing was recorded; choose the service or activity date field, or no period."
+            : `KAI could not calculate this from the uploaded file (${(job.error_code || "unknown reason").replace(/_/g, " ")}). Nothing was recorded; check the source version and its Project period, then try again.` });
         }
       } catch {
         if (!cancelled) setCalculationJob({ ...calculationJob });
