@@ -95,10 +95,27 @@ export function tabularFormProblem(form, basis = null) {
           ? "This table has too many value and month combinations for KAI to apply a period to a rate with a population value. Choose all records as the population, or no period (all dates)."
           : "This source version's profile predates period-filtered rates with a population value. Upload the file again as a new intake version, or choose all records as the population or no period (all dates).";
       }
-      const { start, end } = state.period;
-      const date = new Date(`${end}T00:00:00Z`);
-      date.setUTCDate(date.getUTCDate() + 1);
-      if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. This calculation needs a period starting on a month's first day and ending on a month's last day. Keep your actual Project dates; choose no period (all dates) if they are partial months.";
+      const coverage = basis.period_month_coverage;
+      if (coverage) {
+        // A month the period covers only in part is exact only when the records this calculation reads (a rate's
+        // population, or a count's selected value) have none in it; the server's month aggregates say how many do.
+        const months = coverage.partially_covered_months || [];
+        if (months.length > 0) {
+          const counts = coverage.date_fields?.[form.periodFieldKey];
+          const selected = form.operation === "rate"
+            ? (form.populationFieldKey && form.populationValueKey ? [form.populationFieldKey, form.populationValueKey] : null)
+            : (form.categoryFieldKey && form.categoryValueKey ? [form.categoryFieldKey, form.categoryValueKey] : null);
+          const held = !counts ? null : selected ? counts.by_category?.[selected[0]]?.[selected[1]] : counts.records;
+          if (!Number.isSafeInteger(held) || held > 0) {
+            return `KAI keeps these dates by calendar month. The Project period covers ${months.join(" and ")} only in part${Number.isSafeInteger(held) ? `, and ${held} of the records this calculation reads fall there` : ""}. Keep your actual Project dates; choose no period (all dates), or a calculation whose records have none in ${months.length === 1 ? "that month" : "those months"}.`;
+          }
+        }
+      } else {
+        const { start, end } = state.period;
+        const date = new Date(`${end}T00:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + 1);
+        if (!start.endsWith("-01") || date.getUTCDate() !== 1) return "KAI keeps these dates by calendar month. This calculation needs a period starting on a month's first day and ending on a month's last day. Keep your actual Project dates; choose no period (all dates) if they are partial months.";
+      }
     }
   }
   if (form.operation === "rate" && form.identifierFieldKey) return "Rates are calculated over records; a rate in distinct identifiers cannot be recorded yet. Choose the calculation again.";

@@ -23,7 +23,7 @@
  * skipped unless KAI_CEDAR_BRIDGE_PACKAGE=<.../KAI_Synthetic_Impact_Evidence_Project>
  * is set; the child inherits it.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -37,6 +37,10 @@ const LEGACY_REVISION = "4e41090";
 // The last revision whose count-only Evidence Summary was model-drafted; its
 // own code writes the historical count-only draft case K must not deliver.
 const PRE_COMPOSED_FINDING_REVISION = "d3984e7";
+// The last revision before Excel date cells and the exact-period aggregates:
+// its P1 worker commits the tabular v1 basis without `exact_period_aggregates`,
+// so case S measures a genuinely older committed profile through the current API.
+const PRE_EXACT_PERIOD_REVISION = "b64327d7";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
 const binDir = process.env.PG_BIN_DIR || (existsSync(join(defaultServerBin, "postgres")) ? defaultServerBin : fallbackBin);
@@ -57,6 +61,7 @@ const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME
 const spec = "__tests__/kai-customer-xlsx-file-to-report-browser-acceptance.integration.spec.js";
 const legacyCheckout = join(workDir, `checkout-${LEGACY_REVISION}`);
 const preComposedCheckout = join(workDir, `checkout-${PRE_COMPOSED_FINDING_REVISION}`);
+const preExactCheckout = join(workDir, `checkout-${PRE_EXACT_PERIOD_REVISION}`);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -127,6 +132,12 @@ try {
   run("git", ["clone", "--quiet", "--shared", "--no-checkout", repoRoot, preComposedCheckout], { capture: true });
   run("git", ["checkout", "--quiet", "--detach", PRE_COMPOSED_FINDING_REVISION], { cwd: preComposedCheckout, capture: true });
   symlinkSync(join(repoRoot, "node_modules"), join(preComposedCheckout, "node_modules"));
+  run("git", ["clone", "--quiet", "--shared", "--no-checkout", repoRoot, preExactCheckout], { capture: true });
+  run("git", ["checkout", "--quiet", "--detach", PRE_EXACT_PERIOD_REVISION], { cwd: preExactCheckout, capture: true });
+  symlinkSync(join(repoRoot, "node_modules"), join(preExactCheckout, "node_modules"));
+  if (readFileSync(join(preExactCheckout, "Backend", "kai", "profiling", "tabularMeasurementBasis.js"), "utf8").includes("exact_period_aggregates")) {
+    throw new Error(`${PRE_EXACT_PERIOD_REVISION} unexpectedly already has the exact-period aggregates`);
+  }
   mkdirSync(socketDir, { recursive: true });
   run(initdb, ["-D", dataDir, "--no-locale", "--encoding=UTF8"], { capture: true });
   run(pgCtl, ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -h 127.0.0.1 -p ${port}`, "start"], { capture: true });
@@ -219,6 +230,8 @@ try {
       KAI_XLSX_ACCEPTANCE_LEGACY_REVISION: LEGACY_REVISION,
       KAI_XLSX_ACCEPTANCE_PRE_COMPOSED_CHECKOUT: preComposedCheckout,
       KAI_XLSX_ACCEPTANCE_PRE_COMPOSED_REVISION: PRE_COMPOSED_FINDING_REVISION,
+      KAI_XLSX_ACCEPTANCE_PRE_EXACT_CHECKOUT: preExactCheckout,
+      KAI_XLSX_ACCEPTANCE_PRE_EXACT_REVISION: PRE_EXACT_PERIOD_REVISION,
     },
   });
   if (testResult.status !== 0) throw new Error(`XLSX file-to-report acceptance failed: ${spec}`);
@@ -228,6 +241,7 @@ try {
   // Unlink the checkout's node_modules symlink first so removal can never follow it.
   rmSync(join(legacyCheckout, "node_modules"), { force: true });
   rmSync(join(preComposedCheckout, "node_modules"), { force: true });
+  rmSync(join(preExactCheckout, "node_modules"), { force: true });
   rmSync(workDir, { recursive: true, force: true });
   console.log(`XLSX acceptance ephemeral PostgreSQL workdir removed: ${workDir}`);
 }

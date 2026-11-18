@@ -27,6 +27,8 @@ import {
   derivedMeasurementLocatorCoordinates,
   describeDerivedLimitationCode,
   describeTabularMeasurementOptions,
+  describePeriodMonthCoverage,
+  SCHEMA_ADMITTED_DERIVED_METHODS,
   derivedMeasurementLabelsAdmitted,
   withholdDerivedMeasurementLabels,
   resolveCrossSourceReachMapping,
@@ -448,6 +450,10 @@ export function createPostgresDerivedMeasurementRepository({
     let fresh = 0;
     let auditObjectId = null;
     for (const measurement of measurements) {
+      // A calculated method the schema does not admit is never written.
+      if (!SCHEMA_ADMITTED_DERIVED_METHODS.has(measurement.calculationMethod)) {
+        return { refused: refusal("validation_blocker", "derived_measurement_method_not_recordable", "This calculation cannot be recorded yet.", "Record a supported measurement.") };
+      }
       if (!derivedMeasurementArithmeticHolds(measurementAsRow(measurement))) {
         return { refused: refusal("validation_blocker", "derived_measurement_arithmetic_invalid", "The calculated measurement does not keep its own arithmetic.", "Upload the source again as a new intake version.") };
       }
@@ -587,6 +593,9 @@ export function createPostgresDerivedMeasurementRepository({
           },
           reporting_period_context: periodContext,
           reporting_period: periodContext.period,
+          // Which months the recorded period covers only in part, and the
+          // records in them, so a partial-month calculation is checked first.
+          period_month_coverage: periodContext.period ? describePeriodMonthCoverage(profile, worksheetKey, periodContext.period) : null,
           paired: paired === null ? null : paired.ok
             ? { available: true, worksheet: paired.worksheet, measurements: paired.measurements.map((item) => (item.available
               ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts }

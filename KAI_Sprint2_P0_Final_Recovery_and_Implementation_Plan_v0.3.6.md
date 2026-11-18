@@ -36,22 +36,22 @@ Current owner instructions govern the requested outcome. Historical instructions
 | Knowledge Studio claim internal-use answers in one batch read per claims page | Implemented locally; unit and connected browser tests passed; not deployed | The claims list returns at once (unchanged from 3865f657); each loaded page's internal-use answers (strict internal eligibility and provisional draft admission) come from one batch request (`claim-library/internal-use`, up to 25 claims, one read-only transaction), instead of up to 25 sequential per-claim traceability reads. Per-claim reads remain only on demand (Check internal use, refused-draft explanation). Supersedes the 6a9fbc84 form, which held the claims list for the evaluation. |
 | Knowledge Studio "Take me to this step" | Implemented locally; unit and connected browser tests passed; not deployed | Every place that announces a file's next step for the signed-in actor (Impact attention, Processing & evidence status, Review status) offers one button that opens Sources at that file's step: the promotion or sensitivity panel opened, any other step highlighted, scrolled into view. Step guidance names "Sources > Files that need a step" instead of the separate "Data Sources" card. |
 | File preparation and subsequent source/finding actions | Verified locally through Count records writes, claim proposal and saved reports on 2026-11-17; 111 focused and 98 connected checks passed; not deployed | Eight preparation stages end at Evidence creation. Completed preparation (`currentStage = null`, `currentStatus = complete`) coexists with authorized Count records or claim proposal. A structural-only promoted CSV/XLSX retains `count_records` / `source_measurement_ready` and its current source version only for the authorized actor; other readers receive organization-administrator guidance. Saving a measurement or proposing a finding now refreshes file progress alongside Sources and findings: no reload is needed to advance the next action or remove the finished file from Files that need a step. Optional quality reviews, coverage and questions never manufacture progress stages or Get Kinder waits. |
-| Overall measurement capability | INCOMPLETE — four operations each need a named owner/schema/definition decision | Implemented locally on 2026-11-17 (entry **Measurement: Excel date cells, exact cross-month distinct counts and period-filtered rates**): Excel date-formatted serials (1900/1904) and ISO date cells, exact distinct identifiers across months, and whole-month period-filtered record rates over all dated records or a category-value population. Still not available: partial-month periods (month-only profile contract), recording distinct-key rates (schema CHECK admits record rates only; arithmetic exists), governed cross-worksheet measurements (no relationship/metric model), numerical target versus actual (no target model). |
-| Measurement exact-period/Excel-date package | Implemented and tested locally; not deployed | New intake versions get the additive `exact_period_aggregates` and Excel date recognition; older committed profiles keep their exact results and refuse only the new calculations, with the existing new-intake-version remedy. No migration; existing measurements, evidence and reports unchanged. Production and the actual customer workbook remain NOT_CONFIRMED. |
+| Overall measurement capability | INCOMPLETE (PARTIALLY_COMPLETE) — four operations each still need a named owner/schema/definition decision | Implemented locally: Excel date cells (1900/1904, verified on Excel-authored files), exact distinct identifiers across months, whole-month period-filtered record rates for both populations, and (continuation **Measurement continuation: exact partial-month subset, distinct-key rate basis and decision-ready remainder**) partial-month periods whose partly covered months hold none of the measured records. Not available: other partial-month periods (needs a processing-authority or retention decision), recording distinct-key rates (calculated for both population kinds; needs the stated migration), governed cross-worksheet measurements (needs a relationship/metric model and migration), numerical target versus actual (needs a target model and migration). |
+| Measurement exact-period/Excel-date package and continuation | Implemented and tested locally; not deployed | New intake versions get `exact_period_aggregates` (month windows, category-pair months, category-pair distinct keys) and Excel date recognition; profiles committed by `b64327d7` keep their exact results and refuse only the new calculations, with the new-intake-version remedy proven through the previous revision's own worker. No migration; existing measurements, evidence and reports unchanged. Production and the actual customer workbook remain NOT_CONFIRMED. |
 | Measurement repair package `59571daa` | Implemented and tested locally: 6,163 standard tests and 90 connected checks passed; not deployed | The tested package repairs optional meaning drafts, synchronized concurrent period editors and retryable reads, and adds selection of committed paired mappings through evidence, claims and saved reports. This is the verified scope of that commit, not a declaration that measurement as a whole is done. Production and the actual customer workbook remain NOT_CONFIRMED. |
 | Complete reporting journey across audiences and remaining paths | Remaining implementation, not implemented by this documentation change | One outcome package spanning the work below; do not split it into separately gated backend, UI, validation and export fragments. |
 | Deployment and live confirmation | Not performed; separate operational authorization required | After the local outcome is reviewable and verified, prepare the concrete release and request only the actual remaining deployment/target authorization. Do not confuse that operational authorization with a product evidence-review requirement. |
 
 **Measurement completion correction:** the earlier “Complete customer measurement workflow” title and measurement-completion claims overstated what the evidence established. **Measurement as a whole is not complete.** The named synthetic cases demonstrate the implemented calculation types and repaired transitions only. A test proving refusal of an unavailable calculation is not implementation of that calculation.
 
-**Current unimplemented measurement capabilities (updated 2026-11-17 after the exact-period/Excel-date package):**
+**Current unimplemented measurement capabilities (updated 2026-11-17 after the measurement continuation; designs in that ledger entry):**
 
-1. Partial-month periods for counts, rates and distinct counts: an exact day-range answer needs day-level information, which the month-only profile contract and the no-downstream-read value-access decision exclude. Needs an owner data-minimization decision (day-level aggregates for non-personal date fields, an authorized measurement-time verified-byte read, or period-specific profiling); `tabular_period_not_whole_months` remains.
-2. Recording rates in distinct identifiers: the set arithmetic is implemented (`deriveTabularDistinctKeyRate`), but `source_derived_measurements_method_family_check`/`rate_counts_check` admit record rates only. Needs an authorized migration; a population-value distinct-key rate also needs joint key windows.
-3. Governed cross-worksheet measurements: no relationship/key/cardinality/metric definition model exists, and no authorized worksheet read path. The CSV event/register reconciliation is unchanged.
-4. Numerical target versus actual: no governed numerical target model; `engagement_requirement_target` holds identifiers, labels and dates only.
+1. Partial-month periods whose partly covered months hold measured records (counts, rates, distinct counts): exact answers need day-level information. The exact subset where those months hold none of the measured records is implemented. The rest needs an owner decision: a transient verified-byte calculation (recommended; processing authority plus a basis/method migration) or bounded day-level aggregates (retention-contract change; counts and rates only, since daily totals cannot deduplicate keys). `tabular_period_not_whole_months` remains for those cases.
+2. Recording rates in distinct identifiers: both kinds (all identifiers; a category-value population via `category_pair_distinct`) are calculated exactly by `deriveTabularDistinctKeyRate`, with the would-be persisted measurement, arithmetic check and statement. Recording needs the authorized migration stated in that entry. The write path refuses any method outside `SCHEMA_ADMITTED_DERIVED_METHODS`.
+3. Governed cross-worksheet measurements: needs the relationship/metric model (match fields, entity level, cardinality, blank/unmatched/conflict rules, bounded metrics), a calculation path (profile-time intersection aggregates within one workbook, or authorized worksheet byte reads) and a persisted family/locator migration. The CSV event/register reconciliation is unchanged.
+4. Numerical target versus actual: owner-requested on 2026-11-17 (planning targets were first listed as unavailable on 2026-11-02). Needs a governed target model separate from `engagement_requirement_target`, its migration and comparison/wording rules.
 
-Implemented on 2026-11-17 and no longer on this list: Excel date cells (by number format and workbook date system), exact distinct identifiers across months, and whole-month period-filtered rates for all dated records or a category-value population. Raw Count records intentionally remains an unfiltered record count; calling rows people or outcomes would be incorrect. Explicit selection among committed paired mappings is implemented by `59571daa`; mappings absent from that basis are still unavailable. This list records capability status and does not silently authorize a schema/data-authority change or reopen unrelated historical packages.
+Implemented on 2026-11-17 and no longer on this list: Excel date cells (by number format and workbook date system), exact distinct identifiers across months, whole-month period-filtered rates for all dated records or a category-value population, and partial-month periods whose partly covered months hold none of the measured records. Raw Count records intentionally remains an unfiltered record count; calling rows people or outcomes would be incorrect. Explicit selection among committed paired mappings is implemented by `59571daa`; mappings absent from that basis are still unavailable. This list records capability status and does not silently authorize a schema/data-authority change or reopen unrelated historical packages.
 
 The completed internal-report package recorded 6,138 passing standard tests (129 skipped), 165 passing targeted PostgreSQL/HTTP/browser acceptance checks, and a successful build. Those are the previous package's results, not fresh runtime verification of this documentation-only change. Its exact March/fiscal-year statement passed the browser journey with zero evidence/claim review decisions; its historical six-gap state passed the in-memory regression. See the historical entry **Organization reports: remove mandatory evidence-quality review barriers** for scope and evidence.
 
@@ -82,6 +82,230 @@ The other Project authority documents named in the historical metadata (includin
 **Verification (TOOL_VERIFIED):** the existing authorized document-evidence runner created its own disposable loopback PostgreSQL 16 cluster and applied the canonical chain (88 listed migrations, 86 applied; two production-history-only repairs refused as expected). The new SQL passed inside a read-only transaction, correctly reported missing table, missing column, unvalidated CHECK, missing schema and unapplied document-statement migration, and passed again after reversible probes. All 12 existing document-evidence acceptance tests passed; existing worksheet/derived-measurement and document packet verifiers passed. Log: `/tmp/kai-reporting-schema-verifier.log`. Scope is the SQL, that runner's verifier probes and this evidence entry/status row. No product runtime, feature flags, credentials, existing databases, production or Current State changed; no push/deployment occurred. The complete diff and `git diff --check` were inspected at package completion; unrelated runtime suites/builds were not repeated for this SQL-only outcome.
 
 # Historical execution and implementation ledger
+
+## Measurement continuation: exact partial-month subset, distinct-key rate basis and decision-ready remainder (2026-11-17)
+
+**Authority and start (USER_CONFIRMED / TOOL_VERIFIED):** owner request "Close the Measurement Continuation Correctly, Complete Authorized Work, and Resolve Every Outstanding Dependency". It authorizes local implementation and tests within current contracts, and excludes fetch/push/deployment, existing or production databases, unapproved schema migrations, cloud/flag/tenant changes, secrets, real client data and Current State. TOOL_VERIFIED: `main`, clean, HEAD `cab594ec0ae0d14832d3537eb1cbc9b9c0410fbf`; the owner reports that GitHub `main` is at the same commit (not refetched here). Inspected AGENTS.md, the active contract and status, the profiler/validators/repository/service/route/UI/tests, Operating Model §3.4/§7.1/§14, the Package B value-access decision, the cross-source worker's byte-read authorization and the derived-measurement CHECKs.
+
+**Already-completed behavior confirmed in this execution (TOOL_VERIFIED by fresh runs):**
+- Project-period editing in the source's own Project: `kaiEngagementContextService.js` `get/updateEngagementReportingPeriod`, `getScopedSourceVersionEngagementReportingPeriod` (cases P2, P4, Q).
+- Same-document recovery after recording dates: P2.
+- Meaning drafts and field selections preserved: P3, P4b, unit spec.
+- Concurrent period-editor synchronization: Q.
+- Recoverable failed reads: P4b.
+- Explicit committed paired mapping: P4.
+- Excel formatted dates in both systems: unit spec, including Excel-authored files, and case R.
+- Whole-month cross-month distinct counts and period rates for both populations: unit oracles, R and S.
+- Evidence, claim, saved report and download: R and P5.
+
+**Implemented in this continuation (TOOL_VERIFIED):**
+1. Exact partial-month subset (`periodMonthCoverage`, `partialMonthRefusal`, `describePeriodMonthCoverage` in `kaiDerivedMeasurementValidators.js`):
+   - A Project period with a partly covered month is applied with its actual dates when the records the calculation reads have none in that month (a rate's population, or a count's selected value).
+   - It records `partially_covered_months` / `partially_covered_month_records: 0` and discloses `derived.partly_covered_months_without_records`.
+   - Otherwise it refuses, naming the months and records; nothing is rounded.
+   - The basis read returns `period_month_coverage`, so the form allows only exact cases and explains the rest (`clientDerivedMeasurementLogic.js`, `ClientDerivedMeasurementSection.jsx`).
+2. Distinct-key rates, non-schema parts:
+   - The additive `category_pair_distinct` profile part (`tabularMeasurementBasis.js`) holds distinct keys among records carrying two listed values, overall and as month windows, bounded at 40,000 numbers.
+   - `deriveTabularDistinctKeyRate` calculates both kinds exactly and returns the would-be persisted measurement (method `kai_tabular_conditional_distinct_key_rate_v1`), its arithmetic check (`derivedMeasurementArithmeticHolds`) and its statement.
+   - `SCHEMA_ADMITTED_DERIVED_METHODS` refuses any other method before an insert (`postgresDerivedMeasurementRepository.js`).
+   - The definition validator still refuses the unit (`tabular_distinct_key_rate_not_recordable`).
+3. Excel-authored fixtures (`__tests__/fixtures/excel-authored/`): two synthetic workbooks typed and saved by Microsoft Excel for Mac 16.x, one in the 1900 date system and one in 1904. Excel's own parts are kept byte-identical; only the package author/company metadata and the saved-folder `absPath` were replaced with neutral values before committing.
+4. Older-profile proof on the persisted path: the workbook runner now checks out `b64327d7` (`PRE_EXACT_PERIOD_REVISION`); case S uploads through that revision's own worker.
+
+**Tests (TOOL_VERIFIED):** every Node/npm command set `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`; the runners created and removed their own disposable loopback PostgreSQL clusters. Logs are in this session's scratchpad and are not durable.
+
+- `kai-measurement-exact-period-and-excel-dates.spec.js`: **15/15**. Explicit synthetic records with plain set/filter oracles:
+  - both distinct-key rate kinds across 45 periods × 3 populations, with the same-record rule distinguished from separate records (L06);
+  - partial-month exactness against day-level filtering, with rounding and refusal controls;
+  - the coverage helper and the form;
+  - Excel-authored workbooks, where Excel's own conversion of typed ISO text is the serial oracle.
+- Mutation checks: four new faults each failed 1–5 assertions:
+  - partial-month guard ignored;
+  - population variant ignoring the population value;
+  - pair-window scope forced to outside;
+  - coverage helper reporting zero records.
+  The restored code passed 44/44.
+- Focused measurement/profiling specs (45 files): **544 tests, 543 pass, 0 fail, 1 skip** (Cedar workbook path not set).
+- `npm test`: **6,307 tests, 6,178 pass, 0 fail, 129 skipped** (existing environment/runner-gated skips).
+- `npm run build` PASS; `node --check public/js/bundles/entry.js` PASS; SHA-256 `b320c7ba61610640a1da0e76e9925db32238d722ffca41f6a07f6a21bb565c84`.
+- Workbook runner: **40/40, 0 skip** on the second run; 86 of 88 migrations; schema fingerprint `6ce0ea58caa630d7b3736cf1deb5d0e8` unchanged; method verifier OVERALL PASS. Case **S** (synthetic records):
+  - the `b64327d7` worker commits a basis without `exact_period_aggregates` and without Excel dates;
+  - through the current API, the all-record period rate is 5/8 (62.50%);
+  - the cross-month distinct count, the population period rate and the Excel date field are refused with the remedy, and nothing is written;
+  - the rendered form explains this before any request;
+  - the same bytes uploaded again as a new intake version and promoted as successor make the old version non-current: new calculations on it return 409, and its recorded rate is unchanged;
+  - the successor gives the same rate identity and figures, 3 distinct learners (month sum 4), 2/4 exited, and the Excel date field;
+  - a partial Project period 2026-01-10..2026-02-28 through the real UI records 4 exited visits with the actual dates, while all visits are explained and refused (422);
+  - contributor, reviewer and other-organization writes are refused;
+  - a later `not_allowed` re-review closes both new calculations (422 `allowed_use_not_allowed`, nothing written).
+  Case R and all earlier cases (P1–P5, P4b, Q, M, N, O, A–L) passed.
+- Knowledge-studio runner, rerun because the shared basis read, validators and form changed: measured report selection **21/21**, source-to-impact **16/16**, source promotion **15/15**. Connected total **92 PASS, 0 SKIP, 0 FAIL**.
+
+**Initial failures and corrections:**
+1. Partial-month change: `kai-derived-measurement.spec.js` tests 2 and 5 asserted refusals for periods whose partly covered months hold no records. They now assert the day-level oracle value and keep refusals where the boundary month holds records.
+2. The new spec's distinct-key rate test read the earlier return shape. It was rewritten for both kinds against a set oracle.
+3. Workbook run 1 (39 pass / 1 fail): case S step 5 sent a `not_allowed` re-review that also granted AI processing, which the existing rule VAL-KAI-B1A-02-003 refuses (`body.reviewed_snapshot`, 422). The request now sets `reviewed_llm_processing_allowed: false`; run 2 passed 40/40.
+
+Two Excel save attempts failed on the macOS sandbox path, and one failed on closing the renamed workbook; none are test results. No assertion was weakened or removed.
+
+**Decision-ready designs for the four remaining items (no authority, schema or definition is assumed):**
+
+**Item 5 — exact day-range counts, rates and distinct counts.**
+- Governing rules: the Package B profile contract keeps dates as months (`tabularMeasurementBasis.js`). The Package B value-access decision says nothing downstream re-reads raw uploads. Operating Model §7.1 and §3.4 permit processing and reprocessing in principle, and §14 asks to avoid unnecessary identifiable duplication. The one byte-read consumer, cross-source reconciliation, was authorized separately and flagged at the time as a new parser-reader consumer.
+- Done now, within that contract: when a partly covered month holds none of the measured records, the month aggregates prove that the exact day-range answer equals the summed months. These are applied with the actual dates and disclosed (`derived.partly_covered_months_without_records`). Otherwise the period is refused, never rounded.
+- Strategy A (bounded day-granular aggregates):
+  - Daily record counts per date field, per listed value, and per value pair make record counts and rates exact.
+  - It does not give distinct keys: daily totals cannot deduplicate a key across days. Exact day windows need D(D+1)/2 numbers per table, about 66,795 for one year, so they are not bounded for general use.
+  - It changes the month-only retention contract. Personal-attribute date headers (birth, DOB, age) must be excluded, and a date of birth under a neutral header remains a residual risk.
+- Strategy B (transient calculation from the verified bytes; recommended):
+  - Exact for all three calculations.
+  - A queued job uses the reconciliation pattern:
+    - it reads the exact version's bytes through `createP1ObjectVersionByteSource` and re-checks sha256;
+    - it parses with the profiler's readers (CSV, or the selected worksheet with Excel date cells);
+    - it filters inclusive days and returns counts only.
+  - Controls:
+    - the shared loader (tenant, lineage, currentness, effective allowed use, bound profile) runs both at request time and at record time;
+    - personal-attribute date fields are refused as period fields;
+    - existing P0 limits apply (25 MB, 100,000 rows, worker permit);
+    - one metadata-only audit per write;
+    - no value or day leaves the worker.
+  - If the retained bytes are gone (offboarding disposition, §3.3/§3.4), it refuses as `source_bytes_unavailable` with the new-intake-version remedy; recorded measurements are unchanged.
+  - Needs:
+    - (1) an owner processing-authority decision extending the verified-byte read to single-source tabular period measurements;
+    - (2) a migration admitting a byte-derived basis/method identity (for example `kai_tabular_verified_byte_period_v1`) and a job kind, because recording a byte-derived count as `kai_tabular_measurement_basis_v1` would misstate its basis.
+- Remaining work:
+  - worker job, repository and service, route, UI;
+  - status: queued, then recorded, or refused;
+  - acceptance: day-range oracles across both boundary months, plus refusals for date-of-birth-like fields, missing bytes, tenant, role, currentness and allowed use.
+- Owner decision required: choose A (contract change) or B (processing authority plus migration).
+
+**Item 8 — recording distinct-key rates.**
+- Done now (pure, not recordable):
+  - `deriveTabularDistinctKeyRate` computes both kinds:
+    - A: identifiers of the measured population;
+    - B: a category-value population, from the new `category_pair_distinct` profile part.
+  - Set semantics:
+    - "has a record" means at least one record;
+    - keys whose records disagree are in N;
+    - blank keys are excluded;
+    - duplicates add nothing;
+    - undated records are outside any period;
+    - an empty population is refused;
+    - for B, N needs one record carrying both values.
+  - It returns the exact would-be persisted measurement (method `kai_tabular_conditional_distinct_key_rate_v1`), with its arithmetic check, statement and limitation codes.
+  - `SCHEMA_ADMITTED_DERIVED_METHODS` guards the write path. The definition validator still refuses the unit.
+- Required migration: NOT written to the repository, NOT applied.
+
+```sql
+BEGIN;
+ALTER TABLE kai.source_derived_measurements
+  DROP CONSTRAINT source_derived_measurements_method_family_check,
+  ADD CONSTRAINT source_derived_measurements_method_family_check CHECK (
+    (measurement_family = 'paired_outcome_change' AND calculation_method = 'p1_xlsx_paired_baseline_followup_numeric_change_v1'
+      AND basis_version = 'kai_xlsx_paired_outcome_basis_v1' AND worksheet_key IS NOT NULL)
+    OR (measurement_family = 'tabular_count'
+      AND calculation_method IN ('kai_tabular_conditional_record_count_v1', 'kai_tabular_conditional_distinct_key_count_v1')
+      AND basis_version = 'kai_tabular_measurement_basis_v1')
+    OR (measurement_family = 'tabular_rate'
+      AND calculation_method IN ('kai_tabular_conditional_record_rate_v1', 'kai_tabular_conditional_distinct_key_rate_v1')
+      AND basis_version = 'kai_tabular_measurement_basis_v1')
+    OR (measurement_family = 'cross_source_reach' AND calculation_method = 'kai_cross_source_linked_reach_v1'
+      AND basis_version = 'kai_cross_source_reconciliation_v1' AND worksheet_key IS NULL)),
+  DROP CONSTRAINT source_derived_measurements_rate_counts_check,
+  ADD CONSTRAINT source_derived_measurements_rate_counts_check CHECK (
+    measurement_family <> 'tabular_rate'
+    OR (calculation_method = 'kai_tabular_conditional_record_rate_v1'
+      AND (component_counts->>'population_record_count')::bigint = denominator
+      AND (component_counts->>'numerator_record_count')::bigint = numerator
+      AND (component_counts->>'other_population_record_count')::bigint = denominator - numerator)
+    OR (calculation_method = 'kai_tabular_conditional_distinct_key_rate_v1'
+      AND definition->'unit'->>'kind' = 'distinct_key'
+      AND (component_counts->>'population_distinct_key_count')::bigint = denominator
+      AND (component_counts->>'numerator_distinct_key_count')::bigint = numerator
+      AND (component_counts->>'other_population_distinct_key_count')::bigint = denominator - numerator
+      AND numerator <= (component_counts->>'numerator_record_count')::bigint
+      AND denominator <= (component_counts->>'population_record_count')::bigint));
+COMMIT;
+```
+
+- With the migration, still to do:
+  - rollback that restores both prior definitions and refuses while distinct-key rate rows exist;
+  - entry in `scripts/kai-sprint2-plan-a-migration-chain.js`;
+  - new vectors and fingerprints in `kai-measurement-mvp-derived-measurements-verify-read-only.sql` and `kai-reporting-schema-verify-read-only.sql`;
+  - add the method to `SCHEMA_ADMITTED_DERIVED_METHODS`;
+  - validator admission routed through `deriveTabularDistinctKeyRate` in `recordTabularMeasurement`;
+  - UI "count each identifier once" option for rates.
+- Acceptance:
+  - disposable apply, rollback, reapply with the fingerprint;
+  - CHECK accepts valid rows and refuses tampered ones;
+  - connected UI, evidence, claim, report, saved retrieval and download for both kinds;
+  - refusal of kind B on profiles that predate the pair keys.
+- Owner authorization required: the schema migration.
+
+**Item 9 — governed cross-worksheet measurements.**
+- Existing: CSV linked reach only (two CSV versions, worker byte read, `cross_source_reach`). There is no relationship model, and nothing relates `Self_Rating_Surveys`, `Referral_Followups` and `Delivery_Targets`.
+- Smallest contract: a human-confirmed relationship record covering:
+  - organization;
+  - exact source version(s) and the two sheet keys;
+  - the customer-selected match field on each side (each must be a profile identifier field);
+  - match rule `exact_after_trim`;
+  - entity label (human text, never inferred);
+  - declared cardinality (`many_to_one` / `one_to_one`), checked against the profile (the "one" side has `repeated_key_count = 0`, otherwise refused);
+  - rules:
+    - blank keys excluded and counted;
+    - unmatched keys counted and excluded;
+    - "one"-side keys with conflicting attribute values excluded whole.
+- Bounded v1 metrics:
+  - linked distinct entities (primary keys with a match), with an optional listed value and period;
+  - unmatched primary keys;
+  - among linked keys, the rate whose related record has a listed value. This needs a unique related side.
+- Calculation:
+  - Option (i): profile-time intersection aggregates. For every identifier-field pair across worksheets of the same workbook, keep |A|, |B| and |A∩B|, overall and per listed value. These are counts only, bounded, and need no new byte read. They cannot serve two separate source versions.
+  - Option (ii): a worker read of both worksheets' verified bytes, which needs the item 5 B-style authorization.
+- Persistence:
+  - a new family/method (`cross_worksheet_linkage`, `kai_cross_worksheet_linkage_v1`);
+  - locator coordinates or a contributing-worksheet table carrying both sheet keys;
+  - the CHECK and verifier updates.
+  - All of these are a migration.
+- Evidence: the statement names both worksheets, both match fields, the cardinality and the exclusions; citations carry the version(s) and both worksheets; downstream report reuse follows the existing derived-measurement path.
+- Testable now with synthetic fixtures (not built here, because it would be unreachable without persistence): the relationship validator against profiles and the intersection aggregates.
+- Owner decisions required:
+  - the relationship model and metric set (product);
+  - the migration;
+  - for two versions or option (ii), the byte-read authority.
+
+**Item 10 — numerical target versus actual.**
+- Scope: requested by the owner in the 2026-11-17 continuation (section 4F). It was identified earlier as the unavailable planning targets (T_*) in the 2026-11-02 Measurement MVP entry, and was not among the four gaps listed at `b64327d7`. `engagement_requirement_target` holds identifiers, labels and dates only.
+- Minimal model: an append-only, versioned `kai.engagement_metric_targets` holding:
+  - organization and engagement;
+  - target id and `supersedes_target_id` (one current target per metric/period);
+  - metric identity (family, method and a source-independent definition template: unit, conditions, population, date field role);
+  - unit (`records`, `distinct_identifiers`, `percent`);
+  - entity label;
+  - period (start/end, actual dates);
+  - target value (count integer, or percentage to two places);
+  - direction (`at_least` / `at_most`);
+  - provenance (`organization_stated` by a human, or `source_derived` with source version, worksheet and field, only through an organization-confirmed mapping);
+  - created by (human).
+- Comparison:
+  - only against a current recorded measurement with the same metric identity and period;
+  - outputs actual, target, difference, and ratio (counts) or percentage-point difference (rates);
+  - worded "planned target" versus "recorded actual", never an achieved outcome;
+  - a mismatched identity, period or unit is refused, not approximated.
+- Delivery_Targets rows become targets only through that confirmed mapping.
+- Needs:
+  - an owner product decision on the model and wording;
+  - a migration;
+  - service, route, validator and UI;
+  - report rendering;
+  - acceptance: matching and mismatched identities, superseded targets, tenant, role, currentness and wording validators.
+
+**Boundary:**
+- NOT_CONFIRMED: production, deployed behavior, real-provider generation quality (model responses are the harness's deterministic stub) and the actual customer workbook. Excel coverage is two synthetic Excel-authored files only.
+- TOOL_VERIFIED: no fetch/push/deployment, migration file or schema change, existing or production database access, credential/secret inspection, flag/tenant/configuration change, real-client-data operation or Current State edit.
+- Excel was launched locally (it was not running before) to author the synthetic files, and then quit. The unsanitized originals in its container folder were deleted.
+
+**Status:** EXACT_PARTIAL_MONTH_SUBSET_IMPLEMENTED; DISTINCT_KEY_RATES_CALCULATED_NOT_RECORDABLE; EXCEL_AUTHORED_DATES_VERIFIED; OLDER_PROFILE_PERSISTED_PATH_VERIFIED; PARTIAL_MONTH_GENERAL_CASE_BLOCKED_BY_PROCESSING_DECISION; DISTINCT_KEY_RATE_RECORDING_BLOCKED_BY_MIGRATION_AUTHORIZATION; CROSS_WORKSHEET_AND_NUMERIC_TARGETS_BLOCKED_BY_MODEL_DECISIONS; OVERALL_MEASUREMENT_PARTIALLY_COMPLETE; PRODUCTION_NOT_CONFIRMED.
 
 ## Measurement: Excel date cells, exact cross-month distinct counts and period-filtered rates (2026-11-17)
 

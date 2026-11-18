@@ -254,27 +254,58 @@ test("aggregates over their bound are omitted with a reason, never truncated; th
   assert.equal(D.describeTabularMeasurementOptions(profile, null).period_support.distinct_month_windows, "exceeds_limit");
 });
 
-test("a rate in distinct identifiers: numerator and population are sets of learners, the numerator a subset; it is not recordable", async () => {
+test("rates in distinct identifiers: both population kinds are exact key sets with the numerator a subset; they are calculated but not recordable", async () => {
   const profile = await csvProfile();
-  for (const [first, last] of [["2025-01", "2025-03"], ["2025-02", "2025-06"], ["2025-01", "2025-09"]]) {
-    const period = wholeMonths(first, last);
-    const inPeriod = ROWS.filter((row) => oracle.inPeriod(row, period));
-    const populationSet = new Set(inPeriod.map((row) => row[1]));
-    const numeratorSet = new Set(inPeriod.filter(oracle.completed).map((row) => row[1]));
-    assert.ok([...numeratorSet].every((key) => populationSet.has(key)));
-    const rate = D.deriveTabularDistinctKeyRate(profile, null, { identifierFieldKey: F.learner, category: COMPLETED, period: within }, { reportingPeriod: period });
-    assert.equal(rate.ok, true, JSON.stringify(rate.blockers));
-    assert.deepEqual([rate.numerator, rate.denominator, rate.recordable], [numeratorSet.size, populationSet.size, false]);
-    // Learners with both completed and waiting records in the period are in both sets once.
-    const mixed = [...populationSet].filter((key) => inPeriod.some((row) => row[1] === key && row[2] === "completed") && inPeriod.some((row) => row[1] === key && row[2] === "waiting"));
-    assert.equal(rate.componentCounts.other_population_distinct_key_count, populationSet.size - numeratorSet.size);
-    if (first === "2025-01" && last === "2025-09") assert.ok(mixed.length >= 2, "the fixture has learners in both groups");
+  const EXITED = { kind: "category", field_key: F.cohort, value_key: "value_2" };
+  // Oracle: P and N as sets of learners from the explicit records ("has a record" = at least one).
+  const sets = ({ population = null, period = null }) => {
+    const inScope = ROWS.filter((row) => (!period || oracle.inPeriod(row, period)) && (!population || population(row)));
+    return { P: new Set(inScope.map((row) => row[1])), N: new Set(inScope.filter(oracle.completed).map((row) => row[1])) };
+  };
+  const rateOf = (input, period = null) => D.deriveTabularDistinctKeyRate(profile, null, { identifierFieldKey: F.learner, category: COMPLETED, ...input }, { reportingPeriod: period });
+  const months = monthsBetween("2025-01", "2025-09");
+  let checked = 0;
+  for (let a = 0; a < months.length; a += 1) {
+    for (let b = a; b < months.length; b += 1) {
+      const period = wholeMonths(months[a], months[b]);
+      for (const [population, keep] of [[[], null], [[ACTIVE], oracle.active], [[EXITED], (row) => row[3] === "exited"]]) {
+        const expected = sets({ population: keep, period });
+        const rate = rateOf({ period: within, population }, period);
+        if (expected.P.size === 0) {
+          assert.equal(rate.ok, false, "an empty population is refused, never 0%");
+          continue;
+        }
+        assert.equal(rate.ok, true, JSON.stringify(rate.blockers));
+        assert.ok([...expected.N].every((key) => expected.P.has(key)));
+        assert.deepEqual([rate.measurement.numerator, rate.measurement.denominator], [expected.N.size, expected.P.size], `${period.start}..${period.end} ${population[0]?.value_key ?? "all"}`);
+        assert.equal(D.derivedMeasurementArithmeticHolds(asRow(rate.measurement)), true);
+        checked += 1;
+      }
+    }
   }
-  // All dates: learners with any completed record among all learners with a record.
-  const all = D.deriveTabularDistinctKeyRate(profile, null, { identifierFieldKey: F.learner, category: COMPLETED }, {});
-  assert.deepEqual([all.numerator, all.denominator], [new Set(ROWS.filter(oracle.completed).map((row) => row[1])).size, new Set(ROWS.map((row) => row[1])).size]);
-  assert.equal(D.deriveTabularDistinctKeyRate(profile, null, { identifierFieldKey: F.learner, category: COMPLETED, population: [ACTIVE] }, {}).blockers[0].blocking_reason,
-    "tabular_distinct_key_rate_population_not_committed");
+  assert.ok(checked > 100, String(checked));
+  // All dates, category population: N needs one record carrying both values. L06 is exited only on a waiting record and
+  // completed only on an active one, so it is in P but not N; requiring the two values on separate records would count it.
+  const exited = rateOf({ population: [EXITED] });
+  const expected = sets({ population: (row) => row[3] === "exited" });
+  const separateRecords = new Set([...expected.P].filter((key) => ROWS.some((row) => row[1] === key && oracle.completed(row))));
+  assert.deepEqual([exited.measurement.numerator, exited.measurement.denominator, exited.measurement.percentage], [expected.N.size, expected.P.size, "60.00"]);
+  assert.notEqual(separateRecords.size, expected.N.size, "the same-record rule is what is calculated");
+  assert.deepEqual([exited.recordable, exited.measurement.calculationMethod], [false, "kai_tabular_conditional_distinct_key_rate_v1"]);
+  assert.equal(D.SCHEMA_ADMITTED_DERIVED_METHODS.has(exited.measurement.calculationMethod), false);
+  assert.equal(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: asRow(exited.measurement) }),
+    "Derived measurement: among the 5 distinct field_2 identifiers with a record with field_4 = exited in the CSV data records (the measured population, each identifier counted once), 3 have at least one record with field_3 = completed on a record that also has field_4 = exited: 3 of 5 (60.00%); 2 of the 5 do not.");
+  // Negative arithmetic control: a tampered numerator fails the persisted-arithmetic check.
+  assert.equal(D.derivedMeasurementArithmeticHolds({ ...asRow(exited.measurement), numerator: 4, measured_value: 4 }), false);
+  // All identifiers, all dates.
+  const all = rateOf({});
+  assert.deepEqual([all.measurement.numerator, all.measurement.denominator], [sets({}).N.size, sets({}).P.size]);
+  // A profile committed before the category-pair keys refuses the population kind only.
+  const { category_pair_distinct: _removed, ...olderAggregates } = profile.tabular_measurement_basis.exact_period_aggregates;
+  const older = { ...profile, tabular_measurement_basis: { ...profile.tabular_measurement_basis, exact_period_aggregates: olderAggregates } };
+  assert.equal(D.deriveTabularDistinctKeyRate(older, null, { identifierFieldKey: F.learner, category: COMPLETED, population: [EXITED] }, {}).blockers[0].blocking_reason, "tabular_distinct_key_rate_population_not_committed");
+  assert.equal(D.deriveTabularDistinctKeyRate(older, null, { identifierFieldKey: F.learner, category: COMPLETED }, {}).ok, true);
+  // The record route refuses the unit before any calculation.
   assert.equal(D.validateTabularMeasurementDefinition({ operation: "rate", unit: eachLearner, conditions: [COMPLETED] }).blockers[0].blocking_reason, "tabular_distinct_key_rate_not_recordable");
 });
 
@@ -421,4 +452,88 @@ test("a workbook without date-formatted cells profiles as before apart from the 
   assert.deepEqual(basis.fields.find((field) => field.field_key === "field_2").roles, [], "an unformatted number is never a date, whatever its magnitude");
   assert.deepEqual(basis.fields.find((field) => field.field_key === "field_3").date, { date_count: 3, non_date_count: 0, earliest_month: "2026-01", latest_month: "2026-02" });
   assert.deepEqual(Object.keys(basis).sort(), ["basis_version", "category_cells", "date_cells", "exact_duplicates", "exact_period_aggregates", "fields", "record_count", "single_valued_in", "status"]);
+});
+
+// ---------------------------------------------------------------------------
+// Partial-month Project periods: exact only when no measured record falls in
+// a partly covered month (the month aggregates show that); otherwise refused.
+
+test("a partial-month period gives the exact day-range answer when its partly covered months hold none of the measured records", async () => {
+  const profile = await csvProfile();
+  const EXITED = { kind: "category", field_key: F.cohort, value_key: "value_2" };
+  const exited = (row) => row[3] === "exited";
+  // 2025-02-01 to 2025-04-15: April 2025 is covered only in part; it holds active records (E06, E07, E17) but no exited one.
+  const period = { start: "2025-02-01", end: "2025-04-15" };
+  const dayRange = (row) => row[4] !== "" && row[4] >= period.start && row[4] <= period.end;
+  const count = derive(profile, { operation: "count", conditions: [EXITED, within] }, period);
+  assert.equal(count.measurement.measuredValue, ROWS.filter((row) => exited(row) && dayRange(row)).length);
+  assert.equal(count.measurement.measuredValue, 4); // E04, E05, E11, E12
+  assert.deepEqual(count.measurement.definition.conditions[1], { ...within, period_start: "2025-02-01", period_end: "2025-04-15" });
+  assert.deepEqual([count.measurement.componentCounts.partially_covered_months, count.measurement.componentCounts.partially_covered_month_records], [["2025-04"], 0]);
+  const codes = D.derivedMeasurementLimitationCodes({ measurementRow: asRow(count.measurement), dimensions: null });
+  assert.ok(codes.includes(D.DERIVED_LIMITATION_CODES.PARTLY_COVERED_MONTHS_EMPTY));
+  assert.match(D.describeDerivedLimitationCode(D.DERIVED_LIMITATION_CODES.PARTLY_COVERED_MONTHS_EMPTY), /actual dates were applied exactly/);
+  const rate = derive(profile, { operation: "rate", conditions: [COMPLETED, within], population: [EXITED] }, period);
+  const population = ROWS.filter((row) => exited(row) && dayRange(row));
+  assert.deepEqual([rate.measurement.numerator, rate.measurement.denominator], [population.filter(oracle.completed).length, population.length]);
+  const learners = derive(profile, { operation: "count", unit: eachLearner, conditions: [EXITED, within] }, period);
+  assert.equal(learners.measurement.measuredValue, oracle.learners(population));
+  // Negative controls: rounding to whole months (February to April) or (February to March) gives other answers for all records.
+  const roundedUp = ROWS.filter((row) => row[4] >= "2025-02-01" && row[4] <= "2025-04-30").length;
+  const dayExact = ROWS.filter(dayRange).length;
+  assert.notEqual(roundedUp, dayExact);
+  // The same period over all records, or over active records, needs April's days: refused, never rounded.
+  for (const input of [{ operation: "count", conditions: [within] }, { operation: "count", conditions: [ACTIVE, within] }, { operation: "rate", conditions: [COMPLETED, within], population: [ACTIVE] }]) {
+    const refused = derive(profile, input, period);
+    assert.equal(refused.blockers[0].blocking_reason, "tabular_period_not_whole_months", JSON.stringify(input));
+    assert.match(refused.blockers[0].message, /2025-04 only in part/);
+  }
+  // A period inside one month without records: exactly zero records, and an empty rate population is refused.
+  const quiet = { start: "2025-10-05", end: "2025-10-20" };
+  assert.equal(derive(profile, { operation: "count", conditions: [within] }, quiet).measurement.measuredValue, 0);
+  assert.equal(derive(profile, { operation: "rate", conditions: [COMPLETED, within] }, quiet).blockers[0].blocking_reason, "tabular_counts_inconsistent");
+  // The form reads the same coverage: exited is ready; all records and active are explained before any request.
+  const coverage = D.describePeriodMonthCoverage(profile, null, period);
+  assert.deepEqual(coverage.partially_covered_months, ["2025-04"]);
+  assert.deepEqual([coverage.date_fields[F.date].records, coverage.date_fields[F.date].by_category[F.cohort].value_1, coverage.date_fields[F.date].by_category[F.cohort].value_2],
+    [ROWS.filter((row) => row[4].startsWith("2025-04")).length, ROWS.filter((row) => active(row) && row[4].startsWith("2025-04")).length, 0]);
+  const basis = { tabular: D.describeTabularMeasurementOptions(profile, null), reporting_period: period, period_month_coverage: coverage };
+  const countForm = { ...EMPTY_TABULAR_FORM, categoryFieldKey: F.cohort, categoryValueKey: "value_2", periodFieldKey: F.date };
+  assert.equal(tabularFormProblem(countForm, basis), null);
+  assert.match(tabularFormProblem({ ...countForm, categoryValueKey: "value_1" }, basis), /calendar month.*2025-04 only in part, and 4 of the records/);
+  assert.match(tabularFormProblem({ ...countForm, categoryFieldKey: "", categoryValueKey: "" }, basis), /calendar month/);
+  assert.equal(tabularFormProblem({ ...EMPTY_TABULAR_FORM, operation: "rate", categoryFieldKey: F.status, categoryValueKey: "value_1", populationFieldKey: F.cohort, populationValueKey: "value_2", periodFieldKey: F.date }, basis), null);
+});
+function active(row) { return row[3] === "active"; }
+
+// ---------------------------------------------------------------------------
+// Workbooks authored by Microsoft Excel (Mac, 16.x): see fixtures/excel-authored.
+// Excel wrote visit_date as serials with a custom "yyyy\-mm\-dd" format and,
+// for ISO text typed into typed_date, converted it itself (built-in format
+// 14) - so Excel's own conversion is the oracle for the serials. Only the
+// package's author/company metadata and the saved folder path were replaced.
+
+test("Excel-authored workbooks: Excel's custom and built-in date formats, its own typed-date conversion and the 1904 system are read as the same dates", async () => {
+  const { readFileSync } = await import("node:fs");
+  const typed = ["2026-01-05", "2026-01-20", "2026-02-02", "2026-02-27", "2026-03-16", "2025-12-31"]; // the text typed into Excel
+  const expectedMonths = monthHistogram(typed);
+  const profileOf = async (name) => xlsxProfile(new Uint8Array(readFileSync(new URL(`./fixtures/excel-authored/${name}`, import.meta.url))));
+  const p1900 = await profileOf("synthetic-visits-excel-1900.xlsx");
+  const b1900 = p1900.sheets[0].tabular_measurement_basis;
+  const field = (basis, key) => basis.fields.find((candidate) => candidate.field_key === key);
+  for (const key of ["field_2", "field_5"]) { // custom "yyyy\-mm\-dd" serials, and Excel-converted typed text
+    assert.deepEqual(field(b1900, key).roles, ["date"], key);
+    assert.deepEqual([field(b1900, key).date.excel_date_cell_count, field(b1900, key).date.excel_date_system], [6, EXCEL_DATE_SYSTEM_1900]);
+    assert.deepEqual(b1900.date_cells[key].map(([month, records]) => [month, records]), expectedMonths, key);
+  }
+  assert.deepEqual(field(b1900, "field_4").roles, [], "the unformatted copy of the same serials is a number");
+  const p1904 = await profileOf("synthetic-visits-excel-1904.xlsx");
+  const b1904 = p1904.sheets[0].tabular_measurement_basis;
+  assert.deepEqual([field(b1904, "field_2").date.excel_date_system, field(b1904, "field_2").date.date_count], [EXCEL_DATE_SYSTEM_1904, 6]);
+  assert.deepEqual(b1904.date_cells.field_2.map(([month, records]) => [month, records]), expectedMonths, "Excel's 1904 serials give the same dates");
+  assert.deepEqual(field(b1904, "field_3").roles, [], "plain numbers stay numbers");
+  // Measurement over the Excel dates with a whole-month Project period.
+  const period = wholeMonths("2026-01", "2026-02");
+  const count = derive(p1900, { operation: "count", conditions: [{ ...within, field_key: "field_2" }] }, period, "sheet_1");
+  assert.equal(count.measurement.measuredValue, typed.filter((iso) => iso >= period.start && iso <= period.end).length);
 });

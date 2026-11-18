@@ -145,9 +145,14 @@ test("counts, distinct-key counts, category, period and rate calculations agree 
     D.validateTabularMeasurementDefinition({ operation: "count", unit: eachRef, conditions: [done, periodWithin] }).definition, { reportingPeriod: PERIOD });
   assert.deepEqual([legacy.ok, legacy.blockers[0].blocking_reason], [false, "tabular_distinct_not_exact_for_period"]);
   assert.match(legacy.blockers[0].required_fix, /new intake version/);
-  // A period that is not whole months is refused, never approximated; the period is never invented.
-  const partMonth = derive(profile, { operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }, null, { start: "2025-04-15", end: "2026-03-31" });
-  assert.equal(partMonth.blockers[0].blocking_reason, "tabular_period_not_whole_months");
+  // A period covering a month only in part is applied with its actual dates: exact when no counted record falls in that
+  // month (April 2025 has none), refused - never approximated - when one does (May 2025 holds V01); never invented.
+  const periodCondition = { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" };
+  const partMonth = derive(profile, { operation: "count", conditions: [periodCondition] }, null, { start: "2025-04-15", end: "2026-03-31" });
+  assert.equal(partMonth.measurement.measuredValue, records.filter((row) => row[2] >= "2025-04-15" && row[2] <= "2026-03-31").length);
+  assert.deepEqual([partMonth.measurement.componentCounts.partially_covered_months, partMonth.measurement.componentCounts.partially_covered_month_records], [["2025-04"], 0]);
+  const heldMonth = derive(profile, { operation: "count", conditions: [periodCondition] }, null, { start: "2025-05-02", end: "2026-03-31" });
+  assert.equal(heldMonth.blockers[0].blocking_reason, "tabular_period_not_whole_months");
   const noPeriod = derive(profile, { operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] }, null, null);
   assert.equal(noPeriod.blockers[0].blocking_reason, "tabular_reporting_period_not_recorded");
   // Rate: done among video visits, from the joint category table, not two independent histograms.
@@ -261,7 +266,7 @@ test("profile category retention: ordinary labels are kept; personal, sensitive 
   assert.match(statement, /field_2 = done/);
 });
 
-test("date precision: a month-level basis applies only whole-month periods; every period needing day-level dates is refused", async () => {
+test("date precision: whole months are summed; a partly covered month is exact only when it holds no counted record, otherwise refused", async () => {
   const profile = await csvProfile();
   const within = { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" };
   const reason = (period) => {
@@ -271,10 +276,16 @@ test("date precision: a month-level basis applies only whole-month periods; ever
   assert.equal(reason({ start: "2025-04-01", end: "2026-03-31" }), "ok");
   assert.equal(reason({ start: "2024-02-01", end: "2024-02-29" }), "ok", "a leap-year February is a whole month");
   assert.equal(reason({ start: "2025-02-01", end: "2025-02-28" }), "ok");
+  // Partly covered months with no record (April 2025, March 2026, February 2025): the actual dates give the day-level answer.
+  for (const partial of [{ start: "2025-04-15", end: "2026-03-31" }, { start: "2025-04-01", end: "2026-03-30" }, { start: "2025-02-01", end: "2025-02-27" }]) {
+    const derived = derive(profile, { operation: "count", conditions: [within] }, null, partial);
+    assert.equal(derived.measurement.measuredValue, records.filter((row) => row[2] >= partial.start && row[2] <= partial.end).length, JSON.stringify(partial));
+    assert.deepEqual(derived.measurement.definition.conditions[0].period_start, partial.start, "the actual dates are recorded, not rounded");
+  }
+  // Partly covered months holding records (May 2025: V01 on the 1st; October 2025: V07 on the 1st) need day-level dates: refused.
   for (const partial of [
-    { start: "2025-04-15", end: "2026-03-31" }, // starts mid-month
-    { start: "2025-04-01", end: "2026-03-30" }, // ends a day early
-    { start: "2025-02-01", end: "2025-02-27" },
+    { start: "2025-05-02", end: "2026-03-31" },
+    { start: "2025-04-01", end: "2025-10-15" },
     { start: "2023-02-01", end: "2023-02-29" }, // not a real date
   ]) assert.equal(reason(partial), "tabular_period_not_whole_months", JSON.stringify(partial));
   // The whole-month result equals a day-level calculation over the same rows.

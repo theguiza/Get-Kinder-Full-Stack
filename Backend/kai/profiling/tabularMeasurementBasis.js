@@ -49,6 +49,10 @@
  *   * category-pair months: records per month carrying both of two listed
  *     category values, so a period-filtered rate whose population is a
  *     category value is calculated from the joint table, not from marginals.
+ *   * category-pair distinct keys: per identifier field, the keys with a
+ *     record carrying both of two listed values, overall and as month
+ *     windows, for a rate in distinct identifiers within a category
+ *     population. Profiles committed before this part lack it.
  *   Each part is omitted, with its reason, when it would exceed its bound;
  *   the rest of the basis is unaffected.
  *
@@ -64,6 +68,7 @@ const MAX_JOINT_ENTRIES = 50000;
 // Bounds of the exact-period aggregates (numbers kept per part).
 export const MAX_WINDOW_ENTRIES = 40000;
 export const MAX_CATEGORY_PAIR_MONTH_ENTRIES = 20000;
+export const MAX_CATEGORY_PAIR_DISTINCT_ENTRIES = 40000;
 const IDENTIFIER_RE = /^(?=[A-Za-z0-9_.-]*[A-Za-z])(?=[A-Za-z0-9_.-]*\d)[A-Za-z0-9][A-Za-z0-9_.-]{1,39}$/;
 const CATEGORY_LABEL_RE = /^[A-Za-z][A-Za-z _'()&/-]{0,39}$/;
 // The committed profile's metadata-only CHECK (kai.gate_a_p0_jsonb_metadata_only)
@@ -408,10 +413,65 @@ function summarizeExactPeriodAggregates({ records, identifiers, categoricals, da
     }
     categoryPairMonths = { status: "assessed", cells };
   }
+  // Category-pair distinct keys: per identifier field, the keys with a record
+  // carrying both values - overall and, per date field, as month windows -
+  // so a rate in distinct identifiers can use a category-value population.
+  // Only counts are kept; a pair with no shared record is absent (zero).
+  const pairKeys = new Map();
+  const pairKey = (a, b) => `${a[0]}|${a[1]}|${b[0]}|${b[1]}`;
+  for (const record of records) {
+    const keys = identifiers.map((field) => [field.field_key, cellText(record, field)]).filter(([, key]) => key !== null);
+    if (keys.length === 0) continue;
+    const listed = ordered.map((field) => [field.field_key, valueKeys.get(field.field_key).get(cellText(record, field))]).filter(([, valueKey]) => valueKey);
+    for (let a = 0; a < listed.length; a += 1) {
+      for (let b = a + 1; b < listed.length; b += 1) {
+        const entry = pairKeys.get(pairKey(listed[a], listed[b])) ?? { first: listed[a], second: listed[b], keys: new Map(), months: new Map() };
+        for (const [idKey, key] of keys) {
+          addKey(entry.keys, idKey, key);
+          for (const date of dates) {
+            const month = monthOf(record, date);
+            if (!month) continue;
+            const perIdentifier = entry.months.get(date.field_key) ?? new Map();
+            const perKey = perIdentifier.get(idKey) ?? new Map();
+            addKey(perKey, key, month);
+            perIdentifier.set(idKey, perKey);
+            entry.months.set(date.field_key, perIdentifier);
+          }
+        }
+        pairKeys.set(pairKey(listed[a], listed[b]), entry);
+      }
+    }
+  }
+  const pairDistinctEntries = pairKeys.size * identifiers.length * (1 + dates.reduce((total, date) => {
+    const count = monthLists.get(date.field_key).length;
+    return total + count * (count + 1);
+  }, 0));
+  let categoryPairDistinct;
+  if (pairDistinctEntries > MAX_CATEGORY_PAIR_DISTINCT_ENTRIES) {
+    categoryPairDistinct = { status: "not_assessed", reason: "exceeds_limit" };
+  } else {
+    const cells = {};
+    for (const { first, second, keys, months } of pairKeys.values()) {
+      const windows = {};
+      for (const date of dates) {
+        const dateMonths = monthLists.get(date.field_key);
+        const monthIndex = new Map(dateMonths.map((month, index) => [month, index]));
+        windows[date.field_key] = {};
+        for (const field of identifiers) {
+          const perKey = months.get(date.field_key)?.get(field.field_key) ?? new Map();
+          windows[date.field_key][field.field_key] = distinctWindowTables([...perKey.values()].map((set) => new Set([...set].map((month) => monthIndex.get(month)))), dateMonths.length);
+        }
+      }
+      ((((cells[first[0]] ??= {})[first[1]] ??= {})[second[0]] ??= {})[second[1]] ??= {}).distinct = Object.fromEntries(identifiers.map((field) => [field.field_key, keys.get(field.field_key)?.size ?? 0]));
+      cells[first[0]][first[1]][second[0]][second[1]].windows = windows;
+    }
+    categoryPairDistinct = { status: "assessed", months: Object.fromEntries(dates.map((date) => [date.field_key, monthLists.get(date.field_key)])), cells };
+  }
   return {
     version: EXACT_PERIOD_AGGREGATES_VERSION,
     distinct_month_windows: distinctMonthWindows,
     category_pair_months: categoryPairMonths,
+    category_pair_distinct: categoryPairDistinct,
   };
 }
 

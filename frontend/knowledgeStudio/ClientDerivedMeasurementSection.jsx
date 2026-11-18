@@ -287,6 +287,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             <div data-client-derived-period-context="">
               {!data.reporting_period ? <div className="text-warning" data-client-derived-no-period="">{projectPeriodProblem(data.reporting_period_context)}</div>
                 : <div> KAI Project reporting period: {data.reporting_period.start} to {data.reporting_period.end}.</div>}
+              {data.period_month_coverage?.partially_covered_months?.length ? <div data-client-derived-partial-months="">
+                The period covers {data.period_month_coverage.partially_covered_months.join(" and ")} only in part. KAI applies the actual dates exactly when none of the records a calculation reads fall in {data.period_month_coverage.partially_covered_months.length === 1 ? "that month" : "those months"}; otherwise it explains why it cannot.
+              </div> : null}
               <div>Choose “no period (all dates)” above for a supported calculation without date filtering. Your field selections will remain.</div>
               {data.reporting_period_context?.engagement_id ? <ProjectReportingPeriodEditor organizationId={organizationId}
                 engagementId={data.reporting_period_context.engagement_id} onSaved={load} /> : null}

@@ -67,6 +67,9 @@ const CHROME = process.env.KAI_XLSX_ACCEPTANCE_CHROME;
 const WORKDIR = process.env.KAI_XLSX_ACCEPTANCE_WORKDIR;
 const LEGACY_CHECKOUT = process.env.KAI_XLSX_ACCEPTANCE_LEGACY_CHECKOUT;
 const LEGACY_REVISION = process.env.KAI_XLSX_ACCEPTANCE_LEGACY_REVISION;
+// The revision before Excel date cells and exact-period aggregates (case S).
+const PRE_EXACT_CHECKOUT = process.env.KAI_XLSX_ACCEPTANCE_PRE_EXACT_CHECKOUT;
+const PRE_EXACT_REVISION = process.env.KAI_XLSX_ACCEPTANCE_PRE_EXACT_REVISION;
 
 function assertLoopbackDatabaseUrl(urlString) {
   const host = new URL(urlString).hostname.toLowerCase();
@@ -79,7 +82,7 @@ test("XLSX acceptance isolation: a non-loopback runner URL is refused", () => {
   assert.throws(() => assertLoopbackDatabaseUrl("postgresql://user@example.com:5432/db"), /refused a non-loopback/);
 });
 
-if (!RUNNER_DATABASE_URL || !CHROME || !WORKDIR || !LEGACY_CHECKOUT) {
+if (!RUNNER_DATABASE_URL || !CHROME || !WORKDIR || !LEGACY_CHECKOUT || !PRE_EXACT_CHECKOUT) {
   test("customer XLSX file-to-report browser acceptance requires its runner", { skip: true }, () => {});
 } else {
   assertLoopbackDatabaseUrl(RUNNER_DATABASE_URL);
@@ -458,6 +461,19 @@ async function runXlsxAcceptance() {
     dispatch: await import("../Backend/kai/parsing/p1FileDispatch.js"),
   };
   assert.notEqual(legacy.router, current.router, "two distinct application revisions are loaded");
+  // The revision before the exact-period aggregates: its own worker commits an older v1 basis (case S).
+  const preExact = {
+    router: (await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/routes/sprint2IntakeApi.js"))).default,
+    config: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/config/kaiSprint2Config.js")),
+    auth: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/middleware/kaiSprint2Authentication.js")),
+    runtimeService: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/services/kaiIntakeRuntimeService.js")),
+    upload: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/upload/postgresUploadLifecycleRepository.js")),
+    executor: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/security/internalSecurityAssessmentExecutor.js")),
+    assessor: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/security/boundedFileSecurityAssessor.js")),
+    dispatch: await import(join(PRE_EXACT_CHECKOUT, "Backend/kai/parsing/p1FileDispatch.js")),
+    pool: (await import(join(PRE_EXACT_CHECKOUT, "Backend/db/pg.js"))).default,
+  };
+  assert.notEqual(preExact.router, current.router, "the pre-exact-period revision is a separate module graph");
 
   const ORG_X = "0f000000-0000-4000-8000-0000000000a1";
   const ORG_Y = "0f000000-0000-4000-8000-0000000000b1";
@@ -564,6 +580,8 @@ async function runXlsxAcceptance() {
   const restoreLegacyRuntime = legacy.runtimeService.setKaiIntakeRuntimeDependenciesForTest(runtimeFor(legacy));
   const restoreRuntime = current.runtimeService.setKaiIntakeRuntimeDependenciesForTest(runtimeFor(current));
   const legacyDispatcher = legacy.dispatch.getKaiP1FileDispatcher();
+  const restorePreExactRuntime = preExact.runtimeService.setKaiIntakeRuntimeDependenciesForTest(runtimeFor(preExact));
+  const preExactDispatcher = preExact.dispatch.getKaiP1FileDispatcher();
   const dispatcher = current.dispatch.getKaiP1FileDispatcher();
 
   const harnessSession = (req, _res, next) => {
@@ -598,6 +616,12 @@ async function runXlsxAcceptance() {
   legacyApp.use("/api/kai/sprint2/intake", legacy.config.requireKaiSprint2Enabled, legacy.auth.requireKaiSprint2Authenticated, legacy.router);
   const legacyServer = await new Promise((resolve) => { const listening = legacyApp.listen(0, "127.0.0.1", () => resolve(listening)); });
   const legacyBaseUrl = `http://127.0.0.1:${legacyServer.address().port}`;
+  const preExactApp = express();
+  preExactApp.use(express.json());
+  preExactApp.use(harnessSession);
+  preExactApp.use("/api/kai/sprint2/intake", preExact.config.requireKaiSprint2Enabled, preExact.auth.requireKaiSprint2Authenticated, preExact.router);
+  const preExactServer = await new Promise((resolve) => { const listening = preExactApp.listen(0, "127.0.0.1", () => resolve(listening)); });
+  const preExactBaseUrl = `http://127.0.0.1:${preExactServer.address().port}`;
 
   // A signed-in HTTP client of one application revision (the bundle's own
   // same-origin JSON requests, made from Node with the session cookie).
@@ -613,6 +637,7 @@ async function runXlsxAcceptance() {
     return { status: response.status, body: parsed, disposition: response.headers.get("content-disposition") };
   };
   const legacyAdmin = client(legacyBaseUrl, USERS.clientAdmin);
+  const preExactAdmin = client(preExactBaseUrl, USERS.clientAdmin);
   const adminApi = client(baseUrl, USERS.clientAdmin);
   const gkApi = client(baseUrl, USERS.gkReviewer);
   const gkAdminApi = client(baseUrl, USERS.gkAdmin);
@@ -3291,6 +3316,160 @@ async function runXlsxAcceptance() {
       console.log(`[kai-customer-xlsx-file-to-report] exactPeriodExcelDates ${J(results.exactPeriodExcelDates)}`);
     });
 
+    await test("S: a profile committed by the previous revision keeps its results and refuses only the new calculations; its successor version recovers them; partial-month, currentness and allowed-use outcomes on the persisted path", async () => {
+      // Explicit records [visit_ref, learner_id, status, cohort, day]. visit_date is ISO text (both revisions read it);
+      // visit_day_excel repeats each day as an Excel date-formatted serial (only the current revision reads it as a date).
+      const visitsS = [
+        ["S01", "M01", "completed", "active", "2026-01-05"], ["S02", "M01", "completed", "active", "2026-02-11"], ["S03", "M02", "waiting", "active", "2026-01-20"],
+        ["S04", "M02", "completed", "active", "2026-02-24"], ["S05", "M03", "completed", "exited", "2026-02-03"], ["S06", "M03", "completed", "exited", "2026-02-17"],
+        ["S07", "M04", "waiting", "exited", "2026-02-09"], ["S08", "M05", "completed", "active", "2026-03-04"], ["S09", "M06", "completed", "active", "2025-12-12"],
+        ["S10", "M07", "waiting", "exited", "2026-02-26"],
+      ];
+      const serial1900 = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.parse("1899-12-30T00:00:00Z")) / 86400000;
+      const file = customerFile("synthetic-learner-visits-older-profile.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Learner_Visits_S",
+        rows: [["visit_ref", "learner_id", "status", "cohort", "visit_date", "visit_day_excel"], ...visitsS.map((row) => [...row, { number: serial1900(row[4]), style: 2 }])] }],
+      cellFormats: [{ numFmtId: 14 }] }));
+      const period = { start: "2026-01-01", end: "2026-02-28" };
+      const inPeriod = (row, bounds = period) => row[4] >= bounds.start && row[4] <= bounds.end;
+      const completed = (row) => row[2] === "completed";
+      const exited = (row) => row[3] === "exited";
+      const expected = {
+        allRate: [visitsS.filter((row) => inPeriod(row) && completed(row)).length, visitsS.filter((row) => inPeriod(row)).length],
+        learners: new Set(visitsS.filter((row) => inPeriod(row) && completed(row)).map((row) => row[1])).size,
+        exitedRate: [visitsS.filter((row) => inPeriod(row) && exited(row) && completed(row)).length, visitsS.filter((row) => inPeriod(row) && exited(row)).length],
+      };
+      assert.deepEqual(expected, { allRate: [5, 8], learners: 3, exitedRate: [2, 4] });
+      const COMPLETED = { kind: "category", field_key: "field_3", value_key: "value_1" };
+      const EXITED = { kind: "category", field_key: "field_4", value_key: "value_2" };
+      const within = (field_key = "field_5") => ({ kind: "period", field_key, period_source: "engagement_reporting_period", scope: "within" });
+      const learnerUnit = { kind: "distinct_key", field_key: "field_2", duplicate_policy: "count_each_key_once" };
+      const post = (sv, definition, api = adminApi) => api("POST", tabularMeasurementPath(ORG_X, sv, null), { definition });
+      const rowsOf = async (sv) => (await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n;
+      assert.equal((await adminApi("GET", periodPath)).body.data.start, period.start);
+
+      // 1. The previous revision's own upload and P1 worker commit the older basis.
+      const oldFileId = await apiUpload(preExactAdmin, file, ids.batchId);
+      await preExactDispatcher.whenIdle();
+      const oldPromoted = await decideAndPromote(adminApi, oldFileId);
+      const oldSv = oldPromoted.source_version_id;
+      const oldBasis = (await profileRowOf(oldPromoted.file_profile_id)).profile.sheets[0].tabular_measurement_basis;
+      assert.equal(oldBasis.basis_version, "kai_tabular_measurement_basis_v1");
+      assert.equal("exact_period_aggregates" in oldBasis, false, `committed by ${PRE_EXACT_REVISION}`);
+      assert.deepEqual(oldBasis.fields.find((field) => field.field_key === "field_6").roles, [], "the previous revision read no Excel date cell");
+
+      // 2. Through the current API: the all-record period rate is exact on the older profile; only the new calculations are refused.
+      const oldRate = await post(oldSv, { operation: "rate", conditions: [COMPLETED, within()] });
+      assert.equal(oldRate.status, 200, J(oldRate.body));
+      assert.deepEqual([oldRate.body.data.measurement.numerator, oldRate.body.data.measurement.denominator, oldRate.body.data.measurement.percentage], [...expected.allRate, "62.50"]);
+      const countBefore = await rowsOf(oldSv);
+      for (const [definition, reason] of [
+        [{ operation: "count", unit: learnerUnit, conditions: [COMPLETED, within()] }, "tabular_distinct_not_exact_for_period"],
+        [{ operation: "rate", conditions: [COMPLETED, within()], population: [EXITED] }, "tabular_rate_period_population_not_committed"],
+        [{ operation: "count", conditions: [within("field_6")] }, "tabular_field_role_not_proposed"],
+      ]) {
+        const refused = await post(oldSv, definition);
+        assert.deepEqual([refused.status, refused.body.blockers[0].blocking_reason], [422, reason]);
+        if (reason !== "tabular_field_role_not_proposed") assert.match(refused.body.blockers[0].required_fix, /new intake version/);
+      }
+      assert.equal(await rowsOf(oldSv), countBefore, "refusals write nothing");
+      const oldOptions = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, oldSv, null))).body.data.tabular;
+      assert.deepEqual(oldOptions.period_support, { distinct_month_windows: "not_committed", population_period_rates: "not_committed" });
+      // The rendered form explains the older profile before any request.
+      await openCountRecords(oldSv);
+      const oldSection = `[data-client-derived-measurements="${oldSv}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${oldSection} [data-client-derived-tabular-form]`)), "older version field controls");
+      for (const [key, value] of [["identifierFieldKey", "field_2"], ["categoryFieldKey", "field_3"], ["categoryValueKey", "value_1"], ["periodFieldKey", "field_5"]]) {
+        assert.ok(await setSelect(`${oldSection} [data-client-derived-field="${key}"]`, value), key);
+      }
+      await adminPage.waitFor(async () => /predates exact cross-month identifier counts.*new intake version/.test(await textOf(adminPage, `${oldSection} [data-client-derived-problem]`) ?? ""), "older-profile explanation");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${oldSection} [data-client-derived-record-tabular]`)}).disabled`), true);
+
+      // 3. Recovery: the same bytes uploaded again as a new intake version, promoted as the successor of the older version.
+      const newFileId = await apiUpload(adminApi, file, ids.batchId, { duplicateOf: oldFileId });
+      await dispatcher.whenIdle();
+      const sensitivity = await sensitivityOf(newFileId);
+      assert.equal((await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: SNAPSHOT,
+      })).status, 200);
+      const candidate = await candidateOf(sensitivity.intake_sensitivity_profile_id);
+      const successor = await adminApi("POST", sourceCandidateDecisionPath(ORG_X, candidate.intake_source_candidate_id),
+        { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: oldSv });
+      assert.equal(successor.status, 200, J(successor.body));
+      const newSv = successor.body.data.source_version.source_version_id;
+      const [oldVersion] = await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [oldSv]);
+      assert.equal(oldVersion.is_current, false);
+      // Currentness on the new paths: the historical version measures nothing more; its recorded rate is unchanged.
+      for (const definition of [{ operation: "rate", conditions: [COMPLETED, within()] }, { operation: "count", unit: learnerUnit, conditions: [COMPLETED, within()] }]) {
+        const stale = await post(oldSv, definition);
+        assert.equal(stale.status, 409, J(stale.body));
+      }
+      const [historical] = await query("SELECT numerator::int, denominator::int, percentage::text, measurement_key FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [oldSv]);
+      assert.deepEqual([historical.numerator, historical.denominator, historical.percentage], [...expected.allRate, "62.50"]);
+      // The successor's profile has the aggregates and Excel dates: the same rate has the same identity and figures, and the new calculations are exact.
+      const newRate = await post(newSv, { operation: "rate", conditions: [COMPLETED, within()] });
+      assert.deepEqual([newRate.status, newRate.body.data.measurement.numerator, newRate.body.data.measurement.denominator], [200, ...expected.allRate]);
+      assert.equal((await query("SELECT measurement_key FROM kai.source_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [newRate.body.data.measurement.source_derived_measurement_id]))[0].measurement_key, historical.measurement_key);
+      const learners = await post(newSv, { operation: "count", unit: learnerUnit, conditions: [COMPLETED, within()] });
+      assert.deepEqual([learners.status, learners.body.data.measurement.measured_value], [200, expected.learners]);
+      const exitedRate = await post(newSv, { operation: "rate", conditions: [COMPLETED, within()], population: [EXITED] });
+      assert.deepEqual([exitedRate.status, exitedRate.body.data.measurement.numerator, exitedRate.body.data.measurement.denominator], [200, ...expected.exitedRate]);
+      const excelDates = await post(newSv, { operation: "count", conditions: [within("field_6")] });
+      assert.deepEqual([excelDates.status, excelDates.body.data.measurement.measured_value], [200, expected.allRate[1]]);
+
+      // 4. A partial-month Project period through the real UI: exact for exited visits (none in January), refused for all visits.
+      await configureProjectPeriodInUi("2026-01-10", "2026-02-28");
+      const partial = { start: "2026-01-10", end: "2026-02-28" };
+      assert.equal(visitsS.filter((row) => exited(row) && row[4].startsWith("2026-01")).length, 0);
+      await openCountRecords(newSv);
+      const section = `[data-client-derived-measurements="${newSv}"]`;
+      const field = (key) => `${section} [data-client-derived-field="${key}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-tabular-form]`)), "successor field controls");
+      for (const [key, value] of [["categoryFieldKey", "field_4"], ["categoryValueKey", "value_2"], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-derived-partial-months]`)), "partial-month note");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-derived-record-tabular]`)}).disabled`)) === false, "exact partial-month count ready");
+      const mark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-derived-record-tabular]`, "Calculate and record");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Measurement recorded:"), "partial-month measurement saved");
+      const req = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/tabular-measurements"));
+      const saved = (await adminPage.responseBody(req)).data.measurement;
+      const [persisted] = await query(`SELECT m.measured_value::int, m.definition, m.component_counts, e.statement FROM kai.source_derived_measurements m
+        JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id) JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id
+        WHERE m.source_derived_measurement_id = $1::uuid`, [saved.source_derived_measurement_id]);
+      assert.equal(persisted.measured_value, visitsS.filter((row) => exited(row) && inPeriod(row, partial)).length);
+      assert.deepEqual([persisted.definition.conditions[1].period_start, persisted.definition.conditions[1].period_end], [partial.start, partial.end]);
+      assert.deepEqual([persisted.component_counts.partially_covered_months, persisted.component_counts.partially_covered_month_records], [["2026-01"], 0]);
+      assert.match(persisted.statement, /field_5 within the engagement reporting period 2026-01-10 to 2026-02-28/);
+      // Negative control: rounding the period to January-February would count the same exited visits but every visit differently.
+      assert.notEqual(visitsS.filter((row) => inPeriod(row, partial)).length, expected.allRate[1]);
+      for (const [key, value] of [["categoryFieldKey", ""], ["periodFieldKey", "field_5"]]) assert.ok(await setSelect(field(key), value));
+      await adminPage.waitFor(async () => /2026-01 only in part/.test(await textOf(adminPage, `${section} [data-client-derived-problem]`) ?? ""), "all-visit partial-month explanation");
+      const allPartial = await post(newSv, { operation: "count", conditions: [within()] });
+      assert.deepEqual([allPartial.status, allPartial.body.blockers[0].blocking_reason], [422, "tabular_period_not_whole_months"]);
+      await configureProjectPeriodInUi(period.start, period.end);
+
+      // 5. A later explicit allowed-use prohibition (a re-review of the same profile) closes the new calculations; tenant and role refusals.
+      for (const api of [contributorApi, reviewerApi, adminYApi]) {
+        const denied = await post(newSv, { operation: "rate", conditions: [COMPLETED, within()], population: [EXITED] }, api);
+        assert.ok([403, 404].includes(denied.status), String(denied.status));
+      }
+      const [item] = await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid",
+        [ORG_X, sensitivity.intake_sensitivity_profile_id]);
+      const prohibited = await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), {
+        expected_updated_at: new Date(item.updated_at).toISOString(), review_queue_item_id: item.review_queue_item_id, decision: "reviewed",
+        // A not_allowed use grants no AI processing (a not_allowed decision granting it is itself refused, VAL-KAI-B1A-02-003).
+        reviewed_snapshot: { ...SNAPSHOT, reviewed_allowed_use_status: "not_allowed", reviewed_llm_processing_allowed: false },
+      });
+      assert.equal(prohibited.status, 200, J(prohibited.body));
+      const rowsBefore = await rowsOf(newSv);
+      for (const definition of [{ operation: "rate", conditions: [COMPLETED, within()], population: [EXITED] }, { operation: "count", unit: learnerUnit, conditions: [EXITED, within()] }]) {
+        const closed = await post(newSv, definition);
+        assert.deepEqual([closed.status, closed.body.blockers?.[0]?.blocking_reason], [422, "allowed_use_not_allowed"], J(closed.body));
+      }
+      assert.equal(await rowsOf(newSv), rowsBefore, "a prohibited source records nothing");
+      results.olderProfileRecovery = { revision: PRE_EXACT_REVISION, oldSv, newSv, expected, partialExited: persisted.measured_value };
+      console.log(`[kai-customer-xlsx-file-to-report] olderProfileRecovery ${J(results.olderProfileRecovery)}`);
+    });
+
     await test("N: in Count records the administrator links a participant register, follows the queued job and reloads; a corrected register promoted as its successor marks the linked results not current; refusals", async () => {
       // Synthetic sessions and register: S-ids, learners L01-L15, L16 registered with no session, one unmatched learner L99.
       const sessionRows = [["session_ref", "learner_ref", "track", "held_on", "state"]];
@@ -3776,11 +3955,14 @@ async function runXlsxAcceptance() {
   } finally {
     restoreRuntime();
     restoreLegacyRuntime();
+    restorePreExactRuntime();
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => legacyServer.close(resolve));
+    await new Promise((resolve) => preExactServer.close(resolve));
     await seedPool.end();
     await ambientPool.end();
     await legacy.pool.end();
+    await preExact.pool.end();
   }
 }

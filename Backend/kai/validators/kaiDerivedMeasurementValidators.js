@@ -52,12 +52,25 @@ export const DERIVED_MEASUREMENT_METHODS = Object.freeze({
   DISTINCT_KEY_COUNT: "kai_tabular_conditional_distinct_key_count_v1",
   RECORD_RATE: "kai_tabular_conditional_record_rate_v1",
   CROSS_SOURCE_REACH: CROSS_SOURCE_REACH_METHOD,
+  // Calculated (deriveTabularDistinctKeyRate) but not yet recordable: the
+  // source_derived_measurements method/family CHECK does not admit it.
+  DISTINCT_KEY_RATE: "kai_tabular_conditional_distinct_key_rate_v1",
 });
+// The methods kai.source_derived_measurements admits today; a write of any
+// other method is refused before it reaches the database.
+export const SCHEMA_ADMITTED_DERIVED_METHODS = Object.freeze(new Set([
+  PAIRED_OUTCOME_CALCULATION_METHOD,
+  "kai_tabular_conditional_record_count_v1",
+  "kai_tabular_conditional_distinct_key_count_v1",
+  "kai_tabular_conditional_record_rate_v1",
+  CROSS_SOURCE_REACH_METHOD,
+]));
 const METHOD_FAMILY = Object.freeze({
   [DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME]: DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME,
   [DERIVED_MEASUREMENT_METHODS.RECORD_COUNT]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT,
   [DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_COUNT]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT,
   [DERIVED_MEASUREMENT_METHODS.RECORD_RATE]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE,
+  [DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_RATE]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE,
   [DERIVED_MEASUREMENT_METHODS.CROSS_SOURCE_REACH]: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
 });
 export const SCORE_DIRECTIONS = Object.freeze(["higher_is_better", "lower_is_better", "not_established"]);
@@ -372,12 +385,46 @@ export function validateTabularMeasurementDefinition(input) {
   };
 }
 
-// The basis keeps dates by calendar month, so a period applies only when it
-// is whole months: it starts on a month's first day and ends on a last day.
-function monthBounds({ start, end }) {
+// The basis keeps dates by calendar month. A period is applied with its
+// actual dates: whole months are summed, and a month the period covers only
+// in part (it starts after the 1st, or ends before the last day) is exact
+// only when the measured records have none in it - which month aggregates
+// can show - so nothing is rounded to whole months.
+export function periodMonthCoverage(period) {
+  const start = period?.start;
+  const end = period?.end;
+  if (!isIsoDay(start) || !isIsoDay(end) || start > end) return null;
   const next = new Date(`${end}T00:00:00.000Z`);
   next.setUTCDate(next.getUTCDate() + 1);
-  return start.slice(8) === "01" && next.getUTCDate() === 1 ? { first: start.slice(0, 7), last: end.slice(0, 7) } : null;
+  const partial = new Set();
+  if (start.slice(8) !== "01") partial.add(start.slice(0, 7));
+  if (next.getUTCDate() !== 1) partial.add(end.slice(0, 7));
+  return { first: start.slice(0, 7), last: end.slice(0, 7), partialMonths: [...partial].sort() };
+}
+
+// Recorded with a measurement whose period covers a month only in part: the
+// months, and that none of the measured records fall in them.
+function partlyCoveredMonths(coverage) {
+  return coverage?.partialMonths?.length > 0
+    ? { partially_covered_months: [...coverage.partialMonths], partially_covered_month_records: 0 }
+    : {};
+}
+
+function recordsInMonths(entries, months) {
+  return entries.reduce((total, [month, count]) => total + (months.includes(month) ? count : 0), 0);
+}
+
+// Refuses when records of the measured set fall in a month the period covers
+// only in part: the profile cannot tell which of them are inside the period.
+function partialMonthRefusal(coverage, entries) {
+  const records = recordsInMonths(entries, coverage.partialMonths);
+  if (records === 0) return null;
+  return refuse(
+    "tabular_period_not_whole_months",
+    `KAI keeps source dates by calendar month. The Project period covers ${coverage.partialMonths.join(" and ")} only in part, and ${plural(records, "record")} of this calculation fall in ${coverage.partialMonths.length === 1 ? "that month" : "those months"}, so KAI cannot tell which of them are inside the period.`,
+    "Keep the Project's actual reporting dates. Day-level periods for these records are not available yet; choose a measurement without a period, or one whose records have none in the partly covered months.",
+    { objectType: "tabular_measurement_definition" },
+  );
 }
 
 function sumMonths(entries, { first, last, scope }, distinctKey = null) {
@@ -469,6 +516,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
     conditionsRecord.push({ kind: "category", field_key: category.field_key, value_key: category.value_key, value_label: resolved.entry.label });
   }
   let periodRecord = null;
+  let coverage = null;
   if (period) {
     if (!fieldOf(basis, period.field_key)?.roles?.includes("date")) return notProposed(period.field_key, "date");
     if (!reportingPeriod?.start || !reportingPeriod?.end) {
@@ -479,11 +527,12 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
         { objectType: "tabular_measurement_definition" },
       );
     }
-    if (!monthBounds(reportingPeriod)) {
+    coverage = periodMonthCoverage(reportingPeriod);
+    if (!coverage) {
       return refuse(
         "tabular_period_not_whole_months",
-        "KAI keeps source dates by calendar month, so it applies a reporting period only when it starts on the first day of a month and ends on the last day of one.",
-        "Keep the Project's actual reporting dates. This profile cannot calculate partial months; choose a supported measurement without a period instead.",
+        "The Project's reporting period is not two real dates in order, so KAI cannot apply it.",
+        "Record the Project's actual reporting dates again.",
         { objectType: "tabular_measurement_definition" },
       );
     }
@@ -517,7 +566,11 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
     // side is read from a joint aggregate, never multiplied from marginals.
     let recordsWithoutDate = null;
     if (period) {
-      const bounds = { ...monthBounds(reportingPeriod), scope: period.scope };
+      const bounds = { first: coverage.first, last: coverage.last, scope: period.scope };
+      const populationMonths = populationCondition ? (populationCell.by_date?.[period.field_key] ?? []) : (basis.date_cells?.[period.field_key] ?? []);
+      // The numerator records are population records, so the population decides.
+      const partial = partialMonthRefusal(coverage, populationMonths);
+      if (partial) return partial;
       const inconsistent = () => refuse("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent.", "Upload the file again as a new intake version.", { objectType: "tabular_measurement_definition" });
       const allDatesNumerator = numerator;
       if (populationCondition) {
@@ -579,6 +632,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
           other_population_record_count: denominator - numerator,
           exact_duplicate_member_records: duplicates.member_record_count,
           ...(recordsWithoutDate !== null ? { records_without_date: recordsWithoutDate } : {}),
+          ...partlyCoveredMonths(coverage),
         }),
         exclusions: Object.freeze({
           records_outside_population: basis.record_count - denominator,
@@ -632,7 +686,9 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
   let recordsWithoutDate = null;
   if (period) {
     const dateEntries = category ? (cell.by_date?.[period.field_key] ?? []) : (basis.date_cells?.[period.field_key] ?? []);
-    const bounds = { ...monthBounds(reportingPeriod), scope: period.scope };
+    const partial = partialMonthRefusal(coverage, dateEntries);
+    if (partial) return partial;
+    const bounds = { first: coverage.first, last: coverage.last, scope: period.scope };
     const summed = sumMonths(dateEntries, bounds, distinctKey);
     matchingRecords = summed.records;
     if (distinctKey) distinctCount = summed.distinct;
@@ -680,6 +736,7 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
     });
   }
   if (recordsWithoutDate !== null) componentCounts.records_without_date = recordsWithoutDate;
+  Object.assign(componentCounts, partlyCoveredMonths(coverage));
   return {
     ok: true,
     measurement: Object.freeze({
@@ -701,60 +758,145 @@ export function deriveTabularMeasurement(profile, worksheetKey, definition, { re
 }
 
 /**
- * A rate in distinct identifiers, as sets of keys of one identifier field K:
- *   population P = { k : some record with key k [dated in/outside the period] }
- *   numerator  N = { k : some record with key k, the numerator value [and so dated] }
- * N is a subset of P (each record N reads is a record P reads), so
- * |N| <= |P|; a key with records both with and without the numerator value
- * is in N once and in P once, and P \ N is the keys none of whose (dated)
- * records have it. Both sizes come from the exact distinct-count paths
- * (whole-key counts, month windows), never from month sums of keys.
- * A population value would need the keys of records carrying two values,
- * which the profile does not keep, so it is refused.
+ * A rate in distinct identifiers of one listed identifier field K. Sets of
+ * keys (an identifier is not necessarily a person):
+ *   A - all identifiers of the measured population:
+ *       P = { k : k has a record [dated in (or outside) the period] }
+ *       N = { k : k has a record with the numerator value X [so dated] }
+ *   B - identifiers of a category-value population Y:
+ *       P = { k : k has a record with Y [so dated] }
+ *       N = { k : k has one record carrying both X and Y [so dated] }
+ * "Has a record" is at least one: a key whose records disagree (X on one,
+ * not-X on another) is in N; its other records change nothing. Records with
+ * no K value belong to no key and are excluded from both sets (the source
+ * count is stated). Exact duplicate rows add no key. Records without a date
+ * are outside any period. N is a subset of P (every record N reads is a
+ * record P reads), so 0 <= |N| <= |P|; an empty P is refused, never 0%.
+ * Sizes come only from exact key counts (whole-key counts, committed month
+ * windows, category-pair key counts), never from month sums of keys or
+ * products of marginals. B needs the profile's category-pair distinct keys.
  *
- * Not recordable: kai.source_derived_measurements admits only the record
- * rate method for the tabular_rate family, so validateTabularMeasurementDefinition
- * refuses this unit and no route calls this function.
+ * Not recordable: kai.source_derived_measurements admits the record rate
+ * method only, so validateTabularMeasurementDefinition refuses this unit and
+ * no route calls this function. It returns the measurement exactly as it
+ * would be recorded (method kai_tabular_conditional_distinct_key_rate_v1),
+ * so recording needs only the schema change and the write path.
  */
 export function deriveTabularDistinctKeyRate(profile, worksheetKey, { identifierFieldKey, category, period = null, population = [] }, { reportingPeriod = null } = {}) {
-  if (Array.isArray(population) && population.length > 0) {
-    return refuse(
-      "tabular_distinct_key_rate_population_not_committed",
-      "The profile does not keep the identifiers of records carrying two category values, so a distinct-identifier rate cannot use a population value.",
-      "Use all identifiers as the population.",
-      { objectType: "tabular_measurement_definition" },
-    );
+  const definitionRefusal = (reason, message, fix) => refuse(reason, message, fix, { objectType: "tabular_measurement_definition" });
+  if (!Array.isArray(population) || population.length > 1) {
+    return definitionRefusal("tabular_rate_population_invalid", "The measured population is all identifiers or the identifiers with one category value.", "Select at most one population value.");
   }
+  const populationCondition = population[0] ?? null;
   const unit = { kind: "distinct_key", field_key: identifierFieldKey, duplicate_policy: DUPLICATE_POLICY_COUNT_EACH_KEY_ONCE };
-  const count = (conditions) => {
-    const validated = validateTabularMeasurementDefinition({ operation: "count", unit, conditions });
+  const derive = (input) => {
+    const validated = validateTabularMeasurementDefinition(input);
     return validated.ok ? deriveTabularMeasurement(profile, worksheetKey, validated.definition, { reportingPeriod }) : validated;
   };
-  const numerator = count([category, ...(period ? [period] : [])]);
-  if (!numerator.ok) return numerator;
-  const denominator = count(period ? [period] : []);
-  if (!denominator.ok) return denominator;
-  const n = numerator.measurement.measuredValue;
-  const d = denominator.measurement.measuredValue;
-  if (!isCount(n) || !isCount(d) || d === 0 || n > d) {
-    return refuse("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent or its population is empty.", "Select a population with identifiers.", { objectType: "tabular_measurement_definition" });
+  // Records (and every condition, label, period and partial-month check) from the record rate of the same definition.
+  const records = derive({ operation: "rate", conditions: [category, ...(period ? [period] : [])], population: populationCondition ? [populationCondition] : [] });
+  if (!records.ok) return records;
+  // Population keys: an exact distinct count of K under the population's conditions.
+  const populationKeys = derive({ operation: "count", unit, conditions: [...(populationCondition ? [populationCondition] : []), ...(period ? [period] : [])] });
+  if (!populationKeys.ok) return populationKeys;
+  let n;
+  if (!populationCondition) {
+    const numeratorKeys = derive({ operation: "count", unit, conditions: [category, ...(period ? [period] : [])] });
+    if (!numeratorKeys.ok) return numeratorKeys;
+    n = numeratorKeys.measurement.measuredValue;
+  } else {
+    const { basis } = tabularBasisOf(profile, worksheetKey);
+    const pairs = basis.exact_period_aggregates?.category_pair_distinct;
+    if (!isPlainObject(pairs)) {
+      return definitionRefusal(
+        "tabular_distinct_key_rate_population_not_committed",
+        "This source version's profile was committed before KAI kept the identifiers of records carrying two category values, so a distinct-identifier rate cannot use a population value.",
+        "Upload the file again as a new intake version, or use all identifiers as the population.",
+      );
+    }
+    if (pairs.status !== "assessed") {
+      return definitionRefusal("tabular_distinct_key_rate_population_exceeds_limit", "This table has too many value pairs and months for KAI to keep their identifiers together.", "Use all identifiers as the population.");
+    }
+    const [lower, higher] = [category, populationCondition].sort((a, b) => Number(a.field_key.slice(6)) - Number(b.field_key.slice(6)));
+    const cell = pairs.cells?.[lower.field_key]?.[lower.value_key]?.[higher.field_key]?.[higher.value_key] ?? null;
+    if (!period) {
+      n = cell?.distinct?.[identifierFieldKey] ?? 0;
+    } else if (!cell) {
+      n = 0;
+    } else {
+      const months = pairs.months?.[period.field_key];
+      const table = cell.windows?.[period.field_key]?.[identifierFieldKey];
+      if (!Array.isArray(months) || !isWindowTable(table, months.length)) {
+        return definitionRefusal("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent.", "Upload the file again as a new intake version.");
+      }
+      const coverage = periodMonthCoverage(reportingPeriod);
+      n = windowDistinct(table, months, { first: coverage.first, last: coverage.last, scope: period.scope });
+    }
   }
+  const d = populationKeys.measurement.measuredValue;
+  const recordCounts = records.measurement.componentCounts;
+  if (!isCount(n) || !isCount(d) || d === 0 || n > d || n > recordCounts.numerator_record_count || d > recordCounts.population_record_count) {
+    return definitionRefusal("tabular_counts_inconsistent", "The committed counts for this rate are inconsistent or its population has no identifiers.", "Select a population with identifiers.");
+  }
+  const identifier = fieldOf(tabularBasisOf(profile, worksheetKey).basis, identifierFieldKey);
+  const recordDefinition = records.measurement.definition;
+  const definition = Object.freeze({ operation: "rate", unit: Object.freeze({ ...unit }), conditions: recordDefinition.conditions, population: recordDefinition.population });
+  const family = DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE;
+  const calculationMethod = DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_RATE;
+  const { records_without_date: recordsWithoutDate, partially_covered_months: partialMonths, partially_covered_month_records: partialRecords } = recordCounts;
   return {
     ok: true,
-    recordable: false,
-    numerator: n,
-    denominator: d,
-    percentage: formatRate(n, d),
-    componentCounts: Object.freeze({
-      population_distinct_key_count: d,
-      numerator_distinct_key_count: n,
-      other_population_distinct_key_count: d - n,
-      population_record_count: denominator.measurement.componentCounts.matching_record_count,
-      numerator_record_count: numerator.measurement.componentCounts.matching_record_count,
+    recordable: SCHEMA_ADMITTED_DERIVED_METHODS.has(calculationMethod),
+    measurement: Object.freeze({
+      sheetKey: records.measurement.sheetKey,
+      basisVersion: TABULAR_MEASUREMENT_BASIS_VERSION,
+      family,
+      calculationMethod,
+      measurementKey: computeMeasurementKey({ family, calculationMethod, definition }),
+      definition,
+      fieldKeys: Object.freeze([...new Set([identifierFieldKey, ...records.measurement.fieldKeys])].sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)))),
+      measuredValue: n,
+      numerator: n,
+      denominator: d,
+      percentage: formatRate(n, d),
+      componentCounts: Object.freeze({
+        population_distinct_key_count: d,
+        numerator_distinct_key_count: n,
+        other_population_distinct_key_count: d - n,
+        population_record_count: recordCounts.population_record_count,
+        numerator_record_count: recordCounts.numerator_record_count,
+        source_distinct_key_count: identifier.identifier.distinct_count,
+        source_records_without_key: identifier.blank_count,
+        ...(recordsWithoutDate !== undefined ? { records_without_date: recordsWithoutDate } : {}),
+        ...(partialMonths ? { partially_covered_months: partialMonths, partially_covered_month_records: partialRecords } : {}),
+      }),
+      exclusions: Object.freeze({ ...records.measurement.exclusions }),
+      rowLocators: null,
     }),
-    numeratorDefinition: numerator.measurement.definition,
-    populationDefinition: denominator.measurement.definition,
   };
+}
+
+/**
+ * For the recorded Project period, the months it covers only in part and,
+ * per date field, how many records (overall and per listed category value)
+ * fall in them - the same month aggregates the calculation reads - so the
+ * form can tell an exact partial-month calculation from one that would be
+ * refused. Null when there is no valid period or no assessed basis.
+ */
+export function describePeriodMonthCoverage(profile, worksheetKey, reportingPeriod) {
+  const located = tabularBasisOf(profile, worksheetKey);
+  const coverage = periodMonthCoverage(reportingPeriod);
+  if (!located.ok || !coverage || !isPlainObject(located.basis) || located.basis.status !== "assessed") return null;
+  const { basis } = located;
+  const dateFields = {};
+  for (const field of basis.fields.filter((candidate) => candidate.roles.includes("date"))) {
+    const byCategory = {};
+    for (const [catKey, values] of Object.entries(basis.category_cells || {})) {
+      byCategory[catKey] = Object.fromEntries(Object.entries(values).map(([valueKey, cell]) => [valueKey, recordsInMonths(cell.by_date?.[field.field_key] ?? [], coverage.partialMonths)]));
+    }
+    dateFields[field.field_key] = { records: recordsInMonths(basis.date_cells?.[field.field_key] ?? [], coverage.partialMonths), by_category: byCategory };
+  }
+  return { partially_covered_months: coverage.partialMonths, date_fields: dateFields };
 }
 
 /** What a person can select from one table's committed basis (no values beyond listed category labels). */
@@ -1239,7 +1381,22 @@ function tabularCountBody(row) {
   return `${counted}${dateless}${duplicates}.`;
 }
 
+// A rate in distinct identifiers (not yet recordable; composed for its tests and for the schema continuation).
+function tabularDistinctKeyRateBody(row) {
+  const counts = row.component_counts;
+  const definition = row.definition;
+  const key = definition.unit.field_key;
+  const numerator = conditionPhrase(definition.conditions.find((condition) => condition.kind === "category"));
+  const period = definition.conditions.find((condition) => condition.kind === "period") ?? null;
+  const scope = [definition.population[0] ? conditionPhrase(definition.population[0]) : null, period ? conditionPhrase(period) : null].filter(Boolean);
+  const population = `the ${plural(row.denominator, `distinct ${key} identifier`)} with a record${scope.length > 0 ? ` with ${scope.join(" and ")}` : ""} ${where(row)}`;
+  const qualifying = definition.population[0] ? `${numerator} on a record that also has ${conditionPhrase(definition.population[0])}` : numerator;
+  return `among ${population} (the measured population, each identifier counted once), ${row.numerator} have at least one record with ${qualifying}: `
+    + `${row.numerator} of ${row.denominator} (${row.percentage}%); ${counts.other_population_distinct_key_count} of the ${row.denominator} do not.`;
+}
+
 function tabularRateBody(row) {
+  if (row.calculation_method === DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_RATE) return tabularDistinctKeyRateBody(row);
   const counts = row.component_counts;
   const definition = row.definition;
   const numerator = conditionPhrase(definition.conditions.find((condition) => condition.kind === "category"));
@@ -1372,6 +1529,13 @@ export function derivedMeasurementArithmeticHolds(row) {
       && counts.comparable_pair_count === row.denominator
       && counts.increased_count + counts.unchanged_count + counts.decreased_count === row.denominator
       && counts.participant_count === row.denominator + counts.excluded_participant_count;
+  }
+  if (row.calculation_method === DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_RATE) {
+    return row.definition?.unit?.kind === "distinct_key"
+      && counts.population_distinct_key_count === row.denominator && counts.numerator_distinct_key_count === row.numerator
+      && counts.other_population_distinct_key_count === row.denominator - row.numerator
+      && isCount(counts.population_record_count) && isCount(counts.numerator_record_count)
+      && row.numerator <= counts.numerator_record_count && row.denominator <= counts.population_record_count;
   }
   return counts.population_record_count === row.denominator && counts.numerator_record_count === row.numerator
     && counts.other_population_record_count === row.denominator - row.numerator;
@@ -1542,6 +1706,7 @@ export const DERIVED_LIMITATION_CODES = Object.freeze({
   ENCOUNTERS_NOT_PEOPLE: "derived.encounters_not_people",
   PEOPLE_COUNTED_ONCE: "derived.people_counted_once_across_groups",
   RECORDED_MINUTES_SUBTOTAL: "derived.known_recorded_minutes_subtotal",
+  PARTLY_COVERED_MONTHS_EMPTY: "derived.partly_covered_months_without_records",
 });
 const C = DERIVED_LIMITATION_CODES;
 
@@ -1570,6 +1735,7 @@ export function derivedMeasurementLimitationCodes({ measurementRow: row, dimensi
     if (counts.excluded_participant_count > 0) codes.push(C.OBSERVATIONS_EXCLUDED);
   } else {
     codes.push(hasPeriod(row) ? C.ENGAGEMENT_PERIOD_APPLIED : C.NO_REPORTING_PERIOD);
+    if (Array.isArray(counts.partially_covered_months) && counts.partially_covered_months.length > 0) codes.push(C.PARTLY_COVERED_MONTHS_EMPTY);
     if ((counts.records_without_date ?? 0) > 0) codes.push(C.RECORDS_WITHOUT_DATE_EXCLUDED);
     if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE) codes.push(C.MEASURED_POPULATION_ONLY);
     if (row.definition?.unit?.kind === "distinct_key") {
@@ -1620,6 +1786,7 @@ const DERIVED_DISCLOSURES = Object.freeze({
   [C.ENCOUNTERS_NOT_PEOPLE]: "This counts service encounters, not people; one person can have many encounters.",
   [C.PEOPLE_COUNTED_ONCE]: "A person with encounters in more than one programme group is counted once in an organization-wide total.",
   [C.RECORDED_MINUTES_SUBTOTAL]: "This is a known recorded minutes subtotal, not a complete service-time total; missing, invalid or conflicting durations are not included.",
+  [C.PARTLY_COVERED_MONTHS_EMPTY]: "The reporting period starts or ends part-way through a month; none of the measured records fall in those months, so the period's actual dates were applied exactly.",
 });
 
 export function describeDerivedLimitationCode(code) {
