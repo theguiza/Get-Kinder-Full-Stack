@@ -431,6 +431,25 @@ try {
   if (overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS" || overall(jobVerifier()) !== "PASS") throw new Error("a rolled-back weakening changed the schema");
   console.log(`Cross-source reach: applied twice with no existing row changed; derived-measurement verifier OVERALL PASS after it; ${weakenings.length} deliberately missing or weakened constraints each rejected (FAIL) and rolled back.`);
 
+  // Measurement calculation completion and targets: additive over the derived,
+  // cross-source and job tables; each applied twice, no existing row changes,
+  // and the derived-measurement and job verifiers pass in the completed state.
+  const jobRowsSql = "SELECT md5(coalesce(string_agg(row_to_json(j)::text, '|' ORDER BY j.reconciliation_job_id), '')) FROM kai.cross_source_reconciliation_jobs j;";
+  const jobRowsBeforeCompletion = psqlExec(jobRowsSql);
+  for (const migration of ["kai_sprint2_measurement_calculation_completion", "kai_sprint2_measurement_targets"]) {
+    psqlFile(`migrations/${migration}.sql`);
+    psqlFile(`migrations/${migration}.sql`);
+  }
+  if (psqlExec(derivedRowsSql) !== derivedRowsBeforeCross || psqlExec(legacySnapshotSql) !== evidenceBeforeCross || psqlExec(jobRowsSql) !== jobRowsBeforeCompletion) {
+    throw new Error("the measurement calculation completion or target migration changed an existing row");
+  }
+  const derivedAfterCompletion = derivedVerifier();
+  if (overall(derivedAfterCompletion) !== "PASS" || stateOf(derivedAfterCompletion, "D0.schema_state") !== "after the measurement calculation completion migration"
+    || overall(xlsxVerifier()) !== "PASS" || overall(jobVerifier()) !== "PASS") {
+    throw new Error(`verifiers failed after the measurement calculation completion migration:\n${derivedAfterCompletion.join("\n")}\n${jobVerifier().join("\n")}`);
+  }
+  console.log("Measurement calculation completion and targets: applied twice with no existing row changed; derived-measurement, XLSX method and job verifiers OVERALL PASS in the completed state.");
+
   const testResult = spawnSync("node", [
     "--test",
     "--test-concurrency=1",

@@ -3,14 +3,19 @@
 -- Definitions are pinned to the existing migration's PostgreSQL catalog form.
 -- Semantically equivalent rewrites or future additive changes may require a
 -- reviewed verifier update; this intentionally fails closed on schema drift.
-WITH expected_columns(name, type_name, required, default_expr) AS (
+-- Version-aware: after kai_sprint2_measurement_calculation_completion (a
+-- job_kind column exists) the reference version is optional, the job kind,
+-- worksheets and interpretation exist, and the kind, profile, worksheet and
+-- interpretation CHECKs replace the distinct-versions CHECK.
+WITH state AS (
+  SELECT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass('kai.cross_source_reconciliation_jobs')
+                  AND a.attname = 'job_kind' AND a.attnum > 0 AND NOT a.attisdropped) AS completed
+), base_columns(name, type_name, required, default_expr) AS (
   VALUES
     ('reconciliation_job_id', 'uuid', true, 'gen_random_uuid()'),
     ('organization_id', 'uuid', true, NULL),
     ('primary_source_version_id', 'uuid', true, NULL),
-    ('reference_source_version_id', 'uuid', true, NULL),
     ('primary_profile_canonical_sha256', 'text', true, NULL),
-    ('reference_profile_canonical_sha256', 'text', true, NULL),
     ('request_fingerprint', 'text', true, NULL),
     ('mapping', 'jsonb', true, NULL),
     ('job_state', 'text', true, NULL),
@@ -25,10 +30,19 @@ WITH expected_columns(name, type_name, required, default_expr) AS (
     ('created_at', 'timestamp with time zone', true, 'now()'),
     ('updated_at', 'timestamp with time zone', true, 'now()'),
     ('completed_at', 'timestamp with time zone', false, NULL)
-), expected_constraints(name, kind, definition) AS (
+), expected_columns AS (
+  SELECT * FROM base_columns
+  UNION ALL SELECT 'reference_source_version_id', 'uuid', NOT completed, NULL FROM state
+  UNION ALL SELECT 'reference_profile_canonical_sha256', 'text', NOT completed, NULL FROM state
+  UNION ALL SELECT v.* FROM (VALUES
+      ('job_kind', 'text', true, '''cross_source_reach''::text'),
+      ('primary_worksheet_key', 'text', false, NULL::text),
+      ('reference_worksheet_key', 'text', false, NULL::text),
+      ('interpretation', 'jsonb', false, NULL::text)
+    ) v(name, type_name, required, default_expr), state WHERE state.completed
+), base_constraints(name, kind, definition) AS (
   VALUES
     ('cross_source_reconciliation_jobs_attempt_count_check', 'c', 'CHECK (attempt_count >= 0 AND attempt_count <= 3)'),
-    ('cross_source_reconciliation_jobs_distinct_versions_check', 'c', 'CHECK (primary_source_version_id <> reference_source_version_id)'),
     ('cross_source_reconciliation_jobs_error_code_check', 'c', 'CHECK (last_error_code IS NULL OR last_error_code ~ ''^[a-z0-9_]{1,64}$''::text)'),
     ('cross_source_reconciliation_jobs_fingerprint_check', 'c', 'CHECK (request_fingerprint ~ ''^[a-f0-9]{64}$''::text)'),
     ('cross_source_reconciliation_jobs_id_org_unique', 'u', 'UNIQUE (reconciliation_job_id, organization_id)'),
@@ -36,11 +50,22 @@ WITH expected_columns(name, type_name, required, default_expr) AS (
     ('cross_source_reconciliation_jobs_measurement_ids_check', 'c', 'CHECK (measurement_ids IS NULL OR cardinality(measurement_ids) >= 1 AND cardinality(measurement_ids) <= 64)'),
     ('cross_source_reconciliation_jobs_pkey', 'p', 'PRIMARY KEY (reconciliation_job_id)'),
     ('cross_source_reconciliation_jobs_primary_version_fk', 'f', 'FOREIGN KEY (primary_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT'),
-    ('cross_source_reconciliation_jobs_profile_sha_check', 'c', 'CHECK (primary_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text AND reference_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text)'),
     ('cross_source_reconciliation_jobs_reference_version_fk', 'f', 'FOREIGN KEY (reference_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT'),
     ('cross_source_reconciliation_jobs_request_unique', 'u', 'UNIQUE (organization_id, request_fingerprint)'),
     ('cross_source_reconciliation_jobs_state_check', 'c', 'CHECK (job_state = ANY (ARRAY[''queued''::text, ''in_progress''::text, ''retry_scheduled''::text, ''succeeded''::text, ''failed''::text, ''exhausted''::text]))'),
     ('cross_source_reconciliation_jobs_state_fact_consistency_check', 'c', 'CHECK (job_state = ''queued''::text AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NULL AND measurement_ids IS NULL AND completed_at IS NULL AND attempt_count = 0 OR job_state = ''in_progress''::text AND claim_token IS NOT NULL AND claim_expires_at IS NOT NULL AND last_attempt_at IS NOT NULL AND next_eligible_at IS NULL AND measurement_ids IS NULL AND completed_at IS NULL AND attempt_count >= 1 AND attempt_count <= 3 OR job_state = ''retry_scheduled''::text AND claim_token IS NULL AND claim_expires_at IS NULL AND last_attempt_at IS NOT NULL AND next_eligible_at IS NOT NULL AND last_error_code IS NOT NULL AND measurement_ids IS NULL AND completed_at IS NULL AND attempt_count >= 1 AND attempt_count <= 2 OR job_state = ''succeeded''::text AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NULL AND measurement_ids IS NOT NULL AND completed_at IS NOT NULL AND attempt_count >= 1 AND attempt_count <= 3 OR (job_state = ANY (ARRAY[''failed''::text, ''exhausted''::text])) AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NOT NULL AND measurement_ids IS NULL AND completed_at IS NOT NULL AND attempt_count >= 1 AND attempt_count <= 3 AND (job_state = ''failed''::text OR attempt_count = 3))')
+), expected_constraints AS (
+  SELECT * FROM base_constraints
+  UNION ALL SELECT v.* FROM (VALUES
+      ('cross_source_reconciliation_jobs_distinct_versions_check', 'c', 'CHECK (primary_source_version_id <> reference_source_version_id)'),
+      ('cross_source_reconciliation_jobs_profile_sha_check', 'c', 'CHECK (primary_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text AND reference_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text)')
+    ) v(name, kind, definition), state WHERE NOT state.completed
+  UNION ALL SELECT v.* FROM (VALUES
+      ('cross_source_reconciliation_jobs_kind_check', 'c', 'CHECK (job_kind = ''cross_source_reach''::text AND reference_source_version_id IS NOT NULL AND reference_profile_canonical_sha256 IS NOT NULL AND interpretation IS NULL AND (primary_source_version_id <> reference_source_version_id OR primary_worksheet_key IS NOT NULL AND reference_worksheet_key IS NOT NULL AND primary_worksheet_key <> reference_worksheet_key) OR job_kind = ''tabular_exact_period''::text AND reference_source_version_id IS NULL AND reference_profile_canonical_sha256 IS NULL AND reference_worksheet_key IS NULL)'),
+      ('cross_source_reconciliation_jobs_profile_sha_check', 'c', 'CHECK (primary_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text AND (reference_profile_canonical_sha256 IS NULL OR reference_profile_canonical_sha256 ~ ''^[a-f0-9]{64}$''::text))'),
+      ('cross_source_reconciliation_jobs_worksheet_check', 'c', 'CHECK ((primary_worksheet_key IS NULL OR primary_worksheet_key ~ ''^sheet_[1-9][0-9]{0,3}$''::text) AND (reference_worksheet_key IS NULL OR reference_worksheet_key ~ ''^sheet_[1-9][0-9]{0,3}$''::text))'),
+      ('cross_source_reconciliation_jobs_interpretation_check', 'c', 'CHECK (interpretation IS NULL OR jsonb_typeof(interpretation) = ''object''::text)')
+    ) v(name, kind, definition), state WHERE state.completed
 ), actual_columns AS (
   SELECT a.attname::text AS name, format_type(a.atttypid, a.atttypmod) AS type_name,
          a.attnotnull AS required, pg_get_expr(d.adbin, d.adrelid) AS default_expr
@@ -88,6 +113,6 @@ WITH expected_columns(name, type_name, required, default_expr) AS (
 )
 SELECT ord, check_id, status, detail FROM results
 UNION ALL
-SELECT 99, 'OVERALL', CASE WHEN bool_and(status = 'PASS') AND count(*) = 17 THEN 'PASS' ELSE 'FAIL' END,
+SELECT 99, 'OVERALL', CASE WHEN bool_and(status = 'PASS') AND count(*) = 3 + (SELECT count(*) FROM expected_constraints) THEN 'PASS' ELSE 'FAIL' END,
        'all job migration checks must pass' FROM results
 ORDER BY 1, 2;

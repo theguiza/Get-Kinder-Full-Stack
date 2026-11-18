@@ -50,7 +50,10 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('source_derived_measurement_interpretations', 'organization_id,source_derived_measurement_id', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('evidence_derived_measurements', 'organization_id,evidence_item_id,source_derived_measurement_id', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('source_derived_measurement_sources', 'organization_id,source_derived_measurement_id,source_version_id,source_role', 'kai_sprint2_measurement_mvp_cross_source_reach.sql'),
-    ('cross_source_reconciliation_jobs', 'reconciliation_job_id,organization_id,primary_source_version_id,reference_source_version_id,request_fingerprint,mapping,job_state,attempt_count,claim_token,claim_expires_at,next_eligible_at,measurement_ids', 'kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql')
+    ('cross_source_reconciliation_jobs', 'reconciliation_job_id,organization_id,primary_source_version_id,reference_source_version_id,request_fingerprint,mapping,job_state,attempt_count,claim_token,claim_expires_at,next_eligible_at,measurement_ids', 'kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql'),
+    ('cross_source_reconciliation_jobs', 'job_kind,primary_worksheet_key,reference_worksheet_key,interpretation', 'kai_sprint2_measurement_calculation_completion.sql'),
+    ('source_derived_measurement_sources', 'worksheet_key', 'kai_sprint2_measurement_calculation_completion.sql'),
+    ('measurement_targets', 'measurement_target_id,organization_id,engagement_id,source_id,worksheet_key,measurement_key,measurement_family,target_unit,target_value,comparison,set_on_measurement_id,supersedes_target_id', 'kai_sprint2_measurement_targets.sql')
 ), required_types(table_name, column_name, expected_type, migration) AS (
   VALUES
     ('source_locators', 'coordinates', 'jsonb', 'kai_sprint2_p2_01_evidence_lineage.sql'),
@@ -74,9 +77,11 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('source_locators', 'source_locators_p2_01_locator_type_check', '20a79952e407a69bf7d7d46b6cc2bc45'),
     ('source_locators', 'source_locators_p2_01_coordinates_check', 'd5265a33039490287a63225d0c246401')
 ), measurement_checks(constraint_name, expected_md5) AS (
-  -- Same descriptor fingerprints as the existing Cedar Bridge preflight.
+  -- Descriptor fingerprints (PostgreSQL 16); the method/family CHECK is the one
+  -- kai_sprint2_measurement_calculation_completion leaves (identifier rates, the
+  -- verified-bytes basis, linked-reach worksheets); the arithmetic CHECK is unchanged.
   VALUES
-    ('source_derived_measurements_method_family_check', 'fef8ba84fb253dd2a058488e3a6de7b8'),
+    ('source_derived_measurements_method_family_check', '4d0b0335196faf3625f1fc43d516efd1'),
     ('source_derived_measurements_arithmetic_check', '9c7d96417506956fe1956ec8fd15e71e')
 ), vocabulary_checks(table_name, constraint_name, required_terms, migration) AS (
   VALUES
@@ -93,6 +98,8 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('source_derived_measurement_interpretations', 'source_derived_measurement_interpretations_history_unique', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('evidence_derived_measurements', 'evidence_derived_measurements_statement_unique', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('cross_source_reconciliation_jobs', 'cross_source_reconciliation_jobs_request_unique', 'kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql'),
+    ('measurement_targets', 'measurement_targets_identity_root_unique', 'kai_sprint2_measurement_targets.sql'),
+    ('measurement_targets', 'measurement_targets_single_successor_unique', 'kai_sprint2_measurement_targets.sql'),
     ('generation_runs', 'generation_runs_p3_01_identity_unique', 'kai_sprint2_p3_01_generated_content_drafts.sql')
 ), required_triggers(table_name, trigger_name, migration) AS (
   VALUES
@@ -103,7 +110,8 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('source_derived_measurement_interpretations', 'trg_source_derived_measurement_interpretations_append_only', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('evidence_derived_measurements', 'trg_evidence_derived_measurements_append_only', 'kai_sprint2_measurement_mvp_source_derived_measurements.sql'),
     ('source_derived_measurement_sources', 'trg_source_derived_measurement_sources_append_only', 'kai_sprint2_measurement_mvp_cross_source_reach.sql'),
-    ('source_derived_measurement_sources', 'trg_source_derived_measurement_sources_admitted', 'kai_sprint2_measurement_mvp_cross_source_reach.sql')
+    ('source_derived_measurement_sources', 'trg_source_derived_measurement_sources_admitted', 'kai_sprint2_measurement_mvp_cross_source_reach.sql'),
+    ('measurement_targets', 'trg_measurement_targets_append_only', 'kai_sprint2_measurement_targets.sql')
 ), checks(check_id, status, detail, related_migration) AS (
   SELECT 'table.' || r.table_name,
          CASE WHEN c.relkind IN ('r', 'p') THEN 'PASS' ELSE 'FAIL' END,

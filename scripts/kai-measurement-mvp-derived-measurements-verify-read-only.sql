@@ -8,11 +8,24 @@
 -- separately by scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql.
 -- Version-aware (D0): before the cross-source migration its family and
 -- arithmetic branch must be refused and D7 is not applicable; after it they
--- must be admitted and its contributing-source table verified.
+-- must be admitted and its contributing-source table verified. After
+-- kai_sprint2_measurement_calculation_completion, a rate in distinct
+-- identifiers, the verified-bytes tabular basis and a linked-reach primary
+-- worksheet must also be admitted (completion overrides below).
 -- Last row OVERALL must be PASS. Run it in the pgAdmin Query Tool (F5).
 WITH
 schema_state AS (
-  SELECT to_regclass('kai.source_derived_measurement_sources') IS NOT NULL AS cross_present
+  SELECT to_regclass('kai.source_derived_measurement_sources') IS NOT NULL AS cross_present,
+         EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass('kai.cross_source_reconciliation_jobs')
+                  AND a.attname = 'job_kind' AND a.attnum > 0 AND NOT a.attisdropped) AS completion_present
+),
+-- Vectors whose expectation changes after the calculation completion migration.
+completion_overrides(name, vector, expected) AS (
+  VALUES
+    ('source_derived_measurements_method_family_check', 'cross-source reach on a worksheet', true),
+    ('source_derived_measurements_method_family_check', 'tabular distinct-key rate', true),
+    ('source_derived_measurements_method_family_check', 'tabular count from verified bytes', true),
+    ('source_derived_measurements_rate_counts_check', 'distinct-key rate identifiers add up', true)
 ),
 live AS (
   SELECT con.conname::text AS name,
@@ -34,6 +47,8 @@ measurement_vectors(name, vector, measurement_family, calculation_method, basis_
     ('source_derived_measurements_method_family_check', 'count with the paired basis', 'tabular_count', 'kai_tabular_conditional_record_count_v1', 'kai_xlsx_paired_outcome_basis_v1', NULL, '0', '0', NULL, NULL, '{}', '{}', false, false),
     ('source_derived_measurements_method_family_check', 'cross-source reach', 'cross_source_reach', 'kai_cross_source_linked_reach_v1', 'kai_cross_source_reconciliation_v1', NULL, '0', '0', NULL, NULL, '{}', '{}', false, true),
     ('source_derived_measurements_method_family_check', 'cross-source reach on a worksheet', 'cross_source_reach', 'kai_cross_source_linked_reach_v1', 'kai_cross_source_reconciliation_v1', 'sheet_1', '0', '0', NULL, NULL, '{}', '{}', false, false),
+    ('source_derived_measurements_method_family_check', 'tabular distinct-key rate', 'tabular_rate', 'kai_tabular_conditional_distinct_key_rate_v1', 'kai_tabular_measurement_basis_v1', NULL, '0', '0', NULL, NULL, '{}', '{}', false, false),
+    ('source_derived_measurements_method_family_check', 'tabular count from verified bytes', 'tabular_count', 'kai_tabular_conditional_record_count_v1', 'kai_tabular_verified_bytes_v1', NULL, '0', '0', NULL, NULL, '{}', '{}', false, false),
     ('source_derived_measurements_method_family_check', 'unknown family', 'tabular_sum', 'kai_tabular_conditional_record_count_v1', 'kai_tabular_measurement_basis_v1', NULL, '0', '0', NULL, NULL, '{}', '{}', false, false),
     ('source_derived_measurements_arithmetic_check', 'count within matching records', 'tabular_count', NULL, NULL, NULL, '5', '5', NULL, NULL, '{"matching_record_count": 5}', '{}', true, true),
     ('source_derived_measurements_arithmetic_check', 'count above matching records', 'tabular_count', NULL, NULL, NULL, '6', '6', NULL, NULL, '{"matching_record_count": 5}', '{}', false, false),
@@ -65,16 +80,23 @@ measurement_vectors(name, vector, measurement_family, calculation_method, basis_
     ('source_derived_measurements_rate_counts_check', 'rate population adds up', 'tabular_rate', NULL, NULL, NULL, '9', '9', '29', '31.03',
       '{"population_record_count": 29, "numerator_record_count": 9, "other_population_record_count": 20}', '{}', true, true),
     ('source_derived_measurements_rate_counts_check', 'rate population does not add up', 'tabular_rate', NULL, NULL, NULL, '9', '9', '29', '31.03',
-      '{"population_record_count": 29, "numerator_record_count": 9, "other_population_record_count": 19}', '{}', false, false)
+      '{"population_record_count": 29, "numerator_record_count": 9, "other_population_record_count": 19}', '{}', false, false),
+    ('source_derived_measurements_rate_counts_check', 'distinct-key rate identifiers add up', 'tabular_rate', 'kai_tabular_conditional_distinct_key_rate_v1', NULL, NULL, '3', '3', '5', '60.00',
+      '{"population_distinct_key_count": 5, "numerator_distinct_key_count": 3, "other_population_distinct_key_count": 2, "population_record_count": 6, "numerator_record_count": 4}',
+      '{"unit": {"kind": "distinct_key"}}', false, false),
+    ('source_derived_measurements_rate_counts_check', 'distinct-key rate above its records', 'tabular_rate', 'kai_tabular_conditional_distinct_key_rate_v1', NULL, NULL, '5', '5', '5', '100.00',
+      '{"population_distinct_key_count": 5, "numerator_distinct_key_count": 5, "other_population_distinct_key_count": 0, "population_record_count": 6, "numerator_record_count": 4}',
+      '{"unit": {"kind": "distinct_key"}}', false, false)
 ),
 measurement_results AS (
-  SELECT v.name, v.vector, CASE WHEN s.cross_present THEN v.expected_post ELSE v.expected_pre END AS expected,
+  SELECT v.name, v.vector, CASE WHEN s.completion_present AND o.expected IS NOT NULL THEN o.expected WHEN s.cross_present THEN v.expected_post ELSE v.expected_pre END AS expected,
          (xpath('/row/ok/text()', query_to_xml(format(
            'SELECT coalesce(%s, true) AS ok FROM (VALUES (%L::text, %L::text, %L::text, %L::text, %L::bigint, %L::bigint, %L::bigint, %L::numeric, %L::jsonb, %L::jsonb))'
            || ' AS t(measurement_family, calculation_method, basis_version, worksheet_key, measured_value, numerator, denominator, percentage, component_counts, definition)',
            coalesce(substr(l.def, 7), 'false'), v.measurement_family, v.calculation_method, v.basis_version, v.worksheet_key, v.measured_value, v.numerator, v.denominator, v.percentage,
            v.component_counts, v.definition), false, true, '')))[1]::text = 'true' AS observed
     FROM measurement_vectors v CROSS JOIN schema_state s LEFT JOIN live l ON l.name = v.name
+    LEFT JOIN completion_overrides o ON o.name = v.name AND o.vector = v.vector
 ),
 interpretation_vectors(name, vector, indicator_label, meaning_text, score_direction, evidence_basis, interpretation_status, created_by_type, expected) AS (
   VALUES
@@ -173,7 +195,8 @@ vector_status(name, status, observed) AS (
 ),
 checks(seq, check_id, status, expected, observed, detail) AS (
   SELECT 5, 'D0.schema_state', 'PASS', 'informational',
-         CASE WHEN (SELECT cross_present FROM schema_state) THEN 'after the cross-source reach migration' ELSE 'before the cross-source reach migration' END,
+         CASE WHEN (SELECT completion_present FROM schema_state) THEN 'after the measurement calculation completion migration'
+              WHEN (SELECT cross_present FROM schema_state) THEN 'after the cross-source reach migration' ELSE 'before the cross-source reach migration' END,
          'selects whether the cross-source family is admitted and D7 applies'
   UNION ALL
   SELECT 10, 'D1.tables_present',
