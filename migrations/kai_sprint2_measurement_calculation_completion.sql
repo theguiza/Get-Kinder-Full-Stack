@@ -56,7 +56,8 @@ ALTER TABLE kai.source_derived_measurements
         AND (component_counts->>'other_population_record_count')::bigint = denominator - numerator
       )
       OR (
-        calculation_method = 'kai_tabular_conditional_distinct_key_rate_v1'
+        -- IS NOT DISTINCT FROM keeps the branch selector definite (never NULL).
+        calculation_method IS NOT DISTINCT FROM 'kai_tabular_conditional_distinct_key_rate_v1'
         AND definition->'unit'->>'kind' = 'distinct_key'
         AND (component_counts->>'population_distinct_key_count')::bigint = denominator
         AND (component_counts->>'numerator_distinct_key_count')::bigint = numerator
