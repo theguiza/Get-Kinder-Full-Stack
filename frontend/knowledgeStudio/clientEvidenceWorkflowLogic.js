@@ -143,11 +143,7 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   source_version_not_current: "A selected claim uses a source version recorded as non-current. Select findings from a current source version. If this file should still be current, its source-version history needs investigation.",
   not_authorized: "Your role does not include internal draft generation for this organization.",
   no_project: "Select a Project above: each draft belongs to one Project.",
-  no_measured_claim: "No measured finding yet. In Data Sources, use Count records on your source to record what one record represents and its "
-    + "reporting period, then propose the claim from the measurement. Count records works on a single-table CSV file, or on one "
-    + "worksheet you select in an Excel workbook (one worksheet per record-count definition; worksheets are never added together). "
-    + "A count of rows is not a count of unique participants or a programme outcome. Structural facts about a file's columns are not "
-    + "impact findings.",
+  no_measured_claim: "No measured finding saved yet. In Sources > Data Sources, open View measurements, choose a worksheet and save a calculated result for reports. Descriptions and targets are optional.",
   claims_not_all_loaded: "Not every claim of your organization is loaded yet, and none of the loaded ones is a measured finding. "
     + "Use \"Load more claims\" in Evidence to find your measured findings.",
   no_claims_selected: "Select at least one claim in Evidence to draft from.",
@@ -823,7 +819,7 @@ export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
   review_sensitivity: "Use for impact: this file first needs your sensitivity & allowed-use review. Record your decision below; nothing is decided for you.",
   confirm_promotion: "Use for impact: confirm the source authorization below, then choose the reviewed source type and promote. Nothing is promoted without your confirmation.",
   done: "Use for impact: this file's evidence exists. Propose claims from it below, generate their gap follow-ups, then internal drafts.",
-  measure: "Use for impact: this spreadsheet is a source now. Count records is open below: choose the worksheet if asked, record what one record represents and its period, then propose the claim. That measured finding can be used in your reports without any review.",
+  measure: "Measurements are open below. Choose a worksheet, then save a calculated result for reports. No description or target is required.",
   interrupted: "Use for impact stopped. Every completed step is kept; use the action again to continue from the current state.",
 });
 
@@ -933,7 +929,7 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
 export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "
   + "not a measured programme result, so it is not an impact report, and a review would not make it one. It is kept exactly as it was "
   + "generated, with its citations and history. To produce a usable internal report, select a measured finding under Claims for internal "
-  + "drafts and generate a new draft (use Count records in Data Sources first if there is none; it works on a single-table CSV file "
+  + "drafts and generate a new draft (open View measurements in Data Sources to save a result first if there is none; it works on a single-table CSV file "
   + "or on one worksheet you select in an Excel workbook, never adding worksheets together).";
 
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({

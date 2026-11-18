@@ -142,13 +142,25 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     load();
   }, [revision, load]);
 
-  const send = async (kind, path, body, success) => {
+  const send = async (kind, path, body, success, { forReports = false } = {}) => {
     if (pending) return;
     setPending(kind);
     setNotice(null);
     let result;
+    let reportFailures = 0;
     try {
       result = await postJson(path, body);
+      if (forReports && canProposeClaim && [200, 201].includes(result.statusCode) && result.body?.ok) {
+        const saved = result.body.data;
+        for (const entry of saved.measurements || [saved]) {
+          const evidenceId = entry.evidenceItem?.evidence_item_id;
+          if (!evidenceId) { reportFailures += 1; continue; }
+          try {
+            const proposed = await postJson(claimProposalPath(organizationId, evidenceId), {});
+            if (![200, 201].includes(proposed.statusCode) || !proposed.body?.ok) reportFailures += 1;
+          } catch { reportFailures += 1; }
+        }
+      }
     } catch {
       setNotice({ kind: "warning", text: "KAI could not confirm the write. Your inputs are kept. Refresh measurements to check whether it was recorded before retrying." });
       await load();
@@ -162,7 +174,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       return true;
     }
     const ok = (result.statusCode === 200 || result.statusCode === 201) && result.body?.ok;
-    setNotice(ok ? { kind: "success", text: result.body.data?.replayed ? "Already recorded; nothing changed." : success(result.body.data) } : { kind: "warning", text: errorText(result) });
+    setNotice(ok ? { kind: reportFailures ? "warning" : "success", text: reportFailures
+      ? `Results saved. ${reportFailures} could not be added to reports; use Add to reports on the saved result to retry.`
+      : `${result.body.data?.replayed ? "Already recorded; nothing changed." : success(result.body.data)}${forReports && canProposeClaim ? " Ready to select in Evidence for your report." : ""}` } : { kind: "warning", text: errorText(result) });
     if (ok) {
       onRecorded?.();
       load();
@@ -171,6 +185,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   };
 
   const data = basis.data;
+  const resultSaved = (key) => data?.recorded?.some((saved) => saved.measurement_key === key && (!canProposeClaim || currentEvidenceOf(saved)?.claim));
+  const pairedSaved = data?.paired?.measurements?.some((item) => item.available)
+    && data.paired.measurements.filter((item) => item.available).every((item) => resultSaved(item.measurement_key));
   const fields = data?.tabular?.available ? data.tabular.fields : [];
   const byRole = (role) => fields.filter((field) => field.role === role);
   const valuesOf = (fieldKey) => fields.find((field) => field.field_key === fieldKey)?.values || [];
@@ -234,55 +251,58 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
 
   return (
     <div className="border-top pt-2 mt-2 small" data-client-derived-measurements={sourceVersionId}>
-      <h6 className="mb-1">Measure field values</h6>
-      <div className="text-muted mb-1">
-        KAI calculates the numbers from this source. You can save calculated results without entering a definition.
-        An optional description explains what they mean; it does not change the calculation.
-      </div>
+      <h6 className="mb-1">Calculated results</h6>
+      <div className="text-muted mb-1">Choose a result to save. Descriptions and targets are optional.</div>
       {["loading", "refreshing"].includes(basis.status) ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
       {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
       {basis.status !== "loading" ? <button type="button" className="btn btn-sm btn-link" data-client-derived-refresh="" disabled={basis.status === "refreshing" || Boolean(pending)} onClick={load}>Refresh measurements</button> : null}
-      {notice ? <div className={`alert alert-${notice.kind} py-2`} data-client-derived-notice={notice.kind}>{notice.text}</div> : null}
+      {notice ? <div role="status" className={`alert alert-${notice.kind} py-2`} data-client-derived-notice={notice.kind}>{notice.text}</div> : null}
       {calculationJob ? <div className="text-muted" data-client-derived-calculation-job={calculationJob.job_state}>
         Exact-period calculation: {calculationJob.job_state.replace(/_/g, " ")}.
       </div> : null}
 
       {data?.paired?.available ? (
         <div className="mb-2" data-client-derived-paired="">
-          <div className="fw-semibold">Calculated baseline/follow-up results</div>
-          <div className="text-muted">These comparisons use all survey dates. They do not apply the Project reporting period.</div>
-          {data.paired.measurements.map((item) => (
-            <div key={item.outcome_field_key} data-client-derived-paired-field={item.outcome_field_key}>
-              {item.source_heading_suggestion ? <div className="fw-semibold" data-client-derived-preview-heading="">{item.source_heading_suggestion.suggested_label} <span className="fw-normal text-muted">(from the column heading)</span></div> : null}
-              {item.available
-                ? `Numeric outcome ${item.outcome_field_key} (column ${item.outcome_column}): ${item.numerator} of ${item.denominator} comparable pairs (${item.percentage}%) have a numerically higher follow-up value; whether higher is better is not established.`
-                : `${item.outcome_field_key || "A field"}: ${item.blockers?.[0]?.message || "cannot be measured."}`}
-              {item.available ? <div className="text-muted">{item.component_counts.unchanged_count} unchanged; {item.component_counts.decreased_count} lower; {item.component_counts.excluded_participant_count} excluded because their observations cannot be compared. No user-entered definition is needed to calculate these numbers.</div> : null}
-            </div>
-          ))}
-          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={basis.status !== "success" || Boolean(pending) || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
+          <div className="fw-semibold">Baseline to follow-up</div>
+          <div className="text-muted">All survey dates; these comparisons do not apply the Project reporting period. Higher is not automatically better.</div>
+          <div className="kai-measurement-outcomes">{data.paired.measurements.map((item) => (
+            <article className="kai-measurement-outcome" key={item.outcome_field_key} data-client-derived-paired-field={item.outcome_field_key}>
+              <div className="fw-semibold" data-client-derived-preview-heading="">{item.source_heading_suggestion?.suggested_label || (item.outcome_column ? `Numeric outcome in column ${item.outcome_column}` : `Numeric outcome ${item.outcome_field_key || ""}`)}</div>
+              {item.available ? <>
+                <strong className="kai-measurement-value">{item.percentage}%</strong>
+                <div>{item.numerator} of {item.denominator} comparable pairs have a higher follow-up value.</div>
+                <div className="text-muted">{item.component_counts.unchanged_count} unchanged · {item.component_counts.decreased_count} lower · {item.component_counts.excluded_participant_count} excluded</div>
+                <details><summary>How this was calculated</summary>
+                  <div>Column {item.outcome_column} ({item.outcome_field_key}); {item.numerator} of {item.denominator} comparable pairs ({item.percentage}%) have a numerically higher follow-up value; whether higher is better is not established. Excluded observations cannot be compared. The label is suggested from the source heading.</div>
+                </details>
+              </> : <div>{item.blockers?.[0]?.message || "This field cannot be measured."}</div>}
+            </article>
+          ))}</div>
+          <button type="button" className="btn btn-sm btn-outline-primary mt-1" disabled={basis.status !== "success" || Boolean(pending) || pairedSaved || !data.paired.measurements.some((item) => item.available)} data-client-derived-record-paired=""
             onClick={() => send("paired", pairedOutcomeMeasurementsPath(organizationId, sourceVersionId, worksheetKey || null), {},
-              (recorded) => `${recorded.measurements.length} proposed results kept as evidence.`)}>
-            {pending === "paired" ? "Keeping..." : "Keep these results as evidence"}
+                (recorded) => `${recorded.measurements.length} results saved.`, { forReports: true })}>
+            {pending === "paired" ? "Saving..." : pairedSaved ? "Results saved" : canProposeClaim ? "Save results for reports" : "Save results"}
           </button>
         </div>
       ) : null}
 
       {data?.tabular?.ready_measurements?.length ? <div className="mb-3" data-client-ready-measurements="">
-        <div className="fw-semibold">Calculated counts and rates</div>
-        <div className="text-muted">All dates; duplicate rows remain in record counts. Category labels come from the source. These counts do not establish completed services, verified outcomes or people served. Only listed category labels are shown; other records remain in each rate's denominator.</div>
-        <div className="table-responsive"><table className="table table-sm mb-1">
-          <thead><tr><th>Source value or unit</th><th>Calculated result</th><th /></tr></thead>
-          <tbody>{data.tabular.ready_measurements.slice(0, showAllReady ? undefined : 16).map((item) => <tr key={item.key} data-client-ready-measurement={item.key}>
-            <td>{item.label}</td>
-            <td>{item.denominator == null ? item.measured_value : `${item.numerator} of ${item.denominator} records (${item.percentage}%)`}</td>
-            <td><button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending) || basis.status !== "success" || data.recorded?.some((saved) => saved.measurement_key === item.measurement_key)}
+        <details open={data?.paired?.available ? undefined : true} data-client-source-breakdown=""><summary>Record counts and source-value breakdown</summary>
+        <div className="text-muted">All dates · Rows include duplicates · Identifier counts count keys, not people.</div>
+        <div className="kai-measurement-results">
+          {data.tabular.ready_measurements.slice(0, showAllReady ? undefined : 16).map((item) => <div className="kai-measurement-result" key={item.key} data-client-ready-measurement={item.key}>
+            <div className="kai-measurement-result-label">{item.label}</div>
+            <strong>{item.denominator == null ? item.measured_value : `${item.numerator} of ${item.denominator} records (${item.percentage}%)`}</strong>
+            <button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending) || basis.status !== "success" || resultSaved(item.measurement_key)}
+              aria-label={`${resultSaved(item.measurement_key) ? "Saved" : "Save"} ${item.label}${canProposeClaim ? " for reports" : ""}`}
               data-client-save-ready-measurement={item.key}
               onClick={() => send("ready", tabularMeasurementPath(organizationId, sourceVersionId, worksheetKey || null), { definition: item.definition },
-                () => `Calculated result saved: ${item.label}.`)}>{data.recorded?.some((saved) => saved.measurement_key === item.measurement_key) ? "Saved" : "Save result"}</button></td>
-          </tr>)}</tbody>
-        </table></div>
+                () => `Calculated result saved: ${item.label}.`, { forReports: true })}>{resultSaved(item.measurement_key) ? "Saved" : canProposeClaim ? "Save for reports" : "Save result"}</button>
+          </div>)}
+        </div>
         {data.tabular.ready_measurements.length > 16 ? <button type="button" className="btn btn-sm btn-link" data-client-ready-show-all="" onClick={() => setShowAllReady((value) => !value)}>{showAllReady ? "Show fewer results" : `Show all ${data.tabular.ready_measurements.length} results`}</button> : null}
+        <details><summary>Counting rules</summary>Category labels come from the source. These counts do not establish completed services or independently verified outcomes. Other and withheld values remain in each rate's denominator.</details>
+        </details>
       </div> : null}
 
       {data?.paired && !data.paired.available ? (
@@ -420,16 +440,18 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
       </details>
+      {data?.recorded?.some((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")) ? <h6>Saved results</h6> : null}
       {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
         const current = currentEvidenceOf(recorded);
         const paired = recorded.measurement_family === "paired_outcome_change";
         const linked = recorded.measurement_family === "cross_source_reach";
         const stillCurrent = contributingSourcesCurrent(recorded);
+        const categoryLabel = !recorded.category_labels_withheld && recorded.definition?.conditions?.find((condition) => condition.kind === "category")?.value_label;
         return (
-          <div key={recorded.source_derived_measurement_id} className="border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}
+          <div key={recorded.source_derived_measurement_id} className="kai-measurement-saved border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}
             data-client-derived-current={stillCurrent ? "current" : "not_current"}>
             <div className="fw-semibold">
-              {measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {linked ? crossSourceHeadlineValue(recorded) : recorded.measured_value}{recorded.percentage ? ` (${recorded.percentage}%)` : ""}
+              {current?.interpretation?.indicator_label || sourceHeadingSuggestionOf(recorded.source_heading_suggestion) || categoryLabel || measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {linked ? crossSourceHeadlineValue(recorded) : recorded.percentage != null ? `${recorded.numerator} of ${recorded.denominator} (${recorded.percentage}%)` : recorded.measured_value}
             </div>
             {linked ? <CrossSourceActivityDetail entry={recorded} /> : null}
             {linked ? (
@@ -452,7 +474,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             ) : null}
             {current?.interpretation
               ? <div data-client-derived-meaning-state="stated">Meaning stated by your organization: {current.interpretation.indicator_label}. {current.interpretation.meaning_text}</div>
-              : <div data-client-derived-meaning-state="proposed">Meaning proposed, not stated by your organization.</div>}
+              : <span className="text-muted" data-client-derived-meaning-state="proposed">Description optional.</span>}
+            <details data-client-derived-calculation-details=""><summary>Calculation and source details</summary>
             {current?.statement ? <div data-client-derived-evidence-statement="">{current.statement}</div> : null}
             {current ? (
               <ul className="mb-1">
@@ -462,16 +485,18 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
             {current?.claim ? (
               <div data-client-derived-claim={current.claim.claim_id}>Claim: {current.claim.statement}</div>
             ) : null}
+            </details>
+            {current?.claim ? <div className="kai-measurement-report-status" data-client-derived-report-status="ready">Available in Evidence for your reports.</div> : null}
             {current && !current.claim && canProposeClaim ? (
               <button type="button" className="btn btn-sm btn-outline-primary me-1" disabled={Boolean(pending)} data-client-derived-propose-claim={current.evidence_item_id}
                 onClick={() => send("propose", claimProposalPath(organizationId, current.evidence_item_id), {}, (proposed) => claimProposalResultMessage(proposed))}>
-                Propose a claim
+                Add to reports
               </button>
             ) : null}
             <button type="button" className="btn btn-sm btn-link" data-client-derived-clarify={recorded.source_derived_measurement_id}
               aria-expanded={clarifying === recorded.source_derived_measurement_id}
               onClick={() => { setClarifying(clarifying === recorded.source_derived_measurement_id ? null : recorded.source_derived_measurement_id); setClarifyForm(interpretationFormFrom(current?.interpretation)); }}>
-              {current?.interpretation ? "Change meaning" : "Clarify meaning"}
+              {current?.interpretation ? "Edit description" : "Add description (optional)"}
             </button>
             {clarifying === recorded.source_derived_measurement_id ? (
               <MeaningQuestionsForm attr="data-client-derived-clarify" form={clarifyForm} setForm={setClarifyForm}
@@ -481,6 +506,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 onCancel={() => { setClarifying(null); setClarifyForm(interpretationFormFrom(current?.interpretation)); }} />
             ) : null}
             {recorded.target_comparison ? <div data-client-derived-target-comparison={recorded.target_comparison.met ? "met" : "not_met"}>{recorded.target_comparison.text}</div> : null}
+            <details data-client-derived-target-options=""><summary>{recorded.target ? "Edit planned target" : "Add planned target (optional)"}</summary>
             <form className="d-flex flex-wrap gap-1 align-items-end mt-1" data-client-derived-target-form={recorded.source_derived_measurement_id}
               onSubmit={(event) => setTarget(event, recorded)}>
               <label>
@@ -490,6 +516,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                   onChange={(event) => setTargetDraft(recorded, { value: event.target.value })} />
               </label>
               <select className="form-select form-select-sm w-auto" disabled={Boolean(pending)} data-client-derived-target-comparison-select=""
+                aria-label="Target comparison"
                 value={targetDrafts[recorded.source_derived_measurement_id]?.comparison ?? recorded.target?.comparison ?? "at_least"}
                 onChange={(event) => setTargetDraft(recorded, { comparison: event.target.value })}>
                 <option value="at_least">at least</option>
@@ -499,6 +526,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
                 {recorded.target ? "Change target" : "Set target"}
               </button>
             </form>
+            </details>
           </div>
         );
       })}

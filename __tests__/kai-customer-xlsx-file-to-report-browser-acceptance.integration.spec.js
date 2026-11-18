@@ -278,7 +278,9 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     await evaluate(`(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       const parents = [];
-      for (let p = el?.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open) parents.unshift(p);
+      for (let p = el?.parentElement; p; p = p.parentElement) {
+        if (p.tagName === 'DETAILS' && !p.open && !(el.tagName === 'SUMMARY' && el.parentElement === p)) parents.unshift(p);
+      }
       for (const p of parents) p.querySelector(':scope > summary')?.click();
     })()`);
     // Wait for the revealed control to be rendered (a view or list may still be loading).
@@ -326,6 +328,30 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     return JSON.parse(base64Encoded ? Buffer.from(body, "base64").toString("utf8") : body);
   };
   return {
+    async capturePanel(selector, name, width = 1280) {
+      const directory = process.env.KAI_MEASUREMENT_SCREENSHOTS;
+      if (!directory) return;
+      mkdirSync(directory, { recursive: true });
+      await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
+      const layout = await evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        const ancestors = [];
+        for (let p = el; p && ancestors.length < 9; p = p.parentElement) {
+          const r = p.getBoundingClientRect();
+          ancestors.push({ tag: p.tagName, class: p.className, x: r.x, width: r.width, client: p.clientWidth, scroll: p.scrollWidth });
+        }
+        return { viewport: innerWidth, ancestors };
+      })()`);
+      writeFileSync(join(directory, `${name}-${width}.json`), JSON.stringify(layout, null, 2));
+      await evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        el.scrollIntoView({ block: 'start' });
+      })()`);
+      assert.ok(layout.ancestors[0].scroll <= layout.ancestors[0].client + 1, `${name}: measurement controls must fit at ${width}px`);
+      const shot = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
+      writeFileSync(join(directory, `${name}-${width}.png`), Buffer.from(shot.data, "base64"));
+      await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
+    },
     responseBody,
     requests: () => requests.slice(),
     mark: () => requests.length,
@@ -2590,7 +2616,7 @@ async function runXlsxAcceptance() {
       // 1. Keep (select and retain) the proposed paired outcome.
       let mark = adminPage.mark();
       await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Keep these results as evidence");
-      await waitNotice(/proposed results kept as evidence/, "paired kept");
+      await waitNotice(/results saved/, "paired kept");
       await adminPage.idle();
       const [kept] = await posts(mark);
       assert.deepEqual([kept.path, kept.status, kept.request], [pairedOutcomeMeasurementsPath(ORG_X, sv, null), 200, {}]);
@@ -2675,7 +2701,7 @@ async function runXlsxAcceptance() {
       assert.ok((await limitations(recorded)).includes("derived.matched_subset_only"));
       assert.ok((await limitations(rateRow)).includes("derived.measured_population_only"));
       assert.match(await textOf(adminPage, `${recorded} [data-client-derived-meaning-state="stated"]`), /Learner confidence/);
-      assert.match(await textOf(adminPage, rateRow), new RegExp(`${attended} \\(${rateMeasurement.percentage}%\\)`));
+      assert.match(await textOf(adminPage, rateRow), new RegExp(`${attended} of ${rateMeasurement.denominator} \\(${rateMeasurement.percentage}%\\)`));
 
       // 6. Propose the paired outcome's claim from its current evidence; retrieve it and its traceability.
       const evidenceId = corrected.response.data.evidenceItem.evidence_item_id;
@@ -3085,7 +3111,7 @@ async function runXlsxAcceptance() {
       await openCountRecords(p.sv); await p.selectSheet("sheet_1");
       assert.match(await textOf(adminPage, `${p.section} [data-client-derived-paired]`), new RegExp(`${p.paired[0]} of ${p.paired[1]} comparable pairs`));
       await adminPage.clickIn(`${p.section} [data-client-derived-record-paired]`, "Keep paired results");
-      await adminPage.waitForText("proposed results kept as evidence");
+      await adminPage.waitForText("results saved");
       const paired = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, p.sv, "sheet_1"))).body.data.recorded.find((entry) => entry.measurement_family === "paired_outcome_change");
       assert.deepEqual([paired.numerator, paired.denominator], p.paired);
       assert.match(paired.evidence.find((e) => e.current).statement, /not established/);
@@ -3193,7 +3219,9 @@ async function runXlsxAcceptance() {
       const selectedClaims = [];
       const proposeMeasured = async (measurementId, evidenceId) => {
         const row = `${p.section} [data-client-derived-recorded="${measurementId}"]`;
-        await adminPage.clickIn(`${row} [data-client-derived-propose-claim="${evidenceId}"]`, "Propose measurement claim");
+        const [alreadySaved] = await query("SELECT claim_id::text FROM kai.claims WHERE evidence_item_id = $1::uuid", [evidenceId]);
+        if (alreadySaved) assert.ok(await textOf(adminPage, `${row} [data-client-derived-report-status="ready"]`), "the calculated result's save action already added it for reporting");
+        else await adminPage.clickIn(`${row} [data-client-derived-propose-claim="${evidenceId}"]`, "Add custom measurement to reports");
         await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${row} [data-client-derived-claim]`)), "derived claim shown");
         const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [evidenceId]);
         selectedClaims.push(claim);
@@ -4110,7 +4138,9 @@ async function runXlsxAcceptance() {
         assert.ok(monthly.limitations.includes("derived.encounters_not_people"), J(monthly.limitations));
         assert.ok(duration.text.includes(`Known recorded service minutes (subtotal): ${grouped(expected.minutes)} minutes`), duration.text);
         assert.ok(duration.limitations.includes("derived.known_recorded_minutes_subtotal"), J(duration.limitations));
-        assert.match(duration.text, /This is a known recorded minutes subtotal, not a complete service-time total/);
+        assert.match(duration.text, /Subtotal only:.*not the complete service time/, "the subtotal limitation stays visible without opening details");
+        await adminPage.clickIn(`[data-client-derived-recorded="${ids[1]}"] [data-client-derived-calculation-details] > summary`, "Inspect the duration calculation and source details");
+        assert.match((await recordedRow(ids[1])).text, /This is a known recorded minutes subtotal, not a complete service-time total/);
         assertActivityShown({ ...(await activityIn(`[data-client-derived-recorded="${ids[0]}"]`)), ...Object.fromEntries(Object.entries(await activityIn(`[data-client-derived-recorded="${ids[1]}"]`)).filter(([k]) => !["months", "total"].includes(k))) }, expected, "after reload");
         assert.match(await textOf(adminPage, `${run.section} [data-client-cross-source-history]`), /succeeded: register 02_participant_register\.csv \(current version\)/i);
         return ids;
@@ -4253,15 +4283,21 @@ async function runXlsxAcceptance() {
       })()`), true, "calculated outcomes precede the raw-count administration form");
       assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-custom-calculations]`)}).open`), false);
       assert.equal(await adminPage.evaluate(`document.querySelector(${J(`[data-client-source-measurement="${sv}"] [data-client-raw-count-description]`)}).open`), false);
+      assert.equal(await textOf(adminPage, `[data-client-open-source-measurement="${sv}"]`), "View measurements");
+      const visibleFormInputs = () => adminPage.evaluate(`Array.from(document.querySelectorAll(${J(`${section} input, ${section} select, [data-client-source-measurement="${sv}"] [data-client-source-measurement-field]`)})).filter((el) => el.offsetParent !== null && !el.closest('details:not([open])')).length`);
+      assert.equal(await visibleFormInputs(), 0, "the calculated survey screen exposes no definition, meaning, target, filter or linkage inputs");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "survey-results");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "survey-results", 390);
       const mark = adminPage.mark();
       await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Keep calculated results");
-      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("2 proposed results kept as evidence"), "two calculated outcomes saved without entering a meaning");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("2 results saved"), "two calculated outcomes saved without entering a meaning");
       const request = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/paired-outcome-measurements"));
       assert.deepEqual(JSON.parse(request.postData), {}, "no manually configured count, mapping, meaning or score direction");
       const saved = await query(`SELECT m.source_derived_measurement_id::text AS id, m.definition, m.numerator::int, m.denominator::int, m.percentage::text,
-        e.evidence_item_id::text AS evidence_id, e.statement FROM kai.source_derived_measurements m
+        e.evidence_item_id::text AS evidence_id, e.statement, c.claim_id::text FROM kai.source_derived_measurements m
         JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id)
         JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id
+        LEFT JOIN kai.claims c ON c.evidence_item_id = e.evidence_item_id
         WHERE m.source_version_id = $1::uuid ORDER BY m.definition->>'outcome_field_key'`, [sv]);
       assert.deepEqual(saved.map((m) => [m.numerator, m.denominator, m.percentage]), [[32, 43, "74.42"], [31, 41, "75.61"]]);
       const claimIds = [];
@@ -4269,10 +4305,12 @@ async function runXlsxAcceptance() {
         assert.equal(m.definition.matching_unit, "household");
         assert.match(m.statement, /comparable household pairs/);
         assert.doesNotMatch(m.statement, /participant pairs|people|caused|improved/);
-        const proposed = await adminApi("POST", claimProposalPath(ORG_X, m.evidence_id), {});
-        assert.equal(proposed.status, 200, J(proposed.body));
-        claimIds.push(proposed.body.data.claim.claim_id);
+        assert.ok(m.claim_id, "the one save action already makes the finding available for reports");
+        claimIds.push(m.claim_id);
       }
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-derived-report-status="ready"]`)}).length`)) === 2, "both results ready for reporting");
+      assert.equal(await visibleFormInputs(), 0, "saving results does not open target or description forms");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "survey-saved");
       // The other worksheet also shows computed results immediately. Saving a
       // displayed rate needs no field choices, formula construction or meaning.
       await panel.selectWorksheet("sheet_2");
@@ -4290,17 +4328,44 @@ async function runXlsxAcceptance() {
       const keptReferral = (await adminPage.responseBody(readyRequest)).data;
       assert.deepEqual([keptReferral.measurement.numerator, keptReferral.measurement.denominator, keptReferral.measurement.percentage], [9, 49, "18.37"]);
       await adminPage.waitFor(() => adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-save-ready-measurement="${referral.key}"]`)}).textContent === 'Saved'`), "saved result remains identified after the refreshed read");
-      const referralClaim = await adminApi("POST", claimProposalPath(ORG_X, keptReferral.evidenceItem.evidence_item_id), {});
-      assert.equal(referralClaim.status, 200);
-      claimIds.push(referralClaim.body.data.claim.claim_id);
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "referral-saved");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "referral-saved", 390);
+      const [referralClaim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [keptReferral.evidenceItem.evidence_item_id]);
+      assert.ok(referralClaim, "the ready rate also needs only one save action before reporting");
+      claimIds.push(referralClaim.claim_id);
       const { shown, draft } = await createMeasuredReportInUi(claimIds);
       for (const m of saved) assert.ok(shown.includes(m.statement), "the saved/downloaded report retains the exact calculated finding");
-      assert.ok(shown.includes(referralClaim.body.data.claim.statement), "the referral rate and its all-date source scope survive generation, saved retrieval and download");
+      assert.ok(shown.includes(referralClaim.statement), "the referral rate and its all-date source scope survive generation, saved retrieval and download");
       assert.ok(shown.includes(sv));
       assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile);
       assert.deepEqual(await approvalState(), approvalBefore, "the complete journey requires zero evidence-quality approval decisions");
+      // A reporting-step outage must not lose a saved calculation or make
+      // the customer recreate it. Retry the existing saved finding only.
+      await openCountRecords(sv);
+      await panel.selectWorksheet("sheet_2");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-ready-measurement="records"]`)), "ready record count");
+      await adminPage.evaluate(`(() => {
+        const original = window.fetch;
+        window.fetch = (input, init) => {
+          const url = String(typeof input === 'string' ? input : input.url);
+          if (url.endsWith('/claim-proposal') && init?.method === 'POST') {
+            window.fetch = original;
+            return Promise.resolve(new Response(JSON.stringify({ ok: false }), { status: 503, headers: { 'content-type': 'application/json' } }));
+          }
+          return original(input, init);
+        };
+      })()`);
+      await adminPage.clickIn(`${section} [data-client-save-ready-measurement="records"]`, "Save count despite reporting-step outage");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice="warning"]`))?.includes("Results saved."), "saved calculation retained with retry guidance");
+      const [retained] = await query(`SELECT m.source_derived_measurement_id::text AS id, e.evidence_item_id::text AS evidence_id
+        FROM kai.source_derived_measurements m JOIN kai.evidence_derived_measurements e USING (source_derived_measurement_id)
+        WHERE m.source_version_id = $1::uuid AND m.worksheet_key = 'sheet_2' AND m.measurement_key = $2`, [sv, referralBasis.tabular.ready_measurements.find((item) => item.key === "records").measurement_key]);
+      assert.ok(retained);
+      await adminPage.clickIn(`${section} [data-client-derived-propose-claim="${retained.evidence_id}"]`, "Retry Add to reports for the saved result");
+      await adminPage.waitFor(() => adminPage.evaluate(`Boolean(document.querySelector(${J(`${section} [data-client-derived-recorded="${retained.id}"] [data-client-derived-report-status="ready"]`)}))`), "existing saved result ready after retry");
+      assert.equal(await rowsOf(), 4, "retry never recalculates or duplicates the retained measurement");
       const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, sv, "sheet_1"), {});
-      assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 3]);
+      assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 4]);
       assert.equal((await adminYApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 403);
       results.householdSurveyRecovery = { sv, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false };
     });

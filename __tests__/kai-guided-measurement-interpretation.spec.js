@@ -169,7 +169,7 @@ test("both interpretation interfaces open and cancel from the current recorded i
   assert.match(client, /onClick=\{\(\) => \{ setClarifying\(\(value\) => !value\); setClarifyForm\(recordedForm\); \}\}/);
   assert.match(client, /const closeMeaning = \(\) => \{ setClarifying\(false\); setClarifyForm\(recordedForm\); \};/);
   assert.match(client, /<MeaningQuestionsForm attr="data-client-measured-claim-clarify"[\s\S]*initial=\{recordedForm\}[\s\S]*onSubmit=\{recordMeaning\} onCancel=\{closeMeaning\}/);
-  assert.match(section, /setClarifyForm\(interpretationFormFrom\(current\?\.interpretation\)\); \}\}>\s*\{current\?\.interpretation \? "Change meaning" : "Clarify meaning"\}/);
+  assert.match(section, /setClarifyForm\(interpretationFormFrom\(current\?\.interpretation\)\); \}\}>\s*\{current\?\.interpretation \? "Edit description" : "Add description \(optional\)"\}/);
   assert.match(section, /<MeaningQuestionsForm attr="data-client-derived-clarify"[\s\S]*initial=\{interpretationFormFrom\(current\?\.interpretation\)\}/);
   assert.match(section, /onCancel=\{\(\) => \{ setClarifying\(null\); setClarifyForm\(interpretationFormFrom\(current\?\.interpretation\)\); \}\}/);
   // The only interpretation write in each is the existing route, on submit.

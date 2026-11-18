@@ -649,7 +649,7 @@ export function createPostgresDerivedMeasurementRepository({
           period_month_coverage: periodContext.period ? describePeriodMonthCoverage(profile, worksheetKey, periodContext.period) : null,
           paired: paired === null ? null : paired.ok
             ? { available: true, worksheet: paired.worksheet, measurements: paired.measurements.map((item) => (item.available
-              ? { available: true, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts,
+              ? { available: true, measurement_key: item.measurementKey, outcome_field_key: item.definition.outcome_field_key, outcome_column: item.definition.outcome_column, numerator: item.numerator, denominator: item.denominator, percentage: item.percentage, component_counts: item.componentCounts,
                 source_heading_suggestion: committedOutcomeHeadingSuggestion(profile, { worksheetKey: item.sheetKey, outcomeFieldKey: item.definition.outcome_field_key }) }
               : { available: false, outcome_field_key: item.outcomeFieldKey, blockers: item.blockers })) }
             : { available: false, blockers: paired.blockers, proposed_pairings: paired.proposedPairings || [] },

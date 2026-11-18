@@ -804,7 +804,7 @@ export default function ClientEvidenceWorkflow({
   if (findingsState.kind === "ready" && findingsState.complete && findings.outcomes.length === 0 && access.recordSourceMeasurement) {
     attention.push({
       key: "no_outcome_measurement",
-      text: "No baseline and follow-up outcome measurement is recorded yet. A source with baseline and follow-up values can be measured with Count records in Sources.",
+      text: "No baseline and follow-up outcome measurement is recorded yet. Open View measurements in Sources to calculate baseline and follow-up results.",
       actionLabel: "Open Sources", onAction: () => onSelectView?.("sources"),
     });
   }
@@ -905,9 +905,9 @@ export default function ClientEvidenceWorkflow({
                 setMeasuring({ contextKey, sourceVersionId: recoveryVersion.sourceVersionId });
                 onSelectView?.("sources");
               }}>
-              Count records on current version
+              View measurements on current version
             </button>
-            <div className="text-muted">Choose the worksheet in Count records. Use its existing measurement if one is recorded, or define the count there, then propose its claim. Earlier reviews stay with the earlier finding.</div>
+            <div className="text-muted">Choose a worksheet, then save a calculated result for your reports. Earlier findings remain with the earlier version.</div>
           </div>
         ) : null}
       </div>
@@ -1037,7 +1037,7 @@ export default function ClientEvidenceWorkflow({
                     {file.nextAction === "count_records" && access.recordSourceMeasurement && isRouteUuid(file.currentSourceVersionId) ? (
                       <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-file-measurement={file.intakeFileId}
                         onClick={() => openFileMeasurement(file)}>
-                        Count records
+                        View measurements
                       </button>
                     ) : null}
                     {file.currentStage === "sensitivity_review" && access.reviewSensitivity ? (
@@ -1101,7 +1101,7 @@ export default function ClientEvidenceWorkflow({
         ) : null}
         {/* A refresh after a recorded measurement keeps the loaded list (and an open panel with its confirmation) mounted. */}
         {(sources.status === "success" || sources.status === "loading") && sources.items.length > 0 ? (
-          <ul className="list-group">
+          <ul className="list-group kai-measurement-source-list">
             {sources.items.map((source) => {
               const currentVersion = source.sourceVersions.find((version) => version.isCurrent);
               const title = currentVersion?.safeFilename || source.sourceVersions.find((version) => version.safeFilename)?.safeFilename || "Source";
@@ -1115,7 +1115,7 @@ export default function ClientEvidenceWorkflow({
                       {version.profileFormat === "xlsx" ? (
                         <span data-client-xlsx-measurement-readiness={version.hasXlsxRecordCountBasis ? "basis_recorded" : "new_version_required"}>
                           {version.hasXlsxRecordCountBasis
-                            ? "Workbook ready: use Count records and choose the worksheet."
+                            ? "Workbook ready: view calculated measurements by worksheet."
                             : "This workbook's earlier profile cannot be counted."}
                         </span>
                       ) : null}
@@ -1141,7 +1141,7 @@ export default function ClientEvidenceWorkflow({
                       {access.recordSourceMeasurement && version.isCurrent && isRouteUuid(version.sourceVersionId) ? (
                         <button type="button" className="btn btn-sm btn-outline-secondary" data-client-open-source-measurement={version.sourceVersionId}
                           onClick={() => setMeasuring({ contextKey, sourceVersionId: version.sourceVersionId })}>
-                          Count records
+                          View measurements
                         </button>
                       ) : null}
                       {openMeasurement === version.sourceVersionId ? (

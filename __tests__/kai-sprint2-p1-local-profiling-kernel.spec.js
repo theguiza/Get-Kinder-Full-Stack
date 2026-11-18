@@ -327,8 +327,8 @@ test("an XLSX profile commits a worksheet record-count basis without values; a l
   }], worksheetOptions: [] });
   assert.match(`${projected.counts.blockers[0].message} ${projected.counts.blockers[0].requiredFix}`,
     /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
-  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file, or on one worksheet you select in an Excel workbook \(one worksheet per record-count definition; worksheets are never added together\)/);
-  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /not a count of unique participants or a programme outcome/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /View measurements.*save a calculated result/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /Descriptions and targets are optional/);
   assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /a single-table CSV file or on one worksheet you select in an Excel workbook, never adding worksheets together/);
   assert.doesNotMatch(`${INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim} ${STRUCTURAL_ONLY_DRAFT_MESSAGE}`, /workbook with one worksheet/);
   const measurable = projectMeasurementBasis({

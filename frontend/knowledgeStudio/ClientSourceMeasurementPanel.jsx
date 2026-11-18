@@ -122,9 +122,9 @@ export default function ClientSourceMeasurementPanel({
   const { data, recorded, selectionRequired } = view;
   const worksheetLabel = data?.counts.worksheet ? `${data.counts.worksheetName || data.counts.worksheet} (${data.counts.worksheet})` : null;
   return (
-    <div className="border rounded p-2 mt-2" data-client-source-measurement={sourceVersionId}>
+    <div className="kai-measurement border rounded p-2 mt-2" data-client-source-measurement={sourceVersionId}>
       <div className="d-flex align-items-center mb-2">
-        <h6 className="mb-0">Measurements from this source</h6>
+        <h6 className="mb-0">Measurements</h6>
         <button type="button" className="btn btn-sm btn-link ms-auto" onClick={onClose}>Close</button>
       </div>
       {view.status === "loading" ? <div className="text-muted small" data-client-source-measurement-loading={selectedWorksheetKey}>Loading the source's counts...</div> : null}
@@ -140,18 +140,20 @@ export default function ClientSourceMeasurementPanel({
               {worksheetOptions.map((sheet) => <option key={sheet.sheetKey} value={sheet.sheetKey}>{`${sheet.sheetName} (${sheet.sheetKey})`}</option>)}
             </select>
           </label>
-          <div>Each worksheet is assessed separately. Notes and other worksheets are never added to the selected count.</div>
+          <div className="text-muted">Results use this worksheet only.</div>
+          <details data-client-worksheet-details=""><summary>Workbook structure</summary>
           {worksheetOptions.map((sheet) => (
             <div key={sheet.sheetKey} data-client-source-measurement-worksheet-option={sheet.sheetKey}>
               {sheet.sheetName} ({sheet.sheetKey}): data rows {sheet.dataRecordCount ?? "unavailable"}, blank rows {sheet.blankRecordCount ?? "unavailable"},
               exact duplicates {sheet.duplicateRecordCount ?? "unavailable"}.
             </div>
           ))}
+          </details>
         </div>
       ) : null}
       {selectionRequired ? (
         <div className="small" data-client-source-measurement-selection-required="">
-          Choose the worksheet to count. Each record-count definition counts one worksheet; KAI never adds worksheets together.
+          Choose a worksheet to see its calculated results. Worksheets are never added together.
         </div>
       ) : null}
       {data && !data.counts.measurable && !selectionRequired ? (
@@ -169,6 +171,7 @@ export default function ClientSourceMeasurementPanel({
         <ClientDerivedMeasurementSection key={`${sourceVersionId}:${selectedWorksheetKey || ""}`} organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
           canProposeClaim={canProposeClaim} onRecorded={onRecorded} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds} />
       )}
+      <details data-client-raw-count-description=""><summary>Raw row count and source details (optional)</summary>
       {data && data.counts.measurable ? <div data-client-worksheet-measurement-state="">
         {recorded ? "Raw count recorded for this worksheet." : "Profiled; raw Count records is available for this worksheet and has not been recorded."}
         {" "}Its optional attested dates and inclusion/exclusion explanation are context; KAI does not apply them as row filters or change the KAI Project period.
@@ -233,7 +236,6 @@ export default function ClientSourceMeasurementPanel({
         </div>
       ) : null}
       {view.showForm ? (
-        <details data-client-raw-count-description=""><summary>Describe a raw row count (optional)</summary>
         <form className="small" onSubmit={(event) => { event.preventDefault(); submit(); }} data-client-source-measurement-form="">
           <div className="text-muted mb-1">
             Only your organization can say what one record represents. KAI counts the records; it does not infer their meaning.
@@ -273,8 +275,8 @@ export default function ClientSourceMeasurementPanel({
             {pending === "record" ? "Recording..." : "Record definition and count"}
           </button>
         </form>
-        </details>
       ) : null}
+      </details>
     </div>
   );
 }

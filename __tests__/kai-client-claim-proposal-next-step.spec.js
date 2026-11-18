@@ -261,8 +261,8 @@ test("Owner direction 2026-11-16: a promoted spreadsheet whose evidence is only 
     const projected = projectClientEvidencePipeline(result.data, ENGAGEMENT);
     assert.ok(projected, "the client accepts the new step");
     assert.equal(projected.files[0].currentSourceVersionId, VERSION);
-    assert.match(nextActionText(projected.files[0]), /Use Count records on its source \(Sources > Data Sources\).*without any review/);
-    assert.match(pipelineReasonMessage("source_measurement_ready", 1), /Count records/);
+    assert.match(nextActionText(projected.files[0]), /View measurements in Sources > Data Sources.*save a calculated result for reports/);
+    assert.match(pipelineReasonMessage("source_measurement_ready", 1), /View measurements/);
     assert.deepEqual(sourcePreparationFiles(projected, {}).map((file) => file.intakeFileId), [fileId(1)], "listed in Files that need a step");
     assert.deepEqual(useForImpactStep(projected.files[0], { recordSourceMeasurement: true }), { kind: "measure" });
     assert.equal(isUseForImpactCandidate(projected.files[0], { recordSourceMeasurement: true }), false, "its own Count records control, not Use for impact");

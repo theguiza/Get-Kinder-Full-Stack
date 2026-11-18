@@ -133,7 +133,7 @@ test("readiness needs a substantive finding: none yet sends the customer to Coun
   const base = { canGenerate: true, engagementId: ENGAGEMENT };
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [], claims: [FIELD_2] }), { ready: false, reason: "no_measured_claim" });
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [FIELD_2.claimId], claims: [FIELD_2] }), { ready: false, reason: "no_measured_claim" });
-  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /Count records/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /View measurements/);
   // An incomplete read never concludes "no measured finding".
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [], claims: [FIELD_2], claimsComplete: false }), { ready: false, reason: "claims_not_all_loaded" });
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [], claims: [], claimsComplete: false }), { ready: false, reason: "claims_not_all_loaded" });

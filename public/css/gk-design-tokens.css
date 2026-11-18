@@ -1,3 +1,42 @@
+/* Measurement results stay usable without depending on table width or a CDN. */
+.kai-measurement-source-list { list-style: none; padding: 0; margin: 0; min-width: 0; }
+.kai-measurement-source-list > li { min-width: 0; overflow-wrap: anywhere; }
+.kai-measurement { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; padding: 20px !important; border: 1px solid #dfe8f5; border-radius: 16px; background: #fff; color: #2f3f58; font-size: 16px; line-height: 1.5; }
+.kai-measurement *, .kai-measurement *::before, .kai-measurement *::after { box-sizing: border-box; }
+.kai-measurement h6 { font-size: 1.05rem; margin: 0 0 8px; }
+.kai-measurement > .d-flex { display: flex; align-items: center; gap: 12px; }
+.kai-measurement > .d-flex > button { margin-left: auto; }
+.kai-measurement [data-client-derived-refresh] { border: 0; background: none; padding-left: 0; text-decoration: underline; }
+.kai-measurement .small { font-size: .94rem; }
+.kai-measurement .text-muted { color: #59677b !important; font-size: .9rem; }
+.kai-measurement button { white-space: normal; border: 1px solid #455a7c; border-radius: 8px; padding: 7px 12px; background: #fff; color: #344967; font: inherit; cursor: pointer; }
+.kai-measurement button:disabled { opacity: .6; cursor: default; }
+.kai-measurement button:focus-visible, .kai-measurement summary:focus-visible { outline: 3px solid #455a7c; outline-offset: 3px; }
+.kai-measurement [data-client-derived-record-paired], .kai-measurement [data-client-save-ready-measurement]:not(:disabled) { background: #455a7c; color: white; }
+.kai-measurement label { max-width: 100%; }
+.kai-measurement input:not([type="checkbox"]), .kai-measurement select { max-width: 100%; border: 1px solid #b8c5d7; border-radius: 7px; padding: 7px; font: inherit; }
+.kai-measurement [data-client-source-measurement-worksheet-select] { display: block; width: 100%; margin: 6px 0; }
+.kai-measurement details { margin: 10px 0; min-width: 0; }
+.kai-measurement summary { cursor: pointer; color: #344967; padding: 5px 0; }
+.kai-measurement details[open] > summary { margin-bottom: 8px; }
+.kai-measurement [data-client-derived-measurements] { margin-top: 16px; padding-top: 16px; border-top: 1px solid #dfe8f5; }
+.kai-measurement-outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 12px; margin: 12px 0; }
+.kai-measurement-outcome { min-width: 0; padding: 16px; border: 1px solid #dfe8f5; border-radius: 12px; background: #f2f6fc; }
+.kai-measurement-value { display: block; margin: 8px 0; font-size: 2rem; line-height: 1.15; color: #344967; }
+.kai-measurement-results { display: grid; gap: 8px; margin: 8px 0; }
+.kai-measurement-result { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid #dfe8f5; border-radius: 10px; }
+.kai-measurement-result-label, .kai-measurement-saved { overflow-wrap: anywhere; min-width: 0; }
+.kai-measurement-saved { margin-top: 12px; padding: 14px !important; border: 1px solid #dfe8f5; border-radius: 12px; }
+.kai-measurement-report-status { color: #206243; font-weight: 600; }
+.kai-measurement [data-client-derived-target-form] { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.kai-measurement [data-client-derived-notice] { padding: 12px; border-radius: 8px; margin: 12px 0; overflow-wrap: anywhere; }
+@media (max-width: 680px) {
+  .kai-measurement { padding: 12px !important; }
+  .kai-measurement-result { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .kai-measurement-result-label { grid-column: 1 / -1; }
+  .kai-measurement-result button { max-width: 130px; }
+}
+
 :root {
   --gk-cream: #f7f3ed;
   --gk-coral: #ff5656;
