@@ -1,0 +1,137 @@
+COMMITTED kai_sprint2_gate_a_p0_upload_lifecycle
+COMMITTED kai_sprint2_gate_a_p0_policy_decision_replay
+COMMITTED kai_sprint2_p1_parser_run_and_file_profile
+COMMITTED kai_sprint2_p1_04_data_dictionary_and_quality
+COMMITTED kai_sprint2_p1_05_intake_sensitivity_profile
+COMMITTED kai_sprint2_p1_06_review_queue
+COMMITTED kai_sprint2_p1_07_intake_source_candidate
+COMMITTED kai_sprint2_p1_08_source_promotion
+COMMITTED kai_sprint2_p2_01_evidence_lineage
+COMMITTED kai_sprint2_p2_03_claim_proposal
+COMMITTED kai_sprint2_p2_04_claim_gap_followup
+COMMITTED kai_sprint2_p2_05_conflict_review_candidate
+COMMITTED kai_sprint2_p3_01_generated_content_drafts
+COMMITTED kai_sprint2_p3_04_generated_content_review_completion
+COMMITTED kai_sprint2_p3_05_export_review_request
+COMMITTED kai_sprint2_p3_09_export_review_start
+COMMITTED kai_sprint2_p3_13_export_review_completion
+COMMITTED kai_sprint2_p3_16_export_candidate_foundation
+COMMITTED kai_sprint2_p3_17_human_authority_decision_ledger
+COMMITTED kai_sprint2_gate_c1_gcs_generation_binding
+COMMITTED kai_sprint2_gk_organization_tenant_binding
+COMMITTED kai_sprint2_p2_09_human_review_internal_approval
+COMMITTED kai_sprint2_p2_10_coverage_review_decision
+COMMITTED kai_sprint2_p2_11_client_followup_completion
+COMMITTED kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation
+COMMITTED kai_sprint2_p13_01_impact_narrative_content_type
+COMMITTED kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger
+COMMITTED kai_sprint2_p2_12_human_review_decision_ledger
+COMMITTED kai_sprint2_a1_1_impact_outcome_context
+COMMITTED kai_sprint2_a1_2_impact_evaluation_framework_and_criteria
+COMMITTED kai_sprint2_a1_3_impact_evaluations_and_results
+COMMITTED kai_sprint2_a1_4_impact_evaluation_result_provenance_links
+COMMITTED kai_sprint2_b1_1_baseline_impact_requirements
+COMMITTED kai_sprint2_b1_3_accepted_catalogue_persistence
+COMMITTED kai_sprint2_c2_1_requirement_assessment_persistence
+COMMITTED kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance
+COMMITTED kai_sprint2_c3_a4_requirement_assessment_provenance_extension
+COMMITTED kai_sprint2_p2_10_funder_coverage_authority
+COMMITTED kai_sprint2_package_2a_engagement_requirement_sets_authority
+COMMITTED kai_sprint2_p3_17_authority_audit_gate_a_operation_repair
+COMMITTED kai_sprint2_p3_19_export_manifest_foundation
+COMMITTED kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair
+COMMITTED kai_sprint2_gate_a_p0_required_index_forward_repair
+COMMITTED kai_sprint2_p3_20_export_manifest_review_binding
+COMMITTED kai_sprint2_p14_01_generation_run_engagement_binding
+COMMITTED kai_sprint2_p14_02_grant_response_packet_export_identity_foundation
+COMMITTED kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation
+COMMITTED kai_sprint2_p14_05_grant_response_packet_export_review_binding
+COMMITTED kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger
+COMMITTED kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation
+COMMITTED kai_sprint2_p14_10_review_queue_target_object_type_repair
+COMMITTED kai_sprint2_generated_content_review_start_audit_contract
+COMMITTED kai_sprint2_br_02_board_reporting_candidate_foundation
+COMMITTED kai_sprint2_br_03a_board_reporting_candidate_review_request
+COMMITTED kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle
+COMMITTED kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger
+COMMITTED kai_sprint2_board_reporting_candidate_export_manifest_foundation
+COMMITTED kai_sprint2_p14_14_generated_content_type_evolution
+COMMITTED kai_sprint2_p14_12_review_queue_type_check_legacy_repair
+COMMITTED kai_sprint2_p14_15_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_p2_10_public_coverage_authority
+COMMITTED kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair
+COMMITTED kai_sprint2_p13_ext1_case_for_support_content_type_evolution
+COMMITTED kai_sprint2_p13_ext1_case_for_support_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_p13_ext2_board_update_content_type_evolution
+COMMITTED kai_sprint2_p13_ext2_board_update_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_p13_ext3_annual_report_section_content_type_evolution
+COMMITTED kai_sprint2_p13_ext3_annual_report_section_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution
+COMMITTED kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution
+COMMITTED kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution
+COMMITTED kai_sprint2_package_g_improvement_practices_foundation
+COMMITTED kai_sprint2_join_1_organization_join_requests
+COMMITTED kai_sprint2_p1_downstream_recovery_state
+COMMITTED kai_sprint2_b1a_02_client_admin_sensitivity_review
+COMMITTED kai_sprint2_p2_01m_source_record_count_measurement
+COMMITTED kai_sprint2_plan_a_organization_internal_release_authority
+COMMITTED kai_sprint2_plan_a_organization_internal_factual_review_authority
+COMMITTED kai_sprint2_p2_01m_xlsx_worksheet_record_count_method
+COMMITTED kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method
+COMMITTED kai_sprint2_p2_01m_worksheet_measurement_identity
+COMMITTED kai_sprint2_measurement_mvp_source_derived_measurements
+COMMITTED kai_sprint2_measurement_mvp_cross_source_reach
+COMMITTED kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs
+COMMITTED kai_sprint2_document_statement_evidence
+COMMITTED kai_sprint2_measurement_calculation_completion
+COMMITTED kai_sprint2_measurement_targets
+Unsupported major guard (simulated 17 on PG16): STOP_INCOMPATIBLE
+Rate CHECK literal: record good: true
+Rate CHECK literal: record bad: false
+Rate CHECK literal: NULL method bad record arithmetic: false
+Rate CHECK literal: distinct identifiers good, records differ: true
+Rate CHECK literal: distinct identifiers bad: false
+Rate CHECK literal: distinct identifiers above records: false
+Rate CHECK literal: distinct wrong unit: false
+Rate CHECK literal: missing JSON operands retain SQL NULL: NULL
+C both applied: {'calculation': 'ALREADY_APPLIED', 'targets': 'ALREADY_APPLIED', 'OVERALL': 'SCHEMA_COMPATIBLE'}
+scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql: OVERALL PASS
+scripts/kai-measurement-mvp-cross-source-reconciliation-jobs-verify-read-only.sql: OVERALL PASS
+scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql: OVERALL PASS
+scripts/kai-reporting-schema-verify-read-only.sql: OVERALL PASS
+B calculation only: {'calculation': 'ALREADY_APPLIED', 'targets': 'REQUIRED', 'OVERALL': 'SCHEMA_DELTA_REQUIRED'}
+A prerequisite: {'calculation': 'REQUIRED', 'targets': 'REQUIRED', 'OVERALL': 'SCHEMA_DELTA_REQUIRED'}
+COMMITTED kai_sprint2_measurement_targets
+independent targets already applied: {'calculation': 'REQUIRED', 'targets': 'ALREADY_APPLIED', 'OVERALL': 'SCHEMA_DELTA_REQUIRED'}
+D1 partial calculation column: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'REQUIRED', 'OVERALL': 'STOP_INCOMPATIBLE'}
+D2 reserved calculation index collision: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'REQUIRED', 'OVERALL': 'STOP_INCOMPATIBLE'}
+D3 same-named incomplete target table: {'calculation': 'REQUIRED', 'targets': 'STOP_INCOMPATIBLE', 'OVERALL': 'STOP_INCOMPATIBLE'}
+D4 reserved target index collision: {'calculation': 'REQUIRED', 'targets': 'STOP_INCOMPATIBLE', 'OVERALL': 'STOP_INCOMPATIBLE'}
+D5 composite type collision: {'calculation': 'REQUIRED', 'targets': 'STOP_INCOMPATIBLE', 'OVERALL': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_calculation_completion
+COMMITTED kai_sprint2_measurement_targets
+Negative target FK enforcement disabled: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative calculation CHECK: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'STOP_INCOMPATIBLE'}
+Negative calculation index: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'ALREADY_APPLIED'}
+Negative job default: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'ALREADY_APPLIED'}
+Negative job nullability: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'ALREADY_APPLIED'}
+Negative admission trigger disabled: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'ALREADY_APPLIED'}
+Negative admission function: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'ALREADY_APPLIED'}
+Negative target CHECK: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative target FK: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative target self FK: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative target index: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative target column nullability: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative target trigger: {'calculation': 'ALREADY_APPLIED', 'targets': 'STOP_INCOMPATIBLE'}
+COMMITTED kai_sprint2_measurement_targets
+Negative append-only function: {'calculation': 'STOP_INCOMPATIBLE', 'targets': 'STOP_INCOMPATIBLE'}
+restored completed: {'calculation': 'ALREADY_APPLIED', 'targets': 'ALREADY_APPLIED', 'OVERALL': 'SCHEMA_COMPATIBLE'}
+PASS: A/B/C, 19 incompatible states; exact pins reproduced from committed migrations; four existing verifiers PASS.
+Removed runner-owned disposable cluster.

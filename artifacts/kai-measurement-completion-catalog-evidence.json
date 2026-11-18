@@ -1,0 +1,1610 @@
+{
+  "source_revision": "ed37dddd167a5ce4543ca6ed841be090060b1242",
+  "postgres_version": "postgres (PostgreSQL) 16.14 (Homebrew)",
+  "rollback_sha256": {
+    "kai_sprint2_measurement_calculation_completion": "bacd1c863c0ce63d157fac4dc304cc2f364ba36a2901cf6aa133d81edc541a8e",
+    "kai_sprint2_measurement_targets": "0255ea3ed844c5f8d8ecb74ce5b136d19d7daebc1c018046859e5e5287d67d9c"
+  },
+  "migrations_sha256": {
+    "kai_sprint2_gate_a_p0_upload_lifecycle": "78535c7d287a6f2f36aa7f8d0fab92ab9019a56b297b8ec45b24f53e53228dd6",
+    "kai_sprint2_gate_a_p0_policy_decision_replay": "9d225fa720907f27a847fc2ab3b10ae1c4cfbead4a4c40b7f7343c2e9c34f84a",
+    "kai_sprint2_p1_parser_run_and_file_profile": "6863632cf9ca5823d1bfecda5fe86a1bb874c19955a5530c1e4c7bb71178b5d2",
+    "kai_sprint2_p1_04_data_dictionary_and_quality": "3924138cc62688ac54d9f4e57bf1b18fa37e55a229bca981c8c84b7f9d6a7f35",
+    "kai_sprint2_p1_05_intake_sensitivity_profile": "b748026b8393a45e40ffa5df2328700ab38e5e87c160f18d53b5f0d790dc2184",
+    "kai_sprint2_p1_06_review_queue": "c6e7015297063096750943e37d9240e41543903b3680c7d86683b0c8230aa959",
+    "kai_sprint2_p1_07_intake_source_candidate": "51e24856a556abdfd83062a0d50ffc278f9ed8b09d4d4aedbc42527f08d2ad36",
+    "kai_sprint2_p1_08_source_promotion": "9c58847669820bba3704cf2c41457a3be6f2a7c89d6dbe155d4f73eb1f7194e6",
+    "kai_sprint2_p2_01_evidence_lineage": "dd50f383cf094fa37f0edd6c28426b58538831eb9379d53d068666db26e12bcb",
+    "kai_sprint2_p2_03_claim_proposal": "13f9cf60bd1aca49d831d8006a95f3c8d9da94e7efdcca4bb40242171a15de09",
+    "kai_sprint2_p2_04_claim_gap_followup": "21799858dade1acf9806277de9153cc7b5d2a34e248fb44f1e549bf54d121719",
+    "kai_sprint2_p2_05_conflict_review_candidate": "4e7fbc548debe49915e4422c88fa1b6f607bf712fb32112e8a5bc4b63ffa19f9",
+    "kai_sprint2_p3_01_generated_content_drafts": "dc0330e35b8501c86067dd8efc6d3123e73f3b25f15a5b2d828bd135d9ff50f4",
+    "kai_sprint2_p3_04_generated_content_review_completion": "ab5590a60285bdb267dc8688f48f94742f1e5376c34e1078017c038e0b632e35",
+    "kai_sprint2_p3_05_export_review_request": "a8f72f69cd0b9f5adfc2cea5b6aa58bad553b5dd5d7206b8eb590e4572e97342",
+    "kai_sprint2_p3_09_export_review_start": "b769dffe294bf3bb48c1c011bdae0f14f2cadd37ec8b0f100049d7b2537e7919",
+    "kai_sprint2_p3_13_export_review_completion": "375d80a8f76c9b2df58454e8605040228403c522cf09fef54ba7e0bd5e2a40c6",
+    "kai_sprint2_p3_16_export_candidate_foundation": "cb947fde5d34bd1b31dee661d1652869aea618afe61c7eec1ee505cd220fda37",
+    "kai_sprint2_p3_17_human_authority_decision_ledger": "cf41f52fbe4bba8f1dcb933f3f0131f3711090e2e6f95c3e2f607c57135b3e48",
+    "kai_sprint2_gate_c1_gcs_generation_binding": "d8229ba9635d87c5d99c2ac86d64b1efbfdbb5b8610e5f147235e0ef5a6ada9d",
+    "kai_sprint2_gk_organization_tenant_binding": "a9b834d222091125b1b975f9757bbcb7d6191f14a741021b407b78209b00d994",
+    "kai_sprint2_p2_09_human_review_internal_approval": "ca293f168bea6576c9e5823ff2c032b2d0dba5d99d042f3ccef3d07624b76962",
+    "kai_sprint2_p2_10_coverage_review_decision": "2e8d26bd51295fc855330a4f649f6b2aa441f50b41e7898753e4cf15c80d8c40",
+    "kai_sprint2_p2_11_client_followup_completion": "5fabb953770335e8658771518898c44a3078aac5e7a9d6d20b53e4fce7c4fd76",
+    "kai_sprint2_legacy_generation_cutover_20260817": "733795b189f742895ee1ce67bf4fb0bf5779ef00e470969c1d1219c69e7312df",
+    "kai_sprint2_p1_06_review_status_column_repair": "9b4cdb6674a5f9091695550c0223cea16705a1ae10f7bae0d43c4489b5ff8571",
+    "kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation": "f280e5e35dbac3764360a624b14e074028928d4582ed994f3d0af033c6df6924",
+    "kai_sprint2_p13_01_impact_narrative_content_type": "df270e6f55847a40c530ffc49808c11e09e35167be5cb28f6540786a897e9e97",
+    "kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger": "e5dcb6667b8e81f5bc5bc3adebc3c215689f331125a0ecc429673edd569b78b0",
+    "kai_sprint2_p2_12_human_review_decision_ledger": "1338fecb47b3b1225a22e51d963211809006c0e95810f0b60dc4ef95e734ed2b",
+    "kai_sprint2_a1_1_impact_outcome_context": "b00e4e579894e239b681880d1634ba7e1934edfeb14603e4255bcae6e549bb28",
+    "kai_sprint2_a1_2_impact_evaluation_framework_and_criteria": "5ff85512326716596e0731a09e04b36e60dc637ea063cf7c9122550d8aa8ff92",
+    "kai_sprint2_a1_3_impact_evaluations_and_results": "384419889262e14e5658327233262208f8e0aae0188a68fee73d20e615989038",
+    "kai_sprint2_a1_4_impact_evaluation_result_provenance_links": "f1e1011f898f9ab2b0ac86bf012c52c92994f3b280495930aa2fbfd191844f58",
+    "kai_sprint2_b1_1_baseline_impact_requirements": "8a1c1e57780914e5e7e0337d2ef7ba7605a56d34e2d440d4bdb77da5d9789ce9",
+    "kai_sprint2_b1_3_accepted_catalogue_persistence": "0daa77cb890be21e85046c6490d22b20ca01a0081840df6f9afa7370296758a3",
+    "kai_sprint2_c2_1_requirement_assessment_persistence": "c36c8a7e107d0349631f963528d919cc38cfe2984fcf0060e38effae80e7df98",
+    "kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance": "e4f327cf269d9f323258747e7b3044b26030e480281db67fc7d731b0dde89aff",
+    "kai_sprint2_c3_a4_requirement_assessment_provenance_extension": "74df51baee0f80330a1db2e1aa673db5d057f74c6d537603921a9510ddaf5df4",
+    "kai_sprint2_p2_10_funder_coverage_authority": "54204d9e292430c5e5e77a0ba9d774f9243b00f1783a529257a05e7b3113b099",
+    "kai_sprint2_package_2a_engagement_requirement_sets_authority": "0ef1f92e31107093fa02fb259d22ed60d65758f886b354df77de99774affb935",
+    "kai_sprint2_p3_17_authority_audit_gate_a_operation_repair": "be6f56c3c32e3bce8b24536be7faae715d425da34b8561c9c84b2f9489fd550a",
+    "kai_sprint2_p3_19_export_manifest_foundation": "dee1947ff32a360930ffce2905c5b615a37be46ada4d8d71862d44952eb555cb",
+    "kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair": "35ab8cf330221ff6611fc1e4c539445da0a606f6263e10284dbd6312eea2dee1",
+    "kai_sprint2_gate_a_p0_required_index_forward_repair": "063a5d2556e7893d9e06b6c0656cf0f5f2d86f4dfa98d203296959ef548b68c9",
+    "kai_sprint2_p3_20_export_manifest_review_binding": "2e38cdd439b245d32a9a92fbee22c85e15f8ba2fb2313bf607b3feddcdad75d2",
+    "kai_sprint2_p14_01_generation_run_engagement_binding": "3bcac275ddabeba661f2d26f0cbdbf4a833f47a7561f2c9c298f70bb73749930",
+    "kai_sprint2_p14_02_grant_response_packet_export_identity_foundation": "da3b880eaa1c93a2f41ca0c6cc663fa32617115edffbe2a1365662010f36c105",
+    "kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation": "3d7700d2da39e114a822ae6adad96d4aa6704fb44254ccd27bc3ed3a6c51adbc",
+    "kai_sprint2_p14_05_grant_response_packet_export_review_binding": "3580792a63180e13c94399ecc06d40c1217ca6d25351d8ef6ca7535aa16694df",
+    "kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger": "7f0a3c5abe2d9504584668ca5e10af1e55924bb4380dfb1d09c449d67dfb77d8",
+    "kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation": "77a55506e14e0c3719147495ff6cc57c450c676ffed38da27b9dfe0b93abe005",
+    "kai_sprint2_p14_10_review_queue_target_object_type_repair": "6d37346f33d847b00ee40d8689a9756051e460068b5d0aa8f2f5e5d56283aff7",
+    "kai_sprint2_generated_content_review_start_audit_contract": "7cc4d952e471cdb1f6f3a55ab8fba58f0ac731af56b02d88ead169d0fcee10cf",
+    "kai_sprint2_br_02_board_reporting_candidate_foundation": "e8919ce9d8d980512673dec311795e0c84ef755a437cde559b0f46298ef8c89e",
+    "kai_sprint2_br_03a_board_reporting_candidate_review_request": "da92a7d9be9b09f0db58e3939b2e8e4181e0dd987e3bce5e07a073a8a07aff26",
+    "kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle": "04ad9f354f2ce631e7885b14f30a523cb3947686c2c0534c0f576ba4bc748a51",
+    "kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger": "46512d24f115f1a949d8fbb8afe799efbfdac72c94c90ef74314c8941e32b8a6",
+    "kai_sprint2_board_reporting_candidate_export_manifest_foundation": "3f5770040cbc9aa7d3a18280a1022453bcde4a5de2cddd5b13b3582888658e22",
+    "kai_sprint2_p14_14_generated_content_type_evolution": "ef957e2608129c991eb4ea587c140aac380582e2d2db03d37b48d3f235dd025b",
+    "kai_sprint2_p14_12_review_queue_type_check_legacy_repair": "09c38a18ef8699c2a6c4d6652bb5fc7579f3a15441c3b8d70b58c47e144937f6",
+    "kai_sprint2_p14_15_export_candidate_content_type_evolution": "6838d48c1a8cc78d615e6940f4e44cee06082eb2e1c34363a297bd33d87b1224",
+    "kai_sprint2_p2_10_public_coverage_authority": "df60a04f79ee767960f1c79422179a3597ab3c624b9580eaf5413f7bfc0f8fdd",
+    "kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair": "f79ad57d0ab6580847d155e0b999156df34210899b93a89f17754af3fa1fc0a3",
+    "kai_sprint2_p13_ext1_case_for_support_content_type_evolution": "0506d65b6c6414e81956a6389ed3546afecc39dac458bb500ce5f849bc9f0534",
+    "kai_sprint2_p13_ext1_case_for_support_export_candidate_content_type_evolution": "990298f41742d5254d8bb8e8664071d9ec23bbfa109ffeaec78c3ae90a44f5a6",
+    "kai_sprint2_p13_ext2_board_update_content_type_evolution": "92c3ab5bc4260f99bd106f11d6bc99e09b096777459a7c1c5b4b1c51ff1ae35b",
+    "kai_sprint2_p13_ext2_board_update_export_candidate_content_type_evolution": "9a191365207166f9cf52567e7b69ff771d8b6dee08d3d0cd70f720fa98eae27d",
+    "kai_sprint2_p13_ext3_annual_report_section_content_type_evolution": "55109431f85566cbc374555f1b44932e28849b0259689de84e0b8b9fda604b5d",
+    "kai_sprint2_p13_ext3_annual_report_section_export_candidate_content_type_evolution": "41c95ca6f4bb8f73a2d27fc8e0c3ce23950cc791e811ba10cf87e8f66f7ee5b1",
+    "kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution": "e1b10481eb184caccc76ff202eb896b1bb2145de34eb47e37618fde502dd436f",
+    "kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution": "da24a6add60e71e1f6d6f3a512618955959418d9ad51e9ddbd6124b9a424387b",
+    "kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution": "fae6f57dc47faca3d495039d7d0c7f3a87d42a38eb28278fbf173b416ca58f72",
+    "kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution": "ef73e3824c5615947e7e952c1cf4c31a643ad94280ca9e7536ca741a9b3791c1",
+    "kai_sprint2_package_g_improvement_practices_foundation": "3440564eacdabc3064491656bf4a896f87a416e7f665ec0c17d5b7b476ffad2c",
+    "kai_sprint2_join_1_organization_join_requests": "269a1098949cf34967a92afd242490643f606903c3421add32d3d635e7f7c36d",
+    "kai_sprint2_p1_downstream_recovery_state": "0f7566e965e0d31353690ae2b072e24509735a225b1227d32130e83ae5d49b72",
+    "kai_sprint2_b1a_02_client_admin_sensitivity_review": "b7faf2f7e93e8c9eeb340c5aea6f4072d4fa44c362e20a701299b7471364f150",
+    "kai_sprint2_p2_01m_source_record_count_measurement": "4e99cf6b08d837815aff3b72f7e64659e2f9646076ea121a7005898fdd735e9e",
+    "kai_sprint2_plan_a_organization_internal_release_authority": "118601a503f08db36b57377a3e4762b6ff3461fa4ffe62f802ef46b802001110",
+    "kai_sprint2_plan_a_organization_internal_factual_review_authority": "b0be8053df898025fa21292f571bf3e4600edd36fb8620e1b910a5085a873126",
+    "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method": "aff208bad7b6b85884d1054315f98666438cb87dc5475f1d54f996e0725e9db3",
+    "kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method": "262e9f549c6ebad065479518d705d0358f4421727ca0f11b4baf524626e2777a",
+    "kai_sprint2_p2_01m_worksheet_measurement_identity": "644ca8d6750ce0e05f4dcc035502d758ef181088604667ab9f89ccca0eb90f5d",
+    "kai_sprint2_measurement_mvp_source_derived_measurements": "063acff63347b52316179d69b7088068274d4baceaacd8c482c1352ea9c59be5",
+    "kai_sprint2_measurement_mvp_cross_source_reach": "fe9e02c00c16766db03aaed200c96245e887b3b9f610814001bbceb70a0e89e0",
+    "kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs": "3403162b2d791ee1dfa9774814b14c82bdb42406069737467929269cd24cae22",
+    "kai_sprint2_document_statement_evidence": "9b908cfe87976aa400884d423422eac8e7951fb6586e70039378bd6a424d7412",
+    "kai_sprint2_measurement_calculation_completion": "95a808390fddac40269d089d4e60404a29a32e6c75ab38b4493a4fc8783d8237",
+    "kai_sprint2_measurement_targets": "b4b3dcbc35baf3a05b4245958bac5b38ace8266a422a4864ea7e448d0bf94b95"
+  },
+  "prerequisite": {
+    "signatures": {
+      "cross_source_reconciliation_jobs.column": "290521ad923bf4eee9f4139577341926",
+      "cross_source_reconciliation_jobs.constraint": "a3306714a4465c6a974d8623bd68b2ad",
+      "cross_source_reconciliation_jobs.index": "8c3191b307567581852b80e9f002d8cf",
+      "cross_source_reconciliation_jobs.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "cross_source_reconciliation_jobs.trigger": "EMPTY",
+      "measurement_targets.column": "ABSENT",
+      "measurement_targets.constraint": "ABSENT",
+      "measurement_targets.index": "ABSENT",
+      "measurement_targets.table": "ABSENT",
+      "measurement_targets.trigger": "ABSENT",
+      "source_derived_measurement_sources.column": "df8e7d4fa37d8ad9d2db0dea8e8efbb7",
+      "source_derived_measurement_sources.constraint": "97e1d423fe536d83df441d52a6776b3f",
+      "source_derived_measurement_sources.index": "80896faf6eee166f5fbc2dc2184f3cb3",
+      "source_derived_measurement_sources.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "source_derived_measurement_sources.trigger": "8db8977cadf62171ea0dae5e1be79211",
+      "source_derived_measurements.column": "d1b21bf656f781afc95f9d2d4034a3b7",
+      "source_derived_measurements.constraint": "3120652f8ee12ccd2ef2263004c909ac",
+      "source_derived_measurements.index": "daee8c76099b2dade317cd59a020f539",
+      "source_derived_measurements.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "source_derived_measurements.trigger": "256837dc1dce349ef1e28cc83ad21f81",
+      "function.source_derived_measurement_source_admitted()": "ae5f729177d3d764bb8bc413a84bf592",
+      "function.source_derived_measurement_append_only()": "280e770348d8e059ac3b74e5001b4c3b",
+      "function.gate_a_p0_jsonb_metadata_only(jsonb)": "23aa61b014feed8e38486cae014078e7",
+      "namespace.calculation": "ABSENT",
+      "namespace.targets": "ABSENT",
+      "type.measurement_targets": "ABSENT"
+    },
+    "objects": [
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "attempt_count",
+        "definition": "[\"attempt_count\", \"integer\", true, \"0\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "claim_expires_at",
+        "definition": "[\"claim_expires_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "claim_token",
+        "definition": "[\"claim_token\", \"uuid\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "completed_at",
+        "definition": "[\"completed_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "job_state",
+        "definition": "[\"job_state\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "last_attempt_at",
+        "definition": "[\"last_attempt_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "last_error_code",
+        "definition": "[\"last_error_code\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "mapping",
+        "definition": "[\"mapping\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "measurement_ids",
+        "definition": "[\"measurement_ids\", \"uuid[]\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "next_eligible_at",
+        "definition": "[\"next_eligible_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "primary_profile_canonical_sha256",
+        "definition": "[\"primary_profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "primary_source_version_id",
+        "definition": "[\"primary_source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reconciliation_job_id",
+        "definition": "[\"reconciliation_job_id\", \"uuid\", true, \"gen_random_uuid()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reference_profile_canonical_sha256",
+        "definition": "[\"reference_profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reference_source_version_id",
+        "definition": "[\"reference_source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "request_fingerprint",
+        "definition": "[\"request_fingerprint\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "requested_by",
+        "definition": "[\"requested_by\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "updated_at",
+        "definition": "[\"updated_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_attempt_count_check",
+        "definition": "[\"cross_source_reconciliation_jobs_attempt_count_check\", \"c\", \"CHECK (((attempt_count >= 0) AND (attempt_count <= 3)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_distinct_versions_check",
+        "definition": "[\"cross_source_reconciliation_jobs_distinct_versions_check\", \"c\", \"CHECK ((primary_source_version_id <> reference_source_version_id))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_error_code_check",
+        "definition": "[\"cross_source_reconciliation_jobs_error_code_check\", \"c\", \"CHECK (((last_error_code IS NULL) OR (last_error_code ~ '^[a-z0-9_]{1,64}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_fingerprint_check",
+        "definition": "[\"cross_source_reconciliation_jobs_fingerprint_check\", \"c\", \"CHECK ((request_fingerprint ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_id_org_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_id_org_unique\", \"u\", \"UNIQUE (reconciliation_job_id, organization_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_mapping_check",
+        "definition": "[\"cross_source_reconciliation_jobs_mapping_check\", \"c\", \"CHECK (((jsonb_typeof(mapping) = 'object'::text) AND gate_a_p0_jsonb_metadata_only(mapping)))\", true, false, false, false, null, \"gate_a_p0_jsonb_metadata_only(jsonb)\", null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_measurement_ids_check",
+        "definition": "[\"cross_source_reconciliation_jobs_measurement_ids_check\", \"c\", \"CHECK (((measurement_ids IS NULL) OR ((cardinality(measurement_ids) >= 1) AND (cardinality(measurement_ids) <= 64))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_pkey",
+        "definition": "[\"cross_source_reconciliation_jobs_pkey\", \"p\", \"PRIMARY KEY (reconciliation_job_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_primary_version_fk",
+        "definition": "[\"cross_source_reconciliation_jobs_primary_version_fk\", \"f\", \"FOREIGN KEY (primary_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_profile_sha_check",
+        "definition": "[\"cross_source_reconciliation_jobs_profile_sha_check\", \"c\", \"CHECK (((primary_profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text) AND (reference_profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_reference_version_fk",
+        "definition": "[\"cross_source_reconciliation_jobs_reference_version_fk\", \"f\", \"FOREIGN KEY (reference_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_request_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_request_unique\", \"u\", \"UNIQUE (organization_id, request_fingerprint)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_state_check",
+        "definition": "[\"cross_source_reconciliation_jobs_state_check\", \"c\", \"CHECK ((job_state = ANY (ARRAY['queued'::text, 'in_progress'::text, 'retry_scheduled'::text, 'succeeded'::text, 'failed'::text, 'exhausted'::text])))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_state_fact_consistency_check",
+        "definition": "[\"cross_source_reconciliation_jobs_state_fact_consistency_check\", \"c\", \"CHECK ((((job_state = 'queued'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND (attempt_count = 0)) OR ((job_state = 'in_progress'::text) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL) AND (last_attempt_at IS NOT NULL) AND (next_eligible_at IS NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3))) OR ((job_state = 'retry_scheduled'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_attempt_at IS NOT NULL) AND (next_eligible_at IS NOT NULL) AND (last_error_code IS NOT NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND ((attempt_count >= 1) AND (attempt_count <= 2))) OR ((job_state = 'succeeded'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NULL) AND (measurement_ids IS NOT NULL) AND (completed_at IS NOT NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3))) OR ((job_state = ANY (ARRAY['failed'::text, 'exhausted'::text])) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NOT NULL) AND (measurement_ids IS NULL) AND (completed_at IS NOT NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3)) AND ((job_state = 'failed'::text) OR (attempt_count = 3)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_id_org_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_id_org_unique\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_id_org_unique ON kai.cross_source_reconciliation_jobs USING btree (reconciliation_job_id, organization_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_pkey",
+        "definition": "[\"cross_source_reconciliation_jobs_pkey\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_pkey ON kai.cross_source_reconciliation_jobs USING btree (reconciliation_job_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_request_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_request_unique\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_request_unique ON kai.cross_source_reconciliation_jobs USING btree (organization_id, request_fingerprint)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "ix_cross_source_reconciliation_jobs_due",
+        "definition": "[\"ix_cross_source_reconciliation_jobs_due\", \"CREATE INDEX ix_cross_source_reconciliation_jobs_due ON kai.cross_source_reconciliation_jobs USING btree (job_state, next_eligible_at, claim_expires_at)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "ix_cross_source_reconciliation_jobs_tenant_created",
+        "definition": "[\"ix_cross_source_reconciliation_jobs_tenant_created\", \"CREATE INDEX ix_cross_source_reconciliation_jobs_tenant_created ON kai.cross_source_reconciliation_jobs USING btree (organization_id, created_at DESC)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "table",
+        "identity": "cross_source_reconciliation_jobs",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "field_keys",
+        "definition": "[\"field_keys\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "profile_canonical_sha256",
+        "definition": "[\"profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_derived_measurement_id",
+        "definition": "[\"source_derived_measurement_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_role",
+        "definition": "[\"source_role\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_version_id",
+        "definition": "[\"source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_field_keys_check",
+        "definition": "[\"source_derived_measurement_sources_field_keys_check\", \"c\", \"CHECK (((jsonb_typeof(field_keys) = 'array'::text) AND ((jsonb_array_length(field_keys) >= 1) AND (jsonb_array_length(field_keys) <= 8))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_measurement_fk",
+        "definition": "[\"source_derived_measurement_sources_measurement_fk\", \"f\", \"FOREIGN KEY (source_derived_measurement_id, organization_id) REFERENCES source_derived_measurements(source_derived_measurement_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_derived_measurements\", null, \"[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_pkey",
+        "definition": "[\"source_derived_measurement_sources_pkey\", \"p\", \"PRIMARY KEY (source_derived_measurement_id, source_role)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_profile_sha_check",
+        "definition": "[\"source_derived_measurement_sources_profile_sha_check\", \"c\", \"CHECK ((profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_role_check",
+        "definition": "[\"source_derived_measurement_sources_role_check\", \"c\", \"CHECK ((source_role = ANY (ARRAY['primary'::text, 'reference'::text])))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_source_version_fk",
+        "definition": "[\"source_derived_measurement_sources_source_version_fk\", \"f\", \"FOREIGN KEY (source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_version_unique",
+        "definition": "[\"source_derived_measurement_sources_version_unique\", \"u\", \"UNIQUE (source_derived_measurement_id, source_version_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "idx_source_derived_measurement_sources_version",
+        "definition": "[\"idx_source_derived_measurement_sources_version\", \"CREATE INDEX idx_source_derived_measurement_sources_version ON kai.source_derived_measurement_sources USING btree (organization_id, source_version_id)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "source_derived_measurement_sources_pkey",
+        "definition": "[\"source_derived_measurement_sources_pkey\", \"CREATE UNIQUE INDEX source_derived_measurement_sources_pkey ON kai.source_derived_measurement_sources USING btree (source_derived_measurement_id, source_role)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "source_derived_measurement_sources_version_unique",
+        "definition": "[\"source_derived_measurement_sources_version_unique\", \"CREATE UNIQUE INDEX source_derived_measurement_sources_version_unique ON kai.source_derived_measurement_sources USING btree (source_derived_measurement_id, source_version_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "table",
+        "identity": "source_derived_measurement_sources",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurement_sources_admitted",
+        "definition": "[\"trg_source_derived_measurement_sources_admitted\", \"CREATE TRIGGER trg_source_derived_measurement_sources_admitted BEFORE INSERT ON kai.source_derived_measurement_sources FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_source_admitted()\", \"O\", \"source_derived_measurement_source_admitted()\", false, false]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurement_sources_append_only",
+        "definition": "[\"trg_source_derived_measurement_sources_append_only\", \"CREATE TRIGGER trg_source_derived_measurement_sources_append_only BEFORE DELETE OR UPDATE ON kai.source_derived_measurement_sources FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_append_only()\", \"O\", \"source_derived_measurement_append_only()\", false, false]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "basis_version",
+        "definition": "[\"basis_version\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "calculation_method",
+        "definition": "[\"calculation_method\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "component_counts",
+        "definition": "[\"component_counts\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_by",
+        "definition": "[\"created_by\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_by_type",
+        "definition": "[\"created_by_type\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "definition",
+        "definition": "[\"definition\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "denominator",
+        "definition": "[\"denominator\", \"bigint\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "exclusions",
+        "definition": "[\"exclusions\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "field_keys",
+        "definition": "[\"field_keys\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measured_value",
+        "definition": "[\"measured_value\", \"bigint\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measurement_family",
+        "definition": "[\"measurement_family\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measurement_key",
+        "definition": "[\"measurement_key\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "numerator",
+        "definition": "[\"numerator\", \"bigint\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "percentage",
+        "definition": "[\"percentage\", \"numeric(5,2)\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "profile_canonical_sha256",
+        "definition": "[\"profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "row_locators",
+        "definition": "[\"row_locators\", \"jsonb\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "source_derived_measurement_id",
+        "definition": "[\"source_derived_measurement_id\", \"uuid\", true, \"gen_random_uuid()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "source_version_id",
+        "definition": "[\"source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "worksheet_key",
+        "definition": "[\"worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_arithmetic_check",
+        "definition": "[\"source_derived_measurements_arithmetic_check\", \"c\", \"CHECK (((measured_value >= 0) AND (numerator = measured_value) AND (((measurement_family = 'tabular_count'::text) AND (denominator IS NULL) AND (percentage IS NULL) AND (measured_value <= ((component_counts ->> 'matching_record_count'::text))::bigint)) OR ((measurement_family = ANY (ARRAY['paired_outcome_change'::text, 'tabular_rate'::text])) AND (denominator > 0) AND (numerator <= denominator) AND (percentage = round((((numerator)::numeric * 100.0) / (denominator)::numeric), 2))) OR ((measurement_family = 'cross_source_reach'::text) AND (denominator IS NULL) AND (percentage IS NULL) AND (jsonb_typeof((definition -> 'measured_component'::text)) = 'string'::text) AND (measured_value = ((component_counts ->> (definition ->> 'measured_component'::text)))::bigint) AND (((component_counts ->> 'excess_copy_record_count'::text))::bigint = (((component_counts ->> 'duplicate_member_record_count'::text))::bigint - ((component_counts ->> 'duplicate_group_count'::text))::bigint)) AND (((component_counts ->> 'distinct_event_count'::text))::bigint = ((((component_counts ->> 'physical_record_count'::text))::bigint - ((component_counts ->> 'blank_event_identifier_record_count'::text))::bigint) - ((component_counts ->> 'excess_copy_record_count'::text))::bigint)) AND (((component_counts ->> 'consistent_event_count'::text))::bigint = (((component_counts ->> 'distinct_event_count'::text))::bigint - ((component_counts ->> 'conflicting_event_identity_count'::text))::bigint)) AND (((component_counts ->> 'completed_event_count'::text))::bigint <= ((component_counts ->> 'consistent_event_count'::text))::bigint) AND (((component_counts ->> 'in_period_completed_event_count'::text))::bigint = ((((component_counts ->> 'completed_event_count'::text))::bigint - ((component_counts ->> 'completed_without_date_count'::text))::bigint) - ((component_counts ->> 'completed_outside_period_count'::text))::bigint)) AND (((component_counts ->> 'eligible_encounter_count'::text))::bigint = ((((component_counts ->> 'in_period_completed_event_count'::text))::bigint - ((component_counts ->> 'blank_participant_identifier_event_count'::text))::bigint) - ((component_counts ->> 'unmatched_event_count'::text))::bigint)) AND (((component_counts ->> 'distinct_person_count'::text))::bigint <= ((component_counts ->> 'eligible_encounter_count'::text))::bigint) AND (((component_counts ->> 'multi_group_person_count'::text))::bigint <= ((component_counts ->> 'distinct_person_count'::text))::bigint)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_created_by_type_check",
+        "definition": "[\"source_derived_measurements_created_by_type_check\", \"c\", \"CHECK ((created_by_type = 'human'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_id_org_unique",
+        "definition": "[\"source_derived_measurements_id_org_unique\", \"u\", \"UNIQUE (source_derived_measurement_id, organization_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_key_check",
+        "definition": "[\"source_derived_measurements_key_check\", \"c\", \"CHECK ((measurement_key ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_method_family_check",
+        "definition": "[\"source_derived_measurements_method_family_check\", \"c\", \"CHECK ((((measurement_family = 'paired_outcome_change'::text) AND (calculation_method = 'p1_xlsx_paired_baseline_followup_numeric_change_v1'::text) AND (basis_version = 'kai_xlsx_paired_outcome_basis_v1'::text) AND (worksheet_key IS NOT NULL)) OR ((measurement_family = 'tabular_count'::text) AND (calculation_method = ANY (ARRAY['kai_tabular_conditional_record_count_v1'::text, 'kai_tabular_conditional_distinct_key_count_v1'::text])) AND (basis_version = 'kai_tabular_measurement_basis_v1'::text)) OR ((measurement_family = 'tabular_rate'::text) AND (calculation_method = 'kai_tabular_conditional_record_rate_v1'::text) AND (basis_version = 'kai_tabular_measurement_basis_v1'::text)) OR ((measurement_family = 'cross_source_reach'::text) AND (calculation_method = 'kai_cross_source_linked_reach_v1'::text) AND (basis_version = 'kai_cross_source_reconciliation_v1'::text) AND (worksheet_key IS NULL))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_paired_counts_check",
+        "definition": "[\"source_derived_measurements_paired_counts_check\", \"c\", \"CHECK (((measurement_family <> 'paired_outcome_change'::text) OR ((((component_counts ->> 'increased_count'::text))::bigint = numerator) AND (((component_counts ->> 'comparable_pair_count'::text))::bigint = denominator) AND (((((component_counts ->> 'increased_count'::text))::bigint + ((component_counts ->> 'unchanged_count'::text))::bigint) + ((component_counts ->> 'decreased_count'::text))::bigint) = denominator) AND (((component_counts ->> 'participant_count'::text))::bigint = (denominator + ((component_counts ->> 'excluded_participant_count'::text))::bigint)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_pkey",
+        "definition": "[\"source_derived_measurements_pkey\", \"p\", \"PRIMARY KEY (source_derived_measurement_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_profile_sha_check",
+        "definition": "[\"source_derived_measurements_profile_sha_check\", \"c\", \"CHECK ((profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_rate_counts_check",
+        "definition": "[\"source_derived_measurements_rate_counts_check\", \"c\", \"CHECK (((measurement_family <> 'tabular_rate'::text) OR ((((component_counts ->> 'population_record_count'::text))::bigint = denominator) AND (((component_counts ->> 'numerator_record_count'::text))::bigint = numerator) AND (((component_counts ->> 'other_population_record_count'::text))::bigint = (denominator - numerator)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_shape_check",
+        "definition": "[\"source_derived_measurements_shape_check\", \"c\", \"CHECK (((jsonb_typeof(definition) = 'object'::text) AND (jsonb_typeof(field_keys) = 'array'::text) AND ((jsonb_array_length(field_keys) >= 0) AND (jsonb_array_length(field_keys) <= 8)) AND (jsonb_typeof(component_counts) = 'object'::text) AND (jsonb_typeof(exclusions) = 'object'::text) AND ((row_locators IS NULL) OR (jsonb_typeof(row_locators) = 'object'::text))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_source_version_fk",
+        "definition": "[\"source_derived_measurements_source_version_fk\", \"f\", \"FOREIGN KEY (source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_worksheet_key_check",
+        "definition": "[\"source_derived_measurements_worksheet_key_check\", \"c\", \"CHECK (((worksheet_key IS NULL) OR (worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_id_org_unique",
+        "definition": "[\"source_derived_measurements_id_org_unique\", \"CREATE UNIQUE INDEX source_derived_measurements_id_org_unique ON kai.source_derived_measurements USING btree (source_derived_measurement_id, organization_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_identity_unique",
+        "definition": "[\"source_derived_measurements_identity_unique\", \"CREATE UNIQUE INDEX source_derived_measurements_identity_unique ON kai.source_derived_measurements USING btree (organization_id, source_version_id, COALESCE(worksheet_key, ''::text), measurement_key)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_pkey",
+        "definition": "[\"source_derived_measurements_pkey\", \"CREATE UNIQUE INDEX source_derived_measurements_pkey ON kai.source_derived_measurements USING btree (source_derived_measurement_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "table",
+        "identity": "source_derived_measurements",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurements_append_only",
+        "definition": "[\"trg_source_derived_measurements_append_only\", \"CREATE TRIGGER trg_source_derived_measurements_append_only BEFORE DELETE OR UPDATE ON kai.source_derived_measurements FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_append_only()\", \"O\", \"source_derived_measurement_append_only()\", false, false]"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "gate_a_p0_jsonb_metadata_only(jsonb)",
+        "definition": "CREATE OR REPLACE FUNCTION kai.gate_a_p0_jsonb_metadata_only(value jsonb)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\n  SELECT value::text !~* '(raw_bytes|raw_text|raw_content|prompt|signed_url|credential|secret|token|password|private_path|pii|email|phone|address|-----BEGIN|postgres://|postgresql://|mysql://|mongodb://|https?://|/Users/|/private/|/var/|/tmp/|AKIA[0-9A-Z]{16}|[A-Za-z0-9+/]{80,}={0,2})';\n$function$\n"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "source_derived_measurement_append_only()",
+        "definition": "CREATE OR REPLACE FUNCTION kai.source_derived_measurement_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  RAISE EXCEPTION 'source-derived measurement records are append-only (%)', TG_TABLE_NAME\n    USING ERRCODE = 'check_violation';\nEND;\n$function$\n"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "source_derived_measurement_source_admitted()",
+        "definition": "CREATE OR REPLACE FUNCTION kai.source_derived_measurement_source_admitted()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  measurement record;\nBEGIN\n  SELECT measurement_family, source_version_id, profile_canonical_sha256\n    INTO measurement\n    FROM kai.source_derived_measurements\n   WHERE source_derived_measurement_id = NEW.source_derived_measurement_id\n     AND organization_id = NEW.organization_id;\n  IF NOT FOUND OR measurement.measurement_family <> 'cross_source_reach' THEN\n    RAISE EXCEPTION 'a contributing source is recorded only for a cross-source measurement'\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (NEW.source_role = 'primary') <> (NEW.source_version_id = measurement.source_version_id)\n    OR (NEW.source_role = 'primary' AND NEW.profile_canonical_sha256 <> measurement.profile_canonical_sha256) THEN\n    RAISE EXCEPTION 'the primary contributing source is the measurement''s own version and profile; a reference source is another version'\n      USING ERRCODE = 'check_violation';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      }
+    ]
+  },
+  "completed": {
+    "signatures": {
+      "cross_source_reconciliation_jobs.column": "619285957aad9d54d4bc7d5609d4b0a8",
+      "cross_source_reconciliation_jobs.constraint": "03a92bd2495f88c95f3cad8b95cfd346",
+      "cross_source_reconciliation_jobs.index": "8c3191b307567581852b80e9f002d8cf",
+      "cross_source_reconciliation_jobs.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "cross_source_reconciliation_jobs.trigger": "EMPTY",
+      "measurement_targets.column": "a2ef86cd324a566fab601c71713aa53d",
+      "measurement_targets.constraint": "cfa172e001ffcd0058155232937dfac1",
+      "measurement_targets.index": "02ac62eda2384a81bc6c6a8fa312e1ee",
+      "measurement_targets.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "measurement_targets.trigger": "01e1be33ad5aa9442b1c5fc9400b1a86",
+      "source_derived_measurement_sources.column": "5c792069b18b8198878035146ab402ba",
+      "source_derived_measurement_sources.constraint": "f353f0a283498b318aee82813a6dee72",
+      "source_derived_measurement_sources.index": "e8bea896abd3befc66d07fa6f807887c",
+      "source_derived_measurement_sources.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "source_derived_measurement_sources.trigger": "8db8977cadf62171ea0dae5e1be79211",
+      "source_derived_measurements.column": "d1b21bf656f781afc95f9d2d4034a3b7",
+      "source_derived_measurements.constraint": "03d4d4a2971d8c8c0e642d5ba803d87d",
+      "source_derived_measurements.index": "daee8c76099b2dade317cd59a020f539",
+      "source_derived_measurements.table": "090c1d0c464674ce48dac41eb7697c7a",
+      "source_derived_measurements.trigger": "256837dc1dce349ef1e28cc83ad21f81",
+      "function.source_derived_measurement_source_admitted()": "8839b1a9c8e73b07d48bb6ae4cdb83b3",
+      "function.source_derived_measurement_append_only()": "280e770348d8e059ac3b74e5001b4c3b",
+      "function.gate_a_p0_jsonb_metadata_only(jsonb)": "23aa61b014feed8e38486cae014078e7",
+      "namespace.calculation": "e3a4c89299c8c92a67ccf46bc088b7ca",
+      "namespace.targets": "32f832b6ea840da80ae49e500979137a",
+      "type.measurement_targets": "036d340669cec74ca34a1b52ca4f92c5"
+    },
+    "objects": [
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "attempt_count",
+        "definition": "[\"attempt_count\", \"integer\", true, \"0\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "claim_expires_at",
+        "definition": "[\"claim_expires_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "claim_token",
+        "definition": "[\"claim_token\", \"uuid\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "completed_at",
+        "definition": "[\"completed_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "interpretation",
+        "definition": "[\"interpretation\", \"jsonb\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "job_kind",
+        "definition": "[\"job_kind\", \"text\", true, \"'cross_source_reach'::text\", \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "job_state",
+        "definition": "[\"job_state\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "last_attempt_at",
+        "definition": "[\"last_attempt_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "last_error_code",
+        "definition": "[\"last_error_code\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "mapping",
+        "definition": "[\"mapping\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "measurement_ids",
+        "definition": "[\"measurement_ids\", \"uuid[]\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "next_eligible_at",
+        "definition": "[\"next_eligible_at\", \"timestamp with time zone\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "primary_profile_canonical_sha256",
+        "definition": "[\"primary_profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "primary_source_version_id",
+        "definition": "[\"primary_source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "primary_worksheet_key",
+        "definition": "[\"primary_worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reconciliation_job_id",
+        "definition": "[\"reconciliation_job_id\", \"uuid\", true, \"gen_random_uuid()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reference_profile_canonical_sha256",
+        "definition": "[\"reference_profile_canonical_sha256\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reference_source_version_id",
+        "definition": "[\"reference_source_version_id\", \"uuid\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "reference_worksheet_key",
+        "definition": "[\"reference_worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "request_fingerprint",
+        "definition": "[\"request_fingerprint\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "requested_by",
+        "definition": "[\"requested_by\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "column",
+        "identity": "updated_at",
+        "definition": "[\"updated_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_attempt_count_check",
+        "definition": "[\"cross_source_reconciliation_jobs_attempt_count_check\", \"c\", \"CHECK (((attempt_count >= 0) AND (attempt_count <= 3)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_error_code_check",
+        "definition": "[\"cross_source_reconciliation_jobs_error_code_check\", \"c\", \"CHECK (((last_error_code IS NULL) OR (last_error_code ~ '^[a-z0-9_]{1,64}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_fingerprint_check",
+        "definition": "[\"cross_source_reconciliation_jobs_fingerprint_check\", \"c\", \"CHECK ((request_fingerprint ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_id_org_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_id_org_unique\", \"u\", \"UNIQUE (reconciliation_job_id, organization_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_interpretation_check",
+        "definition": "[\"cross_source_reconciliation_jobs_interpretation_check\", \"c\", \"CHECK (((interpretation IS NULL) OR (jsonb_typeof(interpretation) = 'object'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_kind_check",
+        "definition": "[\"cross_source_reconciliation_jobs_kind_check\", \"c\", \"CHECK ((((job_kind = 'cross_source_reach'::text) AND (reference_source_version_id IS NOT NULL) AND (reference_profile_canonical_sha256 IS NOT NULL) AND (interpretation IS NULL) AND ((primary_source_version_id <> reference_source_version_id) OR ((primary_worksheet_key IS NOT NULL) AND (reference_worksheet_key IS NOT NULL) AND (primary_worksheet_key <> reference_worksheet_key)))) OR ((job_kind = 'tabular_exact_period'::text) AND (reference_source_version_id IS NULL) AND (reference_profile_canonical_sha256 IS NULL) AND (reference_worksheet_key IS NULL))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_mapping_check",
+        "definition": "[\"cross_source_reconciliation_jobs_mapping_check\", \"c\", \"CHECK (((jsonb_typeof(mapping) = 'object'::text) AND gate_a_p0_jsonb_metadata_only(mapping)))\", true, false, false, false, null, \"gate_a_p0_jsonb_metadata_only(jsonb)\", null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_measurement_ids_check",
+        "definition": "[\"cross_source_reconciliation_jobs_measurement_ids_check\", \"c\", \"CHECK (((measurement_ids IS NULL) OR ((cardinality(measurement_ids) >= 1) AND (cardinality(measurement_ids) <= 64))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_pkey",
+        "definition": "[\"cross_source_reconciliation_jobs_pkey\", \"p\", \"PRIMARY KEY (reconciliation_job_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_primary_version_fk",
+        "definition": "[\"cross_source_reconciliation_jobs_primary_version_fk\", \"f\", \"FOREIGN KEY (primary_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_profile_sha_check",
+        "definition": "[\"cross_source_reconciliation_jobs_profile_sha_check\", \"c\", \"CHECK (((primary_profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text) AND ((reference_profile_canonical_sha256 IS NULL) OR (reference_profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_reference_version_fk",
+        "definition": "[\"cross_source_reconciliation_jobs_reference_version_fk\", \"f\", \"FOREIGN KEY (reference_source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"cross_source_reconciliation_jobs\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_request_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_request_unique\", \"u\", \"UNIQUE (organization_id, request_fingerprint)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_state_check",
+        "definition": "[\"cross_source_reconciliation_jobs_state_check\", \"c\", \"CHECK ((job_state = ANY (ARRAY['queued'::text, 'in_progress'::text, 'retry_scheduled'::text, 'succeeded'::text, 'failed'::text, 'exhausted'::text])))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_state_fact_consistency_check",
+        "definition": "[\"cross_source_reconciliation_jobs_state_fact_consistency_check\", \"c\", \"CHECK ((((job_state = 'queued'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND (attempt_count = 0)) OR ((job_state = 'in_progress'::text) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL) AND (last_attempt_at IS NOT NULL) AND (next_eligible_at IS NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3))) OR ((job_state = 'retry_scheduled'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_attempt_at IS NOT NULL) AND (next_eligible_at IS NOT NULL) AND (last_error_code IS NOT NULL) AND (measurement_ids IS NULL) AND (completed_at IS NULL) AND ((attempt_count >= 1) AND (attempt_count <= 2))) OR ((job_state = 'succeeded'::text) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NULL) AND (measurement_ids IS NOT NULL) AND (completed_at IS NOT NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3))) OR ((job_state = ANY (ARRAY['failed'::text, 'exhausted'::text])) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (next_eligible_at IS NULL) AND (last_error_code IS NOT NULL) AND (measurement_ids IS NULL) AND (completed_at IS NOT NULL) AND ((attempt_count >= 1) AND (attempt_count <= 3)) AND ((job_state = 'failed'::text) OR (attempt_count = 3)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "constraint",
+        "identity": "cross_source_reconciliation_jobs_worksheet_check",
+        "definition": "[\"cross_source_reconciliation_jobs_worksheet_check\", \"c\", \"CHECK ((((primary_worksheet_key IS NULL) OR (primary_worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text)) AND ((reference_worksheet_key IS NULL) OR (reference_worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_id_org_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_id_org_unique\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_id_org_unique ON kai.cross_source_reconciliation_jobs USING btree (reconciliation_job_id, organization_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_pkey",
+        "definition": "[\"cross_source_reconciliation_jobs_pkey\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_pkey ON kai.cross_source_reconciliation_jobs USING btree (reconciliation_job_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "cross_source_reconciliation_jobs_request_unique",
+        "definition": "[\"cross_source_reconciliation_jobs_request_unique\", \"CREATE UNIQUE INDEX cross_source_reconciliation_jobs_request_unique ON kai.cross_source_reconciliation_jobs USING btree (organization_id, request_fingerprint)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "ix_cross_source_reconciliation_jobs_due",
+        "definition": "[\"ix_cross_source_reconciliation_jobs_due\", \"CREATE INDEX ix_cross_source_reconciliation_jobs_due ON kai.cross_source_reconciliation_jobs USING btree (job_state, next_eligible_at, claim_expires_at)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "index",
+        "identity": "ix_cross_source_reconciliation_jobs_tenant_created",
+        "definition": "[\"ix_cross_source_reconciliation_jobs_tenant_created\", \"CREATE INDEX ix_cross_source_reconciliation_jobs_tenant_created ON kai.cross_source_reconciliation_jobs USING btree (organization_id, created_at DESC)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "cross_source_reconciliation_jobs",
+        "kind": "table",
+        "identity": "cross_source_reconciliation_jobs",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "comparison",
+        "definition": "[\"comparison\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "created_by",
+        "definition": "[\"created_by\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "created_by_type",
+        "definition": "[\"created_by_type\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "engagement_id",
+        "definition": "[\"engagement_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "measurement_family",
+        "definition": "[\"measurement_family\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "measurement_key",
+        "definition": "[\"measurement_key\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "measurement_target_id",
+        "definition": "[\"measurement_target_id\", \"uuid\", true, \"gen_random_uuid()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "set_on_measurement_id",
+        "definition": "[\"set_on_measurement_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "source_id",
+        "definition": "[\"source_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "supersedes_target_id",
+        "definition": "[\"supersedes_target_id\", \"uuid\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "target_unit",
+        "definition": "[\"target_unit\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "target_value",
+        "definition": "[\"target_value\", \"numeric(14,2)\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "column",
+        "identity": "worksheet_key",
+        "definition": "[\"worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_comparison_check",
+        "definition": "[\"measurement_targets_comparison_check\", \"c\", \"CHECK ((comparison = ANY (ARRAY['at_least'::text, 'at_most'::text])))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_created_by_type_check",
+        "definition": "[\"measurement_targets_created_by_type_check\", \"c\", \"CHECK ((created_by_type = 'human'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_id_org_unique",
+        "definition": "[\"measurement_targets_id_org_unique\", \"u\", \"UNIQUE (measurement_target_id, organization_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_key_check",
+        "definition": "[\"measurement_targets_key_check\", \"c\", \"CHECK ((measurement_key ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_measurement_fk",
+        "definition": "[\"measurement_targets_measurement_fk\", \"f\", \"FOREIGN KEY (set_on_measurement_id, organization_id) REFERENCES source_derived_measurements(source_derived_measurement_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_derived_measurements\", null, \"[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_not_self_check",
+        "definition": "[\"measurement_targets_not_self_check\", \"c\", \"CHECK (((supersedes_target_id IS NULL) OR (supersedes_target_id <> measurement_target_id)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_pkey",
+        "definition": "[\"measurement_targets_pkey\", \"p\", \"PRIMARY KEY (measurement_target_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_supersedes_fk",
+        "definition": "[\"measurement_targets_supersedes_fk\", \"f\", \"FOREIGN KEY (supersedes_target_id, organization_id) REFERENCES measurement_targets(measurement_target_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"measurement_targets\", null, \"[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"measurement_targets\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_unit_value_check",
+        "definition": "[\"measurement_targets_unit_value_check\", \"c\", \"CHECK ((((target_unit = 'count'::text) AND (measurement_family = ANY (ARRAY['tabular_count'::text, 'cross_source_reach'::text])) AND (target_value >= (0)::numeric) AND (target_value = trunc(target_value))) OR ((target_unit = 'percent'::text) AND (measurement_family = ANY (ARRAY['tabular_rate'::text, 'paired_outcome_change'::text])) AND ((target_value >= (0)::numeric) AND (target_value <= (100)::numeric)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "constraint",
+        "identity": "measurement_targets_worksheet_key_check",
+        "definition": "[\"measurement_targets_worksheet_key_check\", \"c\", \"CHECK (((worksheet_key IS NULL) OR (worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "index",
+        "identity": "ix_measurement_targets_identity",
+        "definition": "[\"ix_measurement_targets_identity\", \"CREATE INDEX ix_measurement_targets_identity ON kai.measurement_targets USING btree (organization_id, source_id, measurement_key)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "index",
+        "identity": "measurement_targets_id_org_unique",
+        "definition": "[\"measurement_targets_id_org_unique\", \"CREATE UNIQUE INDEX measurement_targets_id_org_unique ON kai.measurement_targets USING btree (measurement_target_id, organization_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "index",
+        "identity": "measurement_targets_identity_root_unique",
+        "definition": "[\"measurement_targets_identity_root_unique\", \"CREATE UNIQUE INDEX measurement_targets_identity_root_unique ON kai.measurement_targets USING btree (organization_id, engagement_id, source_id, COALESCE(worksheet_key, ''::text), measurement_key) WHERE (supersedes_target_id IS NULL)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "index",
+        "identity": "measurement_targets_pkey",
+        "definition": "[\"measurement_targets_pkey\", \"CREATE UNIQUE INDEX measurement_targets_pkey ON kai.measurement_targets USING btree (measurement_target_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "index",
+        "identity": "measurement_targets_single_successor_unique",
+        "definition": "[\"measurement_targets_single_successor_unique\", \"CREATE UNIQUE INDEX measurement_targets_single_successor_unique ON kai.measurement_targets USING btree (organization_id, supersedes_target_id) WHERE (supersedes_target_id IS NOT NULL)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "table",
+        "identity": "measurement_targets",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "measurement_targets",
+        "kind": "trigger",
+        "identity": "trg_measurement_targets_append_only",
+        "definition": "[\"trg_measurement_targets_append_only\", \"CREATE TRIGGER trg_measurement_targets_append_only BEFORE DELETE OR UPDATE ON kai.measurement_targets FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_append_only()\", \"O\", \"source_derived_measurement_append_only()\", false, false]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "field_keys",
+        "definition": "[\"field_keys\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "profile_canonical_sha256",
+        "definition": "[\"profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_derived_measurement_id",
+        "definition": "[\"source_derived_measurement_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_role",
+        "definition": "[\"source_role\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "source_version_id",
+        "definition": "[\"source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "column",
+        "identity": "worksheet_key",
+        "definition": "[\"worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_field_keys_check",
+        "definition": "[\"source_derived_measurement_sources_field_keys_check\", \"c\", \"CHECK (((jsonb_typeof(field_keys) = 'array'::text) AND ((jsonb_array_length(field_keys) >= 1) AND (jsonb_array_length(field_keys) <= 8))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_measurement_fk",
+        "definition": "[\"source_derived_measurement_sources_measurement_fk\", \"f\", \"FOREIGN KEY (source_derived_measurement_id, organization_id) REFERENCES source_derived_measurements(source_derived_measurement_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_derived_measurements\", null, \"[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_pkey",
+        "definition": "[\"source_derived_measurement_sources_pkey\", \"p\", \"PRIMARY KEY (source_derived_measurement_id, source_role)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_profile_sha_check",
+        "definition": "[\"source_derived_measurement_sources_profile_sha_check\", \"c\", \"CHECK ((profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_role_check",
+        "definition": "[\"source_derived_measurement_sources_role_check\", \"c\", \"CHECK ((source_role = ANY (ARRAY['primary'::text, 'reference'::text])))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_source_version_fk",
+        "definition": "[\"source_derived_measurement_sources_source_version_fk\", \"f\", \"FOREIGN KEY (source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurement_sources\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "constraint",
+        "identity": "source_derived_measurement_sources_worksheet_key_check",
+        "definition": "[\"source_derived_measurement_sources_worksheet_key_check\", \"c\", \"CHECK (((worksheet_key IS NULL) OR (worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "idx_source_derived_measurement_sources_version",
+        "definition": "[\"idx_source_derived_measurement_sources_version\", \"CREATE INDEX idx_source_derived_measurement_sources_version ON kai.source_derived_measurement_sources USING btree (organization_id, source_version_id)\", true, true, true, false, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "source_derived_measurement_sources_pkey",
+        "definition": "[\"source_derived_measurement_sources_pkey\", \"CREATE UNIQUE INDEX source_derived_measurement_sources_pkey ON kai.source_derived_measurement_sources USING btree (source_derived_measurement_id, source_role)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "index",
+        "identity": "source_derived_measurement_sources_version_worksheet_unique",
+        "definition": "[\"source_derived_measurement_sources_version_worksheet_unique\", \"CREATE UNIQUE INDEX source_derived_measurement_sources_version_worksheet_unique ON kai.source_derived_measurement_sources USING btree (source_derived_measurement_id, source_version_id, COALESCE(worksheet_key, ''::text))\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "table",
+        "identity": "source_derived_measurement_sources",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurement_sources_admitted",
+        "definition": "[\"trg_source_derived_measurement_sources_admitted\", \"CREATE TRIGGER trg_source_derived_measurement_sources_admitted BEFORE INSERT ON kai.source_derived_measurement_sources FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_source_admitted()\", \"O\", \"source_derived_measurement_source_admitted()\", false, false]"
+      },
+      {
+        "name": "source_derived_measurement_sources",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurement_sources_append_only",
+        "definition": "[\"trg_source_derived_measurement_sources_append_only\", \"CREATE TRIGGER trg_source_derived_measurement_sources_append_only BEFORE DELETE OR UPDATE ON kai.source_derived_measurement_sources FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_append_only()\", \"O\", \"source_derived_measurement_append_only()\", false, false]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "basis_version",
+        "definition": "[\"basis_version\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "calculation_method",
+        "definition": "[\"calculation_method\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "component_counts",
+        "definition": "[\"component_counts\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_at",
+        "definition": "[\"created_at\", \"timestamp with time zone\", true, \"now()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_by",
+        "definition": "[\"created_by\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "created_by_type",
+        "definition": "[\"created_by_type\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "definition",
+        "definition": "[\"definition\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "denominator",
+        "definition": "[\"denominator\", \"bigint\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "exclusions",
+        "definition": "[\"exclusions\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "field_keys",
+        "definition": "[\"field_keys\", \"jsonb\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measured_value",
+        "definition": "[\"measured_value\", \"bigint\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measurement_family",
+        "definition": "[\"measurement_family\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "measurement_key",
+        "definition": "[\"measurement_key\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "numerator",
+        "definition": "[\"numerator\", \"bigint\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "organization_id",
+        "definition": "[\"organization_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "percentage",
+        "definition": "[\"percentage\", \"numeric(5,2)\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "profile_canonical_sha256",
+        "definition": "[\"profile_canonical_sha256\", \"text\", true, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "row_locators",
+        "definition": "[\"row_locators\", \"jsonb\", false, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "source_derived_measurement_id",
+        "definition": "[\"source_derived_measurement_id\", \"uuid\", true, \"gen_random_uuid()\", \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "source_version_id",
+        "definition": "[\"source_version_id\", \"uuid\", true, null, \"\", \"\", \"-\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "column",
+        "identity": "worksheet_key",
+        "definition": "[\"worksheet_key\", \"text\", false, null, \"\", \"\", \"\\\"default\\\"\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_arithmetic_check",
+        "definition": "[\"source_derived_measurements_arithmetic_check\", \"c\", \"CHECK (((measured_value >= 0) AND (numerator = measured_value) AND (((measurement_family = 'tabular_count'::text) AND (denominator IS NULL) AND (percentage IS NULL) AND (measured_value <= ((component_counts ->> 'matching_record_count'::text))::bigint)) OR ((measurement_family = ANY (ARRAY['paired_outcome_change'::text, 'tabular_rate'::text])) AND (denominator > 0) AND (numerator <= denominator) AND (percentage = round((((numerator)::numeric * 100.0) / (denominator)::numeric), 2))) OR ((measurement_family = 'cross_source_reach'::text) AND (denominator IS NULL) AND (percentage IS NULL) AND (jsonb_typeof((definition -> 'measured_component'::text)) = 'string'::text) AND (measured_value = ((component_counts ->> (definition ->> 'measured_component'::text)))::bigint) AND (((component_counts ->> 'excess_copy_record_count'::text))::bigint = (((component_counts ->> 'duplicate_member_record_count'::text))::bigint - ((component_counts ->> 'duplicate_group_count'::text))::bigint)) AND (((component_counts ->> 'distinct_event_count'::text))::bigint = ((((component_counts ->> 'physical_record_count'::text))::bigint - ((component_counts ->> 'blank_event_identifier_record_count'::text))::bigint) - ((component_counts ->> 'excess_copy_record_count'::text))::bigint)) AND (((component_counts ->> 'consistent_event_count'::text))::bigint = (((component_counts ->> 'distinct_event_count'::text))::bigint - ((component_counts ->> 'conflicting_event_identity_count'::text))::bigint)) AND (((component_counts ->> 'completed_event_count'::text))::bigint <= ((component_counts ->> 'consistent_event_count'::text))::bigint) AND (((component_counts ->> 'in_period_completed_event_count'::text))::bigint = ((((component_counts ->> 'completed_event_count'::text))::bigint - ((component_counts ->> 'completed_without_date_count'::text))::bigint) - ((component_counts ->> 'completed_outside_period_count'::text))::bigint)) AND (((component_counts ->> 'eligible_encounter_count'::text))::bigint = ((((component_counts ->> 'in_period_completed_event_count'::text))::bigint - ((component_counts ->> 'blank_participant_identifier_event_count'::text))::bigint) - ((component_counts ->> 'unmatched_event_count'::text))::bigint)) AND (((component_counts ->> 'distinct_person_count'::text))::bigint <= ((component_counts ->> 'eligible_encounter_count'::text))::bigint) AND (((component_counts ->> 'multi_group_person_count'::text))::bigint <= ((component_counts ->> 'distinct_person_count'::text))::bigint)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_created_by_type_check",
+        "definition": "[\"source_derived_measurements_created_by_type_check\", \"c\", \"CHECK ((created_by_type = 'human'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_id_org_unique",
+        "definition": "[\"source_derived_measurements_id_org_unique\", \"u\", \"UNIQUE (source_derived_measurement_id, organization_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_key_check",
+        "definition": "[\"source_derived_measurements_key_check\", \"c\", \"CHECK ((measurement_key ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_method_family_check",
+        "definition": "[\"source_derived_measurements_method_family_check\", \"c\", \"CHECK ((((measurement_family = 'paired_outcome_change'::text) AND (calculation_method = 'p1_xlsx_paired_baseline_followup_numeric_change_v1'::text) AND (basis_version = 'kai_xlsx_paired_outcome_basis_v1'::text) AND (worksheet_key IS NOT NULL)) OR ((measurement_family = 'tabular_count'::text) AND (calculation_method = ANY (ARRAY['kai_tabular_conditional_record_count_v1'::text, 'kai_tabular_conditional_distinct_key_count_v1'::text])) AND (basis_version = ANY (ARRAY['kai_tabular_measurement_basis_v1'::text, 'kai_tabular_verified_bytes_v1'::text]))) OR ((measurement_family = 'tabular_rate'::text) AND (calculation_method = ANY (ARRAY['kai_tabular_conditional_record_rate_v1'::text, 'kai_tabular_conditional_distinct_key_rate_v1'::text])) AND (basis_version = ANY (ARRAY['kai_tabular_measurement_basis_v1'::text, 'kai_tabular_verified_bytes_v1'::text]))) OR ((measurement_family = 'cross_source_reach'::text) AND (calculation_method = 'kai_cross_source_linked_reach_v1'::text) AND (basis_version = 'kai_cross_source_reconciliation_v1'::text))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_paired_counts_check",
+        "definition": "[\"source_derived_measurements_paired_counts_check\", \"c\", \"CHECK (((measurement_family <> 'paired_outcome_change'::text) OR ((((component_counts ->> 'increased_count'::text))::bigint = numerator) AND (((component_counts ->> 'comparable_pair_count'::text))::bigint = denominator) AND (((((component_counts ->> 'increased_count'::text))::bigint + ((component_counts ->> 'unchanged_count'::text))::bigint) + ((component_counts ->> 'decreased_count'::text))::bigint) = denominator) AND (((component_counts ->> 'participant_count'::text))::bigint = (denominator + ((component_counts ->> 'excluded_participant_count'::text))::bigint)))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_pkey",
+        "definition": "[\"source_derived_measurements_pkey\", \"p\", \"PRIMARY KEY (source_derived_measurement_id)\", true, false, false, true, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_profile_sha_check",
+        "definition": "[\"source_derived_measurements_profile_sha_check\", \"c\", \"CHECK ((profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_rate_counts_check",
+        "definition": "[\"source_derived_measurements_rate_counts_check\", \"c\", \"CHECK (((measurement_family <> 'tabular_rate'::text) OR ((calculation_method IS DISTINCT FROM 'kai_tabular_conditional_distinct_key_rate_v1'::text) AND (((component_counts ->> 'population_record_count'::text))::bigint = denominator) AND (((component_counts ->> 'numerator_record_count'::text))::bigint = numerator) AND (((component_counts ->> 'other_population_record_count'::text))::bigint = (denominator - numerator))) OR ((NOT (calculation_method IS DISTINCT FROM 'kai_tabular_conditional_distinct_key_rate_v1'::text)) AND (((definition -> 'unit'::text) ->> 'kind'::text) = 'distinct_key'::text) AND (((component_counts ->> 'population_distinct_key_count'::text))::bigint = denominator) AND (((component_counts ->> 'numerator_distinct_key_count'::text))::bigint = numerator) AND (((component_counts ->> 'other_population_distinct_key_count'::text))::bigint = (denominator - numerator)) AND (numerator <= ((component_counts ->> 'numerator_record_count'::text))::bigint) AND (denominator <= ((component_counts ->> 'population_record_count'::text))::bigint))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_shape_check",
+        "definition": "[\"source_derived_measurements_shape_check\", \"c\", \"CHECK (((jsonb_typeof(definition) = 'object'::text) AND (jsonb_typeof(field_keys) = 'array'::text) AND ((jsonb_array_length(field_keys) >= 0) AND (jsonb_array_length(field_keys) <= 8)) AND (jsonb_typeof(component_counts) = 'object'::text) AND (jsonb_typeof(exclusions) = 'object'::text) AND ((row_locators IS NULL) OR (jsonb_typeof(row_locators) = 'object'::text))))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_source_version_fk",
+        "definition": "[\"source_derived_measurements_source_version_fk\", \"f\", \"FOREIGN KEY (source_version_id, organization_id) REFERENCES source_versions(source_version_id, organization_id) ON DELETE RESTRICT\", true, false, false, true, \"source_versions\", null, \"[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_check_ins\\\\\\\"()\\\", 5, \\\"O\\\", false, false]\\n[\\\"source_derived_measurements\\\", \\\"\\\\\\\"RI_FKey_check_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_noaction_upd\\\\\\\"()\\\", 17, \\\"O\\\", false, false]\\n[\\\"source_versions\\\", \\\"\\\\\\\"RI_FKey_restrict_del\\\\\\\"()\\\", 9, \\\"O\\\", false, false]\"]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "constraint",
+        "identity": "source_derived_measurements_worksheet_key_check",
+        "definition": "[\"source_derived_measurements_worksheet_key_check\", \"c\", \"CHECK (((worksheet_key IS NULL) OR (worksheet_key ~ '^sheet_[1-9][0-9]{0,3}$'::text)))\", true, false, false, false, null, null, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_id_org_unique",
+        "definition": "[\"source_derived_measurements_id_org_unique\", \"CREATE UNIQUE INDEX source_derived_measurements_id_org_unique ON kai.source_derived_measurements USING btree (source_derived_measurement_id, organization_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_identity_unique",
+        "definition": "[\"source_derived_measurements_identity_unique\", \"CREATE UNIQUE INDEX source_derived_measurements_identity_unique ON kai.source_derived_measurements USING btree (organization_id, source_version_id, COALESCE(worksheet_key, ''::text), measurement_key)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "index",
+        "identity": "source_derived_measurements_pkey",
+        "definition": "[\"source_derived_measurements_pkey\", \"CREATE UNIQUE INDEX source_derived_measurements_pkey ON kai.source_derived_measurements USING btree (source_derived_measurement_id)\", true, true, true, true, true, null]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "table",
+        "identity": "source_derived_measurements",
+        "definition": "[\"r\", \"p\", false, false, false, \"d\", null, 0, 0, 0]"
+      },
+      {
+        "name": "source_derived_measurements",
+        "kind": "trigger",
+        "identity": "trg_source_derived_measurements_append_only",
+        "definition": "[\"trg_source_derived_measurements_append_only\", \"CREATE TRIGGER trg_source_derived_measurements_append_only BEFORE DELETE OR UPDATE ON kai.source_derived_measurements FOR EACH ROW EXECUTE FUNCTION source_derived_measurement_append_only()\", \"O\", \"source_derived_measurement_append_only()\", false, false]"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "gate_a_p0_jsonb_metadata_only(jsonb)",
+        "definition": "CREATE OR REPLACE FUNCTION kai.gate_a_p0_jsonb_metadata_only(value jsonb)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\n  SELECT value::text !~* '(raw_bytes|raw_text|raw_content|prompt|signed_url|credential|secret|token|password|private_path|pii|email|phone|address|-----BEGIN|postgres://|postgresql://|mysql://|mongodb://|https?://|/Users/|/private/|/var/|/tmp/|AKIA[0-9A-Z]{16}|[A-Za-z0-9+/]{80,}={0,2})';\n$function$\n"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "source_derived_measurement_append_only()",
+        "definition": "CREATE OR REPLACE FUNCTION kai.source_derived_measurement_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  RAISE EXCEPTION 'source-derived measurement records are append-only (%)', TG_TABLE_NAME\n    USING ERRCODE = 'check_violation';\nEND;\n$function$\n"
+      },
+      {
+        "name": "function",
+        "kind": "function",
+        "identity": "source_derived_measurement_source_admitted()",
+        "definition": "CREATE OR REPLACE FUNCTION kai.source_derived_measurement_source_admitted()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  measurement record;\nBEGIN\n  SELECT measurement_family, source_version_id, profile_canonical_sha256, worksheet_key\n    INTO measurement\n    FROM kai.source_derived_measurements\n   WHERE source_derived_measurement_id = NEW.source_derived_measurement_id\n     AND organization_id = NEW.organization_id;\n  IF NOT FOUND OR measurement.measurement_family <> 'cross_source_reach' THEN\n    RAISE EXCEPTION 'a contributing source is recorded only for a cross-source measurement'\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF NEW.source_role = 'primary' THEN\n    IF NEW.source_version_id <> measurement.source_version_id\n      OR NEW.profile_canonical_sha256 <> measurement.profile_canonical_sha256\n      OR NEW.worksheet_key IS DISTINCT FROM measurement.worksheet_key THEN\n      RAISE EXCEPTION 'the primary contributing source is the measurement''s own version, profile and worksheet'\n        USING ERRCODE = 'check_violation';\n    END IF;\n  ELSIF NEW.source_version_id = measurement.source_version_id\n    AND (NEW.worksheet_key IS NULL OR NEW.worksheet_key IS NOT DISTINCT FROM measurement.worksheet_key) THEN\n    RAISE EXCEPTION 'a reference contributing source is another version, or another worksheet of the same version'\n      USING ERRCODE = 'check_violation';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      }
+    ]
+  }
+}
