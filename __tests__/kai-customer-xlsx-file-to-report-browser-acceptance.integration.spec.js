@@ -3389,10 +3389,11 @@ async function runXlsxAcceptance() {
       // Oracle: 7 learners against at least 10 is 3 below, 7/10 = 70.00%; 81.82% against at least 75% is 6.82 points above.
       assert.equal(learnerCount.measured_value, 7);
       const countTarget = await setTargetInUi(learnerCount, "10", "at_least", "Target recorded.");
-      assert.equal(countTarget.status, 201);
+      assert.deepEqual([countTarget.status, countTarget.body.data.replayed], [200, false]);
       const countText = "Planned target (stated by the organization): at least 10. Recorded actual: 7, 3 below the target (70.00% of it); the target is not met. A target is the organization's plan, not an achieved outcome, and this comparison does not show why the result differs.";
       await adminPage.waitFor(async () => (await textOf(adminPage, `${countTarget.row} [data-client-derived-target-comparison="not_met"]`)) === countText, "count comparison shown");
       const rateTarget = await setTargetInUi(allVisitRate, "75", "at_least", "Target recorded.");
+      assert.deepEqual([rateTarget.status, rateTarget.body.data.replayed, rateTarget.body.data.target.target_value], [200, false, "75.00"]);
       const rateText = "Planned target (stated by the organization): at least 75.00%. Recorded actual: 81.82%, 6.82 percentage points above the target; the target is met. A target is the organization's plan, not an achieved outcome, and this comparison does not show why the result differs.";
       await adminPage.waitFor(async () => (await textOf(adminPage, `${rateTarget.row} [data-client-derived-target-comparison="met"]`)) === rateText, "rate comparison shown");
       // The same target again changes nothing; a role or organization without the right writes nothing.
@@ -3441,7 +3442,7 @@ async function runXlsxAcceptance() {
       // A changed target supersedes the earlier one and is compared in Count records; the saved report keeps the target it was generated with.
       await openCountRecords(sv);
       const changed = await setTargetInUi(learnerCount, "6", "at_least", "Target recorded.");
-      assert.equal(changed.status, 201);
+      assert.deepEqual([changed.status, changed.body.data.replayed], [200, false]);
       await adminPage.waitFor(async () => (await textOf(adminPage, `${changed.row} [data-client-derived-target-comparison="met"]`))?.startsWith("Planned target (stated by the organization): at least 6. Recorded actual: 7, 1 above the target (116.67% of it); the target is met."), "changed comparison shown");
       const chain = (await targetRows()).filter((t) => t.set_on_measurement_id === learnerCount.source_derived_measurement_id);
       assert.deepEqual(chain.map((t) => [t.target_value, t.supersedes_target_id]), [["10.00", null], ["6.00", chain[0].measurement_target_id]]);
