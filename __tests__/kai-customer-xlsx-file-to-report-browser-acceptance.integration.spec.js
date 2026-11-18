@@ -3397,7 +3397,7 @@ async function runXlsxAcceptance() {
       const rateText = "Planned target (stated by the organization): at least 75.00%. Recorded actual: 81.82%, 6.82 percentage points above the target; the target is met. A target is the organization's plan, not an achieved outcome, and this comparison does not show why the result differs.";
       await adminPage.waitFor(async () => (await textOf(adminPage, `${rateTarget.row} [data-client-derived-target-comparison="met"]`)) === rateText, "rate comparison shown");
       // The same target again changes nothing; a role or organization without the right writes nothing.
-      const replay = await setTargetInUi(learnerCount, "10", "at_least", "Target unchanged.");
+      const replay = await setTargetInUi(learnerCount, "10", "at_least", "Already recorded; nothing changed.");
       assert.equal(replay.body.data.replayed, true);
       const targetsBefore = await targetRows();
       assert.deepEqual(targetsBefore.map((t) => [t.target_unit, t.target_value, t.comparison, t.set_on_measurement_id, t.supersedes_target_id, t.created_by_type, t.engagement_id]),

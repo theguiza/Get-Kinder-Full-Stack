@@ -212,7 +212,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     }
     send("target", measurementTargetPath(organizationId, recorded.source_derived_measurement_id),
       { target_value: value, comparison: draft?.comparison ?? recorded.target?.comparison ?? "at_least" },
-      (saved) => (saved.replayed ? "Target unchanged." : `Target recorded. ${saved.comparison?.text ?? ""}`))
+      (saved) => `Target recorded. ${saved.comparison?.text ?? ""}`)
       .then((ok) => { if (ok) setTargetDrafts((drafts) => { const next = { ...drafts }; delete next[recorded.source_derived_measurement_id]; return next; }); });
   };
 
