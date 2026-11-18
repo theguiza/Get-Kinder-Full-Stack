@@ -2133,7 +2133,9 @@ async function runCedarBridgeAcceptance() {
       const refusals = {
         outsider: await post(body(), outsiderApi),
         same_version: await post(body({ reference_source_version_id: state.events.sourceVersionId })),
+        // A workbook register is one of its worksheets (owner authorization 2026-11-18): naming none is refused with that remedy.
         workbook_as_register: await post(body({ reference_source_version_id: state.workbook.sourceVersionId })),
+        document_as_register: await post(body({ reference_source_version_id: state.notes.sourceVersionId })),
         category_as_event_identifier: await post(withEvents({ event_identifier_field_key: fieldAt(eventsBasis, 8, "categorical").field_key })),
         unlisted_completed_value: await post(withEvents({ completed_value_key: "value_99" })),
         typed_answer: await post(body({ mapping: { ...crossMapping, expected_people: 80 } })),
@@ -2142,7 +2144,8 @@ async function runCedarBridgeAcceptance() {
       report.derived_measurements.cross_source_refusals = Object.fromEntries(Object.entries(refusals).map(([k, v]) => [k, [v.status, blockersOf(v)]]));
       assert.ok(refusals.outsider.status >= 400 && refusals.outsider.status < 500);
       assert.deepEqual(report.derived_measurements.cross_source_refusals.same_version, [422, ["cross_source_same_version"]]);
-      assert.deepEqual(report.derived_measurements.cross_source_refusals.workbook_as_register, [422, ["cross_source_source_not_csv"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.workbook_as_register, [422, ["tabular_worksheet_selection_required"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.document_as_register, [422, ["cross_source_source_not_csv"]], "a document is no register table");
       assert.deepEqual(report.derived_measurements.cross_source_refusals.category_as_event_identifier, [422, ["cross_source_field_role_not_proposed"]]);
       assert.deepEqual(report.derived_measurements.cross_source_refusals.unlisted_completed_value, [422, ["cross_source_value_not_listed"]]);
       assert.deepEqual(report.derived_measurements.cross_source_refusals.typed_answer, [422, ["cross_source_mapping_invalid"]]);
