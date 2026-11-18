@@ -292,3 +292,28 @@ test("exact days are never applied to a date describing a person: a date-of-birt
   const visits = exact("field_3", { start: "2025-02-10", end: "2025-02-28" });
   assert.equal(visits.measurement.measuredValue, rows.slice(1).filter((row) => row[2] >= "2025-02-10" && row[2] <= "2025-02-28").length);
 });
+
+test("generation conformance: a report restating each new measurement with its limitation descriptions passes the generated-content validators", async () => {
+  const { validateGeneratedContentDraft, composeEvidenceSummaryMeasurementDisclosures } = await import("../Backend/kai/validators/kaiGeneratedContentValidators.js");
+  const { composeMeasurementDisclosure } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
+  const profile = await csvProfile();
+  const period = { start: "2025-02-12", end: "2025-04-15" };
+  const rows = [
+    asRow(fromRecords(profile, { operation: "rate", conditions: [COMPLETED, within], population: [ACTIVE] }, period).measurement),
+    asRow(fromRecords(profile, { operation: "count", unit: eachLearner, conditions: [ACTIVE, within] }, period).measurement),
+    asRow(D.deriveTabularMeasurement(profile, null, D.validateTabularMeasurementDefinition({ operation: "rate", unit: eachLearner, conditions: [COMPLETED, within] }).definition, { reportingPeriod: { start: "2025-02-01", end: "2025-04-30" } }).measurement),
+  ];
+  const claims = rows.map((row, index) => ({
+    claimId: `c1000000-0000-4000-8000-00000000000${index + 1}`, evidenceItemId: `e1000000-0000-4000-8000-00000000000${index + 1}`,
+    claimStatement: D.composeDerivedClaimStatementFromRow(row), limitationCodes: D.derivedMeasurementLimitationCodes({ measurementRow: row }),
+  }));
+  assert.ok(claims[0].limitationCodes.includes(D.DERIVED_LIMITATION_CODES.EXACT_DAYS_FROM_SOURCE_FILE));
+  const generationClaims = claims.map((claim) => ({ ...claim, requestedAudience: "internal", revalidatedForGeneration: true, audienceAuthority: { internal: true } }));
+  // The text a model is given back verbatim: the claim, each derived limitation's description, and the measurement disclosure.
+  const blocks = claims.map((claim, index) => ({ ordinal: index + 1, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
+    text: [claim.claimStatement, claim.limitationCodes.filter((code) => code.startsWith("derived.")).map(D.describeDerivedLimitationCode).join(" "), composeMeasurementDisclosure(claim.limitationCodes)].filter(Boolean).join(" ") }));
+  const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks, claims: generationClaims });
+  assert.equal(composed.ok, true);
+  const result = validateGeneratedContentDraft({ requestedAudience: "internal", generationClaims, blocks: composed.blocks, contentType: "evidence_summary" });
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [], JSON.stringify(result.blockers));
+});

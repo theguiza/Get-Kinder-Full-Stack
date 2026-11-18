@@ -2004,7 +2004,8 @@ const DERIVED_DISCLOSURES = Object.freeze({
   [C.PEOPLE_COUNTED_ONCE]: "A person with encounters in more than one programme group is counted once in an organization-wide total.",
   [C.RECORDED_MINUTES_SUBTOTAL]: "This is a known recorded minutes subtotal, not a complete service-time total; missing, invalid or conflicting durations are not included.",
   [C.PARTLY_COVERED_MONTHS_EMPTY]: "The reporting period starts or ends part-way through a month; none of the measured records fall in those months, so the period's actual dates were applied exactly.",
-  [C.EXACT_DAYS_FROM_SOURCE_FILE]: "The reporting period's exact dates were applied to each record's day by recalculating from the verified uploaded file.",
+  // Worded without "verified": the values themselves are not verified, and the report's wording rules keep it that way.
+  [C.EXACT_DAYS_FROM_SOURCE_FILE]: "The reporting period's exact dates were applied to each record's own day, read again from the uploaded file this source version was profiled from.",
 });
 
 export function describeDerivedLimitationCode(code) {
