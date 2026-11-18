@@ -14,6 +14,7 @@ import {
   selectedWorksheetView,
   sourceRecordCountMeasurementPath,
 } from "./clientSourceMeasurementLogic.js";
+import { keepMeasurementDraft, measurementDraftKey, readMeasurementDraft } from "./measurementDraftStore.js";
 
 const FIELDS = Object.freeze([
   ["countedUnit", "What one record represents", "e.g. programme session"],
@@ -36,7 +37,9 @@ const FIELDS = Object.freeze([
  * response is shown only under the worksheet it was loaded for. The selection
  * is kept by the parent (initialWorksheetKey/onWorksheetChange), because a
  * refresh of the Data Sources list remounts this panel; a remount re-reads
- * that worksheet from the server.
+ * that worksheet from the server. With no remembered worksheet, a workbook
+ * opens on its first worksheet so calculated results show at once; each
+ * worksheet's unsaved raw-count definition is kept while switching.
  */
 export default function ClientSourceMeasurementPanel({
   organizationId, sourceVersionId, canProposeClaim, initialWorksheetKey = "", onWorksheetChange, onClose, onRecorded,
@@ -44,7 +47,8 @@ export default function ClientSourceMeasurementPanel({
 }) {
   // Every basis state names the worksheet it was read for ("" = none).
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "", worksheetKey: initialWorksheetKey });
-  const [form, setForm] = useState(EMPTY_MEASUREMENT_FORM);
+  const rawDraftKey = (worksheetKey) => measurementDraftKey(organizationId, sourceVersionId, worksheetKey, "raw_count");
+  const [form, setForm] = useState(() => readMeasurementDraft(rawDraftKey(initialWorksheetKey)) ?? EMPTY_MEASUREMENT_FORM);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
   const [selectedWorksheetKey, setSelectedWorksheetKey] = useState(initialWorksheetKey);
@@ -75,10 +79,22 @@ export default function ClientSourceMeasurementPanel({
     selectedRef.current = worksheetKey;
     setSelectedWorksheetKey(worksheetKey);
     setNotice(null);
-    setForm(EMPTY_MEASUREMENT_FORM);
+    setForm(readMeasurementDraft(rawDraftKey(worksheetKey)) ?? EMPTY_MEASUREMENT_FORM);
     onWorksheetChange?.(worksheetKey);
     load(worksheetKey);
   };
+  // Results first: a workbook with no remembered worksheet opens on its first one.
+  useEffect(() => {
+    if (selectedRef.current === "" && worksheetOptions.length > 1) selectWorksheet(worksheetOptions[0].sheetKey);
+    // selectWorksheet is recreated each render; only the first options read matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worksheetOptions]);
+  const updateForm = (change) => setForm((current) => {
+    const next = { ...current, ...change };
+    keepMeasurementDraft(rawDraftKey(selectedRef.current),
+      JSON.stringify(next) === JSON.stringify(EMPTY_MEASUREMENT_FORM) ? null : next);
+    return next;
+  });
 
   // A write or claim proposal belongs to the worksheet selected when it was
   // sent; its outcome is shown only while that worksheet is still selected.
@@ -109,7 +125,8 @@ export default function ClientSourceMeasurementPanel({
     runForSelection("record",
       (worksheetKey) => postJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, worksheetKey || null), body),
       (ok, result, worksheetKey) => (ok
-        ? { kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded." }
+        ? (keepMeasurementDraft(rawDraftKey(worksheetKey), null),
+          { kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded." })
         : { kind: "warning", text: measurementFailureMessage(result, { worksheetKey: worksheetKey || null }) }));
   };
   const proposeClaim = (evidenceItemId) => {
@@ -245,25 +262,25 @@ export default function ClientSourceMeasurementPanel({
             <label key={key} className="d-block mb-1">
               {label}
               <input className="form-control form-control-sm" value={form[key]} placeholder={placeholder} data-client-source-measurement-field={key}
-                onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />
+                onChange={(event) => updateForm({ [key]: event.target.value })} />
             </label>
           ))}
           <div className="d-flex flex-wrap gap-2">
             <label>
               Reporting period start (optional)
               <input type="date" className="form-control form-control-sm" value={form.periodStart} data-client-source-measurement-field="periodStart"
-                onChange={(event) => setForm((current) => ({ ...current, periodStart: event.target.value }))} />
+                onChange={(event) => updateForm({ periodStart: event.target.value })} />
             </label>
             <label>
               Reporting period end
               <input type="date" className="form-control form-control-sm" value={form.periodEnd} data-client-source-measurement-field="periodEnd"
-                onChange={(event) => setForm((current) => ({ ...current, periodEnd: event.target.value }))} />
+                onChange={(event) => updateForm({ periodEnd: event.target.value })} />
             </label>
           </div>
           {form.periodStart || form.periodEnd ? (
             <label className="form-check mt-1">
               <input type="checkbox" className="form-check-input" checked={form.periodAttested} data-client-source-measurement-field="periodAttested"
-                onChange={(event) => setForm((current) => ({ ...current, periodAttested: event.target.checked }))} />
+                onChange={(event) => updateForm({ periodAttested: event.target.checked })} />
               <span className="form-check-label">
                 This period is my organization's statement. I understand KAI records it as attested and does not verify it against
                 dates in the records.

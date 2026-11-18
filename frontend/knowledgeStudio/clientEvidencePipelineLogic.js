@@ -278,7 +278,7 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "continue_source_preparation":
       return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Sources > Files that need a step to create it; the review is not changed.";
     case "count_records":
-      return "View measurements in Sources > Data Sources, choose a worksheet and save a calculated result for reports. Descriptions and targets are optional.";
+      return "View measurements in Sources > Data Sources and save a calculated result for reports. Descriptions and targets are optional.";
     case "propose_claims":
       return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Sources > Files that need a step proposes them "
         + "(structural column facts are skipped). Evidence-quality reviews are optional for ordinary internal reporting.";

@@ -1005,7 +1005,7 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => (await adminPage.evaluate(
         `document.querySelector('[data-client-preparation-file="${FILE.main}"]')?.dataset.clientPreparationNext`)) === "count_records", "the file's next step is Count records");
       const statusText = await adminPage.evaluate(`document.querySelector('[data-pipeline-file="${FILE.main}"]')?.innerText || ""`);
-      assert.ok(statusText.includes("Use Count records on its source (Sources > Data Sources)"), statusText);
+      assert.ok(statusText.includes("View measurements in Sources > Data Sources and save a calculated result for reports."), statusText);
       assert.ok(!statusText.includes("Waiting for Get Kinder"), statusText);
       assert.ok(statusText.includes("File preparation complete"), statusText);
       assert.doesNotMatch(statusText, /Evidence review|Impact Fact review/);
@@ -1015,7 +1015,7 @@ async function runBrowserAcceptance() {
       await adminPage.evaluate(`window.scrollTo(0, document.body.scrollHeight)`);
       await adminPage.pointerClick(`[data-pipeline-file="${FILE.main}"] [data-client-open-file-step="${FILE.main}"]`, "Take me to this step (Count records)");
       await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(MEASURE)}))`)), "Count records opened");
-      await adminPage.waitForText("Count the records in this source");
+      await adminPage.waitForText("Raw row count and source details (optional)");
       await adminPage.idle();
       assert.equal(await adminPage.evaluate(`(() => {
         const top = document.querySelector('[data-client-source-version="${ids.sourceVersionId}"]').getBoundingClientRect().top;
@@ -1064,7 +1064,7 @@ async function runBrowserAcceptance() {
       assert.ok(!(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-open-source-review="${FILE.main}"]'))`)), "no promotion offered again");
       const mark = adminPage.mark();
       await adminPage.pointerClick(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");
-      await adminPage.waitForText("Count the records in this source");
+      await adminPage.waitForText("Raw row count and source details (optional)");
       await adminPage.idle();
       assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "opening Count records writes nothing");
       const basisError = await adminPage.evaluate(`document.querySelector("[data-client-source-measurement-error]")?.innerText || ""`);
@@ -1207,7 +1207,7 @@ async function runBrowserAcceptance() {
         await adminPage.pointerClick(`${row} [data-client-open-file-measurement]`, "Count records on file");
         const measure = `[data-client-source-measurement="${version.source_version_id}"]`;
         await adminPage.waitFor(async () => Boolean(await adminPage.evaluate(`Boolean(document.querySelector('${measure} [data-client-source-measurement-counted]'))`)), "actual measurement counts");
-        assert.equal(await adminPage.evaluate(`document.querySelector('${measure} [data-client-source-measurement-counted]').innerText`), "2");
+        assert.equal(await adminPage.evaluate(`document.querySelector('${measure} [data-client-source-measurement-counted]').textContent`), "2", "the counted value is present in the optional raw-count details");
         await adminPage.clickIn(`${measure} button`, "Close Count records");
         const status = `[data-pipeline-file="${intakeFileId}"]`;
         await adminPage.pointerClick(`${status} [data-client-open-file-step]`, "Take me to this step");
@@ -1223,6 +1223,12 @@ async function runBrowserAcceptance() {
         assert.deepEqual(await counts(ORG_X), beforeNavigation, "Count records and navigation do not create review decisions or findings");
         // Complete the actual control's write journey without changing tabs,
         // reloading, or pressing Refresh: every display must advance with it.
+        // The raw-count definition is an optional, closed disclosure; the
+        // administrator opens it (again after the panel re-reads on a save).
+        const openRawCount = () => adminPage.evaluate(`(() => { const d = document.querySelector('${measure} [data-client-raw-count-description]'); if (d && !d.open) d.open = true; return Boolean(d); })()`);
+        const rawCountShows = (needle, description) => adminPage.waitFor(async () => (await openRawCount())
+          && (await adminPage.evaluate("document.body.innerText")).includes(needle), description);
+        assert.equal(await openRawCount(), true);
         for (const [field, value] of [
           ["countedUnit", "programme record"], ["unitLabel", "programme records"],
           ["definitionText", "Each data row is one programme record."],
@@ -1238,7 +1244,7 @@ async function runBrowserAcceptance() {
           })()`), true, field);
         }
         await adminPage.pointerClick(`${measure} [data-client-source-measurement-submit]`, "Record definition and count");
-        await adminPage.waitForText("Measurement: 2 source records");
+        await rawCountShows("Measurement: 2 source records", "the recorded raw count");
         await adminPage.idle();
         const counted = fileOf(await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X)), intakeFileId);
         assert.deepEqual(currentOf(counted), [null, "complete", "client", "propose_claims", "claim_proposal_ready"]);
@@ -1246,8 +1252,9 @@ async function runBrowserAcceptance() {
           "recording refreshes the displayed file action without a reload");
         const [measurement] = await query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND source_version_id = $2::uuid", [ORG_X, version.source_version_id]);
         assert.equal(Number(measurement.measured_value), 2);
+        await openRawCount();
         await adminPage.pointerClick(`${measure} [data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose the recorded finding");
-        await adminPage.waitForText("Claim: The promoted source has 2 source records");
+        await rawCountShows("Claim: The promoted source has 2 source records", "the proposed claim");
         await adminPage.idle();
         const usable = fileOf(await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X)), intakeFileId);
         assert.deepEqual(currentOf(usable), [null, "complete", "none", "none", "complete"]);

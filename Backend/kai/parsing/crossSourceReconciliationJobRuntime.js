@@ -122,6 +122,11 @@ export async function readCurrentPairedOutcomeBasis(tx, input) {
   return (await createDefaultCrossSourceWorker()).readPairedOutcomeBasis(tx, input);
 }
 
+// The planned-target rows of one admitted worksheet, read by the same worker.
+export async function readCurrentPlanningTargetCandidates(tx, input) {
+  return (await createDefaultCrossSourceWorker()).readPlanningTargetCandidates(tx, input);
+}
+
 async function createDefaultCrossSourceRepository() {
   const { createPostgresDerivedMeasurementRepository } = await import("../dictionary/postgresDerivedMeasurementRepository.js");
   return createPostgresDerivedMeasurementRepository({ crossSourceReconciliationWorker: await createDefaultCrossSourceWorker() });

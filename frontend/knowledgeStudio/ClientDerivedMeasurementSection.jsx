@@ -32,6 +32,8 @@ import {
   measurementTargetUnit,
 } from "./clientDerivedMeasurementLogic.js";
 import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
+import ClientPlanningTargetCandidates from "./ClientPlanningTargetCandidates.jsx";
+import { keepMeasurementDraft, measurementDraftKey, readMeasurementDraft } from "./measurementDraftStore.js";
 
 const TABULAR_UNAVAILABLE_MESSAGES = Object.freeze({
   table_not_established: "The profile does not establish one unambiguous table. Keep one table with a header for every column and upload it again as a new intake version.",
@@ -65,12 +67,16 @@ function fieldLabel(field) {
 export default function ClientDerivedMeasurementSection({ organizationId, sourceVersionId, worksheetKey, canProposeClaim, onRecorded, linkableVersions = [], versionsById = null, earlierVersionIds = [] }) {
   const { revision } = useContext(ProjectReportingContext);
   const lastRevision = useRef(revision);
+  // Unsaved entries for this version and worksheet survive a worksheet switch or a panel refresh.
+  const draftKey = measurementDraftKey(organizationId, sourceVersionId, worksheetKey, "derived");
+  const kept = readMeasurementDraft(draftKey);
   const [basis, setBasis] = useState({ status: "loading", data: null, error: "" });
-  const [form, setForm] = useState(EMPTY_TABULAR_FORM);
-  const [pairingChoice, setPairingChoice] = useState("");
-  const [meaning, setMeaning] = useState(EMPTY_INTERPRETATION_FORM);
-  const [clarifying, setClarifying] = useState(null);
-  const [clarifyForm, setClarifyForm] = useState(EMPTY_INTERPRETATION_FORM);
+  const [form, setForm] = useState(kept?.form ?? EMPTY_TABULAR_FORM);
+  const [pairingChoice, setPairingChoice] = useState(kept?.pairingChoice ?? "");
+  const [meaning, setMeaning] = useState(kept?.meaning ?? EMPTY_INTERPRETATION_FORM);
+  const [clarifying, setClarifying] = useState(kept?.clarifying ?? null);
+  const [clarifyForm, setClarifyForm] = useState(kept?.clarifyForm ?? EMPTY_INTERPRETATION_FORM);
+  const [customOpen, setCustomOpen] = useState(kept?.customOpen ?? false);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
   const [showAllReady, setShowAllReady] = useState(false);
@@ -95,15 +101,21 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     return false;
   }, [organizationId, sourceVersionId, worksheetKey]);
   useEffect(() => {
-    setForm(EMPTY_TABULAR_FORM);
-    setPairingChoice("");
-    setMeaning(EMPTY_INTERPRETATION_FORM);
-    setClarifying(null);
+    const draft = readMeasurementDraft(draftKey);
+    setForm(draft?.form ?? EMPTY_TABULAR_FORM);
+    setPairingChoice(draft?.pairingChoice ?? "");
+    setMeaning(draft?.meaning ?? EMPTY_INTERPRETATION_FORM);
+    setClarifying(draft?.clarifying ?? null);
+    setClarifyForm(draft?.clarifyForm ?? EMPTY_INTERPRETATION_FORM);
+    setTargetDrafts(draft?.targetDrafts ?? {});
+    setCustomOpen(draft?.customOpen ?? false);
     setNotice(null);
     setShowAllReady(false);
     setCalculationJob(null);
     load();
     return () => { seqRef.current += 1; };
+    // draftKey changes exactly when load does (organization, version, worksheet).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   useEffect(() => {
@@ -185,7 +197,12 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   };
 
   const data = basis.data;
-  const resultSaved = (key) => data?.recorded?.some((saved) => saved.measurement_key === key && (!canProposeClaim || currentEvidenceOf(saved)?.claim));
+  // A result's identity is its worksheet and measurement key: the same
+  // definition on another worksheet of the workbook is a different result.
+  const shownWorksheetKey = worksheetKey || data?.tabular?.sheetKey || data?.paired?.worksheet?.sheetKey || "";
+  const resultSaved = (key) => data?.recorded?.some((saved) => saved.measurement_key === key && (saved.worksheet_key || "") === shownWorksheetKey
+    && (!canProposeClaim || currentEvidenceOf(saved)?.claim));
+  const planningCandidates = data?.planning_targets?.status === "candidates";
   const pairedSaved = data?.paired?.measurements?.some((item) => item.available)
     && data.paired.measurements.filter((item) => item.available).every((item) => resultSaved(item.measurement_key));
   const fields = data?.tabular?.available ? data.tabular.fields : [];
@@ -212,7 +229,12 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   };
 
   // The organization's planned target per recorded measurement (a plan, compared with the recorded actual).
-  const [targetDrafts, setTargetDrafts] = useState({});
+  const [targetDrafts, setTargetDrafts] = useState(kept?.targetDrafts ?? {});
+  useEffect(() => {
+    const empty = JSON.stringify(form) === JSON.stringify(EMPTY_TABULAR_FORM) && JSON.stringify(meaning) === JSON.stringify(EMPTY_INTERPRETATION_FORM)
+      && pairingChoice === "" && clarifying === null && Object.keys(targetDrafts).length === 0;
+    keepMeasurementDraft(draftKey, empty ? null : { form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen });
+  }, [draftKey, form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen]);
   const setTargetDraft = (recorded, change) => setTargetDrafts((drafts) => ({
     ...drafts,
     [recorded.source_derived_measurement_id]: {
@@ -252,7 +274,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   return (
     <div className="border-top pt-2 mt-2 small" data-client-derived-measurements={sourceVersionId}>
       <h6 className="mb-1">Calculated results</h6>
-      <div className="text-muted mb-1">Choose a result to save. Descriptions and targets are optional.</div>
+      <div className="text-muted mb-1">{planningCandidates
+        ? "This worksheet states planned targets, shown below. Counting its rows is optional."
+        : "Choose a result to save. Descriptions and targets are optional."}</div>
       {["loading", "refreshing"].includes(basis.status) ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
       {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
       {basis.status !== "loading" ? <button type="button" className="btn btn-sm btn-link" data-client-derived-refresh="" disabled={basis.status === "refreshing" || Boolean(pending)} onClick={load}>Refresh measurements</button> : null}
@@ -260,6 +284,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {calculationJob ? <div className="text-muted" data-client-derived-calculation-job={calculationJob.job_state}>
         Exact-period calculation: {calculationJob.job_state.replace(/_/g, " ")}.
       </div> : null}
+
+      <ClientPlanningTargetCandidates planning={data?.planning_targets} />
 
       {data?.paired?.available ? (
         <div className="mb-2" data-client-derived-paired="">
@@ -287,7 +313,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       ) : null}
 
       {data?.tabular?.ready_measurements?.length ? <div className="mb-3" data-client-ready-measurements="">
-        <details open={data?.paired?.available ? undefined : true} data-client-source-breakdown=""><summary>Record counts and source-value breakdown</summary>
+        <details open={data?.paired?.available || planningCandidates ? undefined : true} data-client-source-breakdown=""><summary>{planningCandidates ? "Row count of this worksheet (optional)" : "Record counts and source-value breakdown"}</summary>
         <div className="text-muted">All dates · Rows include duplicates · Identifier counts count keys, not people.</div>
         <div className="kai-measurement-results">
           {data.tabular.ready_measurements.slice(0, showAllReady ? undefined : 16).map((item) => <div className="kai-measurement-result" key={item.key} data-client-ready-measurement={item.key}>
@@ -305,7 +331,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         </details>
       </div> : null}
 
-      {data?.paired && !data.paired.available ? (
+      {data?.paired && !data.paired.available && !(planningCandidates && !data.paired.proposed_pairings?.length) ? (
         <div data-client-derived-paired-unavailable="">
           {data.paired.proposed_pairings?.length ? "Choose a baseline/follow-up mapping: " : "Paired outcome unavailable: "}
           {data.paired.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ")}
@@ -330,7 +356,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {data?.tabular && !data.tabular.available ? (
         <div data-client-derived-tabular-unavailable="">Field measurement unavailable: {data.tabular.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ") || TABULAR_UNAVAILABLE_MESSAGES[data.tabular.reason] || "The committed profile has no supported field measurements. Use Count records if available."}</div>
       ) : null}
-      <details data-client-custom-calculations=""><summary className="mb-2">Custom calculation or link to another source (optional)</summary>
+      <details open={customOpen} onToggle={(event) => setCustomOpen(event.currentTarget.open)} data-client-custom-calculations=""><summary className="mb-2">Custom calculation or link to another source (optional)</summary>
       {data?.tabular?.available ? (
         <form className="mb-2" onSubmit={recordTabular} data-client-derived-tabular-form="">
           <div className="fw-semibold">Define a count or rate</div>
@@ -440,8 +466,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
       </details>
-      {data?.recorded?.some((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")) ? <h6>Saved results</h6> : null}
-      {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
+      {data?.recorded?.some((recorded) => (recorded.worksheet_key || "") === shownWorksheetKey) ? <h6>Saved results</h6> : null}
+      {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === shownWorksheetKey).map((recorded) => {
         const current = currentEvidenceOf(recorded);
         const paired = recorded.measurement_family === "paired_outcome_change";
         const linked = recorded.measurement_family === "cross_source_reach";

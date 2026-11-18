@@ -865,7 +865,7 @@ async function runBrowserAcceptance() {
       assert.equal(await textOf(adminPage, `[data-client-claim="${ids.legacyClaimId}"] input[type=checkbox]`), null, "a structural claim is not offered for an impact report");
       assert.match(await textOf(adminPage, `[data-client-claim="${ids.legacyClaimId}"]`), /Structural fact/);
       assert.equal(await attr(adminPage, "[data-client-draft-readiness]", "data-client-draft-readiness"), "no_measured_claim");
-      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /Count records/);
+      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /open View measurements and save a calculated result for reports/);
       assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === "Generate internal evidence summary").disabled`), true);
       await adminPage.clickIn(`[data-client-internal-draft="${ids.historicalDraftId}"] button`, "Read the historical draft");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`)), "the historical draft");
@@ -880,8 +880,13 @@ async function runBrowserAcceptance() {
     await test("measurement: the administrator records the definition and count in Data Sources and proposes the measured claim; the value is the independent count", async () => {
       await openDataSources();
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-source-measurement="${ids.sourceVersionId}"]`)), "Count records");
-      await adminPage.clickIn(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");
-      await adminPage.waitForText("Counted records = data records minus blank records = 5");
+      await adminPage.clickIn(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "View measurements");
+      // The raw-count definition is optional and closed until the administrator
+      // opens it (it closes again when the panel re-reads after a save).
+      const openRawCount = () => adminPage.evaluate(`(() => { const d = document.querySelector("[data-client-raw-count-description]"); if (d && !d.open) d.open = true; return Boolean(d); })()`);
+      const rawCountShows = (needle, description) => adminPage.waitFor(async () => (await openRawCount())
+        && (await adminPage.evaluate("document.body.innerText")).includes(needle), description);
+      await rawCountShows("Counted records = data records minus blank records = 5", "the optional raw count, opened");
       for (const [field, value] of [
         ["countedUnit", "programme session"], ["unitLabel", "programme sessions"],
         ["definitionText", "Each row of the session log records one delivered programme session."],
@@ -891,13 +896,14 @@ async function runBrowserAcceptance() {
       await adminPage.waitForText("Confirm that the reporting period is your organization's statement.");
       await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
       await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 source records");
+      await rawCountShows("Measurement: 5 source records", "the recorded raw count");
       await adminPage.idle();
+      await openRawCount();
       const [measurement] = await query("SELECT measured_value, evidence_item_id::text FROM kai.evidence_measurements WHERE organization_id = $1::uuid", [ORG_X]);
       assert.equal(Number(measurement.measured_value), independentRecordCount(CSV));
       ids.evidenceItemId = measurement.evidence_item_id;
       await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${ids.evidenceItemId}"]`, "Propose a claim");
-      await adminPage.waitForText("Claim: The promoted source has 5 source records");
+      await rawCountShows("Claim: The promoted source has 5 source records", "the proposed claim");
       const [claim] = await query("SELECT claim_id::text FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_X, ids.evidenceItemId]);
       ids.claimId = claim.claim_id;
       const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
@@ -1957,7 +1963,8 @@ async function runBrowserAcceptance() {
       mkdirSync(proofDir, { recursive: true });
       const buttonState = (selector) => adminPage.evaluate(`(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
-        return el ? { label: el.innerText.trim(), disabled: el.disabled, visible: el.offsetParent !== null } : null;
+        // textContent: the raw-count form sits in an optional, closed disclosure.
+        return el ? { label: el.textContent.trim(), disabled: el.disabled, visible: el.offsetParent !== null } : null;
       })()`);
       const generationButtons = () => adminPage.evaluate(`[...document.querySelectorAll("button")]
         .filter((el) => /^Generate (Free Impact Assessment|internal evidence summary|internal impact narrative)$/.test(el.innerText.trim()))
@@ -2004,6 +2011,10 @@ async function runBrowserAcceptance() {
       // field values stores a different count on the same worksheet. It does
       // not complete or replace the human-defined P2-01M count above it.
       await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-derived-record-tabular]`)) !== null, "the field-value calculation control");
+      // Custom calculations and the raw-count definition are optional, closed
+      // disclosures; the administrator opens each before using it.
+      const openOptional = (selector) => adminPage.evaluate(`(() => { const d = document.querySelector(${JSON.stringify(selector)}); if (d && !d.open) d.open = true; return Boolean(d); })()`);
+      await openOptional(`${panel} [data-client-custom-calculations]`);
       await adminPage.clickControl(`${panel} [data-client-derived-record-tabular]`);
       await adminPage.waitForText("Measurement recorded: 5.");
       await adminPage.idle();
@@ -2018,6 +2029,7 @@ async function runBrowserAcceptance() {
         definitionText: "Each row of the session log records one delivered programme session.",
         inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
         periodStart: "2026-09-01", periodEnd: "2026-09-30" })) assert.ok(await setInput(adminPage, `${panel} [data-client-source-measurement-field="${field}"]`, value));
+      await openOptional(`${panel} [data-client-raw-count-description]`);
       await adminPage.clickControl(`${panel} [data-client-source-measurement-field="periodAttested"]`);
       assert.equal((await buttonState(`${panel} [data-client-source-measurement-submit]`)).disabled, false, "the organization's definition enables counting");
       await adminPage.clickControl(`${panel} [data-client-source-measurement-submit]`);
@@ -2036,6 +2048,7 @@ async function runBrowserAcceptance() {
       await openDataSources(PROJECT_X2, { includeOrganizationLibrary: true });
       await openRecovery();
       assert.equal(await textOf(adminPage, `${panel} [data-client-source-measurement-submit]`), null);
+      await openOptional(`${panel} [data-client-raw-count-description]`);
       await adminPage.clickControl(`${panel} [data-client-source-measurement-propose-claim="${currentEvidenceId}"]`);
       await adminPage.waitFor(async () => (await textOf(adminPage, `${panel} [data-client-source-measurement-claim]`)) !== null, "the proposed current sheet_1 claim");
       const after = await adminPage.api("GET", measurementPath);

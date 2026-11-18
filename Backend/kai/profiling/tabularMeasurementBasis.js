@@ -206,6 +206,18 @@ function headerWords(header) {
     .filter(Boolean);
 }
 
+/**
+ * One short source label (a planning row's indicator, unit, programme or
+ * status) as a reader may show it, or null: the category-label shape, no
+ * metadata-only refused word, and the same name/sensitive-value screen as a
+ * listed category value. A label that fails is withheld, never shortened.
+ */
+export function screenedSourceLabel(value) {
+  const label = typeof value === "string" ? value.trim() : "";
+  if (!CATEGORY_LABEL_RE.test(label) || METADATA_ONLY_REFUSED_RE.test(label)) return null;
+  return categoryVocabularyWithheldReason([label], { wholeVocabulary: false }) ? null : label;
+}
+
 /** Whether a header names a personal or free-text attribute, so its values may not be kept. */
 export function headerIndicatesPersonalAttribute(header) {
   const words = headerWords(header);

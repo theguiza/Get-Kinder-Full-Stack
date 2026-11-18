@@ -1411,6 +1411,10 @@ async function runXlsxAcceptance() {
       const rowReadiness = await adminPage.evaluate(`document.querySelector(${J(`${row} [data-client-xlsx-measurement-readiness]`)})?.getAttribute("data-client-xlsx-measurement-readiness") ?? null`);
       const reuploadOffered = Boolean(await textOf(adminPage, `[data-client-continue-xlsx="${sv}"]`));
       await openCountRecords(sv);
+      const firstWorksheetShown = () => adminPage.waitFor(async () => (await adminPage.evaluate("document.querySelector('[data-client-source-measurement-worksheet-select]')?.value ?? null")) === "sheet_1"
+        && (await adminPage.evaluate("document.querySelector('[data-client-source-measurement-worksheet]')?.getAttribute('data-client-source-measurement-worksheet') ?? null")) === "sheet_1"
+        && !(await textOf(adminPage, "[data-client-source-measurement-loading]")), "the panel opens on its first worksheet");
+      await firstWorksheetShown();
       const panelText = await textOf(adminPage, `[data-client-source-measurement="${sv}"]`);
       const observed = {
         profileSheetBases: profile.sheets.map((sheet) => [sheet.sheet_key, sheet.safe_sheet_name, sheet.record_count_basis?.basis_version ?? null]),
@@ -1426,6 +1430,7 @@ async function runXlsxAcceptance() {
         uiOffersReupload: reuploadOffered,
         uiPanelSaysCannotBeCounted: /cannot be counted this way/.test(panelText),
         uiPanelSelectionRequired: Boolean(await textOf(adminPage, "[data-client-source-measurement-selection-required]")),
+        uiPanelWorksheet: await textOf(adminPage, "[data-client-source-measurement-worksheet]"),
       };
       console.log(`[kai-customer-xlsx-file-to-report] F observed ${J(observed)}`);
       const basisVersion = "kai_xlsx_worksheet_record_basis_v1";
@@ -1441,8 +1446,9 @@ async function runXlsxAcceptance() {
         uiRowSaysBasisMissing: false,
         uiOffersReupload: false,
         uiPanelSaysCannotBeCounted: false,
-        uiPanelSelectionRequired: true,
-      }, "every boundary agrees that the worksheet bases are recorded and a worksheet must be chosen");
+        uiPanelSelectionRequired: false,
+        uiPanelWorksheet: "Excel workbook worksheet Read_Me (sheet_1), with its first row as the header row.",
+      }, "every boundary agrees that the worksheet bases are recorded; the panel shows one named worksheet, never the workbook as a whole");
 
       // The selector lists every worksheet with its own counts; a worksheet
       // with its own blocker names that blocker, not a missing basis.
@@ -1503,13 +1509,15 @@ async function runXlsxAcceptance() {
       assert.match(recorded.claim.statement, /in selected worksheet sheet_3/);
       assert.doesNotMatch(recorded.claim.statement, /participant|people|unique|outcome/i, "worksheet rows are not people or outcomes");
 
-      // A fresh application load asks for a worksheet and attributes nothing
-      // until one is chosen; choosing sheet_3 shows its recorded measurement.
+      // A fresh application load opens on the first worksheet, named, and
+      // attributes sheet_3's recorded count to nothing else; choosing sheet_3
+      // shows its recorded measurement.
       await openCountRecords(sv);
-      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "the reloaded panel asks for a worksheet");
-      assert.equal(await textOf(adminPage, "[data-client-source-measurement-recorded]"), null, "no worksheet's count is shown before a worksheet is chosen");
+      await firstWorksheetShown();
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-recorded]"), null, "sheet_3's count is not shown under the first worksheet");
       assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /cannot be counted this way/);
-      assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "no form before a worksheet is chosen");
+      assert.equal(await adminPage.evaluate("document.querySelector('[data-client-source-measurement-worksheet]')?.getAttribute('data-client-source-measurement-worksheet') ?? null"), "sheet_1",
+        "any raw-count form shown belongs to the named first worksheet");
       await selectWorksheet("sheet_3");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-measurement-recorded]")), "sheet_3's recorded measurement after reload");
       assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-source-measurement-value]')?.getAttribute('data-client-source-measurement-value') ?? null`),
@@ -2219,8 +2227,9 @@ async function runXlsxAcceptance() {
 
       // Scenario A: record and claim each worksheet through the UI.
       await openCountRecords(sv);
-      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "a worksheet must be chosen");
-      assert.deepEqual([await textOf(adminPage, "[data-client-source-measurement-form]"), await textOf(adminPage, "[data-client-source-measurement-recorded]")], [null, null]);
+      const opened = await shownFor("sheet_1");
+      assert.match(opened.counts, /Excel workbook worksheet Read_Me \(sheet_1\)/, "the panel opens on its first worksheet, named; worksheets are never added together");
+      assert.deepEqual([opened.recordedWorksheet, opened.value], [null, null], "nothing recorded is attributed to it");
       const optionLabels = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => option.textContent)`);
       assert.ok(optionLabels.includes("Data_Dictionary (sheet_5)") && optionLabels.includes("Service_Events (sheet_3)"), J(optionLabels));
       const recordedIds = {};
@@ -2346,10 +2355,11 @@ async function runXlsxAcceptance() {
       const unkeyed = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv));
       assert.deepEqual([unkeyed.status, unkeyed.body.data.basis.blockers[0].blocking_reason, unkeyed.body.data.recorded], [200, "measurement_xlsx_worksheet_selection_required", null]);
       await openCountRecords(sv);
-      const ambiguous = await textOf(adminPage, panel);
-      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"));
-      assert.doesNotMatch(ambiguous, /cannot be counted this way/, "two recorded worksheets are not shown as an unmeasured source");
-      assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "no form offers to record over a worksheet");
+      const reopened = await shownFor("sheet_1");
+      assert.doesNotMatch(reopened.text, /cannot be counted this way/, "two recorded worksheets are not shown as an unmeasured source");
+      assert.deepEqual([reopened.recordedWorksheet, reopened.value], [null, null], "neither recorded worksheet's count is shown under the first worksheet");
+      await selectWorksheet("sheet_5");
+      assert.equal((await shownFor("sheet_5")).form, false, "no form offers to record over a recorded worksheet");
       const omitted = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv), EVENTS_DEFINITION);
       assert.deepEqual([omitted.status, omitted.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_required"]);
       const invalid = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_99"), EVENTS_DEFINITION);
@@ -4241,6 +4251,14 @@ async function runXlsxAcceptance() {
     });
 
 
+    // Sets Project X's reporting period through the API (no-op when unchanged).
+    const setProjectPeriodByApi = async (start, end) => {
+      const current = (await adminApi("GET", periodPath)).body.data;
+      if (current.start === start && current.end === end) return;
+      const changed = await adminApi("PATCH", periodPath, { start, end, expected_target_revision: current.target_revision });
+      assert.equal(changed.status, 200, J(changed.body));
+    };
+
     await test("W: original Willow Quay household surveys recover on the existing old-profile version, display real outcomes first, and reach a saved report", {
       skip: !process.env.KAI_WILLOW_QUAY_PACKAGE ? "set KAI_WILLOW_QUAY_PACKAGE to the original synthetic package" : false,
     }, async () => {
@@ -4268,11 +4286,22 @@ async function runXlsxAcceptance() {
       assert.equal(sourceOnlyRead.data.paired.measurable, true, J(sourceOnlyRead));
       assert.equal(await rowsOf(), 0, "opening results records no evidence or approvals");
       assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile, "recovery never rewrites the committed profile or checksum binding");
-      await openCountRecords(sv);
+      const guidanceOf = async () => {
+        const pipeline = await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`);
+        const entry = pipeline.body.data.files.find((item) => item.intakeFileId === fileId);
+        return [entry.currentStage, entry.currentStatus, entry.nextAction, entry.reason];
+      };
+      assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "source_measurement_ready"]);
+      // The customer follows the file's own step; the first worksheet's calculated
+      // results appear without choosing a worksheet or opening any form.
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-file-measurement="${fileId}"]`)), "the file's View measurements step");
+      await adminPage.clickIn(`[data-client-open-file-measurement="${fileId}"]`, "View measurements (Files that need a step)");
       const panel = countRecordsPanelFor(sv);
-      await panel.selectWorksheet("sheet_1");
       const section = `[data-client-derived-measurements="${sv}"]`;
-      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-paired]`))?.includes("32 of 43 comparable pairs (74.42%)"), "the existing source calculates without renaming columns, re-uploading or defining a metric");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-paired]`))?.includes("32 of 43 comparable pairs (74.42%)"), "the existing source calculates without renaming columns, re-uploading, choosing a worksheet or defining a metric");
+      assert.equal(await adminPage.evaluate("document.querySelector('[data-client-source-measurement-worksheet-select]').value"), "sheet_1", "the workbook opens on its first worksheet");
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), null);
       assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /31 of 41 comparable pairs \(75.61%\)/);
       assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /Food planning confidence \(1-5\)/);
       assert.match(await textOf(adminPage, `${section} [data-client-derived-paired]`), /do not apply the Project reporting period/);
@@ -4330,6 +4359,87 @@ async function runXlsxAcceptance() {
       await adminPage.waitFor(() => adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-save-ready-measurement="${referral.key}"]`)}).textContent === 'Saved'`), "saved result remains identified after the refreshed read");
       await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "referral-saved");
       await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "referral-saved", 390);
+      // Unsaved entries stay with their worksheet while the customer looks at another one.
+      const fieldValue = (selector) => adminPage.evaluate(`document.querySelector(${J(selector)})?.value ?? null`);
+      for (const [key, value] of [["operation", "rate"], ["categoryFieldKey", "field_5"]]) assert.ok(await setSelect(`${section} [data-client-derived-field="${key}"]`, value), key);
+      assert.ok(await setInput(adminPage, `[data-client-source-measurement="${sv}"] [data-client-source-measurement-field="countedUnit"]`, "referral"));
+      await adminPage.idle();
+
+      // Delivery_Targets: the worksheet's own planned targets, read from the
+      // verified upload as candidates, with every comparison KAI can check.
+      const targetRowsOf = async () => (await query("SELECT count(*)::int AS n FROM kai.measurement_targets WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      const writesBefore = { measurements: await rowsOf(), targets: await targetRowsOf(),
+        evidence: (await query("SELECT count(*)::int AS n FROM kai.evidence_items WHERE source_version_id = $1::uuid", [sv]))[0].n,
+        claims: (await query("SELECT count(*)::int AS n FROM kai.claims WHERE organization_id = $1::uuid", [ORG_X]))[0].n };
+      const plan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).body.data.planning_targets;
+      assert.equal(plan.status, "candidates", J(plan));
+      assert.deepEqual(plan.source, { source_version_id: sv, source_id: promoted.source_id, worksheet_key: "sheet_3", worksheet_name: "Delivery_Targets", profile_canonical_sha256: originalProfile.profile_canonical_sha256 });
+      assert.deepEqual(plan.candidates.map((c) => [c.locator.row_number, c.indicator, c.planned_value, c.unit, c.period.start, c.period.end, c.scope, c.status_label, c.comparator]), [
+        [2, "distinct_households_served", "90", "households", "2025-04-01", "2026-03-31", "all", "planned", null],
+        [3, "completed_household_service_encounters", "250", "encounters", "2025-04-01", "2026-03-31", "all", "planned", null],
+        [4, "pantry_bags_distributed", "300", "bags", "2025-04-01", "2026-03-31", "PA", "planned", null],
+        [5, "matched_food_planning_surveys", "60", "comparable_households", "2025-04-01", "2026-03-31", "all", "planned", null],
+        [6, "reported_partner_contacts", "25", "self_reports", "2025-04-01", "2026-03-31", "all", "planned", null],
+        [7, "food_skills_household_attendances", "95", "encounters", "2025-04-01", "2026-03-31", "FS", "planned", null],
+      ], "the six planning rows exactly as the source states them");
+      assert.ok(plan.candidates.every((c) => c.locator.source_version_id === sv && c.locator.worksheet_key === "sheet_3"
+        && J(c.locator.field_keys) === J({ value: "field_3", indicator: "field_1", unit: "field_4", period: "field_5", scope: "field_2", status: "field_6", note: "field_7" })));
+      const relatedOf = (row) => plan.candidates.find((c) => c.row_number === row).related_measurements;
+      // Households served, encounters, bags and attendances are not measured in
+      // this workbook: nothing from it is proposed. A result from another file on
+      // this Project may share words with the indicator; it is only ever a proposal.
+      for (const row of [2, 3, 4, 7]) {
+        for (const related of relatedOf(row)) {
+          assert.notEqual(related.source_version_id, sv, `row ${row}: no result of this workbook is proposed`);
+          assert.ok(["not_comparable", "confirmation_required"].includes(related.relationship.status));
+          assert.deepEqual(related.relationship.checks.find((c) => c.key === "meaning").result, "confirm", "the meaning is never accepted for the organization");
+        }
+      }
+      assert.deepEqual([3, 4, 7].map((row) => relatedOf(row).length), [0, 0, 0], "no recorded result on this Project is named like encounters, bags or attendances");
+      const [survey] = relatedOf(5);
+      assert.deepEqual([survey.name, survey.value_text, survey.relationship.status], ["Food planning confidence (1-5)", "32 of 43 (74.42%)", "not_comparable"]);
+      assert.deepEqual(survey.relationship.checks.filter((c) => c.result === "fail").map((c) => c.key), ["unit", "period"], "60 comparable households is a count; the saved survey result is a percentage over all survey dates");
+      const [referralPlan] = relatedOf(6);
+      assert.deepEqual([referralPlan.name, referralPlan.value_text, referralPlan.relationship.status], ["reported_contact records", "9 of 49 (18.37%)", "not_comparable"]);
+      assert.deepEqual(referralPlan.relationship.checks.filter((c) => c.result === "fail").map((c) => c.key), ["unit", "period"]);
+      assert.deepEqual([plan.persistence.available, plan.persistence.reason], [false, "target_source_provenance_not_storable"]);
+      await panel.selectWorksheet("sheet_3");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planning-target]`)}).length`)) === 6, "six planned-target candidates");
+      const planText = await textOf(adminPage, `${section} [data-client-planning-targets="candidates"]`);
+      for (const expected of ["6 planned values stated in Delivery_Targets (rows 2-7)", "These are your organization's plans, not results.", "Planned households", "Only for PA",
+        "2025-04-01 to 2026-03-31", "at least / at most not stated",
+        "Possibly related recorded result: Food planning confidence (1-5): 32 of 43 (74.42%)", "Not comparable as stated.",
+        "Differs: The planned value is a count of \"comparable_households\"; this result is comparable pairs with a higher follow-up value (a percentage).",
+        "Differs: This result covers all dates in its source, not 2025-04-01 to 2026-03-31.",
+        "Possibly related recorded result: reported_contact records: 9 of 49 (18.37%)",
+        "No recorded result on this Project has a name that matches this indicator.",
+        "KAI cannot yet store a target together with the worksheet row it came from. Nothing on this worksheet has been saved."]) {
+        assert.ok(planText.includes(expected), `targets worksheet shows: ${expected}`);
+      }
+      assert.equal(await adminPage.evaluate(`(() => {
+        const plan = document.querySelector(${J(`${section} [data-client-planning-targets]`)});
+        const counts = document.querySelector(${J(`${section} [data-client-ready-measurements]`)});
+        return Boolean(plan && counts && (plan.compareDocumentPosition(counts) & Node.DOCUMENT_POSITION_FOLLOWING));
+      })()`), true, "planned targets come before the optional row count");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-source-breakdown]`)}).open`), false, "the six-row count is optional and closed");
+      assert.equal(await textOf(adminPage, `${section} [data-client-derived-paired-unavailable]`), null, "no survey-pairing message on a planning worksheet");
+      assert.deepEqual(await adminPage.evaluate(`Array.from(document.querySelectorAll(${J(`${section} button, ${section} input, ${section} select`)})).filter((el) => el.offsetParent !== null && !el.closest('details:not([open])')).map((el) => el.textContent.trim())`),
+        ["Refresh measurements"], "nothing to configure or count before seeing the planned targets");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-candidates");
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-candidates", 390);
+      assert.deepEqual({ measurements: await rowsOf(), targets: await targetRowsOf(),
+        evidence: (await query("SELECT count(*)::int AS n FROM kai.evidence_items WHERE source_version_id = $1::uuid", [sv]))[0].n,
+        claims: (await query("SELECT count(*)::int AS n FROM kai.claims WHERE organization_id = $1::uuid", [ORG_X]))[0].n }, writesBefore,
+      "reading planned targets writes no target, measurement, evidence or claim");
+      for (const api of [contributorApi, reviewerApi, adminYApi]) assert.equal((await api("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).status, 403);
+      await panel.selectWorksheet("sheet_2");
+      await adminPage.waitFor(async () => (await fieldValue(`${section} [data-client-derived-field="operation"]`)) === "rate", "the referral worksheet's unsaved calculation is still there");
+      assert.deepEqual([await fieldValue(`${section} [data-client-derived-field="categoryFieldKey"]`),
+        await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-custom-calculations]`)}).open`),
+        await fieldValue(`[data-client-source-measurement="${sv}"] [data-client-source-measurement-field="countedUnit"]`)], ["field_5", true, "referral"]);
+      // The planning worksheet is still offered (measuring it is optional); a
+      // planned target cannot yet be stored with its worksheet row.
+      assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "worksheet_measurement_remaining"]);
       const [referralClaim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [keptReferral.evidenceItem.evidence_item_id]);
       assert.ok(referralClaim, "the ready rate also needs only one save action before reporting");
       claimIds.push(referralClaim.claim_id);
@@ -4364,10 +4474,194 @@ async function runXlsxAcceptance() {
       await adminPage.clickIn(`${section} [data-client-derived-propose-claim="${retained.evidence_id}"]`, "Retry Add to reports for the saved result");
       await adminPage.waitFor(() => adminPage.evaluate(`Boolean(document.querySelector(${J(`${section} [data-client-derived-recorded="${retained.id}"] [data-client-derived-report-status="ready"]`)}))`), "existing saved result ready after retry");
       assert.equal(await rowsOf(), 4, "retry never recalculates or duplicates the retained measurement");
+      // The same definition on another worksheet is a different, unsaved result.
+      await panel.selectWorksheet("sheet_1");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-ready-measurement="records"]`)), "survey record count");
+      assert.deepEqual(await adminPage.evaluate(`(() => { const b = document.querySelector(${J(`${section} [data-client-save-ready-measurement="records"]`)}); return [b.textContent, b.disabled]; })()`),
+        ["Save for reports", false], "saving sheet_2's record count does not mark sheet_1's as saved");
       const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, sv, "sheet_1"), {});
       assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 4]);
       assert.equal((await adminYApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 403);
-      results.householdSurveyRecovery = { sv, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false };
+      // The planned contacts target (row 6: 25 self_reports, 2025-04-01 to
+      // 2026-03-31) beside counts that could be its actual. Which date puts a
+      // referral in the period is the organization's decision: by referral
+      // date 9, by follow-up date 8 (independent oracle). KAI proposes both,
+      // names the date column, and accepts neither.
+      const periodBeforeTargets = (await adminApi("GET", periodPath)).body.data;
+      let contactCounts;
+      let contactPlan;
+      try {
+        await setProjectPeriodByApi("2025-04-01", "2026-03-31");
+        const reportedContact = referral.definition.conditions[0];
+        contactCounts = {};
+        for (const [dateField, expected] of [["field_3", 9], ["field_6", 8]]) {
+          const counted = await adminApi("POST", tabularMeasurementPath(ORG_X, sv, "sheet_2"), { definition: { operation: "count", conditions: [reportedContact,
+            { kind: "period", field_key: dateField, period_source: "engagement_reporting_period", scope: "within" }] } });
+          assert.ok([200, 201].includes(counted.status), J(counted.body));
+          assert.equal(counted.body.data.measurement.measured_value, expected, `reported_contact referrals in the fiscal year by ${dateField}`);
+          contactCounts[dateField] = counted.body.data.measurement.source_derived_measurement_id;
+        }
+        contactPlan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).body.data.planning_targets;
+      } finally {
+        if (periodBeforeTargets.start && periodBeforeTargets.end) await setProjectPeriodByApi(periodBeforeTargets.start, periodBeforeTargets.end);
+      }
+      const contactRelated = contactPlan.candidates.find((c) => c.row_number === 6).related_measurements;
+      for (const [dateField, column, value] of [["field_3", "C", "9"], ["field_6", "F", "8"]]) {
+        const related = contactRelated.find((r) => r.source_derived_measurement_id === contactCounts[dateField]);
+        assert.deepEqual([related.name, related.value_text, related.relationship.status], ["reported_contact records", value, "confirmation_required"]);
+        assert.deepEqual(related.relationship.checks.map((c) => [c.key, c.result]),
+          [["project", "pass"], ["currentness", "pass"], ["unit", "pass"], ["period", "pass"], ["comparison", "confirm"], ["meaning", "confirm"]]);
+        assert.equal(related.relationship.checks.find((c) => c.key === "period").text, `Both cover 2025-04-01 to 2026-03-31 (the result applies it to column ${column}).`);
+      }
+      assert.equal(contactRelated.find((r) => r.value_text === "9 of 49 (18.37%)").relationship.status, "not_comparable", "the all-date percentage stays not comparable");
+      assert.equal(await targetRowsOf(), writesBefore.targets, "no planned target is stored from the worksheet");
+      results.householdSurveyRecovery = { sv, fileId, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false,
+        plannedTargets: plan.candidates.map((c) => [c.locator.row_number, c.indicator, c.planned_value, c.unit, c.related_measurements.map((r) => r.relationship.status)]) };
+    });
+
+    await test("W2: a planning worksheet beside its session log: a recorded count with the same unit, period and Project is shown with every check, still needs the organization's confirmation, and nothing is stored as a target", async () => {
+      const sessions = [["session_id", "status", "session_date"],
+        ["T01", "completed", "2026-01-06"], ["T02", "completed", "2026-01-13"], ["T03", "cancelled", "2026-01-20"], ["T04", "completed", "2026-01-27"],
+        ["T05", "completed", "2026-02-03"], ["T06", "cancelled", "2026-02-10"], ["T07", "completed", "2026-02-17"],
+        ["T08", "completed", "2026-03-03"], ["T09", "completed", "2026-03-10"],
+        ["T10", "completed", "2025-12-02"], ["T11", "completed", "2025-12-09"], ["T12", "completed", ""]];
+      // Independent expectation: completed sessions dated within 2026-01-01..2026-03-31.
+      const expectedCompleted = sessions.slice(1).filter(([, status, date]) => status === "completed" && date >= "2026-01-01" && date <= "2026-03-31").length;
+      assert.equal(expectedCompleted, 7);
+      const plannedRows = [["indicator", "program", "target_value", "unit", "reporting_period", "target_status", "comparison", "notes"],
+        ["completed_sessions", "all", 6, "sessions", "2026-01-01 to 2026-03-31", "planned", "at least", "Count only sessions that took place."],
+        ["completed_session_rate", "all", "80%", "", "2026-01-01 to 2026-03-31", "planned", "at least", ""],
+        ["completed_sessions_prior_quarter", "all", 5, "sessions", "2025-10-01 to 2025-12-31", "planned", "at least", ""],
+        ["Maria Lopez", "all", 3, "visits", "2026-01-01 to 2026-03-31", "planned", "", ""],
+        ["volunteer_hours", "all", "TBD", "hours", "2026-01-01 to 2026-03-31", "planned", "at least", ""]];
+      const file = customerFile("planned_session_targets.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Sessions", rows: sessions }, { name: "Planned_Targets", rows: plannedRows }] }));
+      const fileId = await apiUpload(adminApi, file, ids.batchId);
+      await dispatcher.whenIdle();
+      const { source_version_id: sv } = await decideAndPromote(adminApi, fileId);
+      const periodBefore = (await adminApi("GET", periodPath)).body.data;
+      const setPeriod = setProjectPeriodByApi;
+      const targetRows = async () => (await query("SELECT count(*)::int AS n FROM kai.measurement_targets WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      try {
+        await setPeriod("2026-01-01", "2026-03-31");
+        const sessionsBasis = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).body.data;
+        assert.equal(sessionsBasis.planning_targets, null, "a session log is not read as a planning table");
+        const status = sessionsBasis.tabular.fields.find((f) => f.role === "categorical" && (f.values || []).some((v) => v.label === "completed"));
+        const date = sessionsBasis.tabular.fields.find((f) => f.role === "date");
+        const recorded = await adminApi("POST", tabularMeasurementPath(ORG_X, sv, "sheet_1"), {
+          definition: { operation: "count", conditions: [
+            { kind: "category", field_key: status.field_key, value_key: status.values.find((v) => v.label === "completed").value_key },
+            { kind: "period", field_key: date.field_key, period_source: "engagement_reporting_period", scope: "within" }] },
+          interpretation: { indicator_label: "Completed sessions", meaning_text: "Sessions the organization's log records as completed.", evidence_basis: "organization_record" },
+        });
+        assert.ok([200, 201].includes(recorded.status), J(recorded.body));
+        assert.equal(recorded.body.data.measurement.measured_value, expectedCompleted);
+        const measurementId = recorded.body.data.measurement.source_derived_measurement_id;
+        const targetsBefore = await targetRows();
+        const plan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_2"))).body.data.planning_targets;
+        assert.equal(plan.status, "candidates", J(plan));
+        const row = (n) => plan.candidates.find((c) => c.row_number === n);
+        assert.deepEqual(plan.candidates.map((c) => c.row_number), [2, 3, 4, 5, 6]);
+        const compatible = row(2).related_measurements.find((r) => r.source_derived_measurement_id === measurementId);
+        assert.deepEqual([row(2).planned_value, row(2).unit, row(2).comparator, compatible.source_derived_measurement_id, compatible.name, compatible.value_text, compatible.proposed_because, compatible.relationship.status],
+          ["6", "sessions", "at_least", measurementId, "Completed sessions", String(expectedCompleted), "same_indicator_label", "confirmation_required"]);
+        assert.deepEqual(compatible.relationship.checks.map((c) => [c.key, c.result]),
+          [["project", "pass"], ["currentness", "pass"], ["unit", "pass"], ["period", "pass"], ["comparison", "pass"], ["meaning", "confirm"]], "even a full match is never accepted for the organization");
+        const sameResult = (n) => row(n).related_measurements.find((r) => r.source_derived_measurement_id === measurementId);
+        assert.deepEqual([row(3).unit_kind, sameResult(3).relationship.checks.find((c) => c.key === "unit").result], ["percent", "fail"]);
+        assert.deepEqual(sameResult(4).relationship.checks.find((c) => c.key === "period").text, "This result covers 2026-01-01 to 2026-03-31, not 2025-10-01 to 2025-12-31.");
+        assert.deepEqual([row(5).indicator, row(5).related_measurements, row(5).limitations.map((l) => l.code)], [null, [], ["indicator_withheld", "comparison_not_stated"]]);
+        assert.deepEqual([row(6).planned_value, row(6).limitations.map((l) => l.code)], [null, ["planned_value_not_numeric"]]);
+        assert.doesNotMatch(J(plan), /Maria|Lopez|Count only sessions/, "withheld names and free-text notes never leave the server");
+        await openCountRecords(sv);
+        const panel = countRecordsPanelFor(sv);
+        const section = `[data-client-derived-measurements="${sv}"]`;
+        await panel.selectWorksheet("sheet_2");
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planning-target]`)}).length`)) === 5, "five planned-target candidates");
+        const shown = await textOf(adminPage, `${section} [data-client-planning-targets="candidates"]`);
+        for (const expected of [`Possibly related recorded result: Completed sessions: ${expectedCompleted}`, "May be the same measure; only your organization can confirm what it counts.",
+          "Matches: Both are whole counts.", "Matches: Both cover 2026-01-01 to 2026-03-31 (the result applies it to column C).", "Matches: The worksheet states the result should be at least the planned value.",
+          "Needs your confirmation: KAI cannot establish that \"completed_sessions\" counts the same thing as \"Completed sessions\" (source records). Only your organization can confirm this.",
+          "Differs: The planned value is a percentage; this result is a count of source records.", "Indicator withheld",
+          "KAI cannot yet store a target together with the worksheet row it came from."]) {
+          assert.ok(shown.includes(expected), `planning worksheet shows: ${expected}`);
+        }
+        assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /Maria|Lopez|Count only sessions/);
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-compatible");
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-compatible", 390);
+        assert.equal(await targetRows(), targetsBefore, "a candidate is never written as a target");
+        // The person-entered target on the recorded result is unchanged and separate.
+        const sessionsRead = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).body.data;
+        assert.equal(sessionsRead.recorded.find((m) => m.source_derived_measurement_id === measurementId).target, null);
+        results.plannedTargetsCompatible = { sv, measured: expectedCompleted, relationship: compatible.relationship.status, candidates: plan.candidates.length };
+      } finally {
+        if (periodBefore.start && periodBefore.end) await setPeriod(periodBefore.start, periodBefore.end);
+      }
+    });
+
+    await test("W3: the original workbook promoted as the successor version: raw row counts do not hide its unsaved survey outcomes, and the earlier version's results and saved report stay historical", {
+      skip: !process.env.KAI_WILLOW_QUAY_PACKAGE ? "set KAI_WILLOW_QUAY_PACKAGE to the original synthetic package" : false,
+    }, async () => {
+      const earlier = results.householdSurveyRecovery;
+      assert.ok(earlier?.sv, "case W recorded the earlier version");
+      const savedBefore = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, earlier.draftId));
+      assert.equal(savedBefore.status, 200);
+      const originalPath = join(process.env.KAI_WILLOW_QUAY_PACKAGE, "01_UPLOAD_TO_KAI/04_Surveys_Referrals_and_Targets.xlsx");
+      const fileId = await apiUpload(preExactAdmin, customerFile("04_surveys_referrals_and_targets.xlsx", readFileSync(originalPath)), ids.batchId, { duplicateOf: earlier.fileId });
+      await preExactDispatcher.whenIdle();
+      const sensitivity = await sensitivityOf(fileId);
+      assert.equal((await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: SNAPSHOT,
+      })).status, 200);
+      const candidate = await candidateOf(sensitivity.intake_sensitivity_profile_id);
+      const successor = await adminApi("POST", sourceCandidateDecisionPath(ORG_X, candidate.intake_source_candidate_id),
+        { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: earlier.sv });
+      assert.equal(successor.status, 200, J(successor.body));
+      const sv = successor.body.data.source_version.source_version_id;
+      assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [earlier.sv]))[0].is_current, false);
+      assert.equal((await adminApi("GET", derivedMeasurementBasisPath(ORG_X, earlier.sv, "sheet_3"))).status, 409, "a replaced version's worksheet is not read again for targets or results");
+      // The existing saved-report rule (postgresClientInternalReportRepository):
+      // a report is re-evaluated on every read and is available only while its
+      // cited source versions are current, so the earlier version's report is
+      // refused, not silently served from replaced data. Unchanged by this package.
+      const savedAfter = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, earlier.draftId));
+      assert.deepEqual([savedAfter.status, savedAfter.body?.error?.code], [409, "conflict_current_state_changed"]);
+      const guidanceOf = async () => {
+        const entry = (await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`)).body.data.files.find((item) => item.intakeFileId === fileId);
+        return [entry.currentStage, entry.currentStatus, entry.nextAction, entry.reason];
+      };
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-file-measurement="${fileId}"]`)), "the successor file's View measurements step");
+      await adminPage.clickIn(`[data-client-open-file-measurement="${fileId}"]`, "View measurements (successor)");
+      const panel = countRecordsPanelFor(sv);
+      const section = `[data-client-derived-measurements="${sv}"]`;
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-paired]`))?.includes("32 of 43 comparable pairs (74.42%)"), "successor survey outcomes shown first");
+      // Only raw row counts, on every worksheet; each worksheet's own button.
+      for (const key of ["sheet_1", "sheet_2", "sheet_3"]) {
+        await panel.selectWorksheet(key);
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-ready-measurement="records"]`)), `${key} record count`);
+        await adminPage.idle();
+        assert.deepEqual(await adminPage.evaluate(`(() => { const b = document.querySelector(${J(`${section} [data-client-save-ready-measurement="records"]`)}); return [b.textContent, b.disabled]; })()`),
+          ["Save for reports", false], `${key}'s count is not shown as saved by another worksheet's count`);
+        await adminPage.clickIn(`${section} [data-client-save-ready-measurement="records"]`, `Save ${key} row count`);
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Calculated result saved: All nonblank records."), `${key} count saved`);
+        await adminPage.idle();
+      }
+      const counts = await query("SELECT worksheet_key, measured_value::int FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid ORDER BY worksheet_key", [sv]);
+      assert.deepEqual(counts.map((c) => [c.worksheet_key, c.measured_value]), [["sheet_1", 121], ["sheet_2", 49], ["sheet_3", 6]]);
+      assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "worksheet_measurement_remaining"], "row counts do not stand in for the unsaved survey outcomes");
+      await panel.selectWorksheet("sheet_1");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-paired]`))?.includes("31 of 41 comparable pairs (75.61%)"), "survey outcomes still offered");
+      await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Save results for reports (successor)");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("2 results saved"), "survey outcomes saved");
+      assert.deepEqual(await guidanceOf(), [null, "complete", "none", "complete"]);
+      // The successor's planned targets: the earlier version's referral rate is named as replaced, the successor's survey result as current.
+      const plan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).body.data.planning_targets;
+      const relatedOf = (n) => plan.candidates.find((c) => c.row_number === n).related_measurements;
+      const replaced = relatedOf(6).find((r) => r.source_version_id === earlier.sv);
+      assert.deepEqual([replaced.name, replaced.relationship.checks.find((c) => c.key === "currentness").text], ["reported_contact records", "This result was calculated from a source version that has since been replaced."]);
+      const current = relatedOf(5).find((r) => r.source_version_id === sv);
+      assert.deepEqual([current.name, current.value_text, current.relationship.checks.find((c) => c.key === "currentness").result], ["Food planning confidence (1-5)", "32 of 43 (74.42%)", "pass"]);
+      results.successorWorkbook = { sv, earlier: earlier.sv, rowCountsSaved: counts.length, guidanceAfterOutcomes: await guidanceOf() };
     });
 
     await test("summary", async () => {

@@ -30,6 +30,10 @@
 .kai-measurement-report-status { color: #206243; font-weight: 600; }
 .kai-measurement [data-client-derived-target-form] { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .kai-measurement [data-client-derived-notice] { padding: 12px; border-radius: 8px; margin: 12px 0; overflow-wrap: anywhere; }
+.kai-measurement-plan { background: #fff; border-style: dashed; overflow-wrap: anywhere; }
+.kai-measurement-plan ul { padding-left: 18px; margin: 4px 0; }
+.kai-measurement [data-client-planning-target-check-result="fail"] { color: #8a3b12; }
+.kai-measurement [data-client-planning-target-check-result="pass"] { color: #206243; }
 @media (max-width: 680px) {
   .kai-measurement { padding: 12px !important; }
   .kai-measurement-result { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }

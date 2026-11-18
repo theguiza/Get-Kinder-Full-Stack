@@ -3,6 +3,7 @@ import { getScopedIntakeFileParserProfileEligibilityFacts, lockKaiP1EligibleInta
 import { profileLocalTrustedFile, readTrustedCsvRecords, readTrustedWorksheetRecords } from "../profiling/localProfilingKernel.js";
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
+import { assessPlanningTargetRecords } from "../validators/kaiPlanningTargetCandidates.js";
 
 /**
  * KAI cross-source reconciliation worker: the one place a cross-source
@@ -25,6 +26,9 @@ import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./cross
  * A failed earlier survey discovery can also be recalculated on demand for
  * one admitted workbook. This uses the same bounded parser and exact-version
  * checks, returns aggregates only and never rewrites the committed profile.
+ * A small worksheet's planned-target rows are read the same way: only the
+ * screened candidates (planned value, unit, period, programme, status and row
+ * number) leave this module, never the records or a free-text note.
  */
 function refusal(reason) {
   return { ok: false, reason };
@@ -108,6 +112,19 @@ export function createCrossSourceReconciliationWorker({
         ? profile.sheets[0] : profile.sheets?.find((item) => item.sheet_key === input.worksheetKey);
       if (!sheet?.paired_outcome_basis) return refusal("paired_outcome_worksheet_not_readable");
       return { ok: true, sheetKey: sheet.sheet_key, basis: sheet.paired_outcome_basis, recordCountBasis: sheet.record_count_basis };
+    },
+    // Planned targets stated in one worksheet of the SAME verified upload.
+    // Read-only; the record count lets the caller confirm the profiled table.
+    async readPlanningTargetCandidates(tx, input) {
+      if (input.worksheetKey == null) return refusal("planning_target_worksheet_required");
+      const read = await readRecords(tx, input);
+      if (!read.ok) return read;
+      return {
+        ok: true,
+        sheetKey: input.worksheetKey,
+        dataRecordCount: read.records.length - 1,
+        assessment: assessPlanningTargetRecords(read.records, { worksheetKey: input.worksheetKey }),
+      };
     },
     // One version's verified records, for a calculation in this same worker transaction.
     async readSourceRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {

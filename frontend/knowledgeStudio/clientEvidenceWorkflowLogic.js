@@ -143,7 +143,7 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   source_version_not_current: "A selected claim uses a source version recorded as non-current. Select findings from a current source version. If this file should still be current, its source-version history needs investigation.",
   not_authorized: "Your role does not include internal draft generation for this organization.",
   no_project: "Select a Project above: each draft belongs to one Project.",
-  no_measured_claim: "No measured finding saved yet. In Sources > Data Sources, open View measurements, choose a worksheet and save a calculated result for reports. Descriptions and targets are optional.",
+  no_measured_claim: "No measured finding saved yet. In Sources > Data Sources, open View measurements and save a calculated result for reports. Descriptions and targets are optional.",
   claims_not_all_loaded: "Not every claim of your organization is loaded yet, and none of the loaded ones is a measured finding. "
     + "Use \"Load more claims\" in Evidence to find your measured findings.",
   no_claims_selected: "Select at least one claim in Evidence to draft from.",
@@ -819,7 +819,7 @@ export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
   review_sensitivity: "Use for impact: this file first needs your sensitivity & allowed-use review. Record your decision below; nothing is decided for you.",
   confirm_promotion: "Use for impact: confirm the source authorization below, then choose the reviewed source type and promote. Nothing is promoted without your confirmation.",
   done: "Use for impact: this file's evidence exists. Propose claims from it below, generate their gap follow-ups, then internal drafts.",
-  measure: "Measurements are open below. Choose a worksheet, then save a calculated result for reports. No description or target is required.",
+  measure: "Measurements are open below with the calculated results. Save a result for reports; no description or target is required.",
   interrupted: "Use for impact stopped. Every completed step is kept; use the action again to continue from the current state.",
 });
 

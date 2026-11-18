@@ -10,6 +10,7 @@ import {
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { committedOutcomeHeadingSuggestion } from "../profiling/outcomeHeadingSuggestion.js";
 import { profileWithCurrentPairedBasis } from "./pairedOutcomeBasisRecovery.js";
+import { readPlanningTargetCandidates } from "./planningTargetCandidateRead.js";
 import { __evidenceLineageRepositorySharedWrites } from "./postgresEvidenceLineageRepository.js";
 import { __sourceMeasurementRepositoryShared } from "./postgresSourceMeasurementRepository.js";
 import {
@@ -632,6 +633,26 @@ export function createPostgresDerivedMeasurementRepository({
           entry.target = target ? { measurement_target_id: target.measurement_target_id, target_unit: target.target_unit, target_value: target.target_value, comparison: target.comparison } : null;
           entry.target_comparison = target ? composeMeasurementTargetComparison({ measurementRow: row, target }) : null;
         }
+        // Planned targets the worksheet itself states, read from the verified
+        // upload as candidates: never a recorded measurement or an accepted target.
+        const headingProfiles = new Map([[worksheetKey ?? null, profile]]);
+        const planningTargets = await readPlanningTargetCandidates(tx, {
+          organizationId, fileProfileRow, profile, worksheetKey, sourceVersionRow,
+          engagementId: periodContext.engagement_id ?? null,
+          pairedAvailable: Boolean(paired?.ok),
+          worker: crossSourceReconciliationWorker,
+          // A paired result's suggested name comes from its own worksheet's
+          // (recovered) basis on this exact version and profile only.
+          headingLabelOf: async (row) => {
+            if (row.measurement_family !== DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME || row.measurement_source_version_id !== sourceVersionId
+              || row.profile_canonical_sha256 !== fileProfileRow.profile_canonical_sha256) return null;
+            const key = row.worksheet_key ?? null;
+            if (!headingProfiles.has(key)) {
+              headingProfiles.set(key, await profileWithCurrentPairedBasis(tx, { organizationId, fileProfileRow, worksheetKey: key, worker: crossSourceReconciliationWorker }));
+            }
+            return committedOutcomeHeadingSuggestion(headingProfiles.get(key), { worksheetKey: row.worksheet_key, outcomeFieldKey: row.definition?.outcome_field_key })?.suggested_label ?? null;
+          },
+        });
         return success({
           sourceVersion: rowToSourceVersionRecord(sourceVersionRow),
           source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code, reviewed_source_type: sourceRow.reviewed_source_type },
@@ -659,6 +680,7 @@ export function createPostgresDerivedMeasurementRepository({
             ? profile.sheets.map((sheet) => ({ sheet_key: sheet.sheet_key, sheet_name: sheet.safe_sheet_name ?? sheet.sheet_key }))
             : [],
           recorded: [...recorded.values()],
+          planning_targets: planningTargets,
         });
       });
     },

@@ -38,6 +38,27 @@ export function measurementTargetUnit(family) {
   return family === "tabular_rate" || family === "paired_outcome_change" ? "percent" : "count";
 }
 
+// Planned-target candidates read from a worksheet: plain words for each check.
+const PLANNING_CHECK_LABELS = Object.freeze({ pass: "Matches", fail: "Differs", confirm: "Needs your confirmation" });
+export function planningTargetCheckLabel(result) {
+  return PLANNING_CHECK_LABELS[result] || "Not assessed";
+}
+
+export function planningTargetRelationshipLabel(status) {
+  return status === "not_comparable"
+    ? "Not comparable as stated."
+    : "May be the same measure; only your organization can confirm what it counts.";
+}
+
+/** "rows 2-7", "rows 2, 4 and 9" or "row 3". */
+export function planningTargetRowsText(candidates) {
+  const rows = (candidates || []).map((candidate) => candidate.row_number).filter(Number.isInteger).sort((a, b) => a - b);
+  if (rows.length === 0) return "no rows";
+  if (rows.length === 1) return `row ${rows[0]}`;
+  if (rows.every((row, index) => index === 0 || row === rows[index - 1] + 1)) return `rows ${rows[0]}-${rows[rows.length - 1]}`;
+  return `rows ${rows.slice(0, -1).join(", ")} and ${rows[rows.length - 1]}`;
+}
+
 export function derivedMeasurementInterpretationPath(organizationId, measurementId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/derived-measurements/${encodeURIComponent(measurementId)}/interpretations`;

@@ -907,7 +907,7 @@ export default function ClientEvidenceWorkflow({
               }}>
               View measurements on current version
             </button>
-            <div className="text-muted">Choose a worksheet, then save a calculated result for your reports. Earlier findings remain with the earlier version.</div>
+            <div className="text-muted">Its calculated results open there; save one for your reports. Earlier findings remain with the earlier version.</div>
           </div>
         ) : null}
       </div>

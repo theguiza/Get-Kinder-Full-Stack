@@ -1662,6 +1662,33 @@ export async function listScopedDerivedMeasurementRowsBySourceVersion({ organiza
   return rows;
 }
 
+/**
+ * Recorded derived measurements of every source version on one Project
+ * (the file's batch Project, as the reporting-period read resolves it), with
+ * each evidence row and the measuring version's currentness, tenant-scoped
+ * and bounded. Read-only; used to propose results a planned target may relate to.
+ */
+export async function listScopedEngagementDerivedMeasurementRows({ organizationId, engagementId, limit = 500 }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS},
+            msv.is_current AS measurement_source_is_current, msv.source_id::text AS measurement_source_id
+     ${DERIVED_MEASUREMENT_ROW_FROM}
+       JOIN kai.source_versions msv ON msv.organization_id = m.organization_id AND msv.source_version_id = m.source_version_id
+      WHERE l.organization_id = $1::uuid
+        AND EXISTS (
+          SELECT 1 FROM kai.intake_source_candidates c
+            JOIN kai.intake_files f ON f.organization_id = c.organization_id AND f.intake_file_id = c.intake_file_id
+            JOIN kai.intake_batches b ON b.organization_id = f.organization_id AND b.intake_batch_id = f.intake_batch_id
+           WHERE c.organization_id = msv.organization_id AND c.intake_source_candidate_id = msv.intake_source_candidate_id
+             AND b.engagement_id = $2::uuid
+             AND (to_jsonb(f)->>'engagement_id' IS NULL OR to_jsonb(f)->>'engagement_id' = $2::text))
+      ORDER BY m.created_at ASC, m.source_derived_measurement_id ASC, l.created_at ASC
+      LIMIT $3`,
+    [organizationId, engagementId, limit],
+  );
+  return rows;
+}
+
 /** The source's tenant-scoped intake Project, including an unresolved lineage result.
  * The file's recorded Project and its batch must agree. On older supported
  * shapes without a file Project column, the batch supplies the association.

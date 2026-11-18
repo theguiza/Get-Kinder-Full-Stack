@@ -652,12 +652,12 @@ async function runBrowserAcceptance() {
     await page.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
     mark = page.mark();
     await page.clickButton("Promote");
-    // 4e5a758c: a promoted spreadsheet whose evidence is only column facts
-    // continues to its Count records step (opened below); any other file ends
+    // 4e5a758c / af395fc7: a promoted spreadsheet whose evidence is only column
+    // facts continues to its measurements (opened below); any other file ends
     // with its evidence created.
     await page.waitFor(async () => {
       const shown = await page.text();
-      return shown.includes("Use for impact: this file's evidence exists.") || shown.includes("Use for impact: this spreadsheet is a source now.");
+      return shown.includes("Use for impact: this file's evidence exists.") || shown.includes("Measurements are open below with the calculated results.");
     }, "Use for impact continued after promotion");
     await page.idle();
     const posts = postsSince(page, mark);

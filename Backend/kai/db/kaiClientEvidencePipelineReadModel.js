@@ -1,6 +1,28 @@
 import pool from "./kaiDb.js";
 import { MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION } from "../validators/kaiSourceMeasurementValidators.js";
+import { PAIRED_OUTCOME_DISCOVERY_VERSION } from "../profiling/pairedOutcomeBasis.js";
 import { DOCUMENT_EVIDENCE_SCHEMA_READY_SQL, documentStatementsNoneFoundSql } from "../validators/kaiDocumentEvidenceValidators.js";
+
+// A worksheet with calculated baseline/follow-up survey outcomes (committed,
+// or an earlier failed discovery the measurement read recovers from the
+// verified upload) stays available until those outcomes are saved: a raw or
+// other count does not stand in for them. Used inside the unmeasured-worksheet
+// lateral (aliases v and sh) only when kai.source_derived_measurements exists.
+const PAIRED_OUTCOMES_REMAIN_SQL = `(
+  (sh->'paired_outcome_basis'->>'status' IN ('proposed', 'role_selection_required')
+    OR (sh->'paired_outcome_basis'->>'status' = 'no_candidate'
+      AND (CASE WHEN sh->'paired_outcome_basis'->>'discovery_version' ~ '^[0-9]{1,4}$'
+        THEN (sh->'paired_outcome_basis'->>'discovery_version')::int ELSE 0 END) < ${PAIRED_OUTCOME_DISCOVERY_VERSION}
+      AND jsonb_array_length(CASE WHEN jsonb_typeof(sh->'paired_outcome_basis'->'candidates'->'stage') = 'array'
+        THEN sh->'paired_outcome_basis'->'candidates'->'stage' ELSE '[]'::jsonb END) > 0
+      AND sh->'paired_outcome_basis'->>'reason' IN ('participant_identifier_not_found', 'numeric_outcome_field_not_found')))
+  AND NOT EXISTS (
+    SELECT 1 FROM kai.source_derived_measurements pm
+     WHERE pm.organization_id = v.organization_id AND pm.source_version_id = v.source_version_id
+       AND pm.measurement_family = 'paired_outcome_change'
+       AND COALESCE(pm.worksheet_key, sh->>'sheet_key') = sh->>'sheet_key'
+  )
+)`;
 
 /**
  * Read-only, organization + engagement scoped lineage counts for the client
@@ -55,6 +77,10 @@ export async function getClientEvidencePipelineEngagement(organizationId, engage
 }
 
 export async function listClientEvidencePipelineFiles(organizationId, engagementId, { limit, actorUserId = null }, db = pool) {
+  // A schema without derived measurements (older assembled schemas) can hold
+  // no saved survey outcome, so the paired-outcome rule below is not applied there.
+  const { rows: [schema] } = await db.query("SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_measurements_ready");
+  const pairedOutcomesRemainSql = schema?.derived_measurements_ready ? PAIRED_OUTCOMES_REMAIN_SQL : "false";
   const { rows } = await db.query(
     `WITH files AS (
        SELECT f.organization_id, f.intake_file_id, f.safe_filename, f.upload_state, f.file_policy_status,
@@ -288,12 +314,15 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND sh->'record_count_basis'->>'duplicate_record_count' ~ '^[0-9]+$'
             AND sh->'record_count_basis'->'blank_record_count' <= sh->'record_count_basis'->'data_record_count'
             AND sh->'record_count_basis'->'duplicate_record_count' <= sh->'record_count_basis'->'data_record_count'
-            AND NOT EXISTS (
-              SELECT 1 FROM kai.evidence_items ei
-              JOIN kai.source_locators sl ON sl.organization_id = ei.organization_id AND sl.source_locator_id = ei.source_locator_id AND sl.source_version_id = ei.source_version_id
-               WHERE ei.organization_id = v.organization_id AND ei.source_version_id = v.source_version_id
-                 AND ei.evidence_type IN ('source_record_count_measurement', 'source_derived_measurement')
-                 AND sl.coordinates->>'sheet_key' = sh->>'sheet_key'
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM kai.evidence_items ei
+                JOIN kai.source_locators sl ON sl.organization_id = ei.organization_id AND sl.source_locator_id = ei.source_locator_id AND sl.source_version_id = ei.source_version_id
+                 WHERE ei.organization_id = v.organization_id AND ei.source_version_id = v.source_version_id
+                   AND ei.evidence_type IN ('source_record_count_measurement', 'source_derived_measurement')
+                   AND sl.coordinates->>'sheet_key' = sh->>'sheet_key'
+              )
+              OR ${pairedOutcomesRemainSql}
             )
        ) ws ON true
        LEFT JOIN LATERAL (
