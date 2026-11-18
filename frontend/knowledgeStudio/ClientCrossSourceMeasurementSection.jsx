@@ -169,8 +169,10 @@ export default function ClientCrossSourceMeasurementSection({ organizationId, so
   // This workbook is offered as its own register only when it has another worksheet.
   const offeredVersions = linkableVersions.filter((version) => version.sourceVersionId !== sourceVersionId || (eventsBasis?.worksheets || []).length > 1);
   // A workbook register is one worksheet: never the service-event worksheet itself.
-  const registerWorksheets = (register.data?.worksheets || [])
-    .filter((sheet) => !(form.referenceSourceVersionId === sourceVersionId && sheet.sheet_key === eventsWorksheetKey));
+  // For this workbook its worksheets are already known from the service-event basis; another workbook's come with its read.
+  const sameWorkbook = form.referenceSourceVersionId === sourceVersionId;
+  const registerWorksheets = ((sameWorkbook ? eventsBasis?.worksheets : register.data?.worksheets) || [])
+    .filter((sheet) => !(sameWorkbook && sheet.sheet_key === eventsWorksheetKey));
   const registerNeedsWorksheet = (register.data?.worksheets || []).length > 1 || form.referenceSourceVersionId === sourceVersionId;
   const byRole = (list, role) => list.filter((field) => field.role === role);
   const statusValues = eventFields.find((field) => field.field_key === form.statusFieldKey)?.values || [];

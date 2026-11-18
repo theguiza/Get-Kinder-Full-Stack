@@ -3260,7 +3260,7 @@ async function runXlsxAcceptance() {
         ["date", 15, 0, 14, "excel_1900"]);
       assert.equal(basis.tabular.fields.some((field) => field.field_key === "field_6"), false, "plain numbers keep no role");
       assert.deepEqual(basis.tabular.distinct_period_exact.field_2, ["field_5"]);
-      assert.deepEqual(basis.tabular.period_support, { distinct_month_windows: "available", population_period_rates: "available" });
+      assert.deepEqual(basis.tabular.period_support, { distinct_month_windows: "available", population_period_rates: "available", population_distinct_key_rates: "available" });
       const [profileRow] = await query(`SELECT p.profile::text AS profile FROM kai.source_versions sv
         JOIN kai.intake_source_candidates c ON c.organization_id = sv.organization_id AND c.intake_source_candidate_id = sv.intake_source_candidate_id
         JOIN kai.intake_file_profiles p ON p.organization_id = c.organization_id AND p.file_profile_id = c.file_profile_id WHERE sv.source_version_id = $1::uuid`, [sv]);
@@ -3508,7 +3508,7 @@ async function runXlsxAcceptance() {
       }
       assert.equal(await rowsOf(oldSv), countBefore, "refusals write nothing");
       const oldOptions = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, oldSv, null))).body.data.tabular;
-      assert.deepEqual(oldOptions.period_support, { distinct_month_windows: "not_committed", population_period_rates: "not_committed" });
+      assert.deepEqual(oldOptions.period_support, { distinct_month_windows: "not_committed", population_period_rates: "not_committed", population_distinct_key_rates: "not_committed" });
       // The rendered form explains the older profile before any request.
       await openCountRecords(oldSv);
       const oldSection = `[data-client-derived-measurements="${oldSv}"]`;
@@ -3658,9 +3658,9 @@ async function runXlsxAcceptance() {
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-cross-source-form]`)), "the linkage form for the service-event worksheet");
       assert.ok(await optionValueFor(field("referenceSourceVersionId"), "This workbook (another worksheet)") === sv, "the same workbook is offered as a register");
       assert.ok(await setSelect(field("referenceSourceVersionId"), sv));
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, field("referenceWorksheetKey"))), "the register worksheet choice");
-      const sheetOptions = await adminPage.evaluate(`[...document.querySelector(${J(field("referenceWorksheetKey"))}).options].map((o) => o.value)`);
-      assert.deepEqual(sheetOptions, ["", "sheet_2"], "never the service-event worksheet itself");
+      const sheetOptions = () => adminPage.evaluate(`[...(document.querySelector(${J(field("referenceWorksheetKey"))})?.options ?? [])].map((o) => o.value)`);
+      await adminPage.waitFor(async () => (await sheetOptions()).length > 1, "the register worksheet choice");
+      assert.deepEqual(await sheetOptions(), ["", "sheet_2"], "never the service-event worksheet itself");
       assert.ok(await setSelect(field("referenceWorksheetKey"), "sheet_2"));
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, field("registerParticipantFieldKey"))), "the register worksheet's fields");
       for (const [key, value] of [["eventIdentifierFieldKey", "field_1"], ["participantIdentifierFieldKey", "field_2"], ["statusFieldKey", "field_3"], ["dateFieldKey", "field_4"], ["registerParticipantFieldKey", "field_1"]]) {
