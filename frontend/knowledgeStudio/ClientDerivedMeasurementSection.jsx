@@ -73,6 +73,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const [clarifyForm, setClarifyForm] = useState(EMPTY_INTERPRETATION_FORM);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
+  const [showAllReady, setShowAllReady] = useState(false);
   // A queued calculation (exact Project-period days from the verified uploaded file), read until it settles.
   const [calculationJob, setCalculationJob] = useState(null);
   const seqRef = useRef(0);
@@ -99,6 +100,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     setMeaning(EMPTY_INTERPRETATION_FORM);
     setClarifying(null);
     setNotice(null);
+    setShowAllReady(false);
     setCalculationJob(null);
     load();
     return () => { seqRef.current += 1; };
@@ -266,6 +268,23 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         </div>
       ) : null}
 
+      {data?.tabular?.ready_measurements?.length ? <div className="mb-3" data-client-ready-measurements="">
+        <div className="fw-semibold">Calculated counts and rates</div>
+        <div className="text-muted">All dates; duplicate rows remain in record counts. Category labels come from the source. These counts do not establish completed services, verified outcomes or people served. Only listed category labels are shown; other records remain in each rate's denominator.</div>
+        <div className="table-responsive"><table className="table table-sm mb-1">
+          <thead><tr><th>Source value or unit</th><th>Calculated result</th><th /></tr></thead>
+          <tbody>{data.tabular.ready_measurements.slice(0, showAllReady ? undefined : 16).map((item) => <tr key={item.key} data-client-ready-measurement={item.key}>
+            <td>{item.label}</td>
+            <td>{item.denominator == null ? item.measured_value : `${item.numerator} of ${item.denominator} records (${item.percentage}%)`}</td>
+            <td><button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending) || basis.status !== "success" || data.recorded?.some((saved) => saved.measurement_key === item.measurement_key)}
+              data-client-save-ready-measurement={item.key}
+              onClick={() => send("ready", tabularMeasurementPath(organizationId, sourceVersionId, worksheetKey || null), { definition: item.definition },
+                () => `Calculated result saved: ${item.label}.`)}>{data.recorded?.some((saved) => saved.measurement_key === item.measurement_key) ? "Saved" : "Save result"}</button></td>
+          </tr>)}</tbody>
+        </table></div>
+        {data.tabular.ready_measurements.length > 16 ? <button type="button" className="btn btn-sm btn-link" data-client-ready-show-all="" onClick={() => setShowAllReady((value) => !value)}>{showAllReady ? "Show fewer results" : `Show all ${data.tabular.ready_measurements.length} results`}</button> : null}
+      </div> : null}
+
       {data?.paired && !data.paired.available ? (
         <div data-client-derived-paired-unavailable="">
           {data.paired.proposed_pairings?.length ? "Choose a baseline/follow-up mapping: " : "Paired outcome unavailable: "}
@@ -291,6 +310,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {data?.tabular && !data.tabular.available ? (
         <div data-client-derived-tabular-unavailable="">Field measurement unavailable: {data.tabular.blockers?.map((blocker) => `${blocker.message} ${blocker.required_fix || ""}`).join(" ") || TABULAR_UNAVAILABLE_MESSAGES[data.tabular.reason] || "The committed profile has no supported field measurements. Use Count records if available."}</div>
       ) : null}
+      <details data-client-custom-calculations=""><summary className="mb-2">Custom calculation or link to another source (optional)</summary>
       {data?.tabular?.available ? (
         <form className="mb-2" onSubmit={recordTabular} data-client-derived-tabular-form="">
           <div className="fw-semibold">Define a count or rate</div>
@@ -399,8 +419,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           onPeriodSaved={load} linkableVersions={linkableVersions} versionsById={versionsById} earlierVersionIds={earlierVersionIds}
           onReconciled={() => { onRecorded?.(); load(); }} />
       ) : null}
-
-
+      </details>
       {(data?.recorded || []).filter((recorded) => (recorded.worksheet_key || "") === (worksheetKey || data?.tabular?.sheetKey || "")).map((recorded) => {
         const current = currentEvidenceOf(recorded);
         const paired = recorded.measurement_family === "paired_outcome_change";

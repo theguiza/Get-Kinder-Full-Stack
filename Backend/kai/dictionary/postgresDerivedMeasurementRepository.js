@@ -579,6 +579,7 @@ export function createPostgresDerivedMeasurementRepository({
           const shown = labelsAdmitted ? row : { ...row, ...withholdDerivedMeasurementLabels(row) };
           const entry = recorded.get(row.source_derived_measurement_id) ?? {
             source_derived_measurement_id: row.source_derived_measurement_id,
+            measurement_key: row.measurement_key,
             worksheet_key: row.worksheet_key,
             measurement_family: row.measurement_family,
             calculation_method: row.calculation_method,

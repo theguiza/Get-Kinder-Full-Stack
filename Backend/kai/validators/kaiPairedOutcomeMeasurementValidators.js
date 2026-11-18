@@ -287,9 +287,9 @@ export function composePairedOutcomeEvidenceStatement(measurement) {
     : measurement.scoreDirection === "lower_is_better"
       ? `${down} of ${denominator} comparable participant pairs${rateText} improved to a lower follow-up score, the organization defining lower as better; ${same} unchanged and ${up} higher`
       : `${up} of ${denominator} comparable participant pairs${rateText} have a numerically higher follow-up value, ${same} the same and ${down} lower; whether higher is better is not established`;
-  const unit = measurement.matchingUnit === "household" ? "household" : "participant";
+  const unit = ["household", "identifier"].includes(measurement.matchingUnit) ? measurement.matchingUnit : "participant";
   const rule = measurement.instrumentVersionFieldKey ? `the same ${unit} and instrument version` : `the same ${unit} (no instrument version recorded)`;
-  const statementChange = unit === "household" ? change.replaceAll("participant pairs", "household pairs") : change;
+  const statementChange = change.replaceAll("participant pairs", `${unit} pairs`);
   return `${subject}, baseline to follow-up in worksheet ${measurement.sheetKey} ${periodPhrase(measurement)}: ${statementChange}. `
     + `Each pair needs ${rule}; ${measurement.excludedParticipantCount} of ${measurement.participantCount} ${unit}s are excluded as not comparable.`;
 }
@@ -330,7 +330,7 @@ function buildMeasurement({ entry, sheet, alternative, definition, humanSelected
     outcomeFieldKey: entry.outcome_field_key,
     outcomeColumn: column,
     participantFieldKey: alternative.participant_field_key,
-    matchingUnit: alternative.matching_unit === "household" ? "household" : "participant",
+    matchingUnit: ["household", "identifier"].includes(alternative.matching_unit) ? alternative.matching_unit : "participant",
     stageFieldKey: alternative.stage_field_key,
     instrumentVersionFieldKey: alternative.instrument_version_field_key,
     comparabilityRule: alternative.comparability_rule,

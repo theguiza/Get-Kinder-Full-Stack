@@ -9,8 +9,8 @@
  * What it does:
  * - Proposes the participant identifier, stage (baseline/follow-up) and
  *   instrument-version fields, and the numeric outcome fields, from header
- *   words and value shapes. These are proposals for a person to confirm or
- *   correct; nothing is inferred as fact.
+ *   words and value shapes. Results retain this mapping as their calculation
+ *   basis; business meaning and whether higher is better are not inferred.
  * - When more than one field could play a role, it computes every
  *   combination (bounded). It chooses none, so a person can select one
  *   without re-reading the file.
@@ -27,7 +27,7 @@
 import { summarizeOutcomeHeadingSuggestions } from "./outcomeHeadingSuggestion.js";
 
 export const PAIRED_OUTCOME_BASIS_VERSION = "kai_xlsx_paired_outcome_basis_v1";
-export const PAIRED_OUTCOME_DISCOVERY_VERSION = 2;
+export const PAIRED_OUTCOME_DISCOVERY_VERSION = 3;
 export const PAIRED_OUTCOME_CALCULATION_METHOD = "p1_xlsx_paired_baseline_followup_numeric_change_v1";
 export const MAX_PAIRED_OUTCOME_LOCATOR_ROWS = 1000;
 const MAX_ROLE_ALTERNATIVES = 8;
@@ -111,8 +111,27 @@ function isStageColumn(records, position) {
 
 function isNumericColumn(records, position) {
   const present = presentCells(records, position);
+  if (present.some((cell) => cell.date || cell.type === "d")) return false;
   const numeric = present.filter((cell) => numericValue(cell).kind === "number").length;
   return numeric > 0 && numeric * 10 >= present.length * 9;
+}
+
+// A key proposal must actually recur across observations. Unique observation
+// IDs and low-cardinality categories with repeated observations cannot become
+// a matching key merely because they contain an identifier-like value.
+function isRepeatedObservationKey(records, header, stages, columnCount) {
+  const present = presentCells(records, header.position);
+  const codeShape = present.length > 0 && present.every((cell) =>
+    !cell.date && !NON_NUMERIC_CELL_TYPES.has(cell.type)
+    && /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9][A-Za-z0-9_.-]{1,79}$/.test(cell.value.trim()));
+  if (!hasAny(header.tokens, IDENTIFIER_TOKENS) && !codeShape) return false;
+  return stages.some((stage) => {
+    const grouped = groupObservations(records, { participant: header.position, stage, version: null }, columnCount);
+    const keys = [...grouped.participants.values()];
+    const uniquePerStage = (key) => [...key.baseline.values(), ...key.followup.values()].every((rows) => rows.length === 1);
+    return keys.some((key) => key.baseline.size > 0 && key.followup.size > 0 && uniquePerStage(key))
+      && keys.filter(uniquePerStage).length * 2 >= keys.length;
+  });
 }
 
 function sortedRows(rows) {
@@ -273,12 +292,17 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
     if ([...cells.values()].some((cell) => cell.present)) records.push({ row, cells });
   }
 
-  const participant = headers.filter((header) => hasAny(header.tokens, PERSON_TOKENS) && hasAny(header.tokens, IDENTIFIER_TOKENS)).map((header) => header.position);
-  const version = headers.filter((header) => !participant.includes(header.position) && hasAny(header.tokens, VERSION_TOKENS)).map((header) => header.position);
-  const stage = headers.filter((header) => !participant.includes(header.position) && !version.includes(header.position) && isStageColumn(records, header.position))
+  const namedParticipant = headers.filter((header) => hasAny(header.tokens, PERSON_TOKENS) && hasAny(header.tokens, IDENTIFIER_TOKENS)).map((header) => header.position);
+  const version = headers.filter((header) => !namedParticipant.includes(header.position) && hasAny(header.tokens, VERSION_TOKENS)).map((header) => header.position);
+  const stage = headers.filter((header) => !namedParticipant.includes(header.position) && !version.includes(header.position) && isStageColumn(records, header.position))
     .map((header) => header.position);
+  const participant = namedParticipant.length ? namedParticipant : headers.filter((header) =>
+    !version.includes(header.position) && !stage.includes(header.position)
+    && isRepeatedObservationKey(records, header, stage, columnCount)).map((header) => header.position);
   const roles = new Set([...participant, ...version, ...stage]);
-  const outcomes = headers.filter((header) => !roles.has(header.position) && hasAny(header.tokens, SCORE_TOKENS) && isNumericColumn(records, header.position))
+  const outcomes = headers.filter((header) => !roles.has(header.position)
+    && (!hasAny(header.tokens, IDENTIFIER_TOKENS) || hasAny(header.tokens, SCORE_TOKENS))
+    && isNumericColumn(records, header.position))
     .map((header) => header.position);
   const candidates = Object.freeze({
     participant_identifier: Object.freeze(participant.map(fieldKey)),
@@ -302,6 +326,7 @@ export function summarizePairedOutcomeBasis({ rows, recordCountBasis }) {
         alternatives.push(Object.freeze({
           participant_field_key: fieldKey(participantPosition),
           ...(headers.find((header) => header.position === participantPosition)?.tokens.includes("household") ? { matching_unit: "household" } : {}),
+          ...(!namedParticipant.includes(participantPosition) ? { matching_unit: "identifier" } : {}),
           stage_field_key: fieldKey(stagePosition),
           instrument_version_field_key: versionPosition === null ? null : fieldKey(versionPosition),
           comparability_rule: versionPosition === null ? "same_participant_instrument_version_not_recorded" : "same_participant_same_instrument_version",

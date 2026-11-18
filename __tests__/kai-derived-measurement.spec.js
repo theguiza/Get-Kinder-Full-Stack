@@ -253,6 +253,8 @@ test("profile category retention: ordinary labels are kept; personal, sensitive 
   for (const label of ["done", "missed", "Career coaching", "Digital skills"]) assert.ok(committed.includes(`"${label}"`), label);
   // The read model a person sees: the field is listed with its withheld reason and no value to choose.
   const options = D.describeTabularMeasurementOptions(profile, null);
+  for (const key of Object.keys(withheld)) assert.ok(options.ready_measurements.every((result) =>
+    !result.definition.conditions.some((condition) => condition.field_key === key)), `${key} has no suggested result from withheld values`);
   assert.deepEqual(options.fields.find((entry) => entry.field_key === "field_4"), {
     field_key: "field_4", column_position: 4, role: "categorical", present_count: 8, blank_count: 0, values: [], withheld_record_count: 8, vocabulary_withheld: "personal_attribute_field",
   });
@@ -580,4 +582,23 @@ test("optional meaning is absent only by choice; partial labels, descriptions or
   const complete = { ...blank, indicatorLabel: "Referral records", meaningText: "Recorded referrals.", evidenceBasis: "organization_record" };
   assert.equal(interpretationFormProblem(complete), null);
   assert.deepEqual(interpretationBody(complete, { paired: false }), { indicator_label: "Referral records", meaning_text: "Recorded referrals.", evidence_basis: "organization_record" });
+});
+
+
+test("ready calculations are computed by the server, independently match source rows and save through the existing definition contract", async () => {
+  const p = await csvProfile();
+  const ready = D.describeTabularMeasurementOptions(p, null).ready_measurements;
+  assert.equal(ready.find((r) => r.key === "records").measured_value, records.length);
+  assert.equal(ready.find((r) => r.key === "field_1:distinct").measured_value, independent.distinct(records));
+  const completed = ready.find((r) => r.key === "field_2:value_1");
+  assert.deepEqual([completed.numerator, completed.denominator, completed.percentage], [independent.where(1, "done").length, records.length, "66.67"]);
+  for (const item of ready) {
+    const checked = D.validateTabularMeasurementDefinition(item.definition);
+    assert.equal(checked.ok, true);
+    const recomputed = D.deriveTabularMeasurement(p, null, checked.definition);
+    assert.equal(recomputed.ok, true);
+    assert.equal(recomputed.measurement.measurementKey, item.measurement_key);
+    assert.deepEqual([recomputed.measurement.numerator, recomputed.measurement.denominator, recomputed.measurement.percentage], [item.numerator, item.denominator, item.percentage]);
+    assert.equal(checked.definition.conditions.some((c) => c.kind === "period"), false, "ready results explicitly use all dates");
+  }
 });

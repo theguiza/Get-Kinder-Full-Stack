@@ -233,6 +233,7 @@ export default function ClientSourceMeasurementPanel({
         </div>
       ) : null}
       {view.showForm ? (
+        <details data-client-raw-count-description=""><summary>Describe a raw row count (optional)</summary>
         <form className="small" onSubmit={(event) => { event.preventDefault(); submit(); }} data-client-source-measurement-form="">
           <div className="text-muted mb-1">
             Only your organization can say what one record represents. KAI counts the records; it does not infer their meaning.
@@ -272,6 +273,7 @@ export default function ClientSourceMeasurementPanel({
             {pending === "record" ? "Recording..." : "Record definition and count"}
           </button>
         </form>
+        </details>
       ) : null}
     </div>
   );

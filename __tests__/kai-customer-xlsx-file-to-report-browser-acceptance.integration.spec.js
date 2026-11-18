@@ -273,6 +273,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   }`);
   const clickIn = async (selector, description) => {
     await ksRevealSelector(selector);
+    // Requesting an advanced control includes the user's ordinary action of
+    // opening its disclosure. Ready-result tests assert no disclosure is needed.
+    await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      const parents = [];
+      for (let p = el?.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open) parents.unshift(p);
+      for (const p of parents) p.querySelector(':scope > summary')?.click();
+    })()`);
     // Wait for the revealed control to be rendered (a view or list may still be loading).
     await waitFor(() => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return Boolean(el && el.offsetParent !== null && !el.disabled); })()`),
       description, { timeout: 30000 }).catch(() => {});
@@ -656,6 +664,7 @@ async function runXlsxAcceptance() {
   const setInput = (page, selector, value) => page.evaluate(`(() => {
     const el = document.querySelector(${J(selector)});
     if (!el) return false;
+    for (let p = el.closest('details:not([open])'); p; p = el.closest('details:not([open])')) p.querySelector(':scope > summary').click();
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${J(value)});
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
@@ -2734,6 +2743,7 @@ async function runXlsxAcceptance() {
     const setSelect = (selector, value) => adminPage.evaluate(`(() => {
       const el = document.querySelector(${J(selector)});
       if (!el || ![...el.options].some((option) => option.value === ${J(value)})) return false;
+      for (let p = el.closest('details:not([open])'); p; p = el.closest('details:not([open])')) p.querySelector(':scope > summary').click();
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
@@ -4241,6 +4251,8 @@ async function runXlsxAcceptance() {
         const raw = document.querySelector(${J(`[data-client-source-measurement="${sv}"] [data-client-source-measurement-field]`)});
         return Boolean(results && raw && (results.compareDocumentPosition(raw) & Node.DOCUMENT_POSITION_FOLLOWING));
       })()`), true, "calculated outcomes precede the raw-count administration form");
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-custom-calculations]`)}).open`), false);
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`[data-client-source-measurement="${sv}"] [data-client-raw-count-description]`)}).open`), false);
       const mark = adminPage.mark();
       await adminPage.clickIn(`${section} [data-client-derived-record-paired]`, "Keep calculated results");
       await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("2 proposed results kept as evidence"), "two calculated outcomes saved without entering a meaning");
@@ -4261,13 +4273,34 @@ async function runXlsxAcceptance() {
         assert.equal(proposed.status, 200, J(proposed.body));
         claimIds.push(proposed.body.data.claim.claim_id);
       }
+      // The other worksheet also shows computed results immediately. Saving a
+      // displayed rate needs no field choices, formula construction or meaning.
+      await panel.selectWorksheet("sheet_2");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-ready-measurements]`))?.includes("reported_contact"), "calculated referral results");
+      const referralBasis = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_2"))).body.data;
+      const referral = referralBasis.tabular.ready_measurements.find((m) => m.label.startsWith("reported_contact "));
+      assert.deepEqual([referral.numerator, referral.denominator, referral.percentage], [9, 49, "18.37"]);
+      assert.equal(referralBasis.tabular.ready_measurements.find((m) => m.key === "field_2:distinct").measured_value, 36);
+      assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-custom-calculations]`)}).open`), false);
+      const readyMark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-save-ready-measurement="${referral.key}"]`, "Save calculated referral rate");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.startsWith("Calculated result saved:"), "ready result saved");
+      const readyRequest = adminPage.requestsSince(readyMark).find((r) => r.method === "POST" && r.url.includes("/tabular-measurements"));
+      assert.deepEqual(JSON.parse(readyRequest.postData), { definition: referral.definition });
+      const keptReferral = (await adminPage.responseBody(readyRequest)).data;
+      assert.deepEqual([keptReferral.measurement.numerator, keptReferral.measurement.denominator, keptReferral.measurement.percentage], [9, 49, "18.37"]);
+      await adminPage.waitFor(() => adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-save-ready-measurement="${referral.key}"]`)}).textContent === 'Saved'`), "saved result remains identified after the refreshed read");
+      const referralClaim = await adminApi("POST", claimProposalPath(ORG_X, keptReferral.evidenceItem.evidence_item_id), {});
+      assert.equal(referralClaim.status, 200);
+      claimIds.push(referralClaim.body.data.claim.claim_id);
       const { shown, draft } = await createMeasuredReportInUi(claimIds);
       for (const m of saved) assert.ok(shown.includes(m.statement), "the saved/downloaded report retains the exact calculated finding");
+      assert.ok(shown.includes(referralClaim.body.data.claim.statement), "the referral rate and its all-date source scope survive generation, saved retrieval and download");
       assert.ok(shown.includes(sv));
       assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile);
       assert.deepEqual(await approvalState(), approvalBefore, "the complete journey requires zero evidence-quality approval decisions");
       const replay = await adminApi("POST", pairedOutcomeMeasurementsPath(ORG_X, sv, "sheet_1"), {});
-      assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 2]);
+      assert.deepEqual([replay.status, replay.body.data.replayed, await rowsOf()], [200, true, 3]);
       assert.equal((await adminYApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 403);
       results.householdSurveyRecovery = { sv, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false };
     });

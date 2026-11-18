@@ -219,7 +219,7 @@ export function derivePersistablePairedOutcomes(profile, worksheetKey, { pairing
       outcome_field_key: entry.outcomeFieldKey,
       outcome_column: entry.outcomeColumn,
       participant_field_key: entry.participantFieldKey,
-      ...(entry.matchingUnit === "household" ? { matching_unit: "household" } : {}),
+      ...(["household", "identifier"].includes(entry.matchingUnit) ? { matching_unit: entry.matchingUnit } : {}),
       stage_field_key: entry.stageFieldKey,
       instrument_version_field_key: entry.instrumentVersionFieldKey ?? null,
     });
@@ -1121,6 +1121,7 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
     sheetKey,
     available: true,
     record_count: basis.record_count,
+    ready_measurements: calculateReadyTabularMeasurements(profile, worksheetKey, basis),
     exact_duplicates: basis.exact_duplicates,
     single_valued_in: basis.single_valued_in || {},
     distinct_period_exact: distinctPeriodExact,
@@ -1150,6 +1151,36 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
       ...(field.date ? { date: field.date } : {}),
     })),
   };
+}
+
+// Return actual calculations with executable definitions. Choosing a result
+// saves it through the ordinary validated write path; no customer must first
+// build a formula or supply a business interpretation. No period or matching
+// rule is silently inferred from category names or independent histograms.
+function calculateReadyTabularMeasurements(profile, worksheetKey, basis) {
+  const letter = (position) => position > 26
+    ? `${letter(Math.floor((position - 1) / 26))}${String.fromCharCode(65 + (position - 1) % 26)}`
+    : String.fromCharCode(64 + position);
+  const definitions = [{ key: "records", label: "All nonblank records", input: { operation: "count", conditions: [] } }];
+  for (const field of basis.fields.map(screenedField)) {
+    const column = letter(Number(field.field_key.slice(6)));
+    if (field.roles.includes("identifier")) definitions.push({
+      key: `${field.field_key}:distinct`, label: `Distinct identifiers in column ${column}`,
+      input: { operation: "count", unit: { kind: "distinct_key", field_key: field.field_key, duplicate_policy: "count_each_key_once" }, conditions: [] },
+    });
+    for (const value of field.categorical?.vocabulary_withheld ? [] : field.categorical?.values || []) definitions.push({
+      key: `${field.field_key}:${value.value_key}`, label: `${value.label} (column ${column})`,
+      input: { operation: "rate", conditions: [{ kind: "category", field_key: field.field_key, value_key: value.value_key }] },
+    });
+  }
+  return definitions.flatMap(({ key, label, input }) => {
+    const validated = validateTabularMeasurementDefinition(input);
+    const result = validated.ok ? deriveTabularMeasurement(profile, worksheetKey, validated.definition) : null;
+    if (!result?.ok) return [];
+    const m = result.measurement;
+    return [{ key, label, definition: input, measured_value: m.measuredValue, numerator: m.numerator,
+      denominator: m.denominator, percentage: m.percentage, measurement_key: m.measurementKey }];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1553,7 +1584,7 @@ function pairedBody(row, interpretation) {
     : interpretation?.score_direction === "lower_is_better"
       ? "the organization states lower is better"
       : "whether higher is better is not established";
-  const unit = definition.matching_unit === "household" ? "household" : "participant";
+  const unit = ["household", "identifier"].includes(definition.matching_unit) ? definition.matching_unit : "participant";
   const rule = definition.instrument_version_field_key ? `the same ${unit} and instrument version` : `the same ${unit} (no instrument version recorded)`;
   return `numeric outcome ${definition.outcome_field_key} (column ${definition.outcome_column}), ${where(row)}, baseline to follow-up, no reporting period: `
     + `${row.numerator} of ${row.denominator} comparable ${unit} pairs (${row.percentage}%) have a numerically higher follow-up value, `

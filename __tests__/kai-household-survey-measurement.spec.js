@@ -30,7 +30,7 @@ function statementOf(m) {
 test("household IDs and numeric confidence headings yield calculated, correctly scoped outcomes without a definition", async () => {
   const p = await profile(bytes);
   const basis = p.sheets[0].paired_outcome_basis;
-  assert.equal(basis.discovery_version, 2);
+  assert.equal(basis.discovery_version, 3);
   assert.equal(basis.status, "proposed");
   assert.deepEqual(basis.candidates, { participant_identifier: ["field_2"], stage: ["field_3"], instrument_version: ["field_5"], numeric_outcome: ["field_6", "field_7"] });
   assert.deepEqual(basis.outcome_heading_suggestions, { field_6: "Food planning confidence (1-5)", field_7: "Affordable meal confidence (1-5)" });
@@ -45,6 +45,29 @@ test("household IDs and numeric confidence headings yield calculated, correctly 
     assert.match(statementOf(m), /whether higher is better is not established/);
   }
   assert.doesNotMatch(JSON.stringify(basis), /H0[123]|S0[1-6]|household_id|food_planning_confidence_1to5/);
+});
+
+test("pairing discovery uses repeated matching keys and numeric values with unfamiliar headings; dates and unique observation IDs are excluded", async () => {
+  const generic = syntheticXlsxWorkbook({ cellFormats: [{ numFmtId: 14 }], sheets: [{ name: "Observations", rows: [
+    ["entry_id", "case_ref", "phase", "response_date", "questionnaire_version", "Q1", "Q2"],
+    ...rows.map((r, i) => [r[0], r[1].replace("H", "Z"), r[2], { number: 45778 + i, style: 2 }, ...r.slice(4)]),
+  ] }] });
+  const p = await profile(generic);
+  const b = p.sheets[0].paired_outcome_basis;
+  assert.deepEqual(b.candidates, { participant_identifier: ["field_2"], stage: ["field_3"], instrument_version: ["field_5"], numeric_outcome: ["field_6", "field_7"] });
+  const d = derivePersistablePairedOutcomes(p, "sheet_1");
+  assert.equal(d.ok, true);
+  assert.deepEqual(d.measurements.map((m) => [m.numerator, m.denominator]), [[1, 2], [0, 1]]);
+  for (const m of d.measurements) {
+    assert.equal(m.definition.matching_unit, "identifier");
+    assert.doesNotMatch(statementOf(m), /household|participant pairs|people/);
+  }
+  const ambiguous = await profile(syntheticXlsxWorkbook({ sheets: [{ rows: [
+    ["entry_id", "case_ref", "phase", "response_date", "questionnaire_version", "Q1", "Q2", "other_reference"],
+    ...rows.map((r) => [...r, r[1]]),
+  ] }] }));
+  assert.equal(ambiguous.sheets[0].paired_outcome_basis.status, "role_selection_required");
+  assert.equal(derivePersistablePairedOutcomes(ambiguous, "sheet_1").ok, false, "two plausible keys are never silently resolved");
 });
 
 test("failed old discovery is rebuilt by the worker only from the admitted, exact verified workbook", async () => {
