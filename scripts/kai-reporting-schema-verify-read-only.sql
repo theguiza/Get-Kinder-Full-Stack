@@ -67,10 +67,17 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('evidence_items', 'evidence_items_p2_01m_type_class_pairing_check', 'fa3cc6ef6bfcc0f8218978fca9051299'),
     ('source_locators', 'source_locators_p2_01_locator_type_check', '20a79952e407a69bf7d7d46b6cc2bc45'),
     ('source_locators', 'source_locators_p2_01_coordinates_check', 'd5265a33039490287a63225d0c246401')
-), measurement_checks(constraint_name, expected_md5) AS (
+), service_schema(installed) AS (
+  -- kai_sprint2_service_event_measurements widens the two derived CHECKs and
+  -- adds the service funnel CHECK; either the earlier or the widened exact
+  -- definitions pass (as for the planned-target migration).
+  SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+                  WHERE conrelid = to_regclass('kai.source_derived_measurements') AND conname = 'source_derived_measurements_service_funnel_check')
+), measurement_checks(constraint_name, expected_md5, service_md5) AS (
   VALUES
-    ('source_derived_measurements_method_family_check', '4d0b0335196faf3625f1fc43d516efd1'),
-    ('source_derived_measurements_arithmetic_check', '9c7d96417506956fe1956ec8fd15e71e')
+    ('source_derived_measurements_method_family_check', '4d0b0335196faf3625f1fc43d516efd1', '10e72f5ab1d8df61654715f76c3a8d88'),
+    ('source_derived_measurements_arithmetic_check', '9c7d96417506956fe1956ec8fd15e71e', 'a0d4c7ee9a51cfa712d42f7b6c893dc7'),
+    ('source_derived_measurements_service_funnel_check', NULL, 'e0f990a969e7a5f8b1ac334782332901')
 ), vocabulary_checks(table_name, constraint_name, required_terms, migration) AS (
   VALUES
     ('generation_runs', 'generation_runs_p3_01_content_type_check', 'evidence_summary,impact_narrative,readiness_assessment,data_gap_memo', 'kai_sprint2_p14_14_generated_content_type_evolution.sql'),
@@ -140,12 +147,15 @@ WITH required_tables(table_name, required_columns, migration) AS (
       ON c.conrelid = to_regclass('kai.' || r.table_name) AND c.conname = r.constraint_name
   UNION ALL
   SELECT 'measurement.' || r.constraint_name,
-         CASE WHEN c.contype = 'c' AND md5(jsonb_build_array(pg_catalog.pg_get_constraintdef(c.oid), c.convalidated, c.condeferrable)::text) = r.expected_md5
+         CASE WHEN c.contype = 'c' AND md5(jsonb_build_array(pg_catalog.pg_get_constraintdef(c.oid), c.convalidated, c.condeferrable)::text)
+                    = CASE WHEN s.installed THEN r.service_md5 ELSE r.expected_md5 END
               THEN 'PASS' ELSE 'FAIL' END,
          coalesce(pg_catalog.pg_get_constraintdef(c.oid), 'Missing CHECK'),
-         'kai_sprint2_measurement_mvp_source_derived_measurements.sql + kai_sprint2_measurement_mvp_cross_source_reach.sql'
-    FROM measurement_checks r LEFT JOIN pg_catalog.pg_constraint c
+         CASE WHEN s.installed THEN 'kai_sprint2_service_event_measurements.sql'
+              ELSE 'kai_sprint2_measurement_mvp_source_derived_measurements.sql + kai_sprint2_measurement_mvp_cross_source_reach.sql' END
+    FROM measurement_checks r CROSS JOIN service_schema s LEFT JOIN pg_catalog.pg_constraint c
       ON c.conrelid = to_regclass('kai.source_derived_measurements') AND c.conname = r.constraint_name
+   WHERE r.expected_md5 IS NOT NULL OR s.installed
   UNION ALL
   SELECT 'vocabulary.' || r.constraint_name,
          CASE WHEN c.contype = 'c' AND c.convalidated AND NOT EXISTS (
@@ -177,5 +187,9 @@ SELECT 'OVERALL' AS check_id, CASE WHEN bool_and(status = 'PASS') THEN 'PASS' EL
 UNION ALL SELECT * FROM checks
 UNION ALL SELECT 'INFO.connection', 'INFO', 'database=' || current_database() || '; PostgreSQL=' || current_setting('server_version'), ''
 UNION ALL SELECT 'INFO.scope', 'INFO', 'Catalog prerequisites only; no approval records required; app deployment and report generation need an application smoke test', ''
+UNION ALL SELECT 'INFO.service_event_measurements', 'INFO',
+  CASE WHEN (SELECT installed FROM service_schema) THEN 'Single-source service-delivery measurements are installed'
+       ELSE 'Single-source service-delivery measurements are not installed; saving them needs kai_sprint2_service_event_measurements.sql' END,
+  'kai_sprint2_service_event_measurements.sql'
 ) result
 ORDER BY CASE WHEN check_id = 'OVERALL' THEN 0 WHEN status = 'FAIL' THEN 1 WHEN status = 'INFO' THEN 3 ELSE 2 END, check_id;

@@ -97,11 +97,10 @@ try:
       'kai_sprint2_legacy_generation_cutover_20260817':'only accepts a fully-legacy pre-cutover state or its own fully-converged post-cutover state',
       'kai_sprint2_p1_06_review_status_column_repair':'converged-state check failed: expected exactly 1 CHECK constraint governing review_status',
     }
-    for name in chain[:-1]:
+    for name in chain[:chain.index(PLAN)]:
         if name in refusals:
             run('psql',['-Xq','-v','ON_ERROR_STOP=1','-f',str(ROOT/f'migrations/{name}.sql')],expected_error=refusals[name])
         else: execute((ROOT/f'migrations/{name}.sql').read_text())
-    assert chain[-1] == PLAN
     prior = rows("SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid IN ('kai.measurement_targets'::regclass,'kai.evidence_items'::regclass,'kai.source_locators'::regclass) ORDER BY conrelid,conname")
     execute((ROOT/f'migrations/{PLAN}.sql').read_text())
     verifier('scripts/kai-source-planned-targets-verify-read-only.sql')
@@ -111,6 +110,9 @@ try:
     assert rows("SELECT to_regclass('kai.source_planned_targets') IS NULL AS gone")[0]['gone'] == 't'
     execute((ROOT/f'migrations/{PLAN}.sql').read_text())
     verifier('scripts/kai-source-planned-targets-verify-read-only.sql')
+    # Later chain migrations (introduced after the plans) apply on top unchanged.
+    for name in chain[chain.index(PLAN) + 1:]:
+        execute((ROOT/f'migrations/{name}.sql').read_text())
     verifier('scripts/kai-reporting-schema-verify-read-only.sql')
     print(json.dumps(rows("SELECT conname,md5(pg_get_constraintdef(oid)) AS fingerprint FROM pg_constraint WHERE conrelid IN ('kai.evidence_items'::regclass,'kai.source_locators'::regclass) AND conname IN ('evidence_items_p2_01_evidence_type_check','evidence_items_p2_01m_type_class_pairing_check','source_locators_p2_01_locator_type_check','source_locators_p2_01_coordinates_check') ORDER BY conname")), flush=True)
     print('PASS: fresh chain, upgrade, read-only verification, empty rollback, exact prior constraints, reapply; manual-target schema unchanged', flush=True)
