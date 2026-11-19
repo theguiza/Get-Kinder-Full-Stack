@@ -1,3 +1,5 @@
+import { readPlannedTargetEvidence, plannedEvidenceIntact, readPlannedTargetContributors } from './plannedTargetRead.js';
+import { composePlannedTargetStatement, PLANNED_TARGET_EVIDENCE_TYPE } from '../validators/kaiSourcePlannedTargets.js';
 import { createHash } from "node:crypto";
 import {
   getScopedEvidenceItemById,
@@ -697,6 +699,15 @@ export function createPostgresClaimProposalRepository({
           statement = composeDerivedClaimStatementFromRow(measurementRow);
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return continuationFailure(composable);
+        } else if (evidenceItemRow.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE) {
+          const row = await readPlannedTargetEvidence(tx, { organizationId, evidenceItemId });
+          if (!plannedEvidenceIntact({ row, evidenceItemRow, locatorRow, sourceVersionRow })) return claimProposalFailure('conflict_current_state_changed');
+          for (const source of await readPlannedTargetContributors(tx, { organizationId,evidenceItemId })) {
+            if (!source.is_current || source.profile_canonical_sha256 !== source.measured_profile_canonical_sha256) return claimProposalFailure('conflict_current_state_changed');
+            const permitted = validateEffectiveAllowedUsePermitsOperation(await readEffectiveAllowedUseProhibition(tx, { organizationId,intakeSensitivityProfileId:source.intake_sensitivity_profile_id }), { operation:'propose_claim',objectType:'source_version',objectId:source.source_version_id });
+            if (!permitted.ok) return continuationFailure(permitted);
+          }
+          statement = composePlannedTargetStatement(row);
         } else if (evidenceItemRow.evidence_type === DOCUMENT_EVIDENCE_TYPE) {
           // A document statement's claim restates the exact excerpt its
           // locator's hash binds, explicitly as source-reported and not
@@ -813,7 +824,7 @@ export function createPostgresClaimProposalRepository({
             reviewQueueItem: queueRecord,
             warnings,
             replayed: true,
-            ...(isMeasurementClaim || isDerivedMeasurementClaim ? { measurementClaim: true } : {}),
+            ...(isMeasurementClaim || isDerivedMeasurementClaim || evidenceItemRow.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE ? { measurementClaim: true } : {}),
           });
         }
 
@@ -844,7 +855,7 @@ export function createPostgresClaimProposalRepository({
           reviewQueueItem: queueRecord,
           warnings,
           replayed: false,
-          ...(isMeasurementClaim || isDerivedMeasurementClaim ? { measurementClaim: true } : {}),
+          ...(isMeasurementClaim || isDerivedMeasurementClaim || evidenceItemRow.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE ? { measurementClaim: true } : {}),
         });
       });
     } catch (error) {

@@ -463,3 +463,35 @@ export const __sourceMeasurementServiceContract = Object.freeze({
   SOURCE_MEASUREMENT_OPERATION,
   SOURCE_MEASUREMENT_ALLOWED_ROLES,
 });
+
+
+async function plannedTargetRepository(dependencies) {
+  if (dependencies.plannedTargetRepository) return dependencies.plannedTargetRepository;
+  const { createPostgresSourcePlannedTargetRepository } = await import('../dictionary/postgresSourcePlannedTargetRepository.js');
+  return createPostgresSourcePlannedTargetRepository();
+}
+export async function saveSourcePlannedTargets(input, dependencies = {}) {
+  const keys = ['organizationId','sourceVersionId','worksheetKey','selection','actorContext','now'];
+  const denied = admitDerivedInput(input, keys, keys, dependencies);
+  if (denied) return denied;
+  const { selection } = input;
+  if (!UUID_RE.test(input.sourceVersionId ?? '') || !/^sheet_[1-9][0-9]{0,3}$/.test(input.worksheetKey ?? '')
+    || !isPlainObject(selection) || Object.keys(selection).sort().join(',') !== 'profile_canonical_sha256,row_numbers,source_checksum'
+    || !/^[a-f0-9]{64}$/.test(selection.profile_canonical_sha256 ?? '') || !/^[a-f0-9]{64}$/.test(selection.source_checksum ?? '')
+    || !Array.isArray(selection.row_numbers) || selection.row_numbers.length < 1 || selection.row_numbers.length > 200
+    || selection.row_numbers.some((n) => !Number.isInteger(n) || n < 2 || n > 201) || new Set(selection.row_numbers).size !== selection.row_numbers.length) return buildKaiError('validation_blocker');
+  return repositoryResult(await (await plannedTargetRepository(dependencies)).saveSourcePlannedTargets({
+    organizationId:input.organizationId, sourceVersionId:input.sourceVersionId, worksheetKey:input.worksheetKey, selection, actorUserId:input.actorContext.actorUserId, now:input.now,
+  }));
+}
+export async function recordSourcePlannedTargetDecision(input, dependencies = {}) {
+  const keys = ['organizationId','plannedTargetId','decision','actorContext','now'];
+  const denied = admitDerivedInput(input, keys, keys, dependencies);
+  if (denied) return denied;
+  if (!UUID_RE.test(input.plannedTargetId ?? '') || !isPlainObject(input.decision)
+    || !UUID_RE.test(input.decision.expected_decision_id ?? '')
+    || (input.decision.actual_measurement_id != null && !UUID_RE.test(input.decision.actual_measurement_id))) return buildKaiError('validation_blocker');
+  return repositoryResult(await (await plannedTargetRepository(dependencies)).recordSourcePlannedTargetDecision({
+    organizationId:input.organizationId, plannedTargetId:input.plannedTargetId, decision:input.decision, actorUserId:input.actorContext.actorUserId, now:input.now,
+  }));
+}

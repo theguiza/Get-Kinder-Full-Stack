@@ -1,3 +1,6 @@
+import { readEffectiveAllowedUseProhibitions } from './postgresEffectiveAllowedUseResolver.js';
+import { readSavedPlanningTargets } from './plannedTargetRead.js';
+import { saveablePlanningCandidate, plannedTargetComparison } from '../validators/kaiSourcePlannedTargets.js';
 import { listScopedEngagementDerivedMeasurementRows } from "../db/kaiIntakeQueries.js";
 import { derivedContributingSourcesCurrent, derivedMeasurementLabelsAdmitted } from "../validators/kaiDerivedMeasurementValidators.js";
 import {
@@ -48,9 +51,18 @@ function currentMeasurementRows(rows) {
   return [...byId.values()];
 }
 
+// Two batched permission reads cover every primary and linked source on this
+// bounded Project result page. A prohibited actual does not hide usable plans.
+async function projectMeasurementPermissions(tx, { organizationId, measurements }) {
+  const profilesOf = (row) => [row.measurement_intake_sensitivity_profile_id,...(row.contributing_sources || []).map((s) => s.intake_sensitivity_profile_id)];
+  const ids=[...new Set(measurements.flatMap(profilesOf).filter(Boolean))];
+  const permissions=ids.length ? await readEffectiveAllowedUseProhibitions(tx,{ organizationId,intakeSensitivityProfileIds:ids }) : new Map();
+  return new Map(measurements.map((row) => [row.source_derived_measurement_id, profilesOf(row).length > 0 && profilesOf(row).every((id) => permissions.has(id) && permissions.get(id) === null)]));
+}
+
 export async function readPlanningTargetCandidates(tx, {
   organizationId, fileProfileRow, profile, worksheetKey, sourceVersionRow, engagementId, pairedAvailable,
-  headingLabelOf = () => null, worker = null, listProjectMeasurements = listScopedEngagementDerivedMeasurementRows,
+  headingLabelOf = () => null, worker = null, listProjectMeasurements = listScopedEngagementDerivedMeasurementRows, readMeasurementPermissions = projectMeasurementPermissions,
 }) {
   const sheet = planningTargetWorksheet(profile, worksheetKey, { pairedAvailable });
   if (!sheet) return null;
@@ -79,14 +91,17 @@ export async function readPlanningTargetCandidates(tx, {
     worksheet_key: sheet.sheet_key,
     worksheet_name: sheet.safe_sheet_name ?? sheet.sheet_key,
     profile_canonical_sha256: fileProfileRow.profile_canonical_sha256,
+    source_checksum: fileProfileRow.checksum,
   };
   if (assessment.status !== "candidates") {
     return { ...assessment, source, candidates: [], persistence: PLANNING_TARGET_PERSISTENCE };
   }
+  const projectRows=engagementId ? currentMeasurementRows(await listProjectMeasurements({ organizationId,engagementId },tx)) : [];
+  const permissions=await readMeasurementPermissions(tx,{ organizationId,measurements:projectRows });
   const measurements = [];
-  for (const row of engagementId ? currentMeasurementRows(await listProjectMeasurements({ organizationId, engagementId }, tx)) : []) {
+  for (const row of projectRows) {
     // A result recorded from labels the current screen withholds cannot be stated, so it is never proposed.
-    if (!derivedMeasurementLabelsAdmitted(row)) continue;
+    if (!derivedMeasurementLabelsAdmitted(row) || permissions.get(row.source_derived_measurement_id) !== true) continue;
     measurements.push({
       ...row,
       engagement_id: engagementId,
@@ -95,12 +110,19 @@ export async function readPlanningTargetCandidates(tx, {
       source_heading_label: await headingLabelOf(row),
     });
   }
+  const persisted = (await readSavedPlanningTargets(tx, { organizationId, sourceVersionId: source.source_version_id, worksheetKey: sheet.sheet_key })).map((plan) => {
+    if (plan.relationship_status !== 'confirmed' || (plan.actual_is_current && measurements.some((m) => m.source_derived_measurement_id === plan.actual_measurement_id && m.contributing_sources_current))) return plan;
+    return {...plan,actual_value:null,statement:null,actual_availability:plan.actual_is_current === false ? 'source_replaced' : 'not_available'};
+  });
   return {
     ...assessment,
     source,
     project: { engagement_id: engagementId ?? null, recorded_measurement_count: measurements.length },
     candidates: assessment.candidates.map((candidate) => ({
       ...candidate,
+      saveable: saveablePlanningCandidate(candidate),
+      saved: persisted.find((p) => p.row_number === candidate.row_number) ?? null,
+      comparison_result: plannedTargetComparison(persisted.find((p) => p.row_number === candidate.row_number) ?? {}),
       locator: {
         source_version_id: source.source_version_id,
         worksheet_key: source.worksheet_key,
@@ -108,7 +130,7 @@ export async function readPlanningTargetCandidates(tx, {
         row_number: candidate.row_number,
         field_keys: Object.fromEntries(Object.entries(assessment.columns).map(([role, column]) => [role, column.field_key])),
       },
-      related_measurements: relatedRecordedMeasurements({ candidate, measurements, planningEngagementId: engagementId ?? null }),
+      related_measurements: relatedRecordedMeasurements({ candidate, measurements, planningEngagementId: engagementId ?? null, includeMeasurementId:persisted.find((p) => p.row_number === candidate.row_number)?.actual_measurement_id ?? null }),
     })),
     persistence: PLANNING_TARGET_PERSISTENCE,
   };

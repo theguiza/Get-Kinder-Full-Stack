@@ -3133,6 +3133,24 @@ router.post(
   },
 );
 
+// Independent source-backed planning rows; every decision is actor-derived.
+router.post('/admin/organizations/:organizationId/source-versions/:sourceVersionId/planned-targets', sprint2ActorContextMiddleware, async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, 'unsupported_media_type');
+  const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+  if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+  return invokeService(res, async () => (await getSourceMeasurementService()).saveSourcePlannedTargets({
+    ...identifiers, worksheetKey: worksheetKeyQuery(req), selection: requestPayload(req), actorContext:sprint2MappedActorContext(req), now:new Date().toISOString(),
+  }));
+});
+router.post('/admin/organizations/:organizationId/planned-targets/:plannedTargetId/decisions', sprint2ActorContextMiddleware, async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, 'unsupported_media_type');
+  const { organizationId, plannedTargetId } = req.params;
+  if (![organizationId,plannedTargetId].every((x) => KAI_SPRINT2_P0_PATTERNS.uuid.test(x) && x === x.toLowerCase())) return sendKaiError(res, 'validation_blocker');
+  return invokeService(res, async () => (await getSourceMeasurementService()).recordSourcePlannedTargetDecision({
+    organizationId,plannedTargetId,decision:requestPayload(req),actorContext:sprint2MappedActorContext(req),now:new Date().toISOString(),
+  }));
+});
+
 // The organization's planned target for a recorded measurement (a plan, never a result).
 router.post(
   "/admin/organizations/:organizationId/derived-measurements/:measurementId/targets",

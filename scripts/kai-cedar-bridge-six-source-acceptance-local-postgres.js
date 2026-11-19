@@ -217,9 +217,12 @@ try {
   // The measurement calculation completion and target migrations build on all of the above: they roll back first.
   const completionMigration = "kai_sprint2_measurement_calculation_completion";
   const targetsMigration = "kai_sprint2_measurement_targets";
-  if (MIGRATION_CHAIN.slice(-3).join(",") !== [documentMigration, completionMigration, targetsMigration].join(",")) {
+  const plannedMigration = "kai_sprint2_source_planned_targets";
+  if (MIGRATION_CHAIN.slice(-4).join(",") !== [documentMigration, completionMigration, targetsMigration, plannedMigration].join(",")) {
     throw new Error(`${documentMigration}, ${completionMigration} and ${targetsMigration} are not the last migrations in the chain`);
   }
+  const afterPlans = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${plannedMigration}.rollback.sql`);
   const afterTargets = (await catalog(schemaFingerprintSql))[0].fingerprint;
   psqlFile(`migrations/${targetsMigration}.rollback.sql`);
   const afterCompletion = (await catalog(schemaFingerprintSql))[0].fingerprint;
@@ -245,7 +248,9 @@ try {
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterCompletion) throw new Error(`${completionMigration} re-apply changed the schema`);
   psqlFile(`migrations/${targetsMigration}.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterTargets) throw new Error(`${targetsMigration} re-apply changed the schema`);
-  console.log(`Cedar Bridge acceptance: ${targetsMigration}, ${completionMigration}, ${documentMigration}, ${jobsMigration}, ${crossMigration} and ${derivedMigration} rolled back to the prior schema fingerprints and re-applied identically.`);
+  psqlFile(`migrations/${plannedMigration}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterPlans) throw new Error(`${plannedMigration} re-apply changed the schema`);
+  console.log(`Cedar Bridge acceptance: ${plannedMigration}, ${targetsMigration}, ${completionMigration}, ${documentMigration}, ${jobsMigration}, ${crossMigration} and ${derivedMigration} rolled back to the prior schema fingerprints and re-applied identically.`);
   for (const verifier of ["scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql", "scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql"]) {
     const rows = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", verifier], { capture: true }).stdout.trim().split("\n");
     if (rows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2] !== "PASS") throw new Error(`${verifier} failed:\n${rows.join("\n")}`);

@@ -111,6 +111,8 @@ try:
     assert rows("SELECT to_regclass('kai.source_planned_targets') IS NULL AS gone")[0]['gone'] == 't'
     execute((ROOT/f'migrations/{PLAN}.sql').read_text())
     verifier('scripts/kai-source-planned-targets-verify-read-only.sql')
+    verifier('scripts/kai-reporting-schema-verify-read-only.sql')
+    print(json.dumps(rows("SELECT conname,md5(pg_get_constraintdef(oid)) AS fingerprint FROM pg_constraint WHERE conrelid IN ('kai.evidence_items'::regclass,'kai.source_locators'::regclass) AND conname IN ('evidence_items_p2_01_evidence_type_check','evidence_items_p2_01m_type_class_pairing_check','source_locators_p2_01_locator_type_check','source_locators_p2_01_coordinates_check') ORDER BY conname")), flush=True)
     print('PASS: fresh chain, upgrade, read-only verification, empty rollback, exact prior constraints, reapply; manual-target schema unchanged', flush=True)
 finally:
     if started: run('pg_ctl',['-D',str(work/'data'),'stop','-m','fast'])

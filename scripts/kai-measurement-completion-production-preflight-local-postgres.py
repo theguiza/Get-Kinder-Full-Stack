@@ -164,6 +164,7 @@ try:
         'kai_sprint2_legacy_generation_cutover_20260817': 'only accepts a fully-legacy pre-cutover state or its own fully-converged post-cutover state',
         'kai_sprint2_p1_06_review_status_column_repair': 'converged-state check failed: expected exactly 1 CHECK constraint governing review_status',
     }
+    chain = chain[:chain.index(TARGETS) + 1]
     assert chain[-6:] == [DERIVED, REACH, JOBS, DOCUMENT, CALC, TARGETS], chain[-6:]
     for name in chain:
         if name in (CALC, TARGETS):

@@ -86,6 +86,7 @@ if (!RUNNER_DATABASE_URL || !CHROME || !WORKDIR || !LEGACY_CHECKOUT || !PRE_EXAC
   test("customer XLSX file-to-report browser acceptance requires its runner", { skip: true }, () => {});
 } else {
   assertLoopbackDatabaseUrl(RUNNER_DATABASE_URL);
+  if (!process.env.KAI_WILLOW_QUAY_PACKAGE || !existsSync(join(process.env.KAI_WILLOW_QUAY_PACKAGE,'01_UPLOAD_TO_KAI/04_Surveys_Referrals_and_Targets.xlsx'))) throw new Error('Mandatory Willow Quay workbook is required; acceptance cannot silently skip W/W3.');
   await runXlsxAcceptance();
 }
 
@@ -340,7 +341,8 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
           const r = p.getBoundingClientRect();
           ancestors.push({ tag: p.tagName, class: p.className, x: r.x, width: r.width, client: p.clientWidth, scroll: p.scrollWidth });
         }
-        return { viewport: innerWidth, ancestors };
+        return { viewport: innerWidth, document_width:document.documentElement.scrollWidth,document_client_width:document.documentElement.clientWidth,ancestors,
+          overflowing_elements:Array.from(document.querySelectorAll('body *')).filter((node)=>{const r=node.getBoundingClientRect();return r.width>0 && r.right>document.documentElement.clientWidth+1;}).slice(0,20).map((node)=>({tag:node.tagName,class:String(node.className),right:node.getBoundingClientRect().right,width:node.getBoundingClientRect().width})) };
       })()`);
       writeFileSync(join(directory, `${name}-${width}.json`), JSON.stringify(layout, null, 2));
       await evaluate(`(() => {
@@ -348,6 +350,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
         el.scrollIntoView({ block: 'start' });
       })()`);
       assert.ok(layout.ancestors[0].scroll <= layout.ancestors[0].client + 1, `${name}: measurement controls must fit at ${width}px`);
+      assert.ok(layout.document_width <= layout.document_client_width + 1, `${name}: page must fit at ${width}px: ${JSON.stringify(layout.overflowing_elements)}`);
       const shot = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
       writeFileSync(join(directory, `${name}-${width}.png`), Buffer.from(shot.data, "base64"));
       await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -723,7 +726,7 @@ async function runXlsxAcceptance() {
     `SELECT source_version_id::text, source_id::text, is_current, profile_canonical_sha256, intake_source_candidate_id::text
        FROM kai.source_versions WHERE intake_sensitivity_profile_id = $1::uuid`, [sensitivityProfileId]))[0];
   const profileRowOf = async (fileProfileId) => (await query(
-    "SELECT file_profile_id::text, parser_version, profile, profile_canonical_sha256 FROM kai.intake_file_profiles WHERE file_profile_id = $1::uuid", [fileProfileId]))[0];
+    "SELECT file_profile_id::text, parser_version, profile, profile_canonical_sha256, checksum FROM kai.intake_file_profiles WHERE file_profile_id = $1::uuid", [fileProfileId]))[0];
   // Every row that would be a human approval, review, follow-up or release, for one claim's lineage.
   const approvalState = async () => (await query(`SELECT
       (SELECT count(*) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)::int AS evidence_decisions,
@@ -2830,7 +2833,7 @@ async function runXlsxAcceptance() {
       assert.equal((await adminApi("GET", downloadPath)).body, shown, "fresh saved retrieval is identical");
       assert.equal((await adminYApi("GET", downloadPath)).status, 403);
       modelOverride.text = null;
-      return { shown, draft, citations };
+      return { shown, draft, citations, downloadProof:{status:download.status,disposition:download.disposition,body_sha256:sha256(Buffer.from(download.body))} };
     };
 
     // An exact Project period whose partly covered month holds records the calculation reads: the click queues a
@@ -4367,13 +4370,20 @@ async function runXlsxAcceptance() {
 
       // Delivery_Targets: the worksheet's own planned targets, read from the
       // verified upload as candidates, with every comparison KAI can check.
+      // Upgrade the pre-plan schema with an existing human-entered target.
+      const legacyTarget = await adminApi('POST',measurementTargetPath(ORG_X,saved[0].id),{target_value:'80',comparison:'at_least'});
+      assert.equal(legacyTarget.status,200,J(legacyTarget.body));
+      const legacyRowsBefore = await query('SELECT * FROM kai.measurement_targets ORDER BY measurement_target_id');
+      const migrationText = (name) => readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8').replace(/^BEGIN;|COMMIT;\s*$/gm,'');
+      await query('BEGIN;'+migrationText('kai_sprint2_source_planned_targets.rollback.sql')+migrationText('kai_sprint2_source_planned_targets.sql')+'COMMIT;');
+      assert.deepEqual(await query('SELECT * FROM kai.measurement_targets ORDER BY measurement_target_id'),legacyRowsBefore,'additive upgrade preserves every existing manual target exactly');
       const targetRowsOf = async () => (await query("SELECT count(*)::int AS n FROM kai.measurement_targets WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
       const writesBefore = { measurements: await rowsOf(), targets: await targetRowsOf(),
         evidence: (await query("SELECT count(*)::int AS n FROM kai.evidence_items WHERE source_version_id = $1::uuid", [sv]))[0].n,
         claims: (await query("SELECT count(*)::int AS n FROM kai.claims WHERE organization_id = $1::uuid", [ORG_X]))[0].n };
       const plan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).body.data.planning_targets;
       assert.equal(plan.status, "candidates", J(plan));
-      assert.deepEqual(plan.source, { source_version_id: sv, source_id: promoted.source_id, worksheet_key: "sheet_3", worksheet_name: "Delivery_Targets", profile_canonical_sha256: originalProfile.profile_canonical_sha256 });
+      assert.deepEqual(plan.source, { source_version_id: sv, source_id: promoted.source_id, worksheet_key: "sheet_3", worksheet_name: "Delivery_Targets", profile_canonical_sha256: originalProfile.profile_canonical_sha256, source_checksum: originalProfile.checksum });
       assert.deepEqual(plan.candidates.map((c) => [c.locator.row_number, c.indicator, c.planned_value, c.unit, c.period.start, c.period.end, c.scope, c.status_label, c.comparator]), [
         [2, "distinct_households_served", "90", "households", "2025-04-01", "2026-03-31", "all", "planned", null],
         [3, "completed_household_service_encounters", "250", "encounters", "2025-04-01", "2026-03-31", "all", "planned", null],
@@ -4402,18 +4412,18 @@ async function runXlsxAcceptance() {
       const [referralPlan] = relatedOf(6);
       assert.deepEqual([referralPlan.name, referralPlan.value_text, referralPlan.relationship.status], ["reported_contact records", "9 of 49 (18.37%)", "not_comparable"]);
       assert.deepEqual(referralPlan.relationship.checks.filter((c) => c.result === "fail").map((c) => c.key), ["unit", "period"]);
-      assert.deepEqual([plan.persistence.available, plan.persistence.reason], [false, "target_source_provenance_not_storable"]);
+      assert.equal(plan.persistence.available, true);
       await panel.selectWorksheet("sheet_3");
       await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planning-target]`)}).length`)) === 6, "six planned-target candidates");
       const planText = await textOf(adminPage, `${section} [data-client-planning-targets="candidates"]`);
-      for (const expected of ["6 planned values stated in Delivery_Targets (rows 2-7)", "These are your organization's plans, not results.", "Planned households", "Only for PA",
+      for (const expected of ["6 planned values stated in Delivery_Targets (rows 2-7)", "These are your organization's plans, not achieved results.", "Planned households", "Only for PA",
         "2025-04-01 to 2026-03-31", "at least / at most not stated",
         "Possibly related recorded result: Food planning confidence (1-5): 32 of 43 (74.42%)", "Not comparable as stated.",
         "Differs: The planned value is a count of \"comparable_households\"; this result is comparable pairs with a higher follow-up value (a percentage).",
         "Differs: This result covers all dates in its source, not 2025-04-01 to 2026-03-31.",
         "Possibly related recorded result: reported_contact records: 9 of 49 (18.37%)",
         "No recorded result on this Project has a name that matches this indicator.",
-        "KAI cannot yet store a target together with the worksheet row it came from. Nothing on this worksheet has been saved."]) {
+        "Save each planned target for reports. An actual result and comparison direction can be confirmed later."]) {
         assert.ok(planText.includes(expected), `targets worksheet shows: ${expected}`);
       }
       assert.equal(await adminPage.evaluate(`(() => {
@@ -4423,8 +4433,7 @@ async function runXlsxAcceptance() {
       })()`), true, "planned targets come before the optional row count");
       assert.equal(await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-source-breakdown]`)}).open`), false, "the six-row count is optional and closed");
       assert.equal(await textOf(adminPage, `${section} [data-client-derived-paired-unavailable]`), null, "no survey-pairing message on a planning worksheet");
-      assert.deepEqual(await adminPage.evaluate(`Array.from(document.querySelectorAll(${J(`${section} button, ${section} input, ${section} select`)})).filter((el) => el.offsetParent !== null && !el.closest('details:not([open])')).map((el) => el.textContent.trim())`),
-        ["Refresh measurements"], "nothing to configure or count before seeing the planned targets");
+      assert.equal(await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-save-planned-target]`)}).length`), 6);
       await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-candidates");
       await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "targets-candidates", 390);
       assert.deepEqual({ measurements: await rowsOf(), targets: await targetRowsOf(),
@@ -4432,20 +4441,77 @@ async function runXlsxAcceptance() {
         claims: (await query("SELECT count(*)::int AS n FROM kai.claims WHERE organization_id = $1::uuid", [ORG_X]))[0].n }, writesBefore,
       "reading planned targets writes no target, measurement, evidence or claim");
       for (const api of [contributorApi, reviewerApi, adminYApi]) assert.equal((await api("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"))).status, 403);
+      const planSavePath = `${orgPath()}/source-versions/${sv}/planned-targets?worksheet_key=sheet_3`;
+      const planSelection = { row_numbers:[2,3,4,5,6,7],profile_canonical_sha256:plan.source.profile_canonical_sha256,source_checksum:plan.source.source_checksum };
+      for (const api of [contributorApi,reviewerApi,adminYApi]) assert.equal((await api('POST',planSavePath,planSelection)).status,403);
+      for (const bad of [{...planSelection,profile_canonical_sha256:'0'.repeat(64)},{...planSelection,source_checksum:'0'.repeat(64)}]) assert.equal((await adminApi('POST',planSavePath,bad)).status,409);
+      const [beforePlans] = await query('SELECT count(*)::int AS n FROM kai.source_planned_targets WHERE source_version_id=$1',[sv]);
+      assert.equal(beforePlans.n,0,'candidate discovery did not accept a row');
+      await adminPage.evaluate(`(() => { const original=window.fetch; window.fetch=async (input,init) => {
+        const response=await original(input,init);
+        if (String(input).includes('/planned-targets?') && init?.method==='POST') { window.fetch=original; throw new Error('synthetic lost reply after commit'); }
+        return response;
+      }; })()`);
+      await adminPage.clickIn(`${section} [data-client-save-planned-target="2"]`,'Save first source plan');
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planning-target-saved="saved"]`)}).length`)) === 1,'one plan saved independently');
+      assert.equal(await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planning-target-saved="unsaved"]`)}).length`),5);
+      await adminPage.clickIn(`${section} [data-client-planned-target-propose="2"]`,'Add retained plan to reports after lost reply');
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planned-target-report-ready]`)}).length`)) === 1,'interrupted plan save recovered without duplicating plan or evidence');
+      assert.deepEqual(await guidanceOf(),[null,'complete','count_records','worksheet_measurement_remaining']);
+      await adminPage.clickIn(`${section} [data-client-save-all-planned-targets]`,'Save remaining five plans');
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${section} [data-client-planned-target-report-ready]`)}).length`)) === 6,'all six plan findings ready');
+      const savedPlans = (await adminApi('GET',derivedMeasurementBasisPath(ORG_X,sv,'sheet_3'))).body.data.planning_targets.candidates.map((c) => c.saved);
+      assert.deepEqual(savedPlans.map((p) => [p.row_number,p.planned_value,p.unit,p.relationship_status,p.actual_measurement_id,p.comparison]),
+        [[2,'90.00','households','unresolved',null,null],[3,'250.00','encounters','unresolved',null,null],[4,'300.00','bags','unresolved',null,null],[5,'60.00','comparable_households','unresolved',null,null],[6,'25.00','self_reports','unresolved',null,null],[7,'95.00','encounters','unresolved',null,null]]);
+      for (const p of savedPlans) {
+        assert.equal(p.source_version_id,sv); assert.equal(p.source_id,promoted.source_id);
+        assert.equal(p.source_checksum,originalProfile.checksum); assert.equal(p.profile_canonical_sha256,originalProfile.profile_canonical_sha256);
+        assert.equal(p.worksheet_key,'sheet_3'); assert.equal(p.period_start,'2025-04-01'); assert.equal(p.period_end,'2026-03-31');
+        assert.ok(p.source_locator_id && p.evidence_item_id && p.claim_id && p.decision_id);
+        assert.match(p.statement,/Source-stated plan:/); assert.match(p.statement,/Attainment not calculated/);
+        claimIds.push(p.claim_id);
+      }
+      const planAudits=async () => (await query("SELECT count(*)::int AS n FROM kai.audit_events WHERE organization_id=$1 AND metadata->>'operation'='record_source_planned_target'",[ORG_X]))[0].n;
+      const auditBeforeReplay=await planAudits();assert.equal(auditBeforeReplay,6,'one actor-attributed required audit per accepted source plan');
+      assert.equal((await adminApi('POST',planSavePath,planSelection)).body.data.replayed,true);
+      assert.equal(await planAudits(),auditBeforeReplay,'replaying source plans writes no duplicate audit');
+      assert.equal((await query('SELECT count(*)::int AS n FROM kai.source_planned_targets WHERE source_version_id=$1',[sv]))[0].n,6);
+      assert.deepEqual(await guidanceOf(),[null,'complete','none','complete'],'saved plans finish planning worksheet without counting its rows');
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`,'targets-saved');
+      await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`,'targets-saved',390);
+      // Actual schema enforcement, including rollback refusal, never modifies retained plans.
+      const rejectSql = async (sql,params=[],code=null) => {
+        const client = await seedPool.connect();
+        try { await client.query('BEGIN'); await assert.rejects(client.query(sql,params),(error)=>code === null || error.code === code); }
+        finally { await client.query('ROLLBACK'); client.release(); }
+      };
+      await rejectSql('UPDATE kai.source_planned_targets SET planned_value=1 WHERE planned_target_id=$1',[savedPlans[0].planned_target_id]);
+      await rejectSql('DELETE FROM kai.planned_target_decisions WHERE decision_id=$1',[savedPlans[0].decision_id]);
+      const planColumns = ['planned_target_id','organization_id','engagement_id','source_id','source_version_id','source_locator_id','worksheet_key','row_number','file_profile_id','profile_canonical_sha256','source_checksum','indicator','planned_value','unit','unit_kind','period_start','period_end','scope','source_comparison','created_by'];
+      for (const [column,value] of [['organization_id',ORG_Y],['engagement_id',randomUUID()],['source_version_id',randomUUID()],['source_locator_id',savedPlans[1].source_locator_id],['profile_canonical_sha256','0'.repeat(64)],['source_checksum','0'.repeat(64)],['row_number',99],['planned_value','-1'],['unit_kind','bogus']]) {
+        const selected=planColumns.map((c) => c === 'planned_target_id' ? 'gen_random_uuid()' : c === column ? '$2' : c).join(',');
+        await rejectSql(`INSERT INTO kai.source_planned_targets (${planColumns.join(',')}) SELECT ${selected} FROM kai.source_planned_targets WHERE planned_target_id=$1`,[savedPlans[0].planned_target_id,value],'23514');
+      }
+      await rejectSql(`INSERT INTO kai.planned_target_decisions (organization_id,planned_target_id,supersedes_decision_id,actual_measurement_id,relationship_status,comparison,metric_confirmed,population_confirmed,date_basis_confirmed,created_by)
+        SELECT organization_id,planned_target_id,$2,NULL,'unresolved',NULL,false,false,false,created_by FROM kai.source_planned_targets WHERE planned_target_id=$1`,[savedPlans[0].planned_target_id,savedPlans[1].decision_id],'23503');
+      const rollbackClient = await seedPool.connect();
+      try { await assert.rejects(rollbackClient.query(readFileSync(new URL('../migrations/kai_sprint2_source_planned_targets.rollback.sql',import.meta.url),'utf8')),/rollback refused/); }
+      finally { await rollbackClient.query('ROLLBACK');rollbackClient.release(); }
+      assert.equal((await query('SELECT count(*)::int AS n FROM kai.source_planned_targets WHERE source_version_id=$1',[sv]))[0].n,6);
       await panel.selectWorksheet("sheet_2");
       await adminPage.waitFor(async () => (await fieldValue(`${section} [data-client-derived-field="operation"]`)) === "rate", "the referral worksheet's unsaved calculation is still there");
       assert.deepEqual([await fieldValue(`${section} [data-client-derived-field="categoryFieldKey"]`),
         await adminPage.evaluate(`document.querySelector(${J(`${section} [data-client-custom-calculations]`)}).open`),
         await fieldValue(`[data-client-source-measurement="${sv}"] [data-client-source-measurement-field="countedUnit"]`)], ["field_5", true, "referral"]);
-      // The planning worksheet is still offered (measuring it is optional); a
-      // planned target cannot yet be stored with its worksheet row.
-      assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "worksheet_measurement_remaining"]);
+      assert.deepEqual(await guidanceOf(), [null, "complete", "none", "complete"]);
       const [referralClaim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [keptReferral.evidenceItem.evidence_item_id]);
       assert.ok(referralClaim, "the ready rate also needs only one save action before reporting");
       claimIds.push(referralClaim.claim_id);
-      const { shown, draft } = await createMeasuredReportInUi(claimIds);
+      const planOnlyReport = await createMeasuredReportInUi(claimIds);
+      const {shown,draft}=planOnlyReport;
       for (const m of saved) assert.ok(shown.includes(m.statement), "the saved/downloaded report retains the exact calculated finding");
       assert.ok(shown.includes(referralClaim.statement), "the referral rate and its all-date source scope survive generation, saved retrieval and download");
+      for (const p of savedPlans) assert.ok(shown.includes(p.statement),'all six planned facts reach generated, saved and downloaded report');
       assert.ok(shown.includes(sv));
       assert.deepEqual(await profileRowOf(promoted.file_profile_id), originalProfile);
       assert.deepEqual(await approvalState(), approvalBefore, "the complete journey requires zero evidence-quality approval decisions");
@@ -4515,6 +4581,65 @@ async function runXlsxAcceptance() {
       }
       assert.equal(contactRelated.find((r) => r.value_text === "9 of 49 (18.37%)").relationship.status, "not_comparable", "the all-date percentage stays not comparable");
       assert.equal(await targetRowsOf(), writesBefore.targets, "no planned target is stored from the worksheet");
+      // Confirm one explicitly chosen synthetic alternative; unknown direction
+      // remains honest even with a compatible actual. These are test attestations.
+      const contactTarget = savedPlans.find((p) => p.row_number === 6);
+      const decisionPath = `${orgPath()}/planned-targets/${contactTarget.planned_target_id}/decisions`;
+      const rejected = await adminApi('POST',decisionPath,{expected_decision_id:contactTarget.decision_id,actual_measurement_id:contactCounts.field_6,relationship_status:'rejected',comparison:null,metric_confirmed:false,population_confirmed:false,date_basis_confirmed:false});
+      assert.equal(rejected.status,200,J(rejected.body));
+      assert.equal(rejected.body.data.target.relationship_status,'rejected');
+      assert.match(rejected.body.data.target.statement,/Actual unavailable; relationship rejected/);
+      const confirm = { expected_decision_id:rejected.body.data.target.decision_id,actual_measurement_id:contactCounts.field_3,relationship_status:'confirmed',comparison:null,metric_confirmed:true,population_confirmed:true,date_basis_confirmed:true };
+      for (const api of [contributorApi,reviewerApi,adminYApi]) assert.equal((await api('POST',decisionPath,confirm)).status,403);
+      for (const bad of [{...confirm,metric_confirmed:false},{...confirm,population_confirmed:false},{...confirm,date_basis_confirmed:false},{...confirm,actual_measurement_id:saved[0].id}]) assert.equal((await adminApi('POST',decisionPath,bad)).status,422);
+      const confirmed = await adminApi('POST',decisionPath,confirm);
+      assert.equal(confirmed.status,200,J(confirmed.body));
+      assert.equal(confirmed.body.data.target.actual_value,'9');
+      assert.equal(confirmed.body.data.target.comparison,null);
+      assert.match(confirmed.body.data.target.statement,/Attainment not calculated/);
+      assert.equal((await adminApi('POST',decisionPath,confirm)).body.data.replayed,true,'interrupted reply retry reuses decision and evidence');
+      const claimFor = async (id) => { const p=await adminApi('POST',claimProposalPath(ORG_X,id),{});assert.equal(p.status,200,J(p.body));return p.body.data.claim.claim_id; };
+      const confirmedClaim = await claimFor(confirmed.body.data.evidenceItem.evidence_item_id);
+      const noDirectionReport = await createMeasuredReportInUi([confirmedClaim]);
+      assert.ok(noDirectionReport.shown.includes('Comparison direction unknown. Attainment not calculated.'));
+      await openCountRecords(sv);await panel.selectWorksheet('sheet_3');
+      await adminPage.waitFor(async () => (await textOf(adminPage,`${section} [data-client-planning-target="sheet_3:row_6"]`))?.includes('Actual confirmed: 9'),'confirmed target reread');
+      const detail = `${section} [data-client-planning-target="sheet_3:row_6"] [data-client-planned-target-decisions]`;
+      await adminPage.evaluate(`document.querySelector(${J(detail)}).open=true`);
+      assert.ok(await setSelect(`${section} [data-client-plan-comparison="6"]`,'at_least'));
+      for (const key of ['metric','population','date']) await adminPage.clickIn(`${section} [data-client-plan-confirm="6:${key}"]`,'Confirm '+key);
+      await adminPage.clickIn(`${section} [data-client-confirm-planned-target="6"]`,'Save explicit comparison direction');
+      await adminPage.waitFor(async () => (await textOf(adminPage,`${section} [data-client-planning-target="sheet_3:row_6"]`))?.includes('Target not met; variance -16.00'),'9 against 25 at least comparison');
+      const finalPlans = (await adminApi('GET',derivedMeasurementBasisPath(ORG_X,sv,'sheet_3'))).body.data.planning_targets.candidates;
+      const compared = finalPlans.find((p) => p.row_number === 6);
+      assert.deepEqual(compared.comparison_result,{actual_value:'9',planned_value:'25',comparison:'at_least',met:false,variance:'-16.00'});
+      await adminPage.capturePanel(`${section} [data-client-planning-target="sheet_3:row_6"]`,'target-confirmed');
+      await adminPage.capturePanel(`${section} [data-client-planning-target="sheet_3:row_6"]`,'target-confirmed',390);
+      const comparisonReport = await createMeasuredReportInUi([compared.saved.claim_id]);
+      assert.ok(comparisonReport.shown.includes(compared.saved.statement));
+      assert.ok(comparisonReport.shown.includes(contactCounts.field_3));
+      // Later confirmation never rewrites the earlier saved plan-only report.
+      assert.equal((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,draft.generated_content_draft_id))).status,200);
+      assert.equal((await query('SELECT count(*)::int AS n FROM kai.planned_target_decisions WHERE planned_target_id=$1',[contactTarget.planned_target_id]))[0].n,4);
+      // Explicit processing restrictions still govern saved plans and reports.
+      const sensitivity = await sensitivityOf(fileId);
+      const sourceUse = async (snapshot) => {
+        const item=await queueOf('sensitivity_review',sensitivity.intake_sensitivity_profile_id);
+        const result=await adminApi('POST',sensitivityDecisionPath(ORG_X,sensitivity.intake_sensitivity_profile_id),{expected_updated_at:new Date(item.updated_at).toISOString(),review_queue_item_id:item.review_queue_item_id,decision:'reviewed',reviewed_snapshot:snapshot});
+        assert.equal(result.status,200,J(result.body));
+      };
+      await sourceUse({...SNAPSHOT,reviewed_allowed_use_status:'not_allowed',reviewed_llm_processing_allowed:false});
+      assert.equal((await adminApi('POST',planSavePath,planSelection)).status,422);
+      assert.equal((await adminApi('GET',derivedMeasurementBasisPath(ORG_X,sv,'sheet_3'))).status,422);
+      assert.equal((await adminApi('POST',decisionPath,{...confirm,expected_decision_id:compared.saved.decision_id,comparison:'at_least'})).status,422);
+      const prohibitedReport=await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,comparisonReport.draft.generated_content_draft_id));
+      assert.ok([409,422].includes(prohibitedReport.status),J(prohibitedReport.body));
+      await sourceUse(SNAPSHOT);
+      assert.equal((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,comparisonReport.draft.generated_content_draft_id))).status,200);
+      writeFileSync(join('artifacts/kai-measurement-ui','planned-target-plan-only-report.md'),shown);
+      writeFileSync(join('artifacts/kai-measurement-ui','planned-target-direction-unknown-report.md'),noDirectionReport.shown);
+      writeFileSync(join('artifacts/kai-measurement-ui','planned-target-comparison-report.md'),comparisonReport.shown);
+      writeFileSync(join('artifacts/kai-measurement-ui','planned-target-persistence.json'),JSON.stringify({sourceVersionId:sv,targets:finalPlans.map((p)=>p.saved),planOnlyReportId:draft.generated_content_draft_id,noDirectionReportId:noDirectionReport.draft.generated_content_draft_id,comparisonReportId:comparisonReport.draft.generated_content_draft_id,reports:{planOnly:planOnlyReport.downloadProof,directionUnknown:noDirectionReport.downloadProof,comparison:comparisonReport.downloadProof}},null,2));
       results.householdSurveyRecovery = { sv, fileId, originalRows: [121, 49, 6], outcomes: saved.map((m) => [m.numerator, m.denominator, m.percentage]), draftId: draft.generated_content_draft_id, reuploaded: false,
         plannedTargets: plan.candidates.map((c) => [c.locator.row_number, c.indicator, c.planned_value, c.unit, c.related_measurements.map((r) => r.relationship.status)]) };
     });
@@ -4582,7 +4707,7 @@ async function runXlsxAcceptance() {
           "Matches: Both are whole counts.", "Matches: Both cover 2026-01-01 to 2026-03-31 (the result applies it to column C).", "Matches: The worksheet states the result should be at least the planned value.",
           "Needs your confirmation: KAI cannot establish that \"completed_sessions\" counts the same thing as \"Completed sessions\" (source records). Only your organization can confirm this.",
           "Differs: The planned value is a percentage; this result is a count of source records.", "Indicator withheld",
-          "KAI cannot yet store a target together with the worksheet row it came from."]) {
+          "Save each planned target for reports."]) {
           assert.ok(shown.includes(expected), `planning worksheet shows: ${expected}`);
         }
         assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /Maria|Lopez|Count only sessions/);
@@ -4592,7 +4717,14 @@ async function runXlsxAcceptance() {
         // The person-entered target on the recorded result is unchanged and separate.
         const sessionsRead = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).body.data;
         assert.equal(sessionsRead.recorded.find((m) => m.source_derived_measurement_id === measurementId).target, null);
-        results.plannedTargetsCompatible = { sv, measured: expectedCompleted, relationship: compatible.relationship.status, candidates: plan.candidates.length };
+        const {createPostgresSourcePlannedTargetRepository}=await import('../Backend/kai/dictionary/postgresSourcePlannedTargetRepository.js');
+        const failingAuditRepository=createPostgresSourcePlannedTargetRepository({insertAuditEvent:async()=>({ok:false})});
+        const auditRefusal=await failingAuditRepository.saveSourcePlannedTargets({organizationId:ORG_X,sourceVersionId:sv,worksheetKey:'sheet_2',selection:{row_numbers:[2],profile_canonical_sha256:plan.source.profile_canonical_sha256,source_checksum:plan.source.source_checksum},actorUserId:ids.adminUserId,now:new Date().toISOString()});
+        assert.equal(auditRefusal.ok,false);
+        assert.equal((await query('SELECT count(*)::int AS n FROM kai.source_planned_targets WHERE source_version_id=$1',[sv]))[0].n,0,'required-audit failure rolls back the plan and its decision');
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_items WHERE source_version_id=$1 AND evidence_type='source_planned_target'",[sv]))[0].n,0,'required-audit failure rolls back evidence');
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_locators WHERE source_version_id=$1 AND locator_type='planning_target_row'",[sv]))[0].n,0,'required-audit failure rolls back the row locator');
+        results.plannedTargetsCompatible = { sv, fileId, measurementId, measured: expectedCompleted, relationship: compatible.relationship.status, candidates: plan.candidates.length };
       } finally {
         if (periodBefore.start && periodBefore.end) await setPeriod(periodBefore.start, periodBefore.end);
       }
@@ -4661,7 +4793,81 @@ async function runXlsxAcceptance() {
       assert.deepEqual([replaced.name, replaced.relationship.checks.find((c) => c.key === "currentness").text], ["reported_contact records", "This result was calculated from a source version that has since been replaced."]);
       const current = relatedOf(5).find((r) => r.source_version_id === sv);
       assert.deepEqual([current.name, current.value_text, current.relationship.checks.find((c) => c.key === "currentness").result], ["Food planning confidence (1-5)", "32 of 43 (74.42%)", "pass"]);
+      const successorSavePath=`${orgPath()}/source-versions/${sv}/planned-targets?worksheet_key=sheet_3`;
+      const selection={row_numbers:[2,3,4,5,6,7],profile_canonical_sha256:plan.source.profile_canonical_sha256,source_checksum:plan.source.source_checksum};
+      const firstSuccessorPlan=await adminApi('POST',successorSavePath,{...selection,row_numbers:[2]});
+      assert.equal(firstSuccessorPlan.status,200,J(firstSuccessorPlan.body));
+      assert.deepEqual(await guidanceOf(),[null,'complete','count_records','worksheet_measurement_remaining'],'a raw row count plus one saved plan does not complete five unsaved target rows');
+      const successorResponses=await Promise.all([adminApi('POST',successorSavePath,selection),adminApi('POST',successorSavePath,selection)]);
+      assert.deepEqual(successorResponses.map((r)=>r.status),[200,200]);
+      assert.deepEqual(successorResponses.map((r)=>r.body.data.replayed).sort(),[false,true],'concurrent first-save retry converges on one set of accepted rows');
+      const successorPlans=successorResponses.find((r)=>!r.body.data.replayed);
+
+      assert.equal(successorPlans.status,200,J(successorPlans.body));
+      const oldPlans=await query('SELECT planned_target_id,row_number FROM kai.source_planned_targets WHERE source_version_id=$1',[earlier.sv]);
+      for (const entry of successorPlans.body.data.targets) {
+        const prior=oldPlans.find((p)=>p.row_number===entry.target.row_number);
+        assert.equal(entry.target.supersedes_target_id,prior.planned_target_id);
+        assert.notEqual(entry.target.planned_target_id,prior.planned_target_id);
+        assert.equal(entry.target.actual_measurement_id,null,'a source successor does not inherit a confirmed actual from the replaced source');
+        assert.equal(entry.target.comparison,null);
+      }
+      assert.equal((await query('SELECT count(*)::int AS n FROM kai.source_planned_targets WHERE source_version_id=ANY($1::uuid[])',[[sv,earlier.sv]]))[0].n,12,'supersession preserves all six earlier source plans');
+      const oldSelection={...selection,profile_canonical_sha256:plan.source.profile_canonical_sha256};
+      assert.equal((await adminApi('POST',`${orgPath()}/source-versions/${earlier.sv}/planned-targets?worksheet_key=sheet_3`,oldSelection)).status,409);
+      writeFileSync(join('artifacts/kai-measurement-ui','planned-target-supersession.json'),JSON.stringify({earlier:earlier.sv,current:sv,targets:successorPlans.body.data.targets.map((e)=>({planned_target_id:e.target.planned_target_id,supersedes_target_id:e.target.supersedes_target_id,row_number:e.target.row_number}))},null,2));
       results.successorWorkbook = { sv, earlier: earlier.sv, rowCountsSaved: counts.length, guidanceAfterOutcomes: await guidanceOf() };
+    });
+
+    await test("W4: a source-stated comparator and a confirmed actual from another source reach a report; actual permissions and currentness affect that comparison while the plan survives", async () => {
+      const actual=results.plannedTargetsCompatible;
+      assert.ok(actual?.measurementId,'the independent session-log actual exists');
+      const planningFile=customerFile('separate_session_plan.xlsx',syntheticXlsxWorkbook({sheets:[{name:'Delivery_Targets',rows:[
+        ['indicator','program','target_value','unit','reporting_period','comparison'],
+        ['completed_sessions','all',6,'sessions','2026-01-01 to 2026-03-31','at least'],
+      ]}]}));
+      const fileId=await apiUpload(adminApi,planningFile,ids.batchId);await dispatcher.whenIdle();
+      const {source_version_id:sv}=await decideAndPromote(adminApi,fileId);
+      const plan=(await adminApi('GET',derivedMeasurementBasisPath(ORG_X,sv,'sheet_1'))).body.data.planning_targets;
+      const saved=await adminApi('POST',`${orgPath()}/source-versions/${sv}/planned-targets?worksheet_key=sheet_1`,{row_numbers:[2],profile_canonical_sha256:plan.source.profile_canonical_sha256,source_checksum:plan.source.source_checksum});
+      assert.equal(saved.status,200,J(saved.body));
+      const target=saved.body.data.targets[0].target;
+      assert.equal(target.comparison,'at_least','the comparator is explicitly stated in this synthetic source');
+      const decisionPath=`${orgPath()}/planned-targets/${target.planned_target_id}/decisions`;
+      const input={expected_decision_id:target.decision_id,relationship_status:'confirmed',actual_measurement_id:actual.measurementId,comparison:'at_least',metric_confirmed:true,population_confirmed:true,date_basis_confirmed:true};
+      assert.equal((await adminApi('POST',decisionPath,{...input,comparison:'at_most'})).status,422,'source-stated comparator cannot be silently changed');
+      const confirmed=await adminApi('POST',decisionPath,input);assert.equal(confirmed.status,200,J(confirmed.body));
+      assert.equal(confirmed.body.data.target.actual_value,'7');
+      assert.notEqual(confirmed.body.data.target.actual_source_version_id,sv);
+      const claim=await adminApi('POST',claimProposalPath(ORG_X,confirmed.body.data.evidenceItem.evidence_item_id),{});
+      assert.equal(claim.status,200,J(claim.body));
+      const report=await createMeasuredReportInUi([claim.body.data.claim.claim_id]);
+      assert.ok(report.shown.includes('Target met; variance 1.00'));
+      assert.ok(report.shown.includes(actual.sv));assert.ok(report.shown.includes(sv));
+      const readPlan=async () => (await adminApi('GET',derivedMeasurementBasisPath(ORG_X,sv,'sheet_1'))).body.data.planning_targets.candidates[0];
+      assert.deepEqual((await readPlan()).comparison_result,{actual_value:'7',planned_value:'6',comparison:'at_least',met:true,variance:'1.00'});
+      const sensitivity=await sensitivityOf(actual.fileId);
+      const use=async (snapshot) => {
+        const queue=await queueOf('sensitivity_review',sensitivity.intake_sensitivity_profile_id);
+        const result=await adminApi('POST',sensitivityDecisionPath(ORG_X,sensitivity.intake_sensitivity_profile_id),{expected_updated_at:new Date(queue.updated_at).toISOString(),review_queue_item_id:queue.review_queue_item_id,decision:'reviewed',reviewed_snapshot:snapshot});
+        assert.equal(result.status,200,J(result.body));
+      };
+      await use({...SNAPSHOT,reviewed_allowed_use_status:'not_allowed',reviewed_llm_processing_allowed:false});
+      const withheld=await readPlan();assert.equal(withheld.saved.planned_value,'6.00');assert.equal(withheld.saved.actual_value,null);assert.equal(withheld.comparison_result,null);
+      assert.ok([409,422].includes((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,report.draft.generated_content_draft_id))).status));
+      await use(SNAPSHOT);
+      assert.equal((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,report.draft.generated_content_draft_id))).status,200);
+      const replacementFile=customerFile('replacement_session_log.xlsx',syntheticXlsxWorkbook({sheets:[{name:'Sessions',rows:[['session_id','status','session_date'],['NEW01','completed','2026-01-06']]}]}));
+      const replacementId=await apiUpload(adminApi,replacementFile,ids.batchId);await dispatcher.whenIdle();
+      const replacementSensitivity=await sensitivityOf(replacementId);
+      assert.equal((await adminApi('POST',sensitivityDecisionPath(ORG_X,replacementSensitivity.intake_sensitivity_profile_id),{expected_updated_at:new Date(replacementSensitivity.updated_at).toISOString(),review_queue_item_id:replacementSensitivity.review_queue_item_id,decision:'reviewed',reviewed_snapshot:SNAPSHOT})).status,200);
+      const candidate=await candidateOf(replacementSensitivity.intake_sensitivity_profile_id);
+      assert.equal((await adminApi('POST',sourceCandidateDecisionPath(ORG_X,candidate.intake_source_candidate_id),{outcome:'promoted',reviewed_source_type:'organization_primary_record',supersedes_source_version_id:actual.sv})).status,200);
+      const stale=await readPlan();assert.equal(stale.saved.planned_value,'6.00');assert.equal(stale.saved.actual_value,null);assert.equal(stale.comparison_result,null);
+      assert.equal((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,report.draft.generated_content_draft_id))).status,409,'a replaced actual source preserves the existing current-source report rule');
+      const unresolved=await adminApi('POST',decisionPath,{...input,expected_decision_id:confirmed.body.data.target.decision_id,relationship_status:'unresolved',actual_measurement_id:null,metric_confirmed:false,population_confirmed:false,date_basis_confirmed:false});
+      assert.equal(unresolved.status,200,J(unresolved.body));
+      assert.equal(unresolved.body.data.target.planned_value,'6.00','the usable plan survives the unavailable actual');
     });
 
     await test("summary", async () => {

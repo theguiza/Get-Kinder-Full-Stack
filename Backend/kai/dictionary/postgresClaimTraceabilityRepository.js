@@ -1,3 +1,4 @@
+import { readPlannedTargetEvidence, plannedEvidenceIntact, readPlannedTargetContributors } from './plannedTargetRead.js';
 import {
   getScopedClaimById,
   getScopedClaimEvidenceLinkByClaimId,
@@ -563,6 +564,16 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // A cross-source measurement is current only while every source version it
   // combines is current, still bound to the profile it was calculated from,
   // and permitted by its effective allowed use.
+  if (evidenceItemRow.evidence_type === 'source_planned_target') {
+    const row = await readPlannedTargetEvidence(tx, { organizationId,evidenceItemId:evidenceItemRow.evidence_item_id });
+    if (!plannedEvidenceIntact({ row,evidenceItemRow,locatorRow,sourceVersionRow,requireCurrentDecision:false })) return failureWithReason('planned_target_provenance_invalid');
+    const contributors = await readPlannedTargetContributors(tx, { organizationId,evidenceItemId:evidenceItemRow.evidence_item_id });
+    if (contributors.some((r) => !r.is_current || r.profile_canonical_sha256 !== r.measured_profile_canonical_sha256)) return failureWithReason('planned_target_actual_not_current');
+    if (contributors.length) {
+      const permissions = await readEffectiveAllowedUseProhibitions(tx, { organizationId,intakeSensitivityProfileIds:contributors.map((r) => r.intake_sensitivity_profile_id) });
+      if (contributors.some((r) => !permissions.has(r.intake_sensitivity_profile_id) || permissions.get(r.intake_sensitivity_profile_id) !== null)) return failureWithReason('planned_target_actual_not_permitted');
+    }
+  }
   if (evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
     if (!derivedEvidenceIsCurrent(derivedRow)) return failureWithReason("derived_measurement_interpretation_superseded");

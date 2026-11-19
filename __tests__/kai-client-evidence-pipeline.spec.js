@@ -1034,7 +1034,7 @@ test("an authorization or tenant refusal is shown with the server's client-safe 
 
 test("a usable claim does not hide other unmeasured worksheets or create a preparation stage", async () => {
   const rows = [row(1, { ...reviewed, current_profile_format: "xlsx", current_source_version_id: fileId(9),
-    claim_count: 1, claim_ids: [claimId(1)], unmeasured_worksheet_count: 2 })];
+    claim_count: 1, claim_ids: [claimId(1)], unmeasured_worksheet_count: 2, incomplete_planning_worksheet_count: 1, evidence_unclaimed_proposable_count: 1 })];
   const { result } = await read(rows, { actor: boundAdminActor(), facts: [fact(1)] });
   assert.equal(result.ok, true, JSON.stringify(result));
   const current = currentOf(result, 1);

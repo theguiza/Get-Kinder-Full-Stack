@@ -441,6 +441,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId/status",
     // Organization display profile: read_intake roles with active membership in
     // the path organization; name and logo only.
+    "/admin/organizations/:organizationId/planned-targets/:plannedTargetId/decisions",
     "/admin/organizations/:organizationId/profile",
     "/admin/organizations/:organizationId/requirements",
     "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
@@ -457,6 +458,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Measurement MVP: paired baseline/follow-up outcomes retained as
     // evidence (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/paired-outcome-measurements",
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/planned-targets",
     // KAI P2-01M record-count measurement surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",

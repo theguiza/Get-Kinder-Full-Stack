@@ -315,7 +315,14 @@ export function assessPlanningTargetRelationship({ candidate, measurement, plann
   } else add("currentness", "pass", "Calculated from the current source version.");
   const measuredUnit = measurementTargetUnitOf(measurement.measurement_family);
   const unitWord = candidate.unit ? `"${candidate.unit}"` : "an unstated unit";
-  if (!candidate.unit_kind) add("unit", "confirm", "The worksheet does not state the unit, so whether the planned value is a count or a percentage is not established.");
+  const knownCrossUnit = measurement.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH
+    ? measurement.definition?.metric === 'known_recorded_service_minutes' ? 'minutes'
+      : ['distinct_people_served','group_distinct_people_served','people_in_more_than_one_group'].includes(measurement.definition?.metric) ? 'people'
+        : ['eligible_linked_encounters','group_linked_encounters','monthly_eligible_encounters'].includes(measurement.definition?.metric) ? 'encounters' : null
+    : null;
+  const unitSpellings = { minutes:['minutes','minute','mins'],people:['people','persons','person','participants'],encounters:['encounters','encounter','attendances'] };
+  if (knownCrossUnit && candidate.unit && !unitSpellings[knownCrossUnit].includes(candidate.unit.toLowerCase())) add('unit','fail',`This actual measures ${knownCrossUnit}, while the plan states ${unitWord}.`);
+  else if (!candidate.unit_kind) add("unit", "confirm", "The worksheet does not state the unit, so whether the planned value is a count or a percentage is not established.");
   else if (candidate.unit_kind === measuredUnit) add("unit", "pass", measuredUnit === "count" ? "Both are whole counts." : "Both are percentages.");
   else add("unit", "fail", candidate.unit_kind === "count"
     ? `The planned value is a count of ${unitWord}; this result is ${counted}.`
@@ -332,7 +339,9 @@ export function assessPlanningTargetRelationship({ candidate, measurement, plann
   else add("period", "fail", `This result covers ${measuredPeriod.start} to ${measuredPeriod.end}, not ${candidate.period.start} to ${candidate.period.end}.`);
   if (candidate.comparator) add("comparison", "pass", `The worksheet states the result should be ${candidate.comparator === "at_least" ? "at least" : "at most"} the planned value.`);
   else add("comparison", "confirm", "Whether the result should be at least or at most the planned value is not stated.");
-  if (candidate.scope && !candidate.scope_applies_to_all) add("scope", "confirm", `The target applies to "${candidate.scope}" only; confirm the result measures the same part of the work.`);
+  const actualGroup = measurement.definition?.group?.value_label;
+  if (actualGroup && candidate.scope && (candidate.scope_applies_to_all || candidate.scope.toLowerCase() !== actualGroup.toLowerCase())) add('scope','fail',`The actual applies to "${actualGroup}" only; the plan applies to "${candidate.scope}".`);
+  else if (candidate.scope && !candidate.scope_applies_to_all) add("scope", "confirm", `The target applies to "${candidate.scope}" only; confirm the result measures the same part of the work.`);
   else if (!candidate.scope && candidate.limitations.some((item) => item.code === "scope_withheld")) add("scope", "confirm", "The target's programme or scope is withheld; confirm the result measures the same part of the work.");
   add("meaning", "confirm", `KAI cannot establish that ${candidate.indicator ? `"${candidate.indicator}"` : "this indicator"} counts the same thing as "${name}" (${counted}). Only your organization can confirm this.`);
   return {
@@ -346,7 +355,7 @@ export function assessPlanningTargetRelationship({ candidate, measurement, plann
  * name sharing at least two words with the indicator (or the organization's
  * own indicator label equal to it), at most three, each with its checks.
  */
-export function relatedRecordedMeasurements({ candidate, measurements, planningEngagementId, limit = 3 }) {
+export function relatedRecordedMeasurements({ candidate, measurements, planningEngagementId, limit = 3, includeMeasurementId = null }) {
   if (!candidate.indicator) return [];
   const indicatorTerms = termsOf(candidate.indicator);
   const normalized = (text) => String(text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -357,8 +366,8 @@ export function relatedRecordedMeasurements({ candidate, measurements, planningE
       const sameLabel = measurement.indicator_label && normalized(measurement.indicator_label) === normalized(candidate.indicator);
       return { measurement, name, shared, sameLabel };
     })
-    .filter((entry) => entry.measurement.engagement_id === planningEngagementId && (entry.sameLabel || entry.shared.length >= 2))
-    .sort((a, b) => Number(b.sameLabel) - Number(a.sameLabel) || b.shared.length - a.shared.length)
+    .filter((entry) => entry.measurement.engagement_id === planningEngagementId && (entry.sameLabel || entry.shared.length >= 2 || entry.measurement.source_derived_measurement_id === includeMeasurementId))
+    .sort((a, b) => Number(b.measurement.source_derived_measurement_id === includeMeasurementId) - Number(a.measurement.source_derived_measurement_id === includeMeasurementId) || Number(b.sameLabel) - Number(a.sameLabel) || b.shared.length - a.shared.length)
     .slice(0, limit)
     .map(({ measurement, name, shared, sameLabel }) => ({
       source_derived_measurement_id: measurement.source_derived_measurement_id,
@@ -374,7 +383,6 @@ export function relatedRecordedMeasurements({ candidate, measurements, planningE
 }
 
 export const PLANNING_TARGET_PERSISTENCE = Object.freeze({
-  available: false,
-  reason: "target_source_provenance_not_storable",
-  message: "Using a planned value from this worksheet as a result's target is not available yet: KAI cannot yet store a target together with the worksheet row it came from. Nothing on this worksheet has been saved.",
+  available: true,
+  message: "Save each planned target for reports. An actual result and comparison direction can be confirmed later.",
 });

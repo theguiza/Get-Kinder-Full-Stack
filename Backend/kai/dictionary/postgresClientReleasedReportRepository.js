@@ -1,3 +1,4 @@
+import { readPlannedTargetContributors } from './plannedTargetRead.js';
 import { withTransaction } from "../db/kaiDb.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -82,6 +83,11 @@ export function createPostgresClientReleasedReportRepository({ runInTransaction 
           );
           for (const row of contributors.rows) {
             if (!versions.has(row.source_version_id)) versions.set(row.source_version_id, { sourceId: row.source_id, sourceVersionId: row.source_version_id, role: row.source_role });
+          }
+        }
+        for (const plan of rows.filter((r) => r.evidence_type === 'source_planned_target')) {
+          for (const contributor of await readPlannedTargetContributors(tx, { organizationId,evidenceItemId:plan.evidence_item_id })) {
+            if (!versions.has(contributor.source_version_id)) versions.set(contributor.source_version_id, { sourceId:contributor.source_id,sourceVersionId:contributor.source_version_id,role:'actual' });
           }
         }
         if (versions.size === 0) return { citedSourceVersions: [] };

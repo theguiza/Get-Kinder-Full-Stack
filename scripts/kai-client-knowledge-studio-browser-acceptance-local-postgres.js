@@ -165,6 +165,8 @@ const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs",
   "kai_sprint2_measurement_calculation_completion",
   "kai_sprint2_measurement_targets",
+  "kai_sprint2_document_statement_evidence",
+  "kai_sprint2_source_planned_targets",
 ]);
 // The client_admin source promotion acceptance opens Count records on the
 // source it promotes, so it also gets the P2-01M measurement schema (through
@@ -187,6 +189,8 @@ const MEASUREMENT_SCHEMA_MIGRATIONS = Object.freeze([
   "kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs",
   "kai_sprint2_measurement_calculation_completion",
   "kai_sprint2_measurement_targets",
+  "kai_sprint2_document_statement_evidence",
+  "kai_sprint2_source_planned_targets",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

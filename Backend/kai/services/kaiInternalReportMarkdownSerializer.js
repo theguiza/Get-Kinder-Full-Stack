@@ -1,3 +1,4 @@
+import { plannedTargetComparison, PLANNED_TARGET_LIMITATIONS } from '../validators/kaiSourcePlannedTargets.js';
 import { STORY_SOURCE_NOTE } from "../../../shared/kaiStorySourceInformation.js";
 import { PROVISIONAL_REPORT_STATUS, reportInformationNotes } from "../../../shared/kaiReportInformation.js";
 import { COUNT_ONLY_LIMITATION_CODE, WORDING_FALLBACK_RESULT_KEY } from "../validators/kaiGeneratedContentValidators.js";
@@ -289,6 +290,7 @@ function periodLines(model) {
     if (codes.includes(DERIVED_LIMITATION_CODES.NO_REPORTING_PERIOD)) lines.push(`- No reporting period was applied to the derived measurement ${refs(fact.citationRefs)}.`);
     else if (codes.includes(DERIVED_LIMITATION_CODES.ENGAGEMENT_PERIOD_APPLIED)) lines.push(`- The engagement's reporting period was applied to the derived measurement ${refs(fact.citationRefs)}.`);
   }
+  for (const fact of model.facts.filter((f) => f.plannedTarget)) lines.push(`- Planned period: ${fact.plannedTarget.period_start} to ${fact.plannedTarget.period_end} ${refs(fact.citationRefs)}; stated by the planning source.`);
   if (lines.length === 0) lines.push("- The cited evidence does not establish a reporting period.");
   return lines;
 }
@@ -322,6 +324,8 @@ function methodLines(model) {
       "- **Method:** calculated from the cited source version's recorded values under the measurement's recorded definition. "
         + "Its result is stated under Key findings and its limitations under Data quality and limitations.", "");
   }
+  for (const fact of model.facts.filter((f) => f.plannedTarget)) lines.push(`#### ${refs(fact.citationRefs)} Source-stated plan`, '',
+    "- **Method:** the planned value, unit and period are retained from the exact planning row. A confirmed actual uses its recorded calculation and the organization's metric, population and date-basis decision; attainment requires an established direction.", '');
   if (lines.length === 0) lines.push("No measured value is cited; the cited claims are reproduced as recorded.", "");
   return lines;
 }
@@ -350,7 +354,7 @@ function limitationLines(model) {
     lines.push(`- ${refs(fact.citationRefs)}`);
     if (provisional) lines.push("  - Open source notes accompany this finding; they do not require review approval to use the report.");
     for (const limitation of fact.limitationCodes) {
-      const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeDerivedLimitationCode(limitation);
+      const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : (PLANNED_TARGET_LIMITATIONS[limitation] || describeDerivedLimitationCode(limitation));
       lines.push(`  - ${description ? text(description) : "Recorded limitation."} (${code(limitation)})`);
     }
   }
@@ -455,6 +459,7 @@ function analysisLines(model) {
     lines.push(`- ${refs(fact.citationRefs)} **${DOCUMENT_ROLE_LABELS.source_method_or_instruction}:** the source states that "${observationText(fact)}" `
       + "This is the source's own method, requirement or recommendation; it does not show that the step was carried out. Any calculation KAI performed is cited and described separately.");
   }
+  for (const fact of model.facts.filter((f) => f.plannedTarget)) lines.push(`- ${refs(fact.citationRefs)} **Source-backed plan:** ${text(fact.claimStatement)}`);
   // The organization's planned target beside a measured fact: a plan compared with the recorded actual.
   const targetLine = (fact) => (fact.derivedMeasurement?.targetComparison?.text
     ? [`  - **Planned target:** ${text(fact.derivedMeasurement.targetComparison.text)}`] : []);
@@ -686,6 +691,24 @@ function assessmentLines(model, sections) {
   return lines;
 }
 
+function plannedTargetLines(model) {
+  const plans=model.facts.filter((f) => f.plannedTarget);
+  if (!plans.length) return [];
+  return ['## Source-backed planned targets','', ...plans.flatMap((fact) => {
+    const p=fact.plannedTarget;
+    const compared=plannedTargetComparison(p);
+    return [`### ${p.indicator} ${refs(fact.citationRefs)}`, '',
+      `- Plan: ${p.planned_value} ${p.unit}; programme ${p.scope || 'not stated'}; ${p.period_start} to ${p.period_end}.`,
+      `- Plan source: ${code(p.source_version_id)}, worksheet ${p.worksheet_key}, row ${p.row_number}; locator ${code(p.source_locator_id)}.`,
+      `- Plan identity: ${code(p.planned_target_id)}; decision ${code(p.decision_id)}.`,
+      p.relationship_status === 'confirmed' ? `- Actual: ${p.actual_value}; source ${code(p.actual_source_version_id)}; measurement ${code(p.actual_measurement_id)}. Metric, population and date basis confirmed by the organization.` : `- Actual unavailable; relationship ${p.relationship_status}. No achieved result is inferred from this plan.`,
+      p.comparison ? `- Comparison direction: ${p.comparison.replace('_',' ')}.` : '- Comparison direction unknown: at least / at most has not been established.',
+      compared ? `- Target ${compared.met ? 'met' : 'not met'}; variance ${compared.variance} ${p.unit}.` : '- Attainment not calculated; confirm a compatible actual and comparison direction to calculate it.',
+      '',
+    ];
+  })];
+}
+
 export function serializeInternalReportToMarkdown(model) {
   if (!model || model.available !== true || !Array.isArray(model.blocks) || !Array.isArray(model.facts) || model.facts.length === 0) {
     throw new TypeError("An available internal report model is required.");
@@ -718,6 +741,7 @@ export function serializeInternalReportToMarkdown(model) {
     "## Measurement definition and counting method",
     "",
     ...methodLines(model),
+    ...plannedTargetLines(model),
     "## Duplicate records",
     "",
     ...duplicateLines(model),

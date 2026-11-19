@@ -79,8 +79,17 @@ export async function getClientEvidencePipelineEngagement(organizationId, engage
 export async function listClientEvidencePipelineFiles(organizationId, engagementId, { limit, actorUserId = null }, db = pool) {
   // A schema without derived measurements (older assembled schemas) can hold
   // no saved survey outcome, so the paired-outcome rule below is not applied there.
-  const { rows: [schema] } = await db.query("SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_measurements_ready");
+  const { rows: [schema] } = await db.query("SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_measurements_ready, to_regclass('kai.source_planned_targets') IS NOT NULL AS planned_targets_ready");
   const pairedOutcomesRemainSql = schema?.derived_measurements_ready ? PAIRED_OUTCOMES_REMAIN_SQL : "false";
+  const planningRowsCompleteSql = schema?.planned_targets_ready ? `AND NOT (
+    (SELECT count(*) FROM kai.source_planned_targets p WHERE p.organization_id=v.organization_id
+      AND p.source_version_id=v.source_version_id AND p.worksheet_key=sh->>'sheet_key')
+    = (sh->'record_count_basis'->>'data_record_count')::int
+  )` : '';
+  const planningRowsRemainSql = schema?.planned_targets_ready ? `EXISTS (
+    SELECT 1 FROM kai.source_planned_targets p WHERE p.organization_id=v.organization_id
+      AND p.source_version_id=v.source_version_id AND p.worksheet_key=sh->>'sheet_key'
+  )` : 'false';
   const { rows } = await db.query(
     `WITH files AS (
        SELECT f.organization_id, f.intake_file_id, f.safe_filename, f.upload_state, f.file_policy_status,
@@ -164,6 +173,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             dfc.current_profile_format,
             dfc.current_source_version_id,
             COALESCE(ws.unmeasured_worksheet_count, 0)::int AS unmeasured_worksheet_count,
+            COALESCE(ws.incomplete_planning_worksheet_count, 0)::int AS incomplete_planning_worksheet_count,
             ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
             -- Every current version's text was already read by this
             -- extractor method and held no complete statement (its audit).
@@ -294,7 +304,8 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
          HAVING count(v.source_version_id) > 0
        ) dfc ON true
        LEFT JOIN LATERAL (
-         SELECT count(*) AS unmeasured_worksheet_count
+         SELECT count(*) AS unmeasured_worksheet_count,
+                count(*) FILTER (WHERE ${planningRowsRemainSql}) AS incomplete_planning_worksheet_count
            FROM kai.source_versions v
            JOIN kai.intake_source_candidates ic ON ic.organization_id = v.organization_id AND ic.intake_source_candidate_id = v.intake_source_candidate_id
            JOIN kai.intake_file_profiles fp ON fp.organization_id = ic.organization_id AND fp.file_profile_id = ic.file_profile_id
@@ -314,6 +325,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND sh->'record_count_basis'->>'duplicate_record_count' ~ '^[0-9]+$'
             AND sh->'record_count_basis'->'blank_record_count' <= sh->'record_count_basis'->'data_record_count'
             AND sh->'record_count_basis'->'duplicate_record_count' <= sh->'record_count_basis'->'data_record_count'
+            ${planningRowsCompleteSql}
             AND (
               NOT EXISTS (
                 SELECT 1 FROM kai.evidence_items ei
@@ -323,6 +335,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
                    AND sl.coordinates->>'sheet_key' = sh->>'sheet_key'
               )
               OR ${pairedOutcomesRemainSql}
+              OR ${planningRowsRemainSql}
             )
        ) ws ON true
        LEFT JOIN LATERAL (

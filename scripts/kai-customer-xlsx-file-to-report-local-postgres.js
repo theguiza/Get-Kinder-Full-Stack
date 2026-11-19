@@ -199,7 +199,8 @@ try {
   }
   console.log("XLSX acceptance: read-only method verifier OVERALL PASS after the derived-measurement migration");
 
-  const testResult = spawnSync("node", ["--test", "--test-timeout=1800000", spec], {
+  const focusedArgs = process.env.KAI_XLSX_TEST_NAME_PATTERN ? [`--test-name-pattern=${process.env.KAI_XLSX_TEST_NAME_PATTERN}`] : [];
+  const testResult = spawnSync("node", ["--test", "--test-timeout=1800000", ...focusedArgs, spec], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: "inherit",

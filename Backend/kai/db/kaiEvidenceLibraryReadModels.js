@@ -109,8 +109,15 @@ const DERIVED_MEASUREMENT_EVIDENCE_TYPE = "source_derived_measurement";
  * finding. Display only: eligibility stays with the validators.
  */
 export async function withDerivedMeasurementFamilies(organizationId, rows, db) {
+  const plannedIds = rows.filter((r) => r.evidence_type === 'source_planned_target').map((r) => r.evidence_item_id);
+  const planCurrent = new Map();
+  if (plannedIds.length) {
+    const plans = await db.query(`SELECT l.evidence_item_id,NOT EXISTS (SELECT 1 FROM kai.planned_target_decisions n WHERE n.supersedes_decision_id=l.decision_id) AS current
+      FROM kai.evidence_planned_targets l WHERE l.organization_id=$1 AND l.evidence_item_id=ANY($2::uuid[])`,[organizationId,plannedIds]);
+    for (const plan of plans.rows) planCurrent.set(plan.evidence_item_id,plan.current);
+  }
   const derivedIds = rows.filter((row) => row.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id);
-  if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null, measurement_evidence_current: null }));
+  if (derivedIds.length === 0) return rows.map((row) => ({ ...row, measurement_family: null, measurement_evidence_current: planCurrent.get(row.evidence_item_id) ?? null }));
   const { rows: families } = await db.query(
     `SELECT edm.evidence_item_id::text AS evidence_item_id, dm.measurement_family,
             COALESCE(edm.interpretation_id::text, '') = COALESCE((
@@ -137,7 +144,7 @@ export async function withDerivedMeasurementFamilies(organizationId, rows, db) {
     return {
       ...row,
       measurement_family: family?.measurement_family ?? null,
-      measurement_evidence_current: typeof family?.measurement_evidence_current === "boolean" ? family.measurement_evidence_current : null,
+      measurement_evidence_current: typeof family?.measurement_evidence_current === "boolean" ? family.measurement_evidence_current : planCurrent.get(row.evidence_item_id) ?? null,
     };
   });
 }

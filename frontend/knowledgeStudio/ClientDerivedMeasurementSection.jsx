@@ -164,7 +164,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       result = await postJson(path, body);
       if (forReports && canProposeClaim && [200, 201].includes(result.statusCode) && result.body?.ok) {
         const saved = result.body.data;
-        for (const entry of saved.measurements || [saved]) {
+        for (const entry of saved.measurements || saved.targets || [saved]) {
           const evidenceId = entry.evidenceItem?.evidence_item_id;
           if (!evidenceId) { reportFailures += 1; continue; }
           try {
@@ -285,7 +285,13 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
         Exact-period calculation: {calculationJob.job_state.replace(/_/g, " ")}.
       </div> : null}
 
-      <ClientPlanningTargetCandidates planning={data?.planning_targets} />
+      <ClientPlanningTargetCandidates planning={data?.planning_targets} organizationId={organizationId} pending={Boolean(pending)}
+        onSave={(rows) => send("plans", `/api/kai/sprint2/intake/admin/organizations/${organizationId}/source-versions/${sourceVersionId}/planned-targets?worksheet_key=${worksheetKey}`, {
+          row_numbers:rows,profile_canonical_sha256:data.planning_targets.source.profile_canonical_sha256,source_checksum:data.planning_targets.source.source_checksum,
+        }, () => "Planned targets saved.", { forReports:true })}
+        onDecision={(target, decision) => send("plan-decision", `/api/kai/sprint2/intake/admin/organizations/${organizationId}/planned-targets/${target.planned_target_id}/decisions`, decision,
+          () => "Target relationship saved.", { forReports:true })}
+        onPropose={(id) => send("plan-propose", claimProposalPath(organizationId,id), {}, () => "Planned target ready for reports.")} />
 
       {data?.paired?.available ? (
         <div className="mb-2" data-client-derived-paired="">

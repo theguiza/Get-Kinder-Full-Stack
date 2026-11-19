@@ -1671,7 +1671,8 @@ export async function listScopedDerivedMeasurementRowsBySourceVersion({ organiza
 export async function listScopedEngagementDerivedMeasurementRows({ organizationId, engagementId, limit = 500 }, db = pool) {
   const { rows } = await db.query(
     `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS},
-            msv.is_current AS measurement_source_is_current, msv.source_id::text AS measurement_source_id
+            msv.is_current AS measurement_source_is_current, msv.source_id::text AS measurement_source_id,
+            msv.intake_sensitivity_profile_id::text AS measurement_intake_sensitivity_profile_id
      ${DERIVED_MEASUREMENT_ROW_FROM}
        JOIN kai.source_versions msv ON msv.organization_id = m.organization_id AND msv.source_version_id = m.source_version_id
       WHERE l.organization_id = $1::uuid

@@ -561,7 +561,7 @@ test("the document-evidence migration widens exactly the five CHECKs, is listed 
   const derivedCoordinates = derived.slice(derived.indexOf("ADD CONSTRAINT source_locators_p2_01_coordinates_check"), derived.indexOf(";", derived.indexOf("ADD CONSTRAINT source_locators_p2_01_coordinates_check")));
   assert.ok(rollback.includes(derivedCoordinates));
   // The document-statement migration follows the reconciliation jobs; the measurement completion and target migrations follow it.
-  assert.match(chain, /"kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs",\n {2}"kai_sprint2_document_statement_evidence",\n {2}"kai_sprint2_measurement_calculation_completion",\n {2}"kai_sprint2_measurement_targets",\n\];/);
+  assert.match(chain, /"kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs",\n {2}"kai_sprint2_document_statement_evidence",\n {2}"kai_sprint2_measurement_calculation_completion",\n {2}"kai_sprint2_measurement_targets",\n {2}"kai_sprint2_source_planned_targets",\n\];/);
 });
 
 test("the plain-text reader decodes as the profiler does and refuses bytes the profiler would refuse", () => {

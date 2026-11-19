@@ -1,3 +1,5 @@
+import { readPlannedTargetEvidence, plannedEvidenceIntact } from './plannedTargetRead.js';
+import { composePlannedTargetStatement, PLANNED_TARGET_EVIDENCE_TYPE } from '../validators/kaiSourcePlannedTargets.js';
 import {
   getScopedClaimById,
   getScopedDerivedMeasurementByEvidenceItemId,
@@ -190,6 +192,11 @@ export async function evaluateMeasuredClaimIntegrityInTransaction(tx, {
     && claimRow.evidence_item_id === evidenceItemRow.evidence_item_id
     && claimRow.statement === statement
   );
+  if (evidenceItemRow?.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE) {
+    const row = await readPlannedTargetEvidence(tx, { organizationId, evidenceItemId:evidenceItemRow.evidence_item_id });
+    if (!plannedEvidenceIntact({ row, evidenceItemRow, locatorRow, sourceVersionRow, requireCurrentDecision:false })) return { applies:true, reason:'measurement_definition_not_confirmed', measurementRow:null };
+    return { applies:true, reason:restates(composePlannedTargetStatement(row)) ? null : 'claim_not_measurement_restatement', measurementRow:null };
+  }
   if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
     if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
@@ -228,6 +235,20 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   const reasons = [];
   let measurementRow = null;
   let source = null;
+  if (evidenceItemRow?.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE) {
+    const integrity = await evaluateMeasuredClaimIntegrityInTransaction(tx, { organizationId,evidenceItemRow,locatorRow,sourceVersionRow,claimRow });
+    if (integrity.reason) reasons.push(integrity.reason);
+    source = await classifySourceVersionInTransaction(tx, { organizationId,sourceVersionId:evidenceItemRow.source_version_id });
+    reasons.push(...source.getKinderReviewReasons,...source.blockedReasons);
+    const row = await readPlannedTargetEvidence(tx, { organizationId,evidenceItemId:evidenceItemRow.evidence_item_id });
+    if (row?.relationship_status === 'confirmed') {
+      const actualSource = await classifySourceVersionInTransaction(tx, { organizationId,sourceVersionId:row.actual_source_version_id });
+      reasons.push(...actualSource.getKinderReviewReasons,...actualSource.blockedReasons);
+    }
+    const ordered = orderedReasons(reasons);
+    return { ordinary:ordered.length === 0,reasons:ordered,basis:ordered.length ? null : ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT,measurementRow:null,
+      sourcePermissions:{ is_current:source.isCurrent,recorded:source.recorded } };
+  }
   if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     // Measurement MVP: a source-derived measurement is ordinary on the same
     // terms - its arithmetic still matches its basis under its current
@@ -309,7 +330,7 @@ const MEASUREMENT_INTEGRITY_REASONS = new Set([
 export async function measuredFactIntegrityHoldsInTransaction(tx, { organizationId, claimId, evidenceItemId }) {
   const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
   if (!evidenceItemRow) return false;
-  if (evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE && evidenceItemRow.evidence_type !== DERIVED_MEASUREMENT_EVIDENCE_TYPE) return true;
+  if (evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE && evidenceItemRow.evidence_type !== DERIVED_MEASUREMENT_EVIDENCE_TYPE && evidenceItemRow.evidence_type !== PLANNED_TARGET_EVIDENCE_TYPE) return true;
   const locatorRow = await getScopedSourceLocatorById({ organizationId, sourceLocatorId: evidenceItemRow.source_locator_id }, tx);
   const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId: evidenceItemRow.source_version_id }, tx);
   const claimRow = await getScopedClaimById({ organizationId, claimId }, tx);

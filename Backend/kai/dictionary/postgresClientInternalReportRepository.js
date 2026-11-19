@@ -1,3 +1,5 @@
+import { readPlannedTargetEvidence } from './plannedTargetRead.js';
+import { PLANNED_TARGET_EVIDENCE_TYPE, plannedTargetLimitationCodes } from '../validators/kaiSourcePlannedTargets.js';
 import { storySourceWarnings, isRetiredStoryValidationResult } from "../../../shared/kaiStorySourceInformation.js";
 import { withTransaction } from "../db/kaiDb.js";
 import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId, getScopedDerivedMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
@@ -121,6 +123,7 @@ async function readClaimFacts(tx, { organizationId, generatedContentDraftId, cit
   const derivedRow = evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
     ? await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: citation.evidenceItemId }, tx)
     : null;
+  const plannedTarget = evidenceItemRow?.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE ? await readPlannedTargetEvidence(tx,{ organizationId,evidenceItemId:citation.evidenceItemId }) : null;
   const definitionRow = measurementRow
     ? await readDefinition(tx, { organizationId, sourceMeasurementDefinitionId: measurementRow.source_measurement_definition_id })
     : null;
@@ -141,6 +144,9 @@ async function readClaimFacts(tx, { organizationId, generatedContentDraftId, cit
     // The cited evidence's type, so the report describes a source-reported
     // statement, a row count and a derived measurement each as what it is.
     evidenceType: evidenceItemRow?.evidence_type ?? null,
+    ...(evidenceItemRow?.evidence_type === PLANNED_TARGET_EVIDENCE_TYPE ? {
+      plannedTarget,
+    } : {}),
     currentlyEligible: data.eligible === true,
     blockerCodes: [...data.blockerCodes],
     // Every row-count measurement has unverified human meaning, irrespective
@@ -200,7 +206,7 @@ async function readClaimFacts(tx, { organizationId, generatedContentDraftId, cit
     limitationCodes: measurementRow
       ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions })
       : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions })
-        : evidenceItemRow?.evidence_type === DOCUMENT_EVIDENCE_TYPE ? documentGenerationLimitationCodes(data.claim.statement) : [],
+        : plannedTarget ? plannedTargetLimitationCodes(plannedTarget) : evidenceItemRow?.evidence_type === DOCUMENT_EVIDENCE_TYPE ? documentGenerationLimitationCodes(data.claim.statement) : [],
   };
 }
 

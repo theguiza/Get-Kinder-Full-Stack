@@ -1,3 +1,4 @@
+import { readPlannedTargetContributors } from './plannedTargetRead.js';
 /**
  * KAI shared tenant-scoped effective allowed-use resolver (VAL-KAI-B1A-02-003).
  *
@@ -180,6 +181,11 @@ async function readClaimSourceDecisions(tx, { organizationId, claimIds }, readPr
       const key = String(row.claim_id).toLowerCase();
       referenceProfilesByClaim.set(key, [...(referenceProfilesByClaim.get(key) || []), row.intake_sensitivity_profile_id]);
     }
+  }
+  for (const claim of lineage.rows.filter((r) => r.evidence_type === 'source_planned_target')) {
+    const { rows: links } = await tx.query('SELECT evidence_item_id FROM kai.claims WHERE organization_id=$1 AND claim_id=$2', [organizationId,claim.claim_id]);
+    const contributors = links[0] ? await readPlannedTargetContributors(tx, { organizationId,evidenceItemId:links[0].evidence_item_id }) : [];
+    referenceProfilesByClaim.set(String(claim.claim_id).toLowerCase(), contributors.map((r) => r.intake_sensitivity_profile_id));
   }
   const profileIds = [...profileByClaim.values(), ...[...referenceProfilesByClaim.values()].flat()].filter(isUuid);
   const prohibitions = await readProfiles(tx, {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 
@@ -157,11 +157,23 @@ test("original Willow Quay workbook: independent survey pairing and referral fre
   assert.equal(referrals.filter((r) => r.contact_outcome === "").length, 0);
   const reported = referrals.filter((r) => r.contact_outcome === "reported_contact");
   assert.equal(reported.length, 9);
+  const inPeriod = (day) => day >= '2025-04-01' && day <= '2026-03-31';
+  assert.deepEqual(['referral_date','followup_date'].map((key) => reported.filter((r) => inPeriod(r[key])).length), [9,8], 'independent fiscal date alternatives');
   assert.ok(reported.every((r) => r.independently_verified === "no" && r.source_of_outcome === "household_self_report"), "self-reported, never independently verified");
   assert.equal(referrals.filter((r) => r.referral_date > "2026-03-31").length, 2, "two referrals fall after the fiscal year: the all-date rate is not a Project-period rate");
   const ready = describeTabularMeasurementOptions(profile, "sheet_2").ready_measurements.find((m) => m.label.startsWith("reported_contact "));
   assert.deepEqual([ready.numerator, ready.denominator, ready.percentage], [reported.length, referrals.length, (Math.round(reported.length / referrals.length * 10000) / 100).toFixed(2)]);
   assert.deepEqual(ready.definition, { operation: "rate", conditions: [{ kind: "category", field_key: "field_5", value_key: ready.definition.conditions[0].value_key }] }, "all records are the population; no date scope");
+  if (process.env.KAI_MEASUREMENT_SCREENSHOTS) {
+    const dir=process.env.KAI_MEASUREMENT_SCREENSHOTS;mkdirSync(dir,{recursive:true});
+    writeFileSync(join(dir,'source-record-oracle.json'),JSON.stringify({source_file:'04_Surveys_Referrals_and_Targets.xlsx',source_sha256:createHash('sha256').update(bytes).digest('hex'),
+      worksheets:{Self_Rating_Surveys:surveys.length,Referral_Followups:referrals.length,Delivery_Targets:sheets.get('Delivery_Targets').length-1},
+      matching_unit:'household',household_keys:byHousehold.size,scope:'all source dates',food,meal,
+      referral:{numerator:reported.length,denominator:referrals.length,percentage:(reported.length/referrals.length*100).toFixed(2),fiscal_referral_date:reported.filter((r)=>inPeriod(r.referral_date)).length,fiscal_followup_date:reported.filter((r)=>inPeriod(r.followup_date)).length,independently_verified:false},
+      targets:asObjects(sheets.get('Delivery_Targets')).map((r)=>({row:r._row,indicator:r.indicator,programme:r.program,value:r.target_value,unit:r.unit,period:r.reporting_period,comparison:null})),
+    },null,2));
+  }
+
 });
 
 // ---------------------------------------------------------------------------
@@ -292,7 +304,7 @@ test("read helper: only plausible planning worksheets are read; a changed table 
   const queries = [];
   const tx = { query: async (sql) => { queries.push(sql); return { rows: [] }; } };
   const fileProfileRow = { intake_file_id: "f1", checksum, profile_canonical_sha256: "a".repeat(64) };
-  const common = { organizationId: "o1", fileProfileRow, profile, worksheetKey: "sheet_2", sourceVersionRow: { source_version_id: "sv-1", source_id: "s-1" }, engagementId: "p-1", pairedAvailable: false };
+  const common = { readMeasurementPermissions:async (_tx,{ measurements }) => new Map(measurements.map((r) => [r.source_derived_measurement_id,true])), organizationId: "o1", fileProfileRow, profile, worksheetKey: "sheet_2", sourceVersionRow: { source_version_id: "sv-1", source_id: "s-1" }, engagementId: "p-1", pairedAvailable: false };
   const listed = [];
   const listProjectMeasurements = async (args) => { listed.push(args); return [
     { ...countRow(), interpretation_id: "i1", current_interpretation_id: "i1", contributing_sources: [], measurement_source_is_current: true, measurement_source_version_id: "sv-1" },
@@ -306,9 +318,9 @@ test("read helper: only plausible planning worksheets are read; a changed table 
   assert.deepEqual(first.locator, { source_version_id: "sv-1", worksheet_key: "sheet_2", worksheet_name: "Targets", row_number: 2,
     field_keys: { value: "field_3", indicator: "field_1", unit: "field_4", period: "field_5", scope: "field_2", status: "field_6", comparator: "field_7", note: "field_8" } });
   assert.deepEqual(first.related_measurements.map((r) => [r.source_derived_measurement_id, r.relationship.status]), [["m-count", "confirmation_required"]], "a result named from withheld labels is never proposed");
-  assert.equal(result.persistence.available, false);
-  assert.match(result.persistence.message, /cannot yet store a target together with the worksheet row it came from/);
-  assert.deepEqual(queries, [], "the read writes nothing");
+  assert.equal(result.persistence.available, true);
+  assert.match(result.persistence.message, /Save each planned target for reports/);
+  assert.ok(queries.length === 1 && queries.every((sql) => /^SELECT/.test(sql)), "only reads saved plans; discovery accepts nothing");
   const changedProfile = JSON.parse(JSON.stringify(profile));
   changedProfile.sheets[1].record_count_basis.data_record_count = 4;
   assert.equal((await readPlanningTargetCandidates(tx, { ...common, profile: changedProfile, worker: worker(), listProjectMeasurements })).reason, "planning_worksheet_changed");

@@ -422,7 +422,8 @@ function deriveFileStages(row, clientAuthority = NO_CLIENT_AUTHORITY) {
 function nextEvidenceWork(row, usableFactCount, clientAuthority) {
   const remainingWorksheets = count(row.unmeasured_worksheet_count) > 0;
   if (usableFactCount > 0 && !remainingWorksheets) return null;
-  const proposalReady = count(row.evidence_unclaimed_proposable_count) > 0;
+  const incompletePlans = count(row.incomplete_planning_worksheet_count ?? 0) > 0;
+  const proposalReady = !incompletePlans && count(row.evidence_unclaimed_proposable_count) > 0;
   const measurementReady = !proposalReady && (count(row.claim_count) === 0 || remainingWorksheets)
     && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)
     && isCanonicalUuid(row.current_source_version_id);

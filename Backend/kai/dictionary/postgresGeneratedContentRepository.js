@@ -1,3 +1,5 @@
+import { readPlannedTargetEvidence, plannedEvidenceIntact } from './plannedTargetRead.js';
+import { composePlannedTargetStatement, PLANNED_TARGET_EVIDENCE_TYPE, plannedTargetLimitationCodes } from '../validators/kaiSourcePlannedTargets.js';
 import { STORY_SOURCE_NOTE_RESULT, storySourceWarnings } from "../../../shared/kaiStorySourceInformation.js";
 import crypto from "node:crypto";
 
@@ -1905,6 +1907,13 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // source-reported status, uncertainty, estimate or method/instruction
         // wording) travel with it, from the persisted claim's quoted excerpt,
         // so the model and the validators know it is what the source says.
+        if (projection.evidenceType === PLANNED_TARGET_EVIDENCE_TYPE) {
+          if (!(await measuredAdmitted())) rollbackFailure('validation_blocker', stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY,'planned_target_not_intact'));
+          const plan = await readPlannedTargetEvidence(tx, { organizationId:input.organizationId,evidenceItemId:projection.evidenceItemId });
+          if (!plan || !plan.decision_is_current) rollbackFailure('conflict_current_state_changed');
+          projection.modelClaimStatement = composePlannedTargetStatement(plan);
+          measurementCodes = plannedTargetLimitationCodes(plan);
+        }
         if (projection.evidenceType === DOCUMENT_EVIDENCE_TYPE) {
           measurementCodes = documentGenerationLimitationCodes(projection.claimStatement);
         }

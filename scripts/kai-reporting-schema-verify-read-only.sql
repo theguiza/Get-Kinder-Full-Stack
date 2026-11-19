@@ -6,6 +6,7 @@
 -- The reporting-barrier fix a72413e6 added NO migration or approval requirement.
 -- No migration-history ledger is defined in this repository: check actual state.
 -- Document CHECK fingerprints reuse the existing PostgreSQL 16 packet pins;
+-- The source-planned-target extension has independently executed PG16 pins.
 -- on another PostgreSQL major, inspect a definition difference before treating
 -- it as an unapplied migration. Never blindly replay the migration chain.
 WITH required_tables(table_name, required_columns, migration) AS (
@@ -136,7 +137,14 @@ WITH required_tables(table_name, required_columns, migration) AS (
   UNION ALL
   SELECT 'document.' || r.constraint_name,
          CASE WHEN c.contype = 'c' AND c.convalidated AND NOT c.condeferrable
-                    AND md5(pg_catalog.pg_get_constraintdef(c.oid)) = r.expected_md5 THEN 'PASS' ELSE 'FAIL' END,
+                    AND md5(pg_catalog.pg_get_constraintdef(c.oid)) = CASE
+                      WHEN to_regclass('kai.source_planned_targets') IS NOT NULL THEN CASE r.constraint_name
+                        WHEN 'evidence_items_p2_01_evidence_type_check' THEN 'd194949f0ae05a75969869fb6eb7366d'
+                        WHEN 'evidence_items_p2_01m_type_class_pairing_check' THEN 'fde24e16ac65ed2837f69ab93b1b757b'
+                        WHEN 'source_locators_p2_01_locator_type_check' THEN '9c9e6986ce95972ae24cd993b399a1ce'
+                        WHEN 'source_locators_p2_01_coordinates_check' THEN 'f1e1c427937f2a20dff4891349b63473'
+                        ELSE r.expected_md5 END
+                      ELSE r.expected_md5 END THEN 'PASS' ELSE 'FAIL' END,
          CASE WHEN c.oid IS NULL THEN 'Missing CHECK'
               WHEN NOT c.convalidated THEN 'CHECK exists but is NOT VALID'
               ELSE pg_catalog.pg_get_constraintdef(c.oid) END,

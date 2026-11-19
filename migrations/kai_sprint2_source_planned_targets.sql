@@ -179,7 +179,7 @@ CREATE TABLE kai.evidence_planned_targets (
 );
 -- Cross-object facts require transaction-level enforcement beyond individual FKs.
 CREATE FUNCTION kai.validate_planned_target_integrity() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE p kai.source_planned_targets; a kai.source_derived_measurements;
+DECLARE plan_record kai.source_planned_targets; a kai.source_derived_measurements;
 BEGIN
   IF TG_TABLE_NAME = 'source_planned_targets' THEN
     IF NOT EXISTS (
@@ -188,33 +188,44 @@ BEGIN
       JOIN kai.intake_file_profiles f ON f.file_profile_id = c.file_profile_id AND f.organization_id = c.organization_id
       JOIN kai.intake_files i ON i.intake_file_id = f.intake_file_id AND i.organization_id = f.organization_id
       JOIN kai.intake_batches b ON b.intake_batch_id = i.intake_batch_id AND b.organization_id = i.organization_id
+      JOIN kai.engagements engagement ON engagement.engagement_id = b.engagement_id AND engagement.organization_id = b.organization_id
       JOIN kai.source_locators l ON l.source_locator_id = NEW.source_locator_id AND l.organization_id = NEW.organization_id
       WHERE v.source_version_id = NEW.source_version_id AND v.organization_id = NEW.organization_id
-        AND b.engagement_id = NEW.engagement_id AND f.file_profile_id = NEW.file_profile_id
+        AND b.engagement_id = NEW.engagement_id AND (to_jsonb(i)->>'engagement_id' IS NULL OR to_jsonb(i)->>'engagement_id' = NEW.engagement_id::text) AND f.file_profile_id = NEW.file_profile_id
         AND v.profile_canonical_sha256 = NEW.profile_canonical_sha256 AND f.profile_canonical_sha256 = NEW.profile_canonical_sha256
         AND f.checksum = NEW.source_checksum AND l.source_version_id = NEW.source_version_id
+        AND EXISTS (SELECT 1 FROM jsonb_array_elements(f.profile->'sheets') sheet
+          WHERE sheet->>'sheet_key' = NEW.worksheet_key
+            AND (sheet->'record_count_basis'->>'data_record_count')::int >= NEW.row_number - 1)
         AND l.locator_type = 'planning_target_row'
         AND l.coordinates = jsonb_build_object('sheet_key',NEW.worksheet_key,'row_number',NEW.row_number)
-    ) OR (NEW.supersedes_target_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM kai.source_planned_targets old
-      WHERE old.planned_target_id = NEW.supersedes_target_id AND old.organization_id = NEW.organization_id
-        AND old.engagement_id = NEW.engagement_id AND old.source_id = NEW.source_id AND old.source_version_id <> NEW.source_version_id
-        AND old.worksheet_key = NEW.worksheet_key AND old.row_number = NEW.row_number AND old.indicator = NEW.indicator
-        AND old.unit = NEW.unit AND old.unit_kind = NEW.unit_kind AND old.scope IS NOT DISTINCT FROM NEW.scope
-        AND old.period_start = NEW.period_start AND old.period_end = NEW.period_end)) THEN RAISE EXCEPTION 'planned target provenance mismatch' USING ERRCODE = '23514'; END IF;
-  ELSIF TG_TABLE_NAME = 'planned_target_decisions' AND NEW.actual_measurement_id IS NOT NULL THEN
-    SELECT * INTO STRICT p FROM kai.source_planned_targets WHERE planned_target_id = NEW.planned_target_id AND organization_id = NEW.organization_id;
+    ) OR (NEW.supersedes_target_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM kai.source_planned_targets prior
+      WHERE prior.planned_target_id = NEW.supersedes_target_id AND prior.organization_id = NEW.organization_id
+        AND prior.engagement_id = NEW.engagement_id AND prior.source_id = NEW.source_id AND prior.source_version_id <> NEW.source_version_id
+        AND prior.worksheet_key = NEW.worksheet_key AND prior.row_number = NEW.row_number AND prior.indicator = NEW.indicator
+        AND prior.unit = NEW.unit AND prior.unit_kind = NEW.unit_kind AND prior.scope IS NOT DISTINCT FROM NEW.scope
+        AND prior.period_start = NEW.period_start AND prior.period_end = NEW.period_end)) THEN RAISE EXCEPTION 'planned target provenance mismatch' USING ERRCODE = '23514'; END IF;
+  ELSIF TG_TABLE_NAME = 'planned_target_decisions' THEN
+    SELECT * INTO STRICT plan_record FROM kai.source_planned_targets WHERE planned_target_id = NEW.planned_target_id AND organization_id = NEW.organization_id;
+    IF plan_record.source_comparison IS NOT NULL AND NEW.comparison IS DISTINCT FROM plan_record.source_comparison THEN
+      RAISE EXCEPTION 'source comparison cannot be overridden' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.actual_measurement_id IS NOT NULL THEN
     SELECT * INTO STRICT a FROM kai.source_derived_measurements WHERE source_derived_measurement_id = NEW.actual_measurement_id AND organization_id = NEW.organization_id;
     IF NEW.relationship_status = 'confirmed' AND (
-      NOT EXISTS (SELECT 1 FROM kai.source_versions v JOIN kai.intake_source_candidates c USING (intake_source_candidate_id, organization_id)
-        JOIN kai.intake_file_profiles f USING (file_profile_id, organization_id)
-        JOIN kai.intake_files i USING (intake_file_id, organization_id)
-        JOIN kai.intake_batches b USING (intake_batch_id, organization_id)
-        WHERE v.source_version_id = a.source_version_id AND b.engagement_id = p.engagement_id)
-      OR p.unit_kind <> CASE WHEN a.measurement_family IN ('tabular_rate','paired_outcome_change') THEN 'percent' ELSE 'count' END
+      NOT EXISTS (SELECT 1 FROM kai.source_versions v JOIN kai.intake_source_candidates c ON c.intake_source_candidate_id=v.intake_source_candidate_id AND c.organization_id=v.organization_id
+        JOIN kai.intake_file_profiles f ON f.file_profile_id=c.file_profile_id AND f.organization_id=c.organization_id
+        JOIN kai.intake_files i ON i.intake_file_id=f.intake_file_id AND i.organization_id=f.organization_id
+        JOIN kai.intake_batches b ON b.intake_batch_id=i.intake_batch_id AND b.organization_id=i.organization_id
+        JOIN kai.engagements engagement ON engagement.engagement_id=b.engagement_id AND engagement.organization_id=b.organization_id
+        WHERE v.source_version_id = a.source_version_id AND b.engagement_id = plan_record.engagement_id
+          AND (to_jsonb(i)->>'engagement_id' IS NULL OR to_jsonb(i)->>'engagement_id' = plan_record.engagement_id::text))
+      OR plan_record.unit_kind <> CASE WHEN a.measurement_family IN ('tabular_rate','paired_outcome_change') THEN 'percent' ELSE 'count' END
       OR NOT (EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(a.definition->'conditions','[]')) x
-        WHERE x->>'kind' = 'period' AND x->>'scope' = 'within' AND x->>'period_start' = p.period_start::text AND x->>'period_end' = p.period_end::text)
-        OR (a.definition->'period'->>'period_start' = p.period_start::text AND a.definition->'period'->>'period_end' = p.period_end::text)) IS TRUE
+        WHERE x->>'kind' = 'period' AND x->>'scope' = 'within' AND x->>'period_start' = plan_record.period_start::text AND x->>'period_end' = plan_record.period_end::text)
+        OR (a.definition->'period'->>'period_start' = plan_record.period_start::text AND a.definition->'period'->>'period_end' = plan_record.period_end::text)) IS TRUE
     ) THEN RAISE EXCEPTION 'planned target actual incompatible' USING ERRCODE = '23514'; END IF;
+    END IF;
   ELSIF TG_TABLE_NAME = 'evidence_planned_targets' THEN
     IF NOT EXISTS (SELECT 1 FROM kai.source_planned_targets p JOIN kai.evidence_items e ON e.evidence_item_id = NEW.evidence_item_id AND e.organization_id = p.organization_id
       WHERE p.planned_target_id = NEW.planned_target_id AND p.organization_id = NEW.organization_id

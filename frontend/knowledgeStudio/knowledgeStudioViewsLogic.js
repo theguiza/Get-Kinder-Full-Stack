@@ -51,6 +51,7 @@ export function projectIsConfirmedEmpty({ engagementId, scope, pipeline, sources
 }
 
 export const EVIDENCE_TYPES = Object.freeze({
+  planned: "source_planned_target",
   structural: "dictionary_field_presence_fact",
   document: "source_document_statement",
   recordCount: "source_record_count_measurement",
@@ -80,7 +81,7 @@ export const FINDING_CATEGORY_DESCRIPTIONS = Object.freeze({
 });
 
 export function findingCategory(evidenceType, measurementFamily, measurementEvidenceCurrent = null) {
-  if (evidenceType === EVIDENCE_TYPES.structural) return "technical";
+  if (evidenceType === EVIDENCE_TYPES.structural || (evidenceType === EVIDENCE_TYPES.planned && measurementEvidenceCurrent === false)) return "technical";
   if (evidenceType === EVIDENCE_TYPES.derived) {
     if (measurementEvidenceCurrent === false) return "technical";
     if (measurementFamily === MEASUREMENT_FAMILIES.pairedOutcome) return "outcomes";
@@ -94,6 +95,7 @@ export function findingCategory(evidenceType, measurementFamily, measurementEvid
 // A document statement is named by what it is (owner Package 4): the source's
 // estimate or method guidance is not an observation; from its own words.
 export function findingTypeLabel(evidenceType, measurementFamily, measurementEvidenceCurrent = null, statement = null) {
+  if (evidenceType === EVIDENCE_TYPES.planned) return measurementEvidenceCurrent === false ? "Earlier planned-target decision" : "Source-stated planned target";
   if (evidenceType === EVIDENCE_TYPES.structural) return "Column in a source";
   if (evidenceType === EVIDENCE_TYPES.derived && measurementEvidenceCurrent === false) return "Earlier statement of a measurement (meaning since recorded)";
   if (evidenceType === EVIDENCE_TYPES.document) return documentStatementTypeLabel(statement);

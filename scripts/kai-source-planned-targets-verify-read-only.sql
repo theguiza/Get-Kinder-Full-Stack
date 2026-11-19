@@ -11,8 +11,8 @@ WITH checks(check_id, passed) AS (
  UNION ALL
  SELECT 'nullable_actual_and_comparison',count(*)=2 AND bool_and(NOT attnotnull) FROM pg_attribute WHERE attrelid=to_regclass('kai.planned_target_decisions') AND attname IN ('actual_measurement_id','comparison')
  UNION ALL
- SELECT 'linear_history_and_row_identity', count(*)=3 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
- WHERE c.relname IN ('planned_target_decisions_root','planned_target_decisions_successor','source_planned_targets_row_unique') AND i.indisunique AND i.indisvalid
+ SELECT 'linear_history_and_row_identity', count(*)=4 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+ WHERE c.relname IN ('planned_target_decisions_root','planned_target_decisions_successor','source_planned_targets_row_unique','source_planned_targets_successor') AND i.indrelid IN (to_regclass('kai.source_planned_targets'),to_regclass('kai.planned_target_decisions')) AND i.indisunique AND i.indisvalid
  UNION ALL
  SELECT 'evidence_vocabulary', EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='kai.evidence_items'::regclass AND conname='evidence_items_p2_01_evidence_type_check' AND pg_get_constraintdef(oid) LIKE '%source_planned_target%')
  UNION ALL

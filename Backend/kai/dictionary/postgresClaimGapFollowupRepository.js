@@ -1,3 +1,5 @@
+import { readPlannedTargetEvidence } from './plannedTargetRead.js';
+import { __evidenceCoverageAssessmentValidatorsTestables as plannedCoverageHelpers } from '../validators/kaiEvidenceCoverageAssessmentValidators.js';
 import { randomUUID } from "node:crypto";
 import {
   DOCUMENT_ANSWERED_DIMENSION_KEYS,
@@ -257,6 +259,21 @@ function buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionK
  * recomputation agree. Field-presence claims are unchanged.
  */
 async function claimCoverageDimensions(tx, { organizationId, evidenceItemRow, baseDimensions }) {
+  if (evidenceItemRow?.evidence_type === 'source_planned_target') {
+    const plan = await readPlannedTargetEvidence(tx, { organizationId,evidenceItemId:evidenceItemRow.evidence_item_id });
+    const dimensions = { ...baseDimensions };
+    const descriptions = {
+      missingness:'This accepted planning row states its value, unit and period; it does not measure achieved records.',
+      duplicates:'The finding states one uniquely located accepted planning row.',
+      coverage_gaps:'The finding describes the accepted source planning row, not coverage of achieved results.',
+      definition_clarity:'The indicator is source-stated; equivalence to an achieved metric is a separate relationship decision.',
+      denominator_clarity:'This is a planned value, not a measured fraction; it invents no denominator.',
+      time_period_clarity:'The planned period is stated in the source row; an actual must independently match it.',
+      entity_level_clarity:'The planned unit and programme are source-stated; they do not establish an actual population.',
+    };
+    for (const [key,description] of Object.entries(descriptions)) dimensions[key]=plannedCoverageHelpers.dimensionResult(key,plan ? 'resolved_risk_flagged' : 'unresolved',description);
+    return { dimensions,answeredDimensionKeys:plan ? [...DERIVED_ANSWERED_DIMENSION_KEYS] : [] };
+  }
   if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
     const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
       { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id },
