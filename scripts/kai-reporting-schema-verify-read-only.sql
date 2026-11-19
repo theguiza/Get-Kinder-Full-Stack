@@ -1,14 +1,4 @@
--- Run this entire SELECT in pgAdmin's Query Tool against the KAI database.
--- Catalog reads only: no application rows, writes, temporary objects or DDL.
--- OVERALL = PASS means the schema prerequisites checked below are present.
--- FAIL identifies a missing/incompatible prerequisite and its migration.
--- This is not an exhaustive schema comparison or proof of deployed app behavior.
--- The reporting-barrier fix a72413e6 added NO migration or approval requirement.
--- No migration-history ledger is defined in this repository: check actual state.
--- Document CHECK fingerprints reuse the existing PostgreSQL 16 packet pins;
--- The source-planned-target extension has independently executed PG16 pins.
--- on another PostgreSQL major, inspect a definition difference before treating
--- it as an unapplied migration. Never blindly replay the migration chain.
+-- Catalog-only PostgreSQL 16 verifier. Execute the entire file.
 WITH required_tables(table_name, required_columns, migration) AS (
   VALUES
     ('organizations', 'organization_id', 'existing organization foundation'),
@@ -78,9 +68,6 @@ WITH required_tables(table_name, required_columns, migration) AS (
     ('source_locators', 'source_locators_p2_01_locator_type_check', '20a79952e407a69bf7d7d46b6cc2bc45'),
     ('source_locators', 'source_locators_p2_01_coordinates_check', 'd5265a33039490287a63225d0c246401')
 ), measurement_checks(constraint_name, expected_md5) AS (
-  -- Descriptor fingerprints (PostgreSQL 16); the method/family CHECK is the one
-  -- kai_sprint2_measurement_calculation_completion leaves (identifier rates, the
-  -- verified-bytes basis, linked-reach worksheets); the arithmetic CHECK is unchanged.
   VALUES
     ('source_derived_measurements_method_family_check', '4d0b0335196faf3625f1fc43d516efd1'),
     ('source_derived_measurements_arithmetic_check', '9c7d96417506956fe1956ec8fd15e71e')
@@ -183,16 +170,12 @@ WITH required_tables(table_name, required_columns, migration) AS (
     FROM required_triggers r LEFT JOIN pg_catalog.pg_trigger t
       ON t.tgrelid = to_regclass('kai.' || r.table_name) AND t.tgname = r.trigger_name
 )
-SELECT check_id, status, detail, related_migration
-  FROM (
-    SELECT 'OVERALL' AS check_id, CASE WHEN bool_and(status = 'PASS') THEN 'PASS' ELSE 'FAIL' END AS status,
-           count(*) FILTER (WHERE status = 'FAIL')::text || ' failed out of ' || count(*)::text || ' schema checks' AS detail,
-           'Related migrations are diagnostic references, not instructions to rerun them' AS related_migration FROM checks
-    UNION ALL
-    SELECT * FROM checks
-    UNION ALL
-    SELECT 'INFO.connection', 'INFO', 'database=' || current_database() || '; PostgreSQL=' || current_setting('server_version'), ''
-    UNION ALL
-    SELECT 'INFO.scope', 'INFO', 'Catalog prerequisites only; no approval records required; app deployment and report generation need an application smoke test', ''
-  ) result
- ORDER BY CASE WHEN check_id = 'OVERALL' THEN 0 WHEN status = 'FAIL' THEN 1 WHEN status = 'INFO' THEN 3 ELSE 2 END, check_id;
+SELECT check_id, status, detail, related_migration FROM (
+SELECT 'OVERALL' AS check_id, CASE WHEN bool_and(status = 'PASS') THEN 'PASS' ELSE 'FAIL' END AS status,
+       count(*) FILTER (WHERE status = 'FAIL')::text || ' failed out of ' || count(*)::text || ' schema checks' AS detail,
+       'Related migrations are diagnostic references, not instructions to rerun them' AS related_migration FROM checks
+UNION ALL SELECT * FROM checks
+UNION ALL SELECT 'INFO.connection', 'INFO', 'database=' || current_database() || '; PostgreSQL=' || current_setting('server_version'), ''
+UNION ALL SELECT 'INFO.scope', 'INFO', 'Catalog prerequisites only; no approval records required; app deployment and report generation need an application smoke test', ''
+) result
+ORDER BY CASE WHEN check_id = 'OVERALL' THEN 0 WHEN status = 'FAIL' THEN 1 WHEN status = 'INFO' THEN 3 ELSE 2 END, check_id;

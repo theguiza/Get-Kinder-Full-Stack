@@ -48724,3 +48724,10 @@ Early acceptance runs exposed assertions requiring the superseded ineligibility,
 **Scope and limitations:** the separate managed funder/public generation, optional review/release and final-export services retain their existing approval contracts; this package does not establish that those barriers are removed. The customer's ordinary internal report does not depend on those services. Real-model behavior, existing/deployed schema compatibility and deployed behavior remain NOT_CONFIRMED. No production claim is made from these synthetic results.
 
 **Status:** INTERNAL_REPORT_REVIEW_BARRIERS_REMOVED_AND_PROVEN_LOCALLY_WITH_HTTP_POSTGRESQL_AND_BROWSER; EXTERNAL_APPROVAL_PATHS_UNCHANGED; PRODUCTION_NOT_CHANGED. Stop at this local package boundary.
+
+
+### pgAdmin reporting-verifier delivery repair (2026-11-18)
+
+**Owner request (USER_CONFIRMED):** repair the file directly after pgAdmin reported SQLSTATE 42601 at character 18714 / line 183. The owner returned all eight target checks and OVERALL PASS; the owner-operated reporting query has not returned a successful result.
+
+**Change and verification (TOOL_VERIFIED):** compacted `scripts/kai-reporting-schema-verify-read-only.sql` to a complete 181-line, 18,699-byte query, including its final ORDER BY and semicolon before the reported cutoff. A quote-aware token comparison against HEAD confirms every executable SQL token and check is preserved. This is a file-delivery repair, not a change to schema or verification criteria; the previously complete repository SQL was already valid. `python3 scripts/kai-source-planned-targets-local-postgres.py` passed both target verification runs, reporting verification, fresh/upgrade/unused rollback/reapply and exact preceding-constraint preservation on its owned disposable local PostgreSQL cluster; the cluster was removed. Log: `/tmp/kai-pgadmin-verifier-repair.log`. Full diff inspected and `git diff --check` passed. No existing database, production, credentials, feature flags or Current State changed. The user's already-open pgAdmin buffer was not edited or executed; its successful rerun remains NOT_CONFIRMED.
