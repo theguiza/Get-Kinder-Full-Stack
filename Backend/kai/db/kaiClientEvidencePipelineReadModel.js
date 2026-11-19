@@ -24,6 +24,37 @@ const PAIRED_OUTCOMES_REMAIN_SQL = `(
   )
 )`;
 
+// A service-record table (its committed basis lists a completed status value)
+// keeps substantive service-delivery work until one saved service measurement
+// of that table names a required set (headline encounters, programme
+// breakdown, households served) that is entirely saved. A raw or other count,
+// or one saved service result alone, never completes it. `basis` and `sheet`
+// are SQL expressions for the table's basis and worksheet key (NULL for CSV).
+const SERVICE_COMPLETION_LABELS_SQL = "('completed','complete','attended','delivered','served','done','fulfilled','finished','present')";
+function serviceMeasurementRemainsSql(basis, sheet) {
+  return `(
+  ${basis}->>'basis_version' = 'kai_tabular_measurement_basis_v1' AND ${basis}->>'status' = 'assessed'
+  AND EXISTS (
+    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(${basis}->'fields') = 'array' THEN ${basis}->'fields' ELSE '[]'::jsonb END) sf
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sf->'categorical'->'values') = 'array' THEN sf->'categorical'->'values' ELSE '[]'::jsonb END) sval
+     WHERE sf->'roles' ? 'categorical' AND COALESCE(sf->'categorical'->>'vocabulary_withheld', 'false') = 'false'
+       AND lower(sval->>'label') IN ${SERVICE_COMPLETION_LABELS_SQL}
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM kai.source_derived_measurements sm
+     WHERE sm.organization_id = v.organization_id AND sm.source_version_id = v.source_version_id
+       AND sm.measurement_family = 'service_events' AND COALESCE(sm.worksheet_key, '') = COALESCE(${sheet}, '')
+       AND jsonb_typeof(sm.component_counts->'required_measurement_keys') = 'array'
+       AND NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements_text(sm.component_counts->'required_measurement_keys') rk(measurement_key)
+          WHERE NOT EXISTS (
+            SELECT 1 FROM kai.source_derived_measurements done
+             WHERE done.organization_id = sm.organization_id AND done.source_version_id = sm.source_version_id
+               AND COALESCE(done.worksheet_key, '') = COALESCE(sm.worksheet_key, '') AND done.measurement_key = rk.measurement_key))
+  )
+)`;
+}
+
 /**
  * Read-only, organization + engagement scoped lineage counts for the client
  * evidence-pipeline projection (kaiClientEvidencePipelineService.js).
@@ -81,6 +112,8 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
   // no saved survey outcome, so the paired-outcome rule below is not applied there.
   const { rows: [schema] } = await db.query("SELECT to_regclass('kai.source_derived_measurements') IS NOT NULL AS derived_measurements_ready, to_regclass('kai.source_planned_targets') IS NOT NULL AS planned_targets_ready");
   const pairedOutcomesRemainSql = schema?.derived_measurements_ready ? PAIRED_OUTCOMES_REMAIN_SQL : "false";
+  const sheetServiceRemainsSql = schema?.derived_measurements_ready ? serviceMeasurementRemainsSql("sh->'tabular_measurement_basis'", "sh->>'sheet_key'") : "false";
+  const csvServiceRemainsSql = schema?.derived_measurements_ready ? serviceMeasurementRemainsSql("fp.profile->'tabular_measurement_basis'", "NULL::text") : "false";
   const planningRowsCompleteSql = schema?.planned_targets_ready ? `AND NOT (
     (SELECT count(*) FROM kai.source_planned_targets p WHERE p.organization_id=v.organization_id
       AND p.source_version_id=v.source_version_id AND p.worksheet_key=sh->>'sheet_key')
@@ -174,6 +207,8 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             dfc.current_source_version_id,
             COALESCE(ws.unmeasured_worksheet_count, 0)::int AS unmeasured_worksheet_count,
             COALESCE(ws.incomplete_planning_worksheet_count, 0)::int AS incomplete_planning_worksheet_count,
+            COALESCE(ws.service_worksheet_remaining_count, 0)::int AS service_worksheet_remaining_count,
+            COALESCE(csvs.csv_service_measurement_remaining, false) AS csv_service_measurement_remaining,
             ${DOCUMENT_EVIDENCE_SCHEMA_READY_SQL} AS document_evidence_supported,
             -- Every current version's text was already read by this
             -- extractor method and held no complete statement (its audit).
@@ -305,7 +340,8 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
        ) dfc ON true
        LEFT JOIN LATERAL (
          SELECT count(*) AS unmeasured_worksheet_count,
-                count(*) FILTER (WHERE ${planningRowsRemainSql}) AS incomplete_planning_worksheet_count
+                count(*) FILTER (WHERE ${planningRowsRemainSql}) AS incomplete_planning_worksheet_count,
+                count(*) FILTER (WHERE ${sheetServiceRemainsSql}) AS service_worksheet_remaining_count
            FROM kai.source_versions v
            JOIN kai.intake_source_candidates ic ON ic.organization_id = v.organization_id AND ic.intake_source_candidate_id = v.intake_source_candidate_id
            JOIN kai.intake_file_profiles fp ON fp.organization_id = ic.organization_id AND fp.file_profile_id = ic.file_profile_id
@@ -336,8 +372,17 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
               )
               OR ${pairedOutcomesRemainSql}
               OR ${planningRowsRemainSql}
+              OR ${sheetServiceRemainsSql}
             )
        ) ws ON true
+       LEFT JOIN LATERAL (
+         SELECT bool_or(${csvServiceRemainsSql}) AS csv_service_measurement_remaining
+           FROM kai.source_versions v
+           JOIN kai.intake_source_candidates ic ON ic.organization_id = v.organization_id AND ic.intake_source_candidate_id = v.intake_source_candidate_id
+           JOIN kai.intake_file_profiles fp ON fp.organization_id = ic.organization_id AND fp.file_profile_id = ic.file_profile_id
+          WHERE v.organization_id = files.organization_id AND v.source_version_id::text = dfc.current_source_version_id AND v.is_current = true
+            AND fp.profile->>'format' = 'csv'
+       ) csvs ON true
        LEFT JOIN LATERAL (
          SELECT count(*) AS evidence_count,
                 count(*) FILTER (WHERE ei.evidence_review_status = 'needs_gk_review') AS evidence_needs_review_count,

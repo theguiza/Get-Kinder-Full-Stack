@@ -2948,7 +2948,9 @@ async function runXlsxAcceptance() {
       await p.recordRaw("sheet_1", surveys.length - 1);
       const pipeline = await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`);
       const guidance = pipeline.body.data.files.find((entry) => entry.intakeFileId === p.fileId);
-      assert.deepEqual([guidance.currentStage, guidance.currentStatus, guidance.nextAction, guidance.reason], [null, "complete", "count_records", "worksheet_measurement_remaining"]);
+      // Referral_Followups lists a completed state: its service-delivery results
+      // (completed-status records) remain and lead the step after a raw count elsewhere.
+      assert.deepEqual([guidance.currentStage, guidance.currentStatus, guidance.nextAction, guidance.reason], [null, "complete", "count_records", "service_measurement_remaining"]);
       for (const key of ["sheet_2", "sheet_3"]) {
         await p.selectSheet(key);
         assert.equal((await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, p.sv, key))).body.data.recorded, null);
@@ -4868,6 +4870,346 @@ async function runXlsxAcceptance() {
       const unresolved=await adminApi('POST',decisionPath,{...input,expected_decision_id:confirmed.body.data.target.decision_id,relationship_status:'unresolved',actual_measurement_id:null,metric_confirmed:false,population_confirmed:false,date_basis_confirmed:false});
       assert.equal(unresolved.status,200,J(unresolved.body));
       assert.equal(unresolved.body.data.target.planned_value,'6.00','the usable plan survives the unavailable actual');
+    });
+
+    await test("X: a synthetic service workbook shows service-delivery measurements first; Save for reports persists validated encounters, programmes and households through evidence, claims, planned-target relationships, a saved report and its download", async () => {
+      // Service records: the original synthetic Willow Quay service log when the
+      // package is supplied, otherwise an equivalent generated log. The expected
+      // numbers come from the independent oracle below (plain arrays only).
+      const SERVICE_HEADER = ["event_id", "household_id", "service_date", "program_code", "activity_type", "delivery_status", "session_minutes", "record_type", "data_quality_note", "external_use_from_row"];
+      let serviceRows;
+      let serviceHeader = SERVICE_HEADER;
+      const willowCsvPath = process.env.KAI_WILLOW_QUAY_PACKAGE ? join(process.env.KAI_WILLOW_QUAY_PACKAGE, "01_UPLOAD_TO_KAI/03_Service_Encounters.csv") : null;
+      if (willowCsvPath && existsSync(willowCsvPath)) {
+        const lines = readFileSync(willowCsvPath, "utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
+        serviceHeader = lines[0].split(",");
+        serviceRows = lines.slice(1).map((line) => line.split(","));
+      } else {
+        serviceRows = [];
+        for (let i = 1; i <= 120; i += 1) {
+          const programme = i % 3 === 0 ? "FS" : "PA";
+          serviceRows.push([`E${String(i).padStart(4, "0")}`, `H${String((i % 37) + 1).padStart(3, "0")}`, `2025-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 27) + 1).padStart(2, "0")}`,
+            programme, programme === "PA" ? (i % 2 ? "Pantry pickup" : "Food access drop-in") : (i % 2 ? "Kitchen skills practice" : "Meal planning circle"),
+            i % 9 === 0 ? "cancelled" : i % 13 === 0 ? "no_show" : "completed", String(15 + (i % 4) * 15), "household_service_encounter", i % 5 === 0 ? "Checked later" : "", "not_authorized_by_row"]);
+        }
+        serviceRows.push([...serviceRows[3]], [...serviceRows[40]], [...serviceRows[77]]);
+      }
+      const col = (name) => serviceHeader.indexOf(name);
+      const v = (row, name) => String(row[col(name)] ?? "").trim();
+      const oracle = (rows, period) => {
+        const material = ["household_id", "service_date", "program_code", "activity_type", "delivery_status", "session_id", "delivery_mode", "recorded_by_role", "record_type", "external_use_from_row"].filter((name) => col(name) >= 0);
+        const groups = new Map();
+        for (const row of rows.filter((r) => r.some((c) => String(c).trim()))) { const id = v(row, "event_id"); if (!groups.has(id)) groups.set(id, []); groups.get(id).push(row); }
+        const events = [...groups.values()].filter((copies) => !material.some((name) => new Set(copies.map((r) => v(r, name))).size > 1)).map((copies) => copies[0]);
+        const done = events.filter((row) => v(row, "delivery_status") === "completed");
+        const inScope = period ? done.filter((row) => v(row, "service_date") >= period.start && v(row, "service_date") <= period.end) : done;
+        const by = (list, name) => list.reduce((m, r) => ({ ...m, [v(r, name)]: (m[v(r, name)] ?? 0) + 1 }), {});
+        return { physical: rows.length, distinct: groups.size, completed: done.length, inScope: inScope.length, byProgramme: by(inScope, "program_code"), byActivity: by(inScope, "activity_type"),
+          households: new Set(inScope.map((r) => v(r, "household_id"))).size, excess: rows.length - groups.size };
+      };
+      const FY = { start: "2025-04-01", end: "2026-03-31" };
+      const expected = oracle(serviceRows, FY);
+      const expectedAllDates = oracle(serviceRows, null);
+      const planningRows = [["indicator", "program", "target_value", "unit", "reporting_period", "target_status", "notes"],
+        ["distinct_households_served", "all", 90, "households", "2025-04-01 to 2026-03-31", "planned", "Count each household once."],
+        ["completed_household_service_encounters", "all", 250, "encounters", "2025-04-01 to 2026-03-31", "planned", ""],
+        ["pantry_bags_distributed", "PA", 300, "bags", "2025-04-01 to 2026-03-31", "planned", ""],
+        ["food_skills_household_attendances", "FS", 95, "encounters", "2025-04-01 to 2026-03-31", "planned", ""]];
+      const file = customerFile("synthetic_service_delivery_workbook.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Service_Encounters", rows: [serviceHeader, ...serviceRows] }, { name: "Delivery_Targets", rows: planningRows }] }));
+      const periodBefore = (await adminApi("GET", periodPath)).body.data;
+      const measurementRows = async (sv) => (await query(`SELECT m.source_derived_measurement_id::text AS id, m.measurement_family, m.calculation_method, m.basis_version, m.worksheet_key, m.measurement_key,
+          m.definition, m.field_keys, m.measured_value::int AS measured_value, m.component_counts, m.created_by::text AS created_by, e.evidence_item_id::text AS evidence_id, e.statement, c.claim_id::text AS claim_id
+        FROM kai.source_derived_measurements m JOIN kai.evidence_derived_measurements l USING (source_derived_measurement_id)
+        JOIN kai.evidence_items e ON e.evidence_item_id = l.evidence_item_id LEFT JOIN kai.claims c ON c.evidence_item_id = e.evidence_item_id
+        WHERE m.source_version_id = $1::uuid AND m.measurement_family = 'service_events' ORDER BY m.created_at, m.measurement_key`, [sv]));
+      try {
+        await setProjectPeriodByApi(FY.start, FY.end);
+        const fileId = await apiUpload(adminApi, file, ids.batchId);
+        await dispatcher.whenIdle();
+        const promoted = await decideAndPromote(adminApi, fileId);
+        const sv = promoted.source_version_id;
+        const guidanceOf = async () => {
+          const pipeline = await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`);
+          const entry = pipeline.body.data.files.find((item) => item.intakeFileId === fileId);
+          return [entry.currentStage, entry.currentStatus, entry.nextAction, entry.reason];
+        };
+        assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "service_measurement_remaining"], "available service findings lead the file's next step");
+        const servicePath = `${orgPath()}/source-versions/${sv}/service-event-measurements?worksheet_key=sheet_1`;
+        const basisRead = await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"));
+        assert.equal(basisRead.status, 200, J(basisRead.body));
+        const service = basisRead.body.data.service_events;
+        assert.equal(service.status, "available", J(service));
+        assert.deepEqual(Object.fromEntries(Object.entries(service.roles).map(([name, role]) => [name, role.status])), {
+          encounter_identifier: "established", status: "established", service_date: "established", programme: "established", activity: "established", entity_identifier: "established", eligibility: "unavailable",
+        }, "roles from screened headings, profile roles and listed values; none from position or value shape");
+        assert.equal(service.roles.encounter_identifier.counted_unit, "household service encounter");
+        assert.equal(service.roles.entity_identifier.entity_kind, "household");
+        const finding = (metric, { mode = "period", group = null } = {}) => service.findings.find((f) => f.metric === metric && f.mode === mode && ((group === null && !f.group) || f.group?.value_label === group));
+        const completed = finding("completed_service_encounters");
+        assert.deepEqual([completed.measured_value, completed.finding_basis, completed.name, completed.period], [expected.inScope, "service_encounters", "Completed household service encounters",
+          { period_source: "engagement_reporting_period", period_start: FY.start, period_end: FY.end, precision: "day" }]);
+        assert.equal(finding("completed_service_encounters", { mode: "all_dates" }).measured_value, expectedAllDates.inScope);
+        for (const [programme, count] of Object.entries(expected.byProgramme)) assert.equal(finding("group_completed_service_encounters", { group: programme }).measured_value, count, programme);
+        for (const [activity, count] of Object.entries(expected.byActivity)) assert.equal(finding("group_completed_service_encounters", { group: activity }).measured_value, count, activity);
+        assert.equal(finding("distinct_entities_served").measured_value, expected.households);
+        assert.equal(service.funnel.physical_record_count, expected.physical);
+        assert.equal(service.funnel.distinct_event_count, expected.distinct);
+        assert.ok(service.funnel.completed_status_record_count > completed.measured_value, "completed-status records are never presented as distinct completed encounters");
+        assert.match(service.source_value_notes.map((n) => n.text).join(" "), /not an application permission decision/);
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n, 0, "reading writes nothing");
+        assert.doesNotMatch(J(service), /WQE0|WQH0|"E0001"|"H001"|Checked later|"event_id"|"household_id"/, "no identifier, date value, note or heading leaves the worker");
+
+        // The customer opens the file's step: service-delivery measurements lead; raw counts are closed supporting detail.
+        await openStudioTab("Data Sources");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-file-measurement="${fileId}"]`)), "the file's View measurements step");
+        await adminPage.clickIn(`[data-client-open-file-measurement="${fileId}"]`, "View measurements (Files that need a step)");
+        const section = `[data-client-derived-measurements="${sv}"]`;
+        const deliver = `${section} [data-client-service-delivery="available"]`;
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${deliver} [data-client-service-value="completed"]`)) === expected.inScope.toLocaleString("en-US"), "completed encounters shown first");
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-scope]`), /Project period 2025-04-01 to 2026-03-31, by service date \(column C\)\. One service-record source; no participant register is linked\./);
+        for (const [programme, count] of Object.entries(expected.byProgramme)) {
+          assert.match(await textOf(adminPage, `${deliver} [data-client-service-programme="${programme}"]`), new RegExp(`^${programme} ${count}`));
+        }
+        assert.equal(await textOf(adminPage, `${deliver} [data-client-service-value="households"]`), String(expected.households));
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-all-dates]`), new RegExp(`${expectedAllDates.inScope} across all dates`));
+        assert.equal(await adminPage.evaluate(`(() => {
+          const first = document.querySelector(${J(deliver)});
+          const breakdown = document.querySelector(${J(`${section} [data-client-source-breakdown]`)});
+          return Boolean(first && breakdown && (first.compareDocumentPosition(breakdown) & Node.DOCUMENT_POSITION_FOLLOWING)) && breakdown.open === false;
+        })()`), true, "Record counts and source-value breakdown stay available, collapsed, after the service results");
+        assert.equal(await adminPage.evaluate(`document.querySelector(${J(`[data-client-source-measurement="${sv}"] [data-client-raw-count-description]`)}).open`), false);
+        assert.equal(await adminPage.evaluate(`Array.from(document.querySelectorAll(${J(`${section} input, ${section} select`)})).filter((el) => el.offsetParent !== null && !el.closest('details:not([open])')).length`), 0,
+          "no mapping, definition or setup form is required");
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "service-results");
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "service-results", 390);
+
+        // Optional column choices recalculate the read over HTTP and in the UI; nothing is written until a result is saved.
+        const rolesRead = async (roles) => adminApi("GET", `${derivedMeasurementBasisPath(ORG_X, sv, "sheet_1")}&service_roles=${encodeURIComponent(J(roles))}`);
+        const asPeople = await rolesRead({ entity_kind: "person" });
+        assert.equal(asPeople.status, 200, J(asPeople.body));
+        const people = asPeople.body.data.service_events.findings.find((f) => f.metric === "distinct_entities_served" && f.mode === "period");
+        assert.deepEqual([people.name, people.measured_value, asPeople.body.data.service_events.roles.entity_identifier.basis], ["Distinct people served", expected.households, "person_selected"]);
+        assert.notEqual(people.measurement_key, finding("distinct_entities_served").measurement_key, "a stated meaning is a different measurement identity");
+        assert.equal((await rolesRead({ status_field_key: "field_6", completed_value_key: "value_9" })).status, 422, "a value the column does not list is refused");
+        assert.equal((await rolesRead({ entity_kind: "robot" })).status, 422);
+        assert.equal((await adminApi("GET", `${derivedMeasurementBasisPath(ORG_X, sv, "sheet_1")}&service_roles=not-json`)).status, 422);
+        await adminPage.evaluate(`document.querySelector(${J(`${deliver} [data-client-service-roles]`)}).open = true`);
+        assert.ok(await setSelect(`${deliver} [data-client-service-role-select="entity_kind"]`, "person"));
+        await adminPage.clickIn(`${deliver} [data-client-service-apply-roles]`, "Recalculate with these columns");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${deliver} [data-client-service-card="households"]`))?.startsWith("Distinct people served"), "recalculated with the person's choice");
+        assert.ok(await textOf(adminPage, `${deliver} [data-client-service-roles-applied]`));
+        await adminPage.evaluate(`document.querySelector(${J(`${deliver} [data-client-service-roles]`)}).open = true`);
+        await adminPage.clickIn(`${deliver} [data-client-service-reset-roles]`, "Use KAI's reading");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${deliver} [data-client-service-card="households"]`))?.startsWith("Distinct households served"), "back to the source's own reading");
+        assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_derived_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n, 0, "choosing columns writes nothing");
+
+        // A raw row count does not complete substantive service work.
+        const raw = basisRead.body.data.tabular.ready_measurements.find((m) => m.key === "records");
+        const rawSaved = await adminApi("POST", tabularMeasurementPath(ORG_X, sv, "sheet_1"), { definition: raw.definition });
+        assert.ok([200, 201].includes(rawSaved.status), J(rawSaved.body));
+        assert.equal((await adminApi("POST", claimProposalPath(ORG_X, rawSaved.body.data.evidenceItem.evidence_item_id), {})).status, 200);
+        assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "service_measurement_remaining"], "saving a raw count does not complete the service findings");
+        // Saving one supporting result does not complete the required set either.
+        const monthly = finding("monthly_completed_service_encounters");
+        const single = await adminApi("POST", servicePath, { measurement_keys: [monthly.measurement_key] });
+        assert.equal(single.status, 200, J(single.body));
+        assert.deepEqual(await guidanceOf(), [null, "complete", "count_records", "service_measurement_remaining"], "one saved result does not complete unrelated findings");
+
+        // Unauthorized and cross-tenant writes and reads are refused; nothing is written.
+        const required = service.findings.filter((f) => f.required).map((f) => f.measurement_key);
+        const before = (await measurementRows(sv)).length;
+        for (const api of [contributorApi, reviewerApi, adminYApi]) {
+          assert.equal((await api("POST", servicePath, { measurement_keys: required })).status, 403);
+          assert.equal((await api("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 403);
+        }
+        assert.equal((await adminApi("POST", `${orgPath(ORG_Y)}/source-versions/${sv}/service-event-measurements?worksheet_key=sheet_1`, { measurement_keys: required })).status, 403, "another organization's path");
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: ["0".repeat(64)] })).body.error.code, "conflict_current_state_changed", "a key the source does not produce is refused, never guessed");
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: required, counts: { completed: 999 } })).status, 422, "the body carries no number");
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: required, roles: { status_field_key: "field_6", completed_value_key: "value_9" } })).status, 422);
+        assert.equal((await measurementRows(sv)).length, before);
+
+        // Save for reports in the UI; the first reply is lost after the commit and the retry reuses the same rows.
+        await adminPage.evaluate(`(() => { const original = window.fetch; window.fetch = async (input, init) => {
+          const response = await original(input, init);
+          if (String(input).includes('/service-event-measurements') && init?.method === 'POST') { window.fetch = original; throw new Error('synthetic lost reply after commit'); }
+          return response; }; })()`);
+        let mark = adminPage.mark();
+        await adminPage.clickIn(`${deliver} [data-client-save-service-measurements]`, "Save service measurements for reports");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("KAI could not confirm the write"), "lost reply reported, inputs kept");
+        const afterLost = await measurementRows(sv);
+        assert.equal(afterLost.length, before + required.length, "the committed write stands");
+        const firstPost = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/service-event-measurements"));
+        assert.deepEqual(JSON.parse(firstPost.postData), { measurement_keys: required }, "the save sends only the shown findings' keys");
+        await adminPage.waitFor(async () => adminPage.evaluate(`!document.querySelector(${J(`${deliver} [data-client-save-service-measurements]`)}).disabled`), "save available again");
+        mark = adminPage.mark();
+        await adminPage.clickIn(`${deliver} [data-client-save-service-measurements]`, "Save service measurements for reports (retry)");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${section} [data-client-derived-notice]`))?.includes("Ready to select in Evidence for your report"), "saved and added to reports");
+        const retry = adminPage.requestsSince(mark).find((r) => r.method === "POST" && r.url.includes("/service-event-measurements"));
+        assert.equal((await adminPage.responseBody(retry)).data.replayed, true, "the retry writes nothing new");
+        await adminPage.waitFor(async () => (await textOf(adminPage, `${deliver} [data-client-save-service-measurements]`)) === "Service measurements saved", "required service set saved");
+        const saved = await measurementRows(sv);
+        assert.equal(saved.length, afterLost.length, "no duplicate measurement or evidence after the retry");
+        const savedRequired = saved.filter((row) => required.includes(row.measurement_key));
+        assert.equal(savedRequired.length, required.length);
+        for (const row of savedRequired) {
+          assert.deepEqual([row.measurement_family, row.calculation_method, row.basis_version, row.worksheet_key, row.created_by], ["service_events", "kai_single_source_service_events_v1", "kai_service_event_records_v1", "sheet_1", ids.adminUserId]);
+          assert.ok(row.claim_id, "the one save action makes the finding available for reports");
+          assert.match(row.statement, /Single source; no register linked\.$/);
+          assert.equal(row.definition.finding_basis, "service_encounters");
+          assert.deepEqual(row.component_counts.required_measurement_keys, [...required].sort());
+        }
+        const savedHeadline = savedRequired.find((row) => row.definition.metric === "completed_service_encounters");
+        assert.equal(savedHeadline.measured_value, expected.inScope);
+        assert.match(savedHeadline.statement, new RegExp(`^Derived measurement: ${expected.inScope} completed household service encounters: column F = completed, service date \\(column C\\) in reporting period 2025-04-01 to 2026-03-31 by day, each column A identifier counted once;`));
+        assert.deepEqual(savedHeadline.definition.roles.encounter_identifier, { field_key: "field_1", basis: "source_heading", counted_unit: "household service encounter" });
+        const audits = (await query("SELECT count(*)::int AS n FROM kai.audit_events WHERE organization_id = $1::uuid AND metadata->>'operation' = 'record_source_derived_measurement' AND actor_user_id = $2::uuid", [ORG_X, ids.adminUserId]))[0].n;
+        assert.ok(audits > 0, "actor-attributed audit");
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: required })).body.data.replayed, true, "an API replay writes nothing");
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "service-saved");
+        await adminPage.capturePanel(`[data-client-source-measurement="${sv}"]`, "service-saved", 390);
+
+        // Planned targets: save the workbook's plans; compatible ones are proposed, an encounter is never a bag.
+        const plan = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_2"))).body.data.planning_targets;
+        assert.equal(plan.status, "candidates", J(plan));
+        const planSaved = await adminApi("POST", `${orgPath()}/source-versions/${sv}/planned-targets?worksheet_key=sheet_2`,
+          { row_numbers: [2, 3, 4, 5], profile_canonical_sha256: plan.source.profile_canonical_sha256, source_checksum: plan.source.source_checksum });
+        assert.equal(planSaved.status, 200, J(planSaved.body));
+        const targetsByRow = Object.fromEntries(planSaved.body.data.targets.map((t) => [t.target.row_number, t.target]));
+        // Every saved plan and the separately saved monthly finding are made available for reports.
+        for (const evidenceId of [...planSaved.body.data.targets.map((t) => t.evidenceItem.evidence_item_id), single.body.data.measurements[0].evidenceItem.evidence_item_id]) {
+          assert.equal((await adminApi("POST", claimProposalPath(ORG_X, evidenceId), {})).status, 200);
+        }
+        assert.deepEqual(await guidanceOf(), [null, "complete", "none", "complete"], "the required service set and the saved plans complete the workbook without a raw-count surrogate");
+        const withSuggestions = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).body.data.service_events.target_suggestions
+          .filter((s) => s.source_version_id === sv);
+        const suggestion = (row) => withSuggestions.find((s) => s.row_number === row);
+        assert.deepEqual([suggestion(2).status, suggestion(2).result.name, suggestion(2).result.value_text], ["confirmation_required", "Distinct households served", String(expected.households)]);
+        assert.deepEqual([suggestion(3).status, suggestion(3).result.name, suggestion(3).result.value_text], ["confirmation_required", "Completed household service encounters", String(expected.inScope)]);
+        assert.deepEqual([suggestion(5).status, suggestion(5).result.name], ["confirmation_required", "Completed household service encounters in FS"]);
+        for (const row of [2, 3, 5]) {
+          assert.deepEqual(suggestion(row).checks.map((c) => [c.key, c.result]), [["project", "pass"], ["currentness", "pass"], ["unit", "pass"], ["period", "pass"], ["comparison", "confirm"], ["scope", "pass"], ["population", "confirm"], ["meaning", "confirm"]], `row ${row}`);
+        }
+        assert.equal(suggestion(4).status, "not_comparable");
+        assert.match(suggestion(4).checks.find((c) => c.key === "unit").text, /while the plan states "bags"/);
+        await openCountRecords(sv);
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll(${J(`${deliver} [data-client-service-target-status="confirmation_required"]`)}).length`)) >= 3, "compatible planned targets shown with the results");
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-target-suggestions]`), /completed_household_service_encounters: plan 250 encounters \(all\), 2025-04-01 to 2026-03-31; sheet_2 row 3\./);
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-target-suggestions]`), /only your organization can confirm what it counts/);
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-targets-not-comparable]`), /pantry_bags_distributed .*bags/);
+        assert.match(await textOf(adminPage, `${deliver} [data-client-service-card="completed"]`), /cancelled, no_show, conflicting and out-of-period records excluded/, "the source's own status values are named");
+        await adminPage.capturePanel(`${deliver} [data-client-service-target-suggestions]`, "service-targets");
+        await adminPage.capturePanel(`${deliver} [data-client-service-target-suggestions]`, "service-targets", 390);
+        // The planning worksheet proposes the same saved results; the existing decision history decides.
+        const related = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_2"))).body.data.planning_targets.candidates.find((c) => c.row_number === 5).related_measurements;
+        assert.ok(related.some((r) => r.source_derived_measurement_id === savedRequired.find((m) => m.definition.group?.value_label === "FS" && m.definition.metric === "group_completed_service_encounters").id
+          && r.relationship.status === "confirmation_required"));
+        const decide = (target, actualId, extra = {}) => adminApi("POST", `${orgPath()}/planned-targets/${target.planned_target_id}/decisions`, {
+          expected_decision_id: target.decision_id, actual_measurement_id: actualId, relationship_status: "confirmed", comparison: null,
+          metric_confirmed: true, population_confirmed: true, date_basis_confirmed: true, ...extra });
+        const paActual = savedRequired.find((m) => m.definition.group?.value_label === "PA" && m.definition.metric === "group_completed_service_encounters");
+        assert.equal((await decide(targetsByRow[4], paActual.id)).status, 422, "an encounter count is refused as pantry bags distributed");
+        const allDatesActual = (await adminApi("POST", servicePath, { measurement_keys: [finding("completed_service_encounters", { mode: "all_dates" }).measurement_key] })).body.data.measurements[0].measurement.source_derived_measurement_id;
+        assert.equal((await decide(targetsByRow[3], allDatesActual)).status, 422, "an all-date actual is refused for the fiscal-year plan");
+        assert.equal((await decide(targetsByRow[3], savedHeadline.id, { metric_confirmed: false })).status, 422, "human confirmation is still required");
+        for (const api of [contributorApi, adminYApi]) assert.equal((await api("POST", `${orgPath()}/planned-targets/${targetsByRow[3].planned_target_id}/decisions`, {
+          expected_decision_id: targetsByRow[3].decision_id, actual_measurement_id: savedHeadline.id, relationship_status: "confirmed", comparison: null,
+          metric_confirmed: true, population_confirmed: true, date_basis_confirmed: true })).status, 403);
+        // Synthetic human confirmation test action (not an organizational decision made by KAI): direction stays unknown.
+        const confirmed = await decide(targetsByRow[3], savedHeadline.id);
+        assert.equal(confirmed.status, 200, J(confirmed.body));
+        assert.deepEqual([confirmed.body.data.target.actual_value, confirmed.body.data.target.comparison], [String(expected.inScope), null]);
+        assert.match(confirmed.body.data.target.statement, /Comparison direction unknown\. Attainment not calculated\./);
+        const targetClaim = await adminApi("POST", claimProposalPath(ORG_X, confirmed.body.data.evidenceItem.evidence_item_id), {});
+        assert.equal(targetClaim.status, 200, J(targetClaim.body));
+
+        // Generated report, saved retrieval and download keep the verified numbers, unit, date scope, exclusions, limitations and citation.
+        const reportClaims = [...savedRequired.map((row) => row.claim_id), targetClaim.body.data.claim.claim_id];
+        const report = await createMeasuredReportInUi(reportClaims);
+        for (const row of savedRequired) assert.ok(report.shown.includes(row.statement), `the saved report states ${row.definition.metric} exactly`);
+        for (const expectedText of [`${expected.inScope} completed household service encounters`, "service date (column C) in reporting period 2025-04-01 to 2026-03-31 by day",
+          `${expected.households} households (column B identifiers, each counted once)`, "Single source; no register linked.",
+          "Calculated from one service-record source only: no participant register was linked", "Records whose status is not the completed value",
+          "This counts service encounters, not people", "Repeated records of one event identifier were counted as one event.", "Comparison direction unknown. Attainment not calculated.", sv]) {
+          assert.ok(report.shown.includes(expectedText), `saved report keeps: ${expectedText}`);
+        }
+        for (const [programme, count] of Object.entries(expected.byProgramme)) assert.ok(report.shown.includes(`${count} completed household service encounters in programme (column D) ${programme}`));
+        assert.deepEqual([...new Set(report.citations.map((c) => c.claim_id))].sort(), [...reportClaims].sort());
+        mkdirSync("artifacts/kai-measurement-ui", { recursive: true });
+        writeFileSync(join("artifacts/kai-measurement-ui", "service-delivery-report.md"), report.shown);
+
+        // Processing restriction: an explicit not-allowed use stops reads, writes and the saved report; restoring it restores them.
+        const sensitivity = await sensitivityOf(fileId);
+        const sourceUse = async (snapshot) => {
+          const item = await queueOf("sensitivity_review", sensitivity.intake_sensitivity_profile_id);
+          const result = await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), { expected_updated_at: new Date(item.updated_at).toISOString(), review_queue_item_id: item.review_queue_item_id, decision: "reviewed", reviewed_snapshot: snapshot });
+          assert.equal(result.status, 200, J(result.body));
+        };
+        await sourceUse({ ...SNAPSHOT, reviewed_allowed_use_status: "not_allowed", reviewed_llm_processing_allowed: false });
+        assert.equal((await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 422);
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: required })).status, 422);
+        assert.ok([409, 422].includes((await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, report.draft.generated_content_draft_id))).status));
+        await sourceUse(SNAPSHOT);
+        assert.equal((await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, report.draft.generated_content_draft_id))).status, 200);
+
+        // Checksum failure: stored bytes that are not the profiled upload are never measured.
+        const [stored] = await query("SELECT storage_object_key FROM kai.intake_files WHERE intake_file_id = $1::uuid", [fileId]);
+        const object = objects.get(stored.storage_object_key);
+        const original = object.bytes;
+        object.bytes = Buffer.from(original).fill(0x20);
+        try {
+          const tampered = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).body.data.service_events;
+          assert.deepEqual([tampered.status, ["cross_source_checksum_mismatch", "cross_source_bytes_unavailable"].includes(tampered.reason)], ["not_assessable", true], J(tampered));
+          assert.equal((await adminApi("POST", servicePath, { measurement_keys: required })).status, 409);
+        } finally {
+          object.bytes = original;
+        }
+
+        // The original service CSV (when supplied) gives the same single-source numbers as its oracle.
+        if (willowCsvPath && existsSync(willowCsvPath)) {
+          const csvId = await uploadCsv("03_service_encounters.csv", readFileSync(willowCsvPath));
+          const csvVersion = (await decideAndPromote(adminApi, csvId)).source_version_id;
+          const csvService = (await adminApi("GET", derivedMeasurementBasisPath(ORG_X, csvVersion, null))).body.data.service_events;
+          const csvFinding = (metric, group = null) => csvService.findings.find((f) => f.metric === metric && f.mode === "period" && ((group === null && !f.group) || f.group?.value_label === group));
+          assert.deepEqual([csvFinding("completed_service_encounters").measured_value, csvFinding("group_completed_service_encounters", "PA").measured_value, csvFinding("group_completed_service_encounters", "FS").measured_value, csvFinding("distinct_entities_served").measured_value],
+            [276, 176, 100, 85]);
+          assert.deepEqual([csvService.funnel.physical_record_count, csvService.funnel.distinct_event_count, csvService.funnel.excess_copy_record_count, csvService.funnel.completed_status_record_count,
+            csvService.funnel.completed_event_count, csvService.funnel.not_completed_event_count, csvService.funnel.completed_outside_period_count], [301, 298, 3, 284, 281, 17, 5]);
+          const csvGuidance = async () => (await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`)).body.data.files.find((item) => item.intakeFileId === csvId);
+          assert.deepEqual([(await csvGuidance()).nextAction, (await csvGuidance()).reason], ["count_records", "service_measurement_remaining"]);
+          const csvSave = await adminApi("POST", `${orgPath()}/source-versions/${csvVersion}/service-event-measurements`, { measurement_keys: csvService.required_measurement_keys });
+          assert.equal(csvSave.status, 200, J(csvSave.body));
+          for (const entry of csvSave.body.data.measurements) assert.equal((await adminApi("POST", claimProposalPath(ORG_X, entry.evidenceItem.evidence_item_id), {})).status, 200);
+          assert.deepEqual([(await csvGuidance()).nextAction, (await csvGuidance()).reason], ["none", "complete"]);
+          results.serviceDeliveryCsv = { sv: csvVersion, completed: 276, programmes: { PA: 176, FS: 100 }, households: 85, funnel: [301, 298, 3, 284, 281, 17, 5] };
+        }
+
+        // Superseded version: the earlier version's service read and save are refused; its saved report follows the existing current-source rule.
+        // A corrected workbook (one record fewer) promoted as the successor of the measured version.
+        const successorFile = customerFile("synthetic_service_delivery_workbook_corrected.xlsx", syntheticXlsxWorkbook({ sheets: [{ name: "Service_Encounters", rows: [serviceHeader, ...serviceRows.slice(0, -1)] }, { name: "Delivery_Targets", rows: planningRows }] }));
+        const successorId = await apiUpload(adminApi, successorFile, ids.batchId);
+        await dispatcher.whenIdle();
+        const successorSensitivity = await sensitivityOf(successorId);
+        assert.equal((await adminApi("POST", sensitivityDecisionPath(ORG_X, successorSensitivity.intake_sensitivity_profile_id), {
+          expected_updated_at: new Date(successorSensitivity.updated_at).toISOString(), review_queue_item_id: successorSensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: SNAPSHOT })).status, 200);
+        const successorCandidate = await candidateOf(successorSensitivity.intake_sensitivity_profile_id);
+        const successor = await adminApi("POST", sourceCandidateDecisionPath(ORG_X, successorCandidate.intake_source_candidate_id), { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: sv });
+        assert.equal(successor.status, 200, J(successor.body));
+        assert.equal((await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 409);
+        assert.equal((await adminApi("POST", servicePath, { measurement_keys: required })).status, 409);
+        assert.equal((await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, report.draft.generated_content_draft_id))).status, 409, "the existing current-source rule for saved reports is unchanged");
+        assert.equal((await measurementRows(sv)).length, saved.length + 1, "earlier measurements and evidence are kept, not rewritten");
+        writeFileSync(join("artifacts/kai-measurement-ui", "service-delivery-persistence.json"), JSON.stringify({
+          sourceVersionId: sv, fileId, expected, expectedAllDates: expectedAllDates.inScope,
+          saved: savedRequired.map((row) => ({ id: row.id, metric: row.definition.metric, group: row.definition.group?.value_label ?? null, value: row.measured_value, evidence: row.evidence_id, claim: row.claim_id, statement: row.statement })),
+          confirmedTarget: { plannedTargetId: targetsByRow[3].planned_target_id, decisionId: confirmed.body.data.target.decision_id, actual: confirmed.body.data.target.actual_value, claimId: targetClaim.body.data.claim.claim_id },
+          suggestions: withSuggestions.map((s) => ({ row: s.row_number, indicator: s.indicator, status: s.status, result: s.result?.name })),
+          report: { draftId: report.draft.generated_content_draft_id, download: report.downloadProof },
+        }, null, 2));
+        results.serviceDelivery = { sv, fileId, completed: expected.inScope, programmes: expected.byProgramme, households: expected.households, allDates: expectedAllDates.inScope,
+          reportDraft: report.draft.generated_content_draft_id, download: report.downloadProof, suggestions: withSuggestions.map((s) => [s.row_number, s.status]) };
+      } finally {
+        if (periodBefore.start && periodBefore.end) await setProjectPeriodByApi(periodBefore.start, periodBefore.end);
+      }
     });
 
     await test("summary", async () => {

@@ -30,7 +30,11 @@ import {
   tabularMeasurementPath,
   measurementTargetPath,
   measurementTargetUnit,
+  serviceEventMeasurementsPath,
+  serviceFindingName,
+  serviceRoleSelectionsFrom,
 } from "./clientDerivedMeasurementLogic.js";
+import ClientServiceDeliveryMeasurements from "./ClientServiceDeliveryMeasurements.jsx";
 import MeaningQuestionsForm from "./MeaningQuestionsForm.jsx";
 import ClientPlanningTargetCandidates from "./ClientPlanningTargetCandidates.jsx";
 import { keepMeasurementDraft, measurementDraftKey, readMeasurementDraft } from "./measurementDraftStore.js";
@@ -77,6 +81,10 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const [clarifying, setClarifying] = useState(kept?.clarifying ?? null);
   const [clarifyForm, setClarifyForm] = useState(kept?.clarifyForm ?? EMPTY_INTERPRETATION_FORM);
   const [customOpen, setCustomOpen] = useState(kept?.customOpen ?? false);
+  // A person's unsaved service-column choices: the draft being edited and the
+  // selection the current read was calculated with (both kept per worksheet).
+  const [serviceRoleDraft, setServiceRoleDraft] = useState(kept?.serviceRoleDraft ?? {});
+  const [serviceRoles, setServiceRoles] = useState(kept?.serviceRoles ?? null);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
   const [showAllReady, setShowAllReady] = useState(false);
@@ -88,7 +96,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     const seq = ++seqRef.current;
     setBasis((current) => ({ ...current, status: current.data ? "refreshing" : "loading", error: "" }));
     try {
-      const result = await getJson(derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey || null));
+      const result = await getJson(derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey || null, serviceRoles));
       if (seqRef.current !== seq) return false;
       if (result.statusCode === 200 && result.body?.ok) {
         setBasis({ status: "success", data: result.body.data, error: "" });
@@ -99,7 +107,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       if (seqRef.current === seq) setBasis((current) => ({ ...current, status: "error", error: "The measurement basis could not be loaded. Your selections and meaning draft are kept. Retry the read." }));
     }
     return false;
-  }, [organizationId, sourceVersionId, worksheetKey]);
+  }, [organizationId, sourceVersionId, worksheetKey, serviceRoles]);
   useEffect(() => {
     const draft = readMeasurementDraft(draftKey);
     setForm(draft?.form ?? EMPTY_TABULAR_FORM);
@@ -109,6 +117,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
     setClarifyForm(draft?.clarifyForm ?? EMPTY_INTERPRETATION_FORM);
     setTargetDrafts(draft?.targetDrafts ?? {});
     setCustomOpen(draft?.customOpen ?? false);
+    setServiceRoleDraft(draft?.serviceRoleDraft ?? {});
     setNotice(null);
     setShowAllReady(false);
     setCalculationJob(null);
@@ -203,6 +212,15 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const resultSaved = (key) => data?.recorded?.some((saved) => saved.measurement_key === key && (saved.worksheet_key || "") === shownWorksheetKey
     && (!canProposeClaim || currentEvidenceOf(saved)?.claim));
   const planningCandidates = data?.planning_targets?.status === "candidates";
+  const service = data?.service_events ?? null;
+  const serviceAvailable = service?.status === "available";
+  // A service finding is saved once its measurement is recorded (and, where
+  // the actor proposes claims, its finding is ready for reports).
+  const serviceFindingSaved = (finding) => Boolean(finding?.saved) && (data?.recorded || []).some((saved) => saved.source_derived_measurement_id === finding.saved.source_derived_measurement_id
+    && (!canProposeClaim || currentEvidenceOf(saved)?.claim));
+  const saveServiceFindings = (keys) => send("service", serviceEventMeasurementsPath(organizationId, sourceVersionId, worksheetKey || null),
+    { measurement_keys: keys, ...(serviceRoles ? { roles: serviceRoles } : {}) },
+    (recorded) => `${recorded.measurements.length} service ${recorded.measurements.length === 1 ? "measurement" : "measurements"} saved.`, { forReports: true });
   const pairedSaved = data?.paired?.measurements?.some((item) => item.available)
     && data.paired.measurements.filter((item) => item.available).every((item) => resultSaved(item.measurement_key));
   const fields = data?.tabular?.available ? data.tabular.fields : [];
@@ -232,9 +250,10 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
   const [targetDrafts, setTargetDrafts] = useState(kept?.targetDrafts ?? {});
   useEffect(() => {
     const empty = JSON.stringify(form) === JSON.stringify(EMPTY_TABULAR_FORM) && JSON.stringify(meaning) === JSON.stringify(EMPTY_INTERPRETATION_FORM)
-      && pairingChoice === "" && clarifying === null && Object.keys(targetDrafts).length === 0;
-    keepMeasurementDraft(draftKey, empty ? null : { form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen });
-  }, [draftKey, form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen]);
+      && pairingChoice === "" && clarifying === null && Object.keys(targetDrafts).length === 0
+      && Object.keys(serviceRoleDraft).length === 0 && serviceRoles === null;
+    keepMeasurementDraft(draftKey, empty ? null : { form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen, serviceRoleDraft, serviceRoles });
+  }, [draftKey, form, meaning, pairingChoice, clarifying, clarifyForm, targetDrafts, customOpen, serviceRoleDraft, serviceRoles]);
   const setTargetDraft = (recorded, change) => setTargetDrafts((drafts) => ({
     ...drafts,
     [recorded.source_derived_measurement_id]: {
@@ -276,7 +295,8 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       <h6 className="mb-1">Calculated results</h6>
       <div className="text-muted mb-1">{planningCandidates
         ? "This worksheet states planned targets, shown below. Counting its rows is optional."
-        : "Choose a result to save. Descriptions and targets are optional."}</div>
+        : serviceAvailable ? "Service-delivery results come first; record counts and other breakdowns are optional supporting detail below."
+          : "Choose a result to save. Descriptions and targets are optional."}</div>
       {["loading", "refreshing"].includes(basis.status) ? <div className="text-muted" data-client-derived-loading="">Loading...</div> : null}
       {basis.status === "error" ? <div className="alert alert-warning py-2" data-client-derived-error="">{basis.error} <button type="button" className="btn btn-sm btn-outline-primary" data-client-derived-retry="" onClick={load}>Retry measurement read</button></div> : null}
       {basis.status !== "loading" ? <button type="button" className="btn btn-sm btn-link" data-client-derived-refresh="" disabled={basis.status === "refreshing" || Boolean(pending)} onClick={load}>Refresh measurements</button> : null}
@@ -284,6 +304,12 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       {calculationJob ? <div className="text-muted" data-client-derived-calculation-job={calculationJob.job_state}>
         Exact-period calculation: {calculationJob.job_state.replace(/_/g, " ")}.
       </div> : null}
+
+      <ClientServiceDeliveryMeasurements service={service} pending={Boolean(pending) || basis.status !== "success"} canProposeClaim={canProposeClaim}
+        isSaved={serviceFindingSaved} onSave={saveServiceFindings} roleDraft={serviceRoleDraft} setRoleDraft={setServiceRoleDraft}
+        rolesApplied={Boolean(serviceRoles)}
+        onApplyRoles={() => { setServiceRoles(serviceRoleSelectionsFrom(serviceRoleDraft)); setNotice(null); }}
+        onResetRoles={() => { setServiceRoleDraft({}); setServiceRoles(null); setNotice(null); }} />
 
       <ClientPlanningTargetCandidates planning={data?.planning_targets} organizationId={organizationId} pending={Boolean(pending)}
         onSave={(rows) => send("plans", `/api/kai/sprint2/intake/admin/organizations/${organizationId}/source-versions/${sourceVersionId}/planned-targets?worksheet_key=${worksheetKey}`, {
@@ -319,7 +345,7 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
       ) : null}
 
       {data?.tabular?.ready_measurements?.length ? <div className="mb-3" data-client-ready-measurements="">
-        <details open={data?.paired?.available || planningCandidates ? undefined : true} data-client-source-breakdown=""><summary>{planningCandidates ? "Row count of this worksheet (optional)" : "Record counts and source-value breakdown"}</summary>
+        <details open={data?.paired?.available || planningCandidates || serviceAvailable ? undefined : true} data-client-source-breakdown=""><summary>{planningCandidates ? "Row count of this worksheet (optional)" : "Record counts and source-value breakdown"}</summary>
         <div className="text-muted">All dates · Rows include duplicates · Identifier counts count keys, not people.</div>
         <div className="kai-measurement-results">
           {data.tabular.ready_measurements.slice(0, showAllReady ? undefined : 16).map((item) => <div className="kai-measurement-result" key={item.key} data-client-ready-measurement={item.key}>
@@ -483,7 +509,9 @@ export default function ClientDerivedMeasurementSection({ organizationId, source
           <div key={recorded.source_derived_measurement_id} className="kai-measurement-saved border rounded p-2 mb-1" data-client-derived-recorded={recorded.source_derived_measurement_id}
             data-client-derived-current={stillCurrent ? "current" : "not_current"}>
             <div className="fw-semibold">
-              {current?.interpretation?.indicator_label || sourceHeadingSuggestionOf(recorded.source_heading_suggestion) || categoryLabel || measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {linked ? crossSourceHeadlineValue(recorded) : recorded.percentage != null ? `${recorded.numerator} of ${recorded.denominator} (${recorded.percentage}%)` : recorded.measured_value}
+              {current?.interpretation?.indicator_label || sourceHeadingSuggestionOf(recorded.source_heading_suggestion)
+                || (recorded.measurement_family === "service_events" && !recorded.category_labels_withheld ? `${serviceFindingName(recorded.definition)}${recorded.definition?.period ? ` (${recorded.definition.period.period_start} to ${recorded.definition.period.period_end})` : " (all dates)"}` : null)
+                || categoryLabel || measurementFamilyLabel(recorded.measurement_family)}{linked ? ` - ${crossSourceMetricLabel(recorded.definition)}` : ""}: {linked ? crossSourceHeadlineValue(recorded) : recorded.percentage != null ? `${recorded.numerator} of ${recorded.denominator} (${recorded.percentage}%)` : recorded.measured_value}
             </div>
             {linked ? <CrossSourceActivityDetail entry={recorded} /> : null}
             {linked ? (

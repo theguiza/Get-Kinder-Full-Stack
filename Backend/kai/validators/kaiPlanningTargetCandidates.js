@@ -1,5 +1,6 @@
 import { screenedSourceLabel } from "../profiling/tabularMeasurementBasis.js";
-import { DERIVED_MEASUREMENT_FAMILIES, measurementTargetUnitOf } from "./kaiDerivedMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_FAMILIES, SERVICE_EVENT_METRICS, measurementTargetUnitOf } from "./kaiDerivedMeasurementValidators.js";
+import { serviceFindingName } from "./kaiServiceEventMeasurements.js";
 
 /**
  * Planned targets stated in a worksheet (for example a "Delivery_Targets"
@@ -264,6 +265,10 @@ const CROSS_SOURCE_METRIC_NAMES = Object.freeze({
 
 /** A recorded measurement's name as the organization or the source states it, and what one counted unit is. */
 export function recordedMeasurementName(row) {
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) {
+    const name = row.indicator_label || serviceFindingName(row.definition || {});
+    return { name, counted: serviceCountedText(row) };
+  }
   const category = (row.definition?.conditions || []).find((condition) => condition.kind === "category")?.value_label ?? null;
   const name = row.indicator_label
     || row.source_heading_label
@@ -278,12 +283,42 @@ export function recordedMeasurementName(row) {
   return { name, counted };
 }
 
+// What one counted unit of a single-source service measurement is, and its unit word.
+const SERVICE_UNIT_SPELLINGS = Object.freeze({
+  encounters: ["encounters", "encounter", "attendances", "attendance", "visits", "visit", "appointments", "appointment"],
+  sessions: ["sessions", "session"],
+  households: ["households", "household"],
+  people: ["people", "persons", "person", "participants", "individuals"],
+  families: ["families", "family"],
+});
+function serviceMeasuredUnit(row) {
+  const d = row.definition || {};
+  if ([SERVICE_EVENT_METRICS.DISTINCT_ENTITIES, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(d.metric)) {
+    const kind = d.finding_basis === "service_encounters" ? d.roles?.entity_identifier?.entity_kind : null;
+    return kind === "household" ? "households" : kind === "person" ? "people" : kind === "family" ? "families" : null;
+  }
+  if (d.counted_unit?.kind !== "encounter" || d.finding_basis !== "service_encounters") return null;
+  return /session/.test(d.counted_unit.label || "") ? "sessions" : "encounters";
+}
+function serviceCountedText(row) {
+  const d = row.definition || {};
+  const unit = serviceMeasuredUnit(row);
+  if (unit === "encounters" || unit === "sessions") return `completed ${d.counted_unit.label}s (single source)`;
+  if (unit) return `${unit} with at least one completed encounter (single source)`;
+  return d.counted_unit?.kind === "record" ? "source records with the completed status value" : "distinct source identifier values (meaning not established)";
+}
+
 /**
  * The exact period a recorded measurement covers (with the date column a
  * worksheet calculation applies it to), "all_dates", or "outside" (records
  * dated outside a period).
  */
 export function recordedMeasurementPeriod(row) {
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) {
+    const period = row.definition?.period;
+    return period?.period_start && period?.period_end
+      ? { start: period.period_start, end: period.period_end, field_key: row.definition.roles?.service_date?.field_key ?? null } : "all_dates";
+  }
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) {
     const period = row.definition?.period;
     return period?.period_start && period?.period_end ? { start: period.period_start, end: period.period_end, field_key: null } : "all_dates";
@@ -321,7 +356,15 @@ export function assessPlanningTargetRelationship({ candidate, measurement, plann
         : ['eligible_linked_encounters','group_linked_encounters','monthly_eligible_encounters'].includes(measurement.definition?.metric) ? 'encounters' : null
     : null;
   const unitSpellings = { minutes:['minutes','minute','mins'],people:['people','persons','person','participants'],encounters:['encounters','encounter','attendances'] };
-  if (knownCrossUnit && candidate.unit && !unitSpellings[knownCrossUnit].includes(candidate.unit.toLowerCase())) add('unit','fail',`This actual measures ${knownCrossUnit}, while the plan states ${unitWord}.`);
+  const service = measurement.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS;
+  const serviceUnit = service ? serviceMeasuredUnit(measurement) : null;
+  if (service && candidate.unit && candidate.unit_kind !== "percent" && serviceUnit && !SERVICE_UNIT_SPELLINGS[serviceUnit].includes(candidate.unit.toLowerCase())) {
+    add("unit", "fail", `This actual counts ${serviceUnit} (${counted}), while the plan states ${unitWord}.`);
+  } else if (service && candidate.unit && candidate.unit_kind !== "percent" && !serviceUnit) {
+    add("unit", "fail", `This result counts ${counted}; it does not establish ${unitWord}.`);
+  } else if (service && serviceUnit && candidate.unit && candidate.unit_kind !== "percent") {
+    add("unit", "pass", `Both count ${serviceUnit}.`);
+  } else if (knownCrossUnit && candidate.unit && !unitSpellings[knownCrossUnit].includes(candidate.unit.toLowerCase())) add('unit','fail',`This actual measures ${knownCrossUnit}, while the plan states ${unitWord}.`);
   else if (!candidate.unit_kind) add("unit", "confirm", "The worksheet does not state the unit, so whether the planned value is a count or a percentage is not established.");
   else if (candidate.unit_kind === measuredUnit) add("unit", "pass", measuredUnit === "count" ? "Both are whole counts." : "Both are percentages.");
   else add("unit", "fail", candidate.unit_kind === "count"
@@ -340,7 +383,19 @@ export function assessPlanningTargetRelationship({ candidate, measurement, plann
   if (candidate.comparator) add("comparison", "pass", `The worksheet states the result should be ${candidate.comparator === "at_least" ? "at least" : "at most"} the planned value.`);
   else add("comparison", "confirm", "Whether the result should be at least or at most the planned value is not stated.");
   const actualGroup = measurement.definition?.group?.value_label;
-  if (actualGroup && candidate.scope && (candidate.scope_applies_to_all || candidate.scope.toLowerCase() !== actualGroup.toLowerCase())) add('scope','fail',`The actual applies to "${actualGroup}" only; the plan applies to "${candidate.scope}".`);
+  if (service) {
+    const group = measurement.definition?.group ?? null;
+    const scoped = candidate.scope && !candidate.scope_applies_to_all;
+    if (scoped && !group) add("scope", "fail", `This result covers every programme; the plan applies to "${candidate.scope}" only.`);
+    else if (scoped && (group.role !== "programme" || group.value_label.toLowerCase() !== candidate.scope.toLowerCase())) add("scope", "fail", `The actual applies to ${group.role} "${group.value_label}" only; the plan applies to "${candidate.scope}".`);
+    else if (scoped) add("scope", "pass", `Both apply to programme "${group.value_label}" only.`);
+    else if (group) add("scope", "fail", `The actual applies to ${group.role} "${group.value_label}" only; the plan applies to ${candidate.scope ? `"${candidate.scope}"` : "everything"}.`);
+    else if (!candidate.scope && candidate.limitations.some((item) => item.code === "scope_withheld")) add("scope", "confirm", "The target's programme or scope is withheld; confirm the result measures the same part of the work.");
+    else add("scope", "pass", "Both cover every programme in the source.");
+    add("population", "confirm", [SERVICE_EVENT_METRICS.DISTINCT_ENTITIES, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(measurement.definition?.metric)
+      ? "The result counts identifiers with at least one completed, consistently recorded encounter in one source; register membership is not checked. Confirm this is the population the plan counts."
+      : "The result counts completed, consistently recorded encounters in one source (cancelled, conflicting and out-of-period records excluded; register membership not checked). Confirm this is what the plan counts.");
+  } else if (actualGroup && candidate.scope && (candidate.scope_applies_to_all || candidate.scope.toLowerCase() !== actualGroup.toLowerCase())) add('scope','fail',`The actual applies to "${actualGroup}" only; the plan applies to "${candidate.scope}".`);
   else if (candidate.scope && !candidate.scope_applies_to_all) add("scope", "confirm", `The target applies to "${candidate.scope}" only; confirm the result measures the same part of the work.`);
   else if (!candidate.scope && candidate.limitations.some((item) => item.code === "scope_withheld")) add("scope", "confirm", "The target's programme or scope is withheld; confirm the result measures the same part of the work.");
   add("meaning", "confirm", `KAI cannot establish that ${candidate.indicator ? `"${candidate.indicator}"` : "this indicator"} counts the same thing as "${name}" (${counted}). Only your organization can confirm this.`);
@@ -364,22 +419,83 @@ export function relatedRecordedMeasurements({ candidate, measurements, planningE
       const { name } = recordedMeasurementName(measurement);
       const shared = [...termsOf(name)].filter((term) => indicatorTerms.has(term));
       const sameLabel = measurement.indicator_label && normalized(measurement.indicator_label) === normalized(candidate.indicator);
-      return { measurement, name, shared, sameLabel };
+      return { measurement, name, shared, sameLabel, sameUnitAndScope: serviceUnitAndScopeMatch(candidate, measurement) };
     })
-    .filter((entry) => entry.measurement.engagement_id === planningEngagementId && (entry.sameLabel || entry.shared.length >= 2 || entry.measurement.source_derived_measurement_id === includeMeasurementId))
+    .filter((entry) => entry.measurement.engagement_id === planningEngagementId && (entry.sameLabel || entry.shared.length >= 2 || entry.sameUnitAndScope || entry.measurement.source_derived_measurement_id === includeMeasurementId))
     .sort((a, b) => Number(b.measurement.source_derived_measurement_id === includeMeasurementId) - Number(a.measurement.source_derived_measurement_id === includeMeasurementId) || Number(b.sameLabel) - Number(a.sameLabel) || b.shared.length - a.shared.length)
     .slice(0, limit)
-    .map(({ measurement, name, shared, sameLabel }) => ({
+    .map(({ measurement, name, shared, sameLabel, sameUnitAndScope }) => ({
       source_derived_measurement_id: measurement.source_derived_measurement_id,
       source_version_id: measurement.source_version_id,
       worksheet_key: measurement.worksheet_key ?? null,
       measurement_family: measurement.measurement_family,
       name,
       value_text: recordedValueText(measurement),
-      proposed_because: sameLabel ? "same_indicator_label" : "shared_name_words",
+      proposed_because: sameLabel ? "same_indicator_label" : shared.length >= 2 ? "shared_name_words" : sameUnitAndScope ? "same_unit_and_scope" : "shared_name_words",
       shared_words: shared,
       relationship: assessPlanningTargetRelationship({ candidate, measurement, planningEngagementId, measurementEngagementId: measurement.engagement_id }),
     }));
+}
+
+// A single-source service result whose counted unit and programme scope are
+// the plan's: proposed (for the organization's confirmation) even when the
+// indicator's words differ. The other checks still decide comparability.
+function serviceUnitAndScopeMatch(candidate, measurement) {
+  if (measurement.measurement_family !== DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS || measurement.definition?.metric === SERVICE_EVENT_METRICS.MONTHLY) return false;
+  const unit = serviceMeasuredUnit(measurement);
+  if (!unit || !candidate.unit || !SERVICE_UNIT_SPELLINGS[unit].includes(candidate.unit.toLowerCase())) return false;
+  const group = measurement.definition?.group ?? null;
+  const scoped = candidate.scope && !candidate.scope_applies_to_all;
+  return scoped ? group?.role === "programme" && group.value_label.toLowerCase() === candidate.scope.toLowerCase() : !group;
+}
+
+/**
+ * Saved planned targets of this Project beside this table's service-delivery
+ * results: for each plan, the result in the same programme scope with the
+ * fewest differing checks, and every check. Compatible means no check
+ * differs; the meaning, population and (unless the source states it)
+ * comparison still need the organization's confirmation through the existing
+ * decision history. Nothing is accepted or written here.
+ */
+export function serviceTargetSuggestions({ plans, measurements, engagementId }) {
+  const suggestions = [];
+  for (const plan of plans) {
+    if (plan.engagement_id !== engagementId) continue;
+    const candidate = {
+      indicator: plan.indicator, planned_value: plan.planned_value, unit: plan.unit, unit_kind: plan.unit_kind,
+      period: { start: plan.period_start, end: plan.period_end }, scope: plan.scope,
+      scope_applies_to_all: /^(all|overall|total|all programs|all programmes|organization|organisation)$/i.test(plan.scope || ""),
+      comparator: plan.source_comparison, limitations: [],
+    };
+    const scoped = candidate.scope && !candidate.scope_applies_to_all;
+    const inScope = measurements.filter((m) => m.definition?.metric !== SERVICE_EVENT_METRICS.MONTHLY
+      && (scoped ? m.definition?.group?.role === "programme" && m.definition.group.value_label.toLowerCase() === candidate.scope.toLowerCase() : !m.definition?.group));
+    const assessed = inScope.map((m) => ({ m, relationship: assessPlanningTargetRelationship({ candidate, measurement: m, planningEngagementId: engagementId, measurementEngagementId: m.engagement_id }) }))
+      .sort((a, b) => a.relationship.checks.filter((c) => c.result === "fail").length - b.relationship.checks.filter((c) => c.result === "fail").length);
+    const best = assessed[0];
+    suggestions.push({
+      planned_target_id: plan.planned_target_id,
+      source_version_id: plan.source_version_id,
+      worksheet_key: plan.worksheet_key,
+      row_number: plan.row_number,
+      indicator: plan.indicator,
+      planned_value: String(plan.planned_value).replace(/\.00$/, ""),
+      unit: plan.unit,
+      scope: plan.scope,
+      period: { start: plan.period_start, end: plan.period_end },
+      relationship_status: plan.relationship_status,
+      actual_measurement_id: plan.actual_measurement_id ?? null,
+      result: best ? {
+        measurement_key: best.m.measurement_key,
+        source_derived_measurement_id: best.m.source_derived_measurement_id ?? null,
+        name: recordedMeasurementName(best.m).name,
+        value_text: String(best.m.measured_value),
+      } : null,
+      status: best ? best.relationship.status : "no_result_in_scope",
+      checks: best ? best.relationship.checks : [],
+    });
+  }
+  return suggestions;
 }
 
 export const PLANNING_TARGET_PERSISTENCE = Object.freeze({

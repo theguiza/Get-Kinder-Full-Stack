@@ -20,6 +20,15 @@ export async function readSavedPlanningTargets(tx, { organizationId, sourceVersi
       AND NOT EXISTS (SELECT 1 FROM kai.planned_target_decisions n WHERE n.supersedes_decision_id = d.decision_id)
     ORDER BY p.row_number`, [organizationId, sourceVersionId, worksheetKey])).rows;
 }
+// The current plans of one Project whose own source version is still current
+// (a replaced plan is never suggested), for service-result suggestions.
+export async function readProjectSavedPlanningTargets(tx, { organizationId, engagementId }) {
+  return (await tx.query(`SELECT ${PLAN_SELECT} FROM ${PLAN_FROM}
+    JOIN kai.source_versions pv ON pv.source_version_id = p.source_version_id AND pv.organization_id = p.organization_id AND pv.is_current = true
+    WHERE p.organization_id = $1 AND p.engagement_id = $2
+      AND NOT EXISTS (SELECT 1 FROM kai.planned_target_decisions n WHERE n.supersedes_decision_id = d.decision_id)
+    ORDER BY p.created_at, p.row_number LIMIT 200`, [organizationId, engagementId])).rows;
+}
 export async function readPlannedTargetEvidence(tx, { organizationId, evidenceItemId }) {
   return (await tx.query(`SELECT ${PLAN_SELECT} FROM ${PLAN_FROM} WHERE p.organization_id = $1 AND l.evidence_item_id = $2`, [organizationId, evidenceItemId])).rows[0] || null;
 }

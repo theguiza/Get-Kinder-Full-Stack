@@ -71,6 +71,8 @@ test("exactly four views, Sources first with Impact the default", () => {
 test("classification uses only recorded discriminators: outcome and reach need their recorded family; prose is never an outcome", () => {
   assert.equal(findingCategory("source_derived_measurement", "paired_outcome_change"), "outcomes");
   assert.equal(findingCategory("source_derived_measurement", "cross_source_reach"), "reach");
+  assert.equal(findingCategory("source_derived_measurement", "service_events"), "reach", "single-source service delivery is reach and service delivery");
+  assert.equal(findingTypeLabel("source_derived_measurement", "service_events"), "Service-delivery measurement");
   assert.equal(findingCategory("source_derived_measurement", "tabular_count"), "measurements");
   assert.equal(findingCategory("source_derived_measurement", null), "measurements", "an unknown family stays neutral");
   // A record count is a count of records under its own definition, never relabelled as reach or impact.

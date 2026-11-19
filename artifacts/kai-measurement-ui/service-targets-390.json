@@ -1,0 +1,189 @@
+{
+  "viewport": 390,
+  "document_width": 375,
+  "document_client_width": 375,
+  "ancestors": [
+    {
+      "tag": "DIV",
+      "class": "kai-service-targets mt-2",
+      "x": 48,
+      "width": 264,
+      "client": 264,
+      "scroll": 264
+    },
+    {
+      "tag": "SECTION",
+      "class": "kai-service-delivery mb-3",
+      "x": 37,
+      "width": 286,
+      "client": 284,
+      "scroll": 284
+    },
+    {
+      "tag": "DIV",
+      "class": "border-top pt-2 mt-2 small",
+      "x": 37,
+      "width": 286,
+      "client": 286,
+      "scroll": 286
+    },
+    {
+      "tag": "DIV",
+      "class": "kai-measurement border rounded p-2 mt-2",
+      "x": 24,
+      "width": 312,
+      "client": 310,
+      "scroll": 310
+    },
+    {
+      "tag": "DIV",
+      "class": "w-100",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "d-flex flex-wrap align-items-center gap-2 mt-1 small",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "LI",
+      "class": "list-group-item",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "UL",
+      "class": "list-group kai-measurement-source-list",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "admin-card mb-3",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    }
+  ],
+  "overflowing_elements": [
+    {
+      "tag": "ASIDE",
+      "class": "gk-shell-sidebar",
+      "right": 387,
+      "width": 387
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-group",
+      "right": 381,
+      "width": 375
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-item",
+      "right": 381,
+      "width": 62.453125
+    },
+    {
+      "tag": "SPAN",
+      "class": "gk-shell-nav-label",
+      "right": 377,
+      "width": 54.453125
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 385.90625,
+      "width": 321.90625
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-secondary",
+      "right": 389.515625,
+      "width": 325.515625
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 387.71875,
+      "width": 323.71875
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 397.515625,
+      "width": 333.515625
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-dark",
+      "right": 425.078125,
+      "width": 361.078125
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-secondary",
+      "right": 409.953125,
+      "width": 345.953125
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 382.375,
+      "width": 318.375
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 380.609375,
+      "width": 316.609375
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 382.40625,
+      "width": 318.40625
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 385.90625,
+      "width": 321.90625
+    },
+    {
+      "tag": "SPAN",
+      "class": "fw-semibold small",
+      "right": 377.984375,
+      "width": 313.984375
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 403.765625,
+      "width": 339.765625
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 393.09375,
+      "width": 329.09375
+    },
+    {
+      "tag": "SPAN",
+      "class": "badge text-bg-success",
+      "right": 387.765625,
+      "width": 323.765625
+    }
+  ]
+}

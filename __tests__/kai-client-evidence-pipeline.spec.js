@@ -1044,3 +1044,27 @@ test("a usable claim does not hide other unmeasured worksheets or create a prepa
   assert.equal(current.reason, "worksheet_measurement_remaining");
   assert.match(JSON.stringify(projectClientEvidencePipeline(result.data, ENGAGEMENT)), /worksheet_measurement_remaining/);
 });
+
+test("service-delivery findings come before Count records and claim proposals; a raw count or partial save does not complete them", async () => {
+  // A CSV service log whose required service set is not saved: a raw-count claim does not complete the file.
+  const csvRows = [row(1, { ...reviewed, current_profile_format: "csv", current_source_version_id: fileId(9),
+    claim_count: 1, claim_ids: [claimId(1)], csv_service_measurement_remaining: true, evidence_unclaimed_proposable_count: 1 })];
+  const csv = await read(csvRows, { actor: boundAdminActor(), facts: [fact(1)] });
+  assert.equal(csv.result.ok, true, JSON.stringify(csv.result));
+  const csvCurrent = currentOf(csv.result, 1);
+  assert.deepEqual([csvCurrent.stage, csvCurrent.status, csvCurrent.next, csvCurrent.reason], [null, "complete", "count_records", "service_measurement_remaining"],
+    "unsaved service findings outrank a claim proposal and a raw count; preparation stays complete");
+  const projected = projectClientEvidencePipeline(csv.result.data, ENGAGEMENT);
+  assert.match(JSON.stringify(projected), /service_measurement_remaining/);
+  // A workbook's service worksheet remains while another worksheet is measured.
+  const xlsx = await read([row(2, { ...reviewed, current_profile_format: "xlsx", current_source_version_id: fileId(8),
+    claim_count: 2, claim_ids: [claimId(1)], unmeasured_worksheet_count: 1, service_worksheet_remaining_count: 1 })], { actor: boundAdminActor(), facts: [fact(1)] });
+  assert.deepEqual([currentOf(xlsx.result, 2).next, currentOf(xlsx.result, 2).reason], ["count_records", "service_measurement_remaining"]);
+  // Once the required service set is saved, completed service work never routes back to raw-count administration.
+  const done = await read([row(3, { ...reviewed, current_profile_format: "csv", current_source_version_id: fileId(7),
+    claim_count: 4, claim_ids: [claimId(1)], csv_service_measurement_remaining: false })], { actor: boundAdminActor(), facts: [fact(1)] });
+  assert.deepEqual([currentOf(done.result, 3).next, currentOf(done.result, 3).reason], ["none", "complete"]);
+  // Another reader is pointed to the organization administrator, not to a Get Kinder wait.
+  const reader = await read(csvRows, { actor: memberActor("client_contributor"), facts: [fact(1)] });
+  assert.notEqual(currentOf(reader.result, 1).reason, "waiting_for_get_kinder_review");
+});

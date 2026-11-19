@@ -11,8 +11,9 @@
  * - a source-derived measurement whose recorded family is
  *   paired_outcome_change -> outcomes and observed change;
  * - a source-derived measurement whose recorded family is cross_source_reach
- *   -> reach and service delivery (its statement carries its own recorded
- *   definition of who or what was counted);
+ *   or service_events (one service-record source) -> reach and service
+ *   delivery (its statement carries its own recorded definition of who or
+ *   what was counted);
  * - every other measurement (record counts, tabular counts and rates, a
  *   derived measurement whose family is not known) -> other measurements;
  * - document statements and any other evidence type -> other findings;
@@ -60,6 +61,7 @@ export const EVIDENCE_TYPES = Object.freeze({
 export const MEASUREMENT_FAMILIES = Object.freeze({
   pairedOutcome: "paired_outcome_change",
   crossSourceReach: "cross_source_reach",
+  serviceEvents: "service_events",
 });
 
 // Display order: outcomes before activity, findings after measurements,
@@ -85,7 +87,7 @@ export function findingCategory(evidenceType, measurementFamily, measurementEvid
   if (evidenceType === EVIDENCE_TYPES.derived) {
     if (measurementEvidenceCurrent === false) return "technical";
     if (measurementFamily === MEASUREMENT_FAMILIES.pairedOutcome) return "outcomes";
-    if (measurementFamily === MEASUREMENT_FAMILIES.crossSourceReach) return "reach";
+    if (measurementFamily === MEASUREMENT_FAMILIES.crossSourceReach || measurementFamily === MEASUREMENT_FAMILIES.serviceEvents) return "reach";
     return "measurements";
   }
   if (evidenceType === EVIDENCE_TYPES.recordCount) return "measurements";
@@ -103,6 +105,7 @@ export function findingTypeLabel(evidenceType, measurementFamily, measurementEvi
   if (evidenceType === EVIDENCE_TYPES.derived) {
     if (measurementFamily === MEASUREMENT_FAMILIES.pairedOutcome) return "Baseline and follow-up measurement";
     if (measurementFamily === MEASUREMENT_FAMILIES.crossSourceReach) return "Linked reach measurement";
+    if (measurementFamily === MEASUREMENT_FAMILIES.serviceEvents) return "Service-delivery measurement";
     return "Measurement";
   }
   return "Evidence";

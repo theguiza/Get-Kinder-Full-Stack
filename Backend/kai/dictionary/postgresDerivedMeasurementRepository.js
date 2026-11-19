@@ -11,6 +11,9 @@ import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { committedOutcomeHeadingSuggestion } from "../profiling/outcomeHeadingSuggestion.js";
 import { profileWithCurrentPairedBasis } from "./pairedOutcomeBasisRecovery.js";
 import { readPlanningTargetCandidates } from "./planningTargetCandidateRead.js";
+import { readProjectSavedPlanningTargets } from "./plannedTargetRead.js";
+import { readServiceEventMeasurements } from "./serviceEventMeasurementRead.js";
+import { serviceTargetSuggestions } from "../validators/kaiPlanningTargetCandidates.js";
 import { __evidenceLineageRepositorySharedWrites } from "./postgresEvidenceLineageRepository.js";
 import { __sourceMeasurementRepositoryShared } from "./postgresSourceMeasurementRepository.js";
 import {
@@ -557,7 +560,7 @@ export function createPostgresDerivedMeasurementRepository({
     // Read-only: what can be measured on one version (and worksheet), and
     // every measurement recorded for the version with its current
     // interpretation, current evidence, claim and limitations.
-    async readDerivedMeasurementBasis({ organizationId, sourceVersionId, worksheetKey = null }) {
+    async readDerivedMeasurementBasis({ organizationId, sourceVersionId, worksheetKey = null, serviceRoles = null }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       return withCaught(run, async (tx) => {
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_READ_OPERATION });
@@ -623,6 +626,27 @@ export function createPostgresDerivedMeasurementRepository({
           recorded.set(row.source_derived_measurement_id, entry);
         }
         const periodContext = await readReportingPeriod(tx, { organizationId, sourceVersionId });
+        // Single-source service-delivery measurements of this table, from the
+        // verified upload, before any raw count or source-value breakdown.
+        const service = await readServiceEventMeasurements(tx, {
+          organizationId, fileProfileRow, profile, worksheetKey, periodContext, selections: serviceRoles, worker: crossSourceReconciliationWorker, recordedRows: rows,
+        });
+        if (service.refused) return failure(service.refused.code, service.refused.blockers);
+        if (service.section?.status === "available") {
+          const plans = periodContext.engagement_id ? await readProjectSavedPlanningTargets(tx, { organizationId, engagementId: periodContext.engagement_id }) : [];
+          service.section.target_suggestions = serviceTargetSuggestions({
+            plans,
+            engagementId: periodContext.engagement_id ?? null,
+            measurements: service.measurements.map((measurement) => {
+              const finding = service.section.findings.find((item) => item.measurement_key === measurement.measurementKey);
+              return {
+                measurement_family: measurement.family, definition: measurement.definition, measured_value: measurement.measuredValue,
+                measurement_key: measurement.measurementKey, source_derived_measurement_id: finding?.saved?.source_derived_measurement_id ?? null,
+                engagement_id: periodContext.engagement_id ?? null, is_current: true, contributing_sources_current: true,
+              };
+            }),
+          });
+        }
         // The organization's planned targets for these measurements on this Project, compared with each recorded actual.
         const targets = periodContext.engagement_id
           ? await readCurrentTargets(tx, { organizationId, engagementId: periodContext.engagement_id, sourceId: sourceRow.source_id })
@@ -681,7 +705,43 @@ export function createPostgresDerivedMeasurementRepository({
             : [],
           recorded: [...recorded.values()],
           planning_targets: planningTargets,
+          service_events: service.section,
         });
+      });
+    },
+
+    // Single-source service-delivery measurements: the findings a person chose
+    // from the service section, recalculated in this transaction from the
+    // verified upload under the same role selections and Project period, and
+    // recorded with their evidence, review queue item and one actor audit.
+    // Anything that changed since the read (source, period, roles) is refused.
+    async recordServiceEventMeasurements({ organizationId, sourceVersionId, worksheetKey = null, measurementKeys, selections = null, actorUserId, now }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      return withCaught(run, async (tx) => {
+        const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+        if (!measurable.ok) return measurable.failure;
+        const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
+        const periodContext = await readReportingPeriod(tx, { organizationId, sourceVersionId });
+        const service = await readServiceEventMeasurements(tx, {
+          organizationId, fileProfileRow, profile: fileProfileRow.profile, worksheetKey, periodContext, selections, worker: crossSourceReconciliationWorker,
+        });
+        if (service.refused) return failure(service.refused.code, service.refused.blockers);
+        if (!service.section) {
+          return refusal("validation_blocker", "service_events_not_available", "This table has no service status with a completed value, so service-delivery measurements are not available.", "Save a calculated count or rate instead.", "service_event_roles");
+        }
+        if (service.section.status !== "available") {
+          const [message, fix] = WORKER_REFUSALS[service.section.reason] ?? [service.section.message, "Upload the file again as a new intake version."];
+          return refusal("conflict_current_state_changed", service.section.reason, message, fix, "service_event_roles");
+        }
+        const chosen = measurementKeys.map((key) => service.measurements.find((measurement) => measurement.measurementKey === key) ?? null);
+        if (chosen.some((measurement) => !measurement)) {
+          return refusal("conflict_current_state_changed", "service_measurement_changed", "The source, its Project period or the column roles changed since these results were shown.", "Refresh the measurements and save again.", "service_event_roles");
+        }
+        const recorded = await recordMeasurements(tx, {
+          organizationId, sourceVersionId, measurements: chosen, sourceRow, profileCanonicalSha256: fileProfileRow.profile_canonical_sha256, interpretation: null, actorUserId, now,
+        });
+        if (recorded.refused) return recorded.refused;
+        return success({ sourceVersion: rowToSourceVersionRecord(sourceVersionRow), measurements: recorded.results, replayed: recorded.replayed });
       });
     },
 

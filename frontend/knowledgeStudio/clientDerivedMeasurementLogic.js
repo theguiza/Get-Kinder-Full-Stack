@@ -16,8 +16,89 @@ function sourceVersionPath(organizationId, sourceVersionId, leaf, worksheetKey) 
   return worksheetKey ? `${path}?worksheet_key=${encodeURIComponent(worksheetKey)}` : path;
 }
 
-export function derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey = null) {
-  return sourceVersionPath(organizationId, sourceVersionId, "derived-measurements", worksheetKey);
+export function derivedMeasurementBasisPath(organizationId, sourceVersionId, worksheetKey = null, serviceRoles = null) {
+  const path = sourceVersionPath(organizationId, sourceVersionId, "derived-measurements", worksheetKey);
+  // A person's unsaved service-column choices recalculate the read only.
+  if (!serviceRoles || Object.keys(serviceRoles).length === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}service_roles=${encodeURIComponent(JSON.stringify(serviceRoles))}`;
+}
+
+export function serviceEventMeasurementsPath(organizationId, sourceVersionId, worksheetKey = null) {
+  return sourceVersionPath(organizationId, sourceVersionId, "service-event-measurements", worksheetKey);
+}
+
+const SERVICE_ROLE_LABELS = Object.freeze({
+  encounter_identifier: "Encounter identifier",
+  status: "Service status and completed value",
+  service_date: "Service date",
+  programme: "Programme",
+  activity: "Activity",
+  entity_identifier: "Household or participant identifier",
+  eligibility: "Eligibility or exclusion column",
+});
+export const SERVICE_ROLE_ORDER = Object.freeze(Object.keys(SERVICE_ROLE_LABELS));
+export function serviceRoleLabel(role) {
+  return SERVICE_ROLE_LABELS[role] || role;
+}
+const SERVICE_ROLE_STATUS_LABELS = Object.freeze({
+  established: "Established",
+  proposed: "Proposed - please confirm",
+  ambiguous: "Ambiguous - choose one",
+  unavailable: "Not found",
+});
+export function serviceRoleStatusLabel(status) {
+  return SERVICE_ROLE_STATUS_LABELS[status] || status;
+}
+
+/** The customer name of a recorded or calculated service finding (mirrors the server's). */
+export function serviceFindingName(definition) {
+  const d = definition || {};
+  const unit = d.counted_unit?.label || "record";
+  const plural = /s$/.test(unit) ? unit : `${unit}s`;
+  const encounters = d.counted_unit?.kind === "record" ? "Completed-status records" : d.finding_basis === "service_encounters" ? `Completed ${plural}` : `Completed-status ${plural}`;
+  const kind = d.roles?.entity_identifier?.entity_kind;
+  const entities = d.finding_basis === "service_encounters" && kind
+    ? `Distinct ${kind === "person" ? "people" : kind === "family" ? "families" : "households"} served` : "Distinct identifier values served";
+  const scope = d.group ? ` in ${d.group.value_label}` : "";
+  if (["distinct_entities_served", "group_distinct_entities_served"].includes(d.metric)) return `${entities}${scope}`;
+  if (d.metric === "monthly_completed_service_encounters") return `${encounters} by month`;
+  return `${encounters}${scope}`;
+}
+
+/** The role selections a person's draft would send (only roles they changed). */
+export function serviceRoleSelectionsFrom(draft) {
+  const out = {};
+  for (const [key, value] of Object.entries(draft || {})) {
+    if (value === undefined || value === "") continue;
+    out[key] = value === "none" ? null : value;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+export function serviceScopeText(service) {
+  if (!service) return "";
+  const date = service.roles?.service_date;
+  if (service.period_applied && service.period) {
+    return `Project period ${service.period.start} to ${service.period.end}, by service date${date?.column ? ` (column ${date.column})` : ""}.`;
+  }
+  return "All dates in the source: no Project period is applied.";
+}
+
+export function serviceFunnelLines(funnel, { periodApplied, encounterColumn = null } = {}) {
+  if (!funnel) return [];
+  const lines = [
+    `${funnel.physical_record_count} nonblank records in the source.`,
+    encounterColumn
+      ? `${funnel.distinct_event_count} distinct encounter identifiers (column ${encounterColumn}); ${funnel.blank_event_identifier_record_count} records without one were excluded.`
+      : "No encounter identifier column is established, so each record is counted on its own.",
+    `${funnel.excess_copy_record_count} repeated copies of ${funnel.duplicate_group_count} identifiers; copies that agree were counted once${funnel.consistent_copy_group_with_other_differences_count ? ` (${funnel.consistent_copy_group_with_other_differences_count} differ only in other columns)` : ""}.`,
+    `${funnel.conflicting_event_identity_count} identifiers whose copies disagree (${funnel.conflicting_record_count} records) were excluded, not resolved by choosing a copy.`,
+    `${funnel.completed_status_record_count} records carry the completed status; ${funnel.completed_event_count} distinct completed encounters; ${funnel.not_completed_event_count} not completed (for example cancelled or no-show) were excluded.`,
+  ];
+  if (funnel.eligibility_excluded_event_count) lines.push(`${funnel.eligibility_excluded_event_count} completed encounters excluded by the eligibility column your organization confirmed.`);
+  if (periodApplied) lines.push(`${funnel.completed_outside_period_count} completed encounters outside the Project period and ${funnel.completed_without_date_count} without a valid service date were excluded.`);
+  lines.push(`${funnel.eligible_encounter_count} completed encounters are counted.`);
+  return lines;
 }
 
 export function pairedOutcomeMeasurementsPath(organizationId, sourceVersionId, worksheetKey = null) {
@@ -277,6 +358,7 @@ const FAMILY_LABELS = Object.freeze({
   tabular_count: "Count",
   tabular_rate: "Rate",
   cross_source_reach: "Linked reach (service events and participant register)",
+  service_events: "Service delivery (one service-record source)",
 });
 
 export function measurementFamilyLabel(family) {

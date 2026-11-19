@@ -1,0 +1,103 @@
+{
+  "sourceVersionId": "ebab500e-c6b2-4418-a142-f7398389638c",
+  "fileId": "991ebbde-78e3-4c6d-a6e7-e9829a5cde3e",
+  "expected": {
+    "physical": 301,
+    "distinct": 298,
+    "completed": 281,
+    "inScope": 276,
+    "byProgramme": {
+      "PA": 176,
+      "FS": 100
+    },
+    "byActivity": {
+      "Pre-packed collection": 61,
+      "Meal planning circle": 40,
+      "Food access drop-in": 53,
+      "Budget cooking workshop": 30,
+      "Kitchen skills practice": 30,
+      "Pantry pickup": 62
+    },
+    "households": 85,
+    "excess": 3
+  },
+  "expectedAllDates": 281,
+  "saved": [
+    {
+      "id": "71a1f10b-b1de-4d4e-89af-cfd0575520f0",
+      "metric": "completed_service_encounters",
+      "group": null,
+      "value": 276,
+      "evidence": "080e43f0-788b-4291-9d0f-60fc453ee73e",
+      "claim": "9e7b3206-9dd6-4192-8c45-cabe95de58a7",
+      "statement": "Derived measurement: 276 completed household service encounters: column F = completed, service date (column C) in reporting period 2025-04-01 to 2026-03-31 by day, each column A identifier counted once; 3 duplicate copies counted once; excluded 0 conflicting, 17 not completed, 5 outside period, 0 without date. Single source; no register linked."
+    },
+    {
+      "id": "383d7409-a799-411e-a7cb-a47d6773f2ed",
+      "metric": "group_completed_service_encounters",
+      "group": "FS",
+      "value": 100,
+      "evidence": "a5a0a1ea-e1ea-4efc-97ef-36fc3c54d4b4",
+      "claim": "33336efc-e4f5-485f-aab4-48c3b70597bf",
+      "statement": "Derived measurement: 100 completed household service encounters in programme (column D) FS: column F = completed, service date (column C) in reporting period 2025-04-01 to 2026-03-31 by day, each column A identifier counted once; across the whole table, 3 duplicate copies counted once; excluded 0 conflicting, 17 not completed, 5 outside period, 0 without date. Single source; no register linked."
+    },
+    {
+      "id": "94517ec3-690a-4fca-a287-de36b5275180",
+      "metric": "distinct_entities_served",
+      "group": null,
+      "value": 85,
+      "evidence": "9baa7bb4-c525-45ba-88d2-40da6632efb7",
+      "claim": "84b278d8-9a4b-46e3-b1ad-67358c96db20",
+      "statement": "Derived measurement: 85 households (column B identifiers, each counted once) with at least one of 276 completed household service encounters: column F = completed, service date (column C) in reporting period 2025-04-01 to 2026-03-31 by day, each column A identifier counted once; 0 without an identifier; 26 in more than one programme counted once. Single source; no register linked."
+    },
+    {
+      "id": "ababec04-1064-4d38-a57f-cfdb35af3045",
+      "metric": "group_completed_service_encounters",
+      "group": "PA",
+      "value": 176,
+      "evidence": "ba413edc-49ad-4a41-95f2-e34fa2d35524",
+      "claim": "603f145b-3868-4191-9108-3776aec5964a",
+      "statement": "Derived measurement: 176 completed household service encounters in programme (column D) PA: column F = completed, service date (column C) in reporting period 2025-04-01 to 2026-03-31 by day, each column A identifier counted once; across the whole table, 3 duplicate copies counted once; excluded 0 conflicting, 17 not completed, 5 outside period, 0 without date. Single source; no register linked."
+    }
+  ],
+  "confirmedTarget": {
+    "plannedTargetId": "e5d4f254-2b82-402a-a064-7fbaf358c7c0",
+    "decisionId": "928ff11c-f88e-4a57-bb6c-dc567af39907",
+    "actual": "276",
+    "claimId": "afd628b6-f6eb-4d93-ae1e-d28ea405e177"
+  },
+  "suggestions": [
+    {
+      "row": 2,
+      "indicator": "distinct_households_served",
+      "status": "confirmation_required",
+      "result": "Distinct households served"
+    },
+    {
+      "row": 3,
+      "indicator": "completed_household_service_encounters",
+      "status": "confirmation_required",
+      "result": "Completed household service encounters"
+    },
+    {
+      "row": 4,
+      "indicator": "pantry_bags_distributed",
+      "status": "not_comparable",
+      "result": "Completed household service encounters in PA"
+    },
+    {
+      "row": 5,
+      "indicator": "food_skills_household_attendances",
+      "status": "confirmation_required",
+      "result": "Completed household service encounters in FS"
+    }
+  ],
+  "report": {
+    "draftId": "742aaa02-744e-44a6-a78a-3062c9e11685",
+    "download": {
+      "status": 200,
+      "disposition": "attachment; filename=\"kai-internal-evidence-summary.md\"",
+      "body_sha256": "7796bff108d02d9b5548e44dad27b028164455132146ab7cadbb93bedf9d5ab1"
+    }
+  }
+}

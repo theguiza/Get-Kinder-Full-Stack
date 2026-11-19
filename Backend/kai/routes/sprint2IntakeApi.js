@@ -2992,9 +2992,38 @@ router.get(
     const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
     if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
     const actorContext = sprint2MappedActorContext(req);
+    // Optional unsaved service-column choices, as one bounded JSON query value.
+    let serviceRoles;
+    if (req.query.service_roles !== undefined) {
+      if (typeof req.query.service_roles !== "string" || req.query.service_roles.length > 2000) return sendKaiError(res, "validation_blocker");
+      try {
+        serviceRoles = JSON.parse(req.query.service_roles);
+      } catch {
+        return sendKaiError(res, "validation_blocker");
+      }
+    }
     return invokeService(res, async () => {
       const service = await getSourceMeasurementService();
-      return service.getDerivedMeasurementBasis({ ...identifiers, worksheetKey: worksheetKeyQuery(req), actorContext });
+      return service.getDerivedMeasurementBasis({ ...identifiers, worksheetKey: worksheetKeyQuery(req), ...(serviceRoles !== undefined ? { serviceRoles } : {}), actorContext });
+    });
+  },
+);
+
+// Single-source service-delivery measurements chosen from the service
+// section of the read (measurement keys), recalculated and recorded by the
+// service from the verified upload; the body carries no count or label.
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/service-event-measurements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordServiceEventMeasurements({ ...identifiers, worksheetKey: worksheetKeyQuery(req), selection: requestPayload(req), actorContext, now });
     });
   },
 );

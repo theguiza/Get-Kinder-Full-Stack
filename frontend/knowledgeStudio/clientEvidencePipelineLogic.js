@@ -81,6 +81,7 @@ export const PIPELINE_REASONS = Object.freeze([
   "claim_proposal_ready",
   "source_measurement_ready",
   "worksheet_measurement_remaining",
+  "service_measurement_remaining",
   "not_currently_eligible",
   "source_not_promoted",
   "unknown",
@@ -278,7 +279,9 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "continue_source_preparation":
       return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Sources > Files that need a step to create it; the review is not changed.";
     case "count_records":
-      return "View measurements in Sources > Data Sources and save a calculated result for reports. Descriptions and targets are optional.";
+      return file.reason === "service_measurement_remaining"
+        ? "View measurements in Sources > Data Sources and save the service-delivery results for reports (completed encounters, programmes and households served). A raw row count does not complete this."
+        : "View measurements in Sources > Data Sources and save a calculated result for reports. Descriptions and targets are optional.";
     case "propose_claims":
       return "Your action is needed: evidence from this file has no proposed claims yet. Use for impact in Sources > Files that need a step proposes them "
         + "(structural column facts are skipped). Evidence-quality reviews are optional for ordinary internal reporting.";
@@ -335,6 +338,7 @@ const REASON_MESSAGES = Object.freeze({
   document_evidence_not_enabled: (n) => `The source from ${pluralFiles(n)} has been promoted. Evidence from document text is not yet available in this KAI installation, so no evidence can be created from ${n === 1 ? "it" : "them"} yet.`,
   no_supportable_statements: (n) => `The source from ${pluralFiles(n)} has been promoted. KAI read ${n === 1 ? "its" : "their"} text and found no complete statement it could cite as evidence, so no evidence was created.`,
   worksheet_measurement_remaining: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} worksheets still available to measure. Open View measurements in Sources > Data Sources and select a worksheet. Existing findings remain usable for reports; measuring every worksheet is optional.`,
+  service_measurement_remaining: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} service-delivery results ready to save: completed service encounters, the programme breakdown and households served. Open View measurements in Sources > Data Sources and choose Save service measurements for reports. A raw row count does not replace them.`,
   source_measurement_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} promoted, with nothing counted from ${n === 1 ? "it" : "them"} yet. Open View measurements on ${n === 1 ? "its source" : "their sources"} (Sources > Data Sources) to save a calculated result for reports.`,
   claim_proposal_ready: (n) => `Evidence has been created from ${pluralFiles(n)}. Propose claims from it in Sources > Files that need a step (Use for impact); evidence-quality reviews are optional for ordinary internal reporting.`,
   not_currently_eligible: (n) => `No currently usable Impact Fact is available from ${pluralFiles(n)}. See the affected findings for their specific limitations.`,

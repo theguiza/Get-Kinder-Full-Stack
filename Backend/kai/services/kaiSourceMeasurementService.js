@@ -12,6 +12,7 @@ import {
   validateCrossSourceReachMapping,
   validateTabularMeasurementDefinition,
 } from "../validators/kaiDerivedMeasurementValidators.js";
+import { validateServiceRoleSelections } from "../validators/kaiServiceEventMeasurements.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 
 // The P2-01 evidence-extraction authority (organization membership only):
@@ -230,14 +231,49 @@ function admitDerivedInput(input, keys, required, dependencies) {
 
 /** Read-only: what can be measured on a version and what is recorded for it. */
 export async function getDerivedMeasurementBasis(input, dependencies = {}) {
-  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "actorContext"], ["organizationId", "sourceVersionId", "actorContext"], dependencies);
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "serviceRoles", "actorContext"], ["organizationId", "sourceVersionId", "actorContext"], dependencies);
   if (denied) return denied;
   if (!isNonEmptyString(input.sourceVersionId)) return buildKaiError("validation_blocker");
+  // A person's unsaved service-column choices recalculate the read; nothing is kept.
+  const roles = validateServiceRoleSelections(input.serviceRoles ?? null);
+  if (!roles.ok) return buildKaiError(roles.code, { blockers: roles.blockers });
   const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
   return repositoryResult(await repository.readDerivedMeasurementBasis({
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
     worksheetKey: input.worksheetKey ?? null,
+    ...(roles.selections ? { serviceRoles: roles.selections } : {}),
+  }));
+}
+
+/**
+ * Single-source service-delivery measurements: save the findings a person
+ * chose from a service-record table's results (by measurement key), under
+ * the same optional column-role selections the read used. The server
+ * recalculates each from the verified upload in the write transaction and
+ * refuses anything that changed. Saving records evidence a claim can be
+ * proposed from; it approves nothing.
+ */
+export async function recordServiceEventMeasurements(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "selection", "actorContext", "now"], ["organizationId", "sourceVersionId", "selection", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  const selection = input.selection;
+  if (!UUID_RE.test(input.sourceVersionId ?? "") || (input.worksheetKey != null && !/^sheet_[1-9][0-9]{0,3}$/.test(input.worksheetKey))
+    || !isPlainObject(selection) || !Object.keys(selection).every((key) => ["measurement_keys", "roles"].includes(key))
+    || !Array.isArray(selection.measurement_keys) || selection.measurement_keys.length < 1 || selection.measurement_keys.length > 60
+    || selection.measurement_keys.some((key) => typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key))
+    || new Set(selection.measurement_keys).size !== selection.measurement_keys.length) return buildKaiError("validation_blocker");
+  const roles = validateServiceRoleSelections(selection.roles ?? null);
+  if (!roles.ok) return buildKaiError(roles.code, { blockers: roles.blockers });
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.recordServiceEventMeasurements({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
+    measurementKeys: selection.measurement_keys,
+    selections: roles.selections,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
   }));
 }
 

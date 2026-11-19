@@ -462,6 +462,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-01M record-count measurement surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",
+    // Single-source service-delivery measurements chosen by measurement key
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/service-event-measurements",
     // Measurement MVP: content-aware tabular counts and rates (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/tabular-measurements",

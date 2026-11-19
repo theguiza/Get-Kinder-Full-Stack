@@ -39,12 +39,14 @@ function position(fieldKey) {
   return Number(String(fieldKey).slice("field_".length));
 }
 
-function cell(record, fieldKey) {
+// Shared with the single-source service-event reconciliation
+// (serviceEventReconciliation.js), so both read records identically.
+export function cell(record, fieldKey) {
   const value = record.values[position(fieldKey) - 1];
   return typeof value === "string" ? value.trim() : "";
 }
 
-function isoDay(value) {
+export function isoDay(value) {
   const match = ISO_DAY_RE.exec(value);
   if (!match) return null;
   const parsed = new Date(`${match[1]}T00:00:00.000Z`);
@@ -52,13 +54,13 @@ function isoDay(value) {
 }
 
 // Data records (header excluded) with their source row number.
-function dataRecords(records) {
+export function dataRecords(records) {
   return records.slice(1)
     .map((values, index) => ({ row: index + 2, values }))
     .filter((record) => record.values.some((value) => typeof value === "string" && value.trim().length > 0));
 }
 
-function rows(list) {
+export function rows(list) {
   return { count: list.length, rows: list.slice(0, MAX_ROW_LOCATORS), complete: list.length <= MAX_ROW_LOCATORS };
 }
 

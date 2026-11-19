@@ -4,6 +4,9 @@ import { profileLocalTrustedFile, readTrustedCsvRecords, readTrustedWorksheetRec
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
 import { assessPlanningTargetRecords } from "../validators/kaiPlanningTargetCandidates.js";
+import { headerIndicatesPersonalAttribute } from "../profiling/tabularMeasurementBasis.js";
+import { dataRecords } from "./crossSourceReachReconciliation.js";
+import { reconcileServiceEvents, serviceHeadingTerms } from "./serviceEventReconciliation.js";
 
 /**
  * KAI cross-source reconciliation worker: the one place a cross-source
@@ -29,6 +32,11 @@ import { assessPlanningTargetRecords } from "../validators/kaiPlanningTargetCand
  * A small worksheet's planned-target rows are read the same way: only the
  * screened candidates (planned value, unit, period, programme, status and row
  * number) leave this module, never the records or a free-text note.
+ * A service-record table's single-source reconciliation is read the same way:
+ * each heading leaves only as the listed service vocabulary words it contains
+ * (and whether it names a personal attribute), and each plan the caller
+ * resolves from them is reconciled here, returning counts, listed labels and
+ * row numbers only.
  */
 function refusal(reason) {
   return { ok: false, reason };
@@ -125,6 +133,22 @@ export function createCrossSourceReconciliationWorker({
         dataRecordCount: read.records.length - 1,
         assessment: assessPlanningTargetRecords(read.records, { worksheetKey: input.worksheetKey }),
       };
+    },
+    // Service-delivery measurements of one table of the SAME verified upload:
+    // `compute({headings, physicalRecordCount, reconcile})` resolves its plans
+    // from the heading words and calls `reconcile(plan)`, which returns
+    // aggregates only; the records never leave this module.
+    async readServiceEvents(tx, { organizationId, intakeFileId, checksum, worksheetKey = null, compute }) {
+      const read = await readRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey });
+      if (!read.ok) return read;
+      const header = Array.isArray(read.records[0]) ? read.records[0] : [];
+      const headings = Object.fromEntries(header.map((text, index) => [`field_${index + 1}`, {
+        terms: serviceHeadingTerms(String(text ?? "").replace(/^\uFEFF/, "")),
+        personal: headerIndicatesPersonalAttribute(String(text ?? "").replace(/^\uFEFF/, "")),
+      }]));
+      const physicalRecordCount = dataRecords(read.records).length;
+      const records = read.records;
+      return { ok: true, ...(await compute({ headings, physicalRecordCount, reconcile: (plan) => reconcileServiceEvents({ records, plan }) })) };
     },
     // One version's verified records, for a calculation in this same worker transaction.
     async readSourceRecords(tx, { organizationId, intakeFileId, checksum, worksheetKey = null }) {

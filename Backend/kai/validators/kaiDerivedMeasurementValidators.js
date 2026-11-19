@@ -1,6 +1,7 @@
 import { describeDocumentLimitationCode } from "./kaiDocumentEvidenceValidators.js";
 import { createHash } from "node:crypto";
 import { CROSS_SOURCE_REACH_BASIS_VERSION, CROSS_SOURCE_REACH_METHOD } from "../parsing/crossSourceReachReconciliation.js";
+import { SERVICE_CONFLICT_ROLES, SERVICE_DUPLICATE_POLICY, SERVICE_EVENTS_FAMILY, SERVICE_EVENTS_METHOD } from "../parsing/serviceEventReconciliation.js";
 import { PAIRED_OUTCOME_CALCULATION_METHOD } from "../profiling/pairedOutcomeBasis.js";
 import { TABULAR_MEASUREMENT_BASIS_VERSION, categoryVocabularyWithheldReason, headerIndicatesPersonalAttribute } from "../profiling/tabularMeasurementBasis.js";
 import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
@@ -45,6 +46,10 @@ export const DERIVED_MEASUREMENT_FAMILIES = Object.freeze({
   TABULAR_COUNT: "tabular_count",
   TABULAR_RATE: "tabular_rate",
   CROSS_SOURCE_REACH: "cross_source_reach",
+  // One service-record table, reconciled record by record from its verified
+  // upload (single source: no register). Never a raw row count and never
+  // linked reach.
+  SERVICE_EVENTS: SERVICE_EVENTS_FAMILY,
 });
 export const DERIVED_MEASUREMENT_METHODS = Object.freeze({
   PAIRED_OUTCOME: PAIRED_OUTCOME_CALCULATION_METHOD,
@@ -55,6 +60,8 @@ export const DERIVED_MEASUREMENT_METHODS = Object.freeze({
   // A rate over identifiers (deriveTabularDistinctKeyRate); admitted by
   // kai_sprint2_measurement_calculation_completion.
   DISTINCT_KEY_RATE: "kai_tabular_conditional_distinct_key_rate_v1",
+  // Admitted by kai_sprint2_service_event_measurements.
+  SERVICE_EVENTS: SERVICE_EVENTS_METHOD,
 });
 // The methods kai.source_derived_measurements admits today; a write of any
 // other method is refused before it reaches the database.
@@ -65,6 +72,7 @@ export const SCHEMA_ADMITTED_DERIVED_METHODS = Object.freeze(new Set([
   "kai_tabular_conditional_record_rate_v1",
   "kai_tabular_conditional_distinct_key_rate_v1",
   CROSS_SOURCE_REACH_METHOD,
+  SERVICE_EVENTS_METHOD,
 ]));
 const METHOD_FAMILY = Object.freeze({
   [DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME]: DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME,
@@ -73,6 +81,7 @@ const METHOD_FAMILY = Object.freeze({
   [DERIVED_MEASUREMENT_METHODS.RECORD_RATE]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE,
   [DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_RATE]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE,
   [DERIVED_MEASUREMENT_METHODS.CROSS_SOURCE_REACH]: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
+  [DERIVED_MEASUREMENT_METHODS.SERVICE_EVENTS]: DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS,
 });
 export const SCORE_DIRECTIONS = Object.freeze(["higher_is_better", "lower_is_better", "not_established"]);
 // What the organization says about where the values come from. KAI never
@@ -296,6 +305,11 @@ function screenedField(field) {
 
 function fieldOf(basis, fieldKey) {
   return screenedField((basis.fields || []).find((field) => field.field_key === fieldKey) ?? null);
+}
+
+/** Every field of a committed basis as a reader may use it (withheld vocabularies screened). */
+export function screenedTabularFields(basis) {
+  return (Array.isArray(basis?.fields) ? basis.fields : []).map(screenedField);
 }
 
 /**
@@ -1485,6 +1499,175 @@ function crossSourceFunnelHolds(row) {
       && group.encounter_count === c.group_encounter_count && group.distinct_person_count === c.group_distinct_person_count)));
 }
 
+// ---------------------------------------------------------------------------
+// Single-source service-delivery measurements (kaiServiceEventMeasurements.js
+// discovers the roles; parsing/serviceEventReconciliation.js calculates).
+
+export const SERVICE_EVENT_METRICS = Object.freeze({
+  COMPLETED_ENCOUNTERS: "completed_service_encounters",
+  GROUP_COMPLETED_ENCOUNTERS: "group_completed_service_encounters",
+  DISTINCT_ENTITIES: "distinct_entities_served",
+  GROUP_DISTINCT_ENTITIES: "group_distinct_entities_served",
+  MONTHLY: "monthly_completed_service_encounters",
+});
+const SERVICE_METRIC_COMPONENT = Object.freeze({
+  [SERVICE_EVENT_METRICS.COMPLETED_ENCOUNTERS]: "eligible_encounter_count",
+  [SERVICE_EVENT_METRICS.MONTHLY]: "eligible_encounter_count",
+  [SERVICE_EVENT_METRICS.GROUP_COMPLETED_ENCOUNTERS]: "group_encounter_count",
+  [SERVICE_EVENT_METRICS.DISTINCT_ENTITIES]: "distinct_entity_count",
+  [SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES]: "group_distinct_entity_count",
+});
+const SERVICE_FUNNEL_KEYS = Object.freeze([
+  "physical_record_count", "blank_event_identifier_record_count", "duplicate_group_count", "duplicate_member_record_count", "excess_copy_record_count",
+  "consistent_copy_group_with_other_differences_count", "conflicting_event_identity_count", "conflicting_record_count", "distinct_event_count",
+  "consistent_event_count", "completed_status_record_count", "completed_event_count", "not_completed_event_count", "eligibility_excluded_event_count",
+  "eligible_completed_event_count", "completed_without_date_count", "completed_outside_period_count", "eligible_encounter_count",
+  "blank_entity_identifier_event_count", "distinct_entity_count", "multi_programme_entity_count", "ungrouped_programme_encounter_count",
+  "ungrouped_activity_encounter_count", "unlisted_status_event_count",
+]);
+const SERVICE_ROLE_BASES = new Set(["source_heading", "person_selected", "proposed"]);
+
+function serviceRoleHolds(entry, extra = []) {
+  return entry === null || (isPlainObject(entry) && FIELD_KEY_RE.test(entry.field_key ?? "") && SERVICE_ROLE_BASES.has(entry.basis)
+    && extra.every((key) => key in entry));
+}
+
+/** What one counted unit of a service finding is: {kind, label} under its roles and basis. */
+export function serviceCountedUnitLabel({ roles, finding_basis: basis }) {
+  if (!roles?.encounter_identifier) return "record";
+  if (basis !== "service_encounters") return `distinct column ${columnLetterOf(roles.encounter_identifier.field_key)} value`;
+  return roles.encounter_identifier.counted_unit || "service encounter";
+}
+
+function columnLetterOf(fieldKey) {
+  const letter = (position) => (position > 26 ? `${letter(Math.floor((position - 1) / 26))}${String.fromCharCode(65 + (position - 1) % 26)}` : String.fromCharCode(64 + position));
+  return FIELD_KEY_RE.test(fieldKey ?? "") ? letter(Number(fieldKey.slice(6))) : "?";
+}
+
+// The reconciliation funnel every service-delivery row keeps (mirrors the CHECK).
+function serviceEventFunnelHolds(row) {
+  const c = row.component_counts;
+  const d = row.definition;
+  if (!isPlainObject(d) || !SERVICE_FUNNEL_KEYS.every((key) => isCount(c[key])) || row.denominator !== null || row.percentage !== null) return false;
+  const component = SERVICE_METRIC_COMPONENT[d.metric];
+  if (!component || d.measured_component !== component || c[component] !== row.measured_value) return false;
+  if (!["service_encounters", "source_values"].includes(d.finding_basis) || d.duplicate_policy !== SERVICE_DUPLICATE_POLICY) return false;
+  const roles = d.roles;
+  if (!isPlainObject(roles) || !serviceRoleHolds(roles.status, ["completed_value_key", "completed_value_label"]) || roles.status === null
+    || !serviceRoleHolds(roles.encounter_identifier ?? null) || !serviceRoleHolds(roles.service_date ?? null) || !serviceRoleHolds(roles.programme ?? null)
+    || !serviceRoleHolds(roles.activity ?? null) || !serviceRoleHolds(roles.entity_identifier ?? null) || !serviceRoleHolds(roles.eligibility ?? null, ["included_value_label"])) return false;
+  const roleKeys = Object.values(roles).filter(Boolean).map((entry) => entry.field_key);
+  if (new Set(roleKeys).size !== roleKeys.length || JSON.stringify([...new Set(roleKeys)].sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)))) !== JSON.stringify(row.field_keys)) return false;
+  if (d.counted_unit?.kind !== (roles.encounter_identifier ? "encounter" : "record") || typeof d.counted_unit?.label !== "string"
+    || d.counted_unit.label !== serviceCountedUnitLabel({ roles, finding_basis: d.finding_basis })) return false;
+  // A finding stated as service encounters needs every role it uses established.
+  if (d.finding_basis === "service_encounters" && (Object.values(roles).some((entry) => entry && entry.basis === "proposed") || !roles.encounter_identifier
+    || ([SERVICE_EVENT_METRICS.DISTINCT_ENTITIES, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(d.metric) && !["household", "person", "family"].includes(roles.entity_identifier?.entity_kind)))) return false;
+  const period = d.period;
+  if (period !== null && (!isPlainObject(period) || period.period_source !== PERIOD_SOURCE_ENGAGEMENT || period.precision !== "day"
+    || !isIsoDay(period.period_start) || !isIsoDay(period.period_end) || period.period_start > period.period_end || !roles.service_date)) return false;
+  if (period === null && (c.completed_without_date_count !== 0 || c.completed_outside_period_count !== 0 || roles.service_date)) return false;
+  const entityMetric = [SERVICE_EVENT_METRICS.DISTINCT_ENTITIES, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(d.metric);
+  if (entityMetric !== Boolean(roles.entity_identifier)) return false;
+  const groupMetric = [SERVICE_EVENT_METRICS.GROUP_COMPLETED_ENCOUNTERS, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(d.metric);
+  if (groupMetric !== Boolean(d.group)) return false;
+  const tables = [c.groups, c.activities, c.programme_activity, c.status_values];
+  if (!tables.every(Array.isArray) || !Array.isArray(c.required_measurement_keys) || !c.required_measurement_keys.every((key) => /^[a-f0-9]{64}$/.test(key))
+    || !isPlainObject(c.conflict_fields) || !SERVICE_CONFLICT_ROLES.every((key) => isCount(c.conflict_fields[key]))) return false;
+  const sum = (list, key) => list.reduce((total, item) => total + item[key], 0);
+  if (![...c.groups, ...c.activities].every((group) => isCount(group.encounter_count) && VALUE_KEY_RE.test(group.value_key ?? "") && typeof group.label === "string"
+    && (group.distinct_entity_count === undefined || (isCount(group.distinct_entity_count) && group.distinct_entity_count <= group.encounter_count)))) return false;
+  if (!c.status_values.every((value) => isCount(value.event_count)) || !c.programme_activity.every((pair) => isCount(pair.encounter_count))) return false;
+  if (d.group) {
+    const table = d.group.role === "activity" ? c.activities : d.group.role === "programme" ? c.groups : null;
+    const groupRow = table?.find((group) => group.value_key === d.group.value_key);
+    const groupRole = roles[d.group.role];
+    if (!groupRow || !groupRole || groupRole.field_key !== d.group.field_key || groupRow.label !== d.group.value_label || groupRow.encounter_count !== c.group_encounter_count
+      || (d.metric === SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES && (d.group.role !== "programme" || groupRow.distinct_entity_count !== c.group_distinct_entity_count))) return false;
+  }
+  if (Array.isArray(c.monthly_activity)) {
+    if (!period || !c.monthly_activity.every((item) => isPlainObject(item) && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(item.month) && isCount(item.encounter_count) && item.encounter_count > 0
+      && item.month >= period.period_start.slice(0, 7) && item.month <= period.period_end.slice(0, 7))
+      || c.monthly_activity.some((item, index) => index > 0 && c.monthly_activity[index - 1].month >= item.month)
+      || sum(c.monthly_activity, "encounter_count") !== c.eligible_encounter_count) return false;
+  } else if (d.metric === SERVICE_EVENT_METRICS.MONTHLY) return false;
+  const recordMode = !roles.encounter_identifier;
+  return c.excess_copy_record_count === c.duplicate_member_record_count - c.duplicate_group_count
+    && c.distinct_event_count === c.physical_record_count - c.blank_event_identifier_record_count - c.excess_copy_record_count
+    && c.consistent_event_count === c.distinct_event_count - c.conflicting_event_identity_count
+    && c.conflicting_record_count >= 2 * c.conflicting_event_identity_count
+    && c.consistent_copy_group_with_other_differences_count <= c.duplicate_group_count - c.conflicting_event_identity_count
+    && c.completed_event_count + c.not_completed_event_count === c.consistent_event_count
+    && c.completed_event_count <= c.completed_status_record_count
+    && sum(c.status_values, "event_count") + c.unlisted_status_event_count === c.consistent_event_count
+    && c.eligible_completed_event_count === c.completed_event_count - c.eligibility_excluded_event_count
+    && (roles.eligibility || c.eligibility_excluded_event_count === 0)
+    && c.eligible_encounter_count === c.eligible_completed_event_count - c.completed_without_date_count - c.completed_outside_period_count
+    && c.distinct_entity_count <= c.eligible_encounter_count - c.blank_entity_identifier_event_count
+    && c.multi_programme_entity_count <= c.distinct_entity_count
+    && (c.groups.length === 0 ? c.ungrouped_programme_encounter_count === 0 : sum(c.groups, "encounter_count") + c.ungrouped_programme_encounter_count === c.eligible_encounter_count)
+    && (c.activities.length === 0 ? c.ungrouped_activity_encounter_count === 0 : sum(c.activities, "encounter_count") + c.ungrouped_activity_encounter_count === c.eligible_encounter_count)
+    && sum(c.programme_activity, "encounter_count") <= c.eligible_encounter_count
+    && (!recordMode || (c.blank_event_identifier_record_count === 0 && c.duplicate_group_count === 0 && c.conflicting_event_identity_count === 0 && c.distinct_event_count === c.physical_record_count));
+}
+
+function servicePlural(label, count) {
+  return `${count} ${count === 1 ? label : /s$/.test(label) ? label : label.endsWith("y") && !/[aeiou]y$/.test(label) ? `${label.slice(0, -1)}ies` : `${label}s`}`;
+}
+
+const SERVICE_ENTITY_PLURALS = Object.freeze({ household: ["household", "households"], person: ["person", "people"], family: ["family", "families"] });
+
+function serviceEntityWords(row) {
+  const entity = row.definition.roles.entity_identifier;
+  const kind = row.definition.finding_basis === "service_encounters" ? entity?.entity_kind : null;
+  return SERVICE_ENTITY_PLURALS[kind] ?? [`distinct column ${columnLetterOf(entity?.field_key)} identifier value`, `distinct column ${columnLetterOf(entity?.field_key)} identifier values`];
+}
+
+function serviceEventBody(row) {
+  const c = row.component_counts;
+  const d = row.definition;
+  const r = d.roles;
+  const unit = d.counted_unit.label;
+  const encounterWord = (count) => (r.encounter_identifier ? servicePlural(`completed ${unit}`, count).replace(/^(\d+) completed distinct/, "$1 distinct") : servicePlural("record", count));
+  const statusText = `column ${columnLetterOf(r.status.field_key)} = ${r.status.completed_value_label}`;
+  const scope = d.period ? `service date (column ${columnLetterOf(r.service_date.field_key)}) in reporting period ${d.period.period_start} to ${d.period.period_end} by day` : "no reporting period (all dates)";
+  const group = d.group ? ` in ${d.group.role} (column ${columnLetterOf(d.group.field_key)}) ${d.group.value_label}` : "";
+  const eligibility = r.eligibility ? `, column ${columnLetterOf(r.eligibility.field_key)} = ${r.eligibility.included_value_label}` : "";
+  const identity = r.encounter_identifier ? `each column ${columnLetterOf(r.encounter_identifier.field_key)} identifier counted once` : "records, not distinct encounters (no encounter identifier column)";
+  // A group's exclusions are the whole table's (the funnel runs before grouping); say so.
+  const exclusions = (d.group ? "across the whole table, " : "") + [
+    ...(r.encounter_identifier ? [`${countedOnceDuplicateCopyCount(c)} duplicate copies counted once`] : []),
+    `excluded ${[
+      ...(r.encounter_identifier ? [`${c.conflicting_event_identity_count} conflicting`] : []),
+      `${c.not_completed_event_count} not completed`,
+      ...(r.eligibility ? [`${c.eligibility_excluded_event_count} not eligible`] : []),
+      ...(d.period ? [`${c.completed_outside_period_count} outside period`, `${c.completed_without_date_count} without date`] : []),
+    ].join(", ")}`,
+  ].join("; ");
+  const proposed = Object.entries(r).filter(([, entry]) => entry?.basis === "proposed").map(([name]) => name.replace(/_/g, " "));
+  const meaning = d.finding_basis === "source_values"
+    ? ` Source-value finding: ${proposed.length > 0 ? `${proposed.join(", ")} proposed, not confirmed` : "column roles not all established"}.` : "";
+  const single = " Single source; no register linked.";
+  const head = `${statusText}${eligibility}, ${scope}, ${identity}`;
+  switch (d.metric) {
+    case SERVICE_EVENT_METRICS.DISTINCT_ENTITIES:
+    case SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES: {
+      const [singular, plural] = serviceEntityWords(row);
+      const among = d.group ? c.group_encounter_count : c.eligible_encounter_count;
+      const overlap = d.group ? "" : `; ${c.multi_programme_entity_count} in more than one programme counted once`;
+      return `${row.measured_value} ${row.measured_value === 1 ? singular : plural} (column ${columnLetterOf(r.entity_identifier.field_key)} identifiers, each counted once)${group} with at least one of ${encounterWord(among)}: ${head}; ${c.blank_entity_identifier_event_count} without an identifier${overlap}.${meaning}${single}`;
+    }
+    case SERVICE_EVENT_METRICS.MONTHLY: {
+      const months = (c.monthly_activity || []).map((item) => `${item.month} ${item.encounter_count}`).join(", ");
+      const stated = `${encounterWord(c.eligible_encounter_count)} by service month (encounters, not people), ${scope}: ${months}.${meaning}${single}`;
+      if (validateComposedStatement(`Derived measurement: ${stated}`).ok && stated.length <= 380) return stated;
+      return `${encounterWord(c.eligible_encounter_count)} grouped by service month (encounters, not people), ${scope}; the monthly breakdown is recorded with the measurement.${meaning}${single}`;
+    }
+    default:
+      return `${encounterWord(row.measured_value)}${group}: ${head}; ${exclusions}.${meaning}${single}`;
+  }
+}
+
 /**
  * Whether every category label a recorded measurement holds (its condition
  * and population values, a linkage's completed value and group labels) still
@@ -1503,6 +1686,17 @@ export function derivedMeasurementCategoryLabels(row) {
   for (const group of Array.isArray(events?.groups) ? events.groups : []) if (typeof group?.label === "string") labels.push(group.label);
   if (typeof definition.group?.value_label === "string") labels.push(definition.group.value_label);
   for (const group of Array.isArray(row?.component_counts?.groups) ? row.component_counts.groups : []) if (typeof group?.label === "string") labels.push(group.label);
+  // A service-delivery finding: its completed and included values, activity
+  // labels and status vocabulary (the counted-unit label is a listed value too).
+  const roles = isPlainObject(definition.roles) ? definition.roles : {};
+  for (const label of [roles.status?.completed_value_label, roles.eligibility?.included_value_label]) if (typeof label === "string") labels.push(label);
+  if (row?.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS && typeof roles.encounter_identifier?.counted_unit === "string"
+    && !["service event", "service encounter", "visit", "attendance", "appointment", "session"].includes(roles.encounter_identifier.counted_unit)) {
+    labels.push(roles.encounter_identifier.counted_unit.replace(/ /g, "_"));
+  }
+  for (const list of [row?.component_counts?.activities, row?.component_counts?.status_values]) {
+    for (const item of Array.isArray(list) ? list : []) if (typeof item?.label === "string") labels.push(item.label);
+  }
   return labels;
 }
 
@@ -1525,8 +1719,15 @@ export function withholdDerivedMeasurementLabels(row) {
     for (const group of definition.mapping.events.groups ?? []) group.label = mask(group.label);
   }
   if (definition.group && "value_label" in definition.group) definition.group.value_label = mask(definition.group.value_label);
+  if (definition.roles?.status && "completed_value_label" in definition.roles.status) definition.roles.status.completed_value_label = mask(definition.roles.status.completed_value_label);
+  if (definition.roles?.eligibility && "included_value_label" in definition.roles.eligibility) definition.roles.eligibility.included_value_label = mask(definition.roles.eligibility.included_value_label);
+  if (definition.roles?.encounter_identifier?.counted_unit) definition.roles.encounter_identifier.counted_unit = mask(definition.roles.encounter_identifier.counted_unit);
+  if (definition.counted_unit?.label && row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) definition.counted_unit.label = mask(definition.counted_unit.label);
+  const maskList = (list) => (Array.isArray(list) ? list.map((item) => ({ ...item, label: mask(item.label) })) : list);
   const componentCounts = row.component_counts && Array.isArray(row.component_counts.groups)
-    ? { ...row.component_counts, groups: row.component_counts.groups.map((group) => ({ ...group, label: mask(group.label) })) }
+    ? { ...row.component_counts, groups: maskList(row.component_counts.groups),
+      ...(Array.isArray(row.component_counts.activities) ? { activities: maskList(row.component_counts.activities) } : {}),
+      ...(Array.isArray(row.component_counts.status_values) ? { status_values: maskList(row.component_counts.status_values) } : {}) }
     : row.component_counts;
   return { definition, component_counts: componentCounts };
 }
@@ -1723,6 +1924,7 @@ function crossSourceBody(row, interpretation) {
 
 function measurementBody(row, interpretation) {
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceBody(row, interpretation);
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) return serviceEventBody(row);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) return pairedBody(row, interpretation);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE) return tabularRateBody(row);
   return tabularCountBody(row);
@@ -1765,6 +1967,7 @@ export function derivedMeasurementArithmeticHolds(row) {
   const counts = row.component_counts;
   if (!isPlainObject(counts) || !isCount(row.measured_value) || !isCount(row.numerator) || row.measured_value !== row.numerator) return false;
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceFunnelHolds(row);
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) return serviceEventFunnelHolds(row);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT) {
     return row.denominator === null && row.percentage === null
       && isCount(counts.matching_record_count) && row.measured_value <= counts.matching_record_count
@@ -1898,15 +2101,19 @@ export function applyDerivedMeasurementCoverageDimensions(dimensions, row) {
   }
   const paired = row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME;
   const cross = row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH;
+  const service = row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS;
   const counts = row.component_counts;
   const excluded = paired
     ? counts.excluded_participant_count > 0
     : cross
       ? counts.completed_without_date_count + counts.unmatched_event_count + counts.blank_participant_identifier_event_count + counts.conflicting_event_identity_count + counts.blank_event_identifier_record_count > 0
-      : (counts.records_without_date ?? 0) > 0 || (row.definition.unit?.kind === "distinct_key" && (counts.source_records_without_key ?? 0) > 0);
+      : service
+        ? counts.completed_without_date_count + counts.conflicting_event_identity_count + counts.blank_event_identifier_record_count
+          + counts.eligibility_excluded_event_count + counts.blank_entity_identifier_event_count > 0
+        : (counts.records_without_date ?? 0) > 0 || (row.definition.unit?.kind === "distinct_key" && (counts.source_records_without_key ?? 0) > 0);
   const duplicateRows = paired
     ? (row.exclusions?.rows || []).some((item) => item.reason === "exact_duplicate_row" && item.row_count > 0)
-    : cross ? counts.duplicate_group_count > 0 : (counts.exact_duplicate_member_records ?? 0) > 0;
+    : cross || service ? counts.duplicate_group_count > 0 : (counts.exact_duplicate_member_records ?? 0) > 0;
   return {
     ...dimensions,
     missingness: excluded
@@ -1921,7 +2128,7 @@ export function applyDerivedMeasurementCoverageDimensions(dimensions, row) {
     denominator_clarity: row.denominator === null
       ? dimensionResult("denominator_clarity", "resolved_clear", "The measurement is a count; it states no rate, so no denominator applies.")
       : dimensionResult("denominator_clarity", "resolved_clear", "The method states the denominator and the population it covers.", { field_count: 1 }),
-    time_period_clarity: hasPeriod(row) || cross
+    time_period_clarity: hasPeriod(row) || cross || (service && isPlainObject(row.definition.period))
       ? dimensionResult("time_period_clarity", "resolved_clear", "The engagement's recorded reporting period is applied to the dates in the selected date field.")
       : dimensionResult("time_period_clarity", "resolved_risk_flagged", "No reporting period is applied to this measurement."),
     entity_level_clarity: dimensionResult("entity_level_clarity", "resolved_clear", "The method states what is counted.", { field_count: 1 }),
@@ -1956,6 +2163,12 @@ export const DERIVED_LIMITATION_CODES = Object.freeze({
   RECORDED_MINUTES_SUBTOTAL: "derived.known_recorded_minutes_subtotal",
   PARTLY_COVERED_MONTHS_EMPTY: "derived.partly_covered_months_without_records",
   EXACT_DAYS_FROM_SOURCE_FILE: "derived.exact_days_from_source_file",
+  SINGLE_SOURCE_SERVICE_RECORDS: "derived.single_source_service_records",
+  SOURCE_VALUE_FINDING: "derived.source_value_finding",
+  RECORDS_NOT_DISTINCT_ENCOUNTERS: "derived.records_not_distinct_encounters",
+  ELIGIBILITY_COLUMN_APPLIED: "derived.eligibility_column_applied",
+  ENTITIES_COUNTED_ONCE: "derived.entities_counted_once_across_programmes",
+  NOT_COMPLETED_EXCLUDED: "derived.not_completed_records_excluded",
 });
 const C = DERIVED_LIMITATION_CODES;
 
@@ -1977,6 +2190,18 @@ export function derivedMeasurementLimitationCodes({ measurementRow: row, dimensi
     if (metric === CROSS_SOURCE_METRICS.RECORDED_DURATION) codes.push(C.RECORDED_MINUTES_SUBTOTAL);
     if ([CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS, CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS, CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY].includes(metric)) codes.push(C.ENCOUNTERS_NOT_PEOPLE);
     else if (metric !== CROSS_SOURCE_METRICS.RECORDED_DURATION) codes.push(C.EACH_KEY_ONCE, C.PEOPLE_COUNTED_ONCE);
+  } else if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS) {
+    const d = row.definition || {};
+    codes.push(C.SINGLE_SOURCE_SERVICE_RECORDS, d.period ? C.ENGAGEMENT_PERIOD_APPLIED : C.NO_REPORTING_PERIOD);
+    if (d.finding_basis !== "service_encounters") codes.push(C.SOURCE_VALUE_FINDING);
+    if (!d.roles?.encounter_identifier) codes.push(C.RECORDS_NOT_DISTINCT_ENCOUNTERS);
+    else if (countedOnceDuplicateCopyCount(counts) > 0) codes.push(C.DUPLICATE_EVENT_COPIES_COLLAPSED);
+    if (counts.conflicting_event_identity_count > 0) codes.push(C.CONFLICTING_EVENTS_EXCLUDED);
+    if (counts.not_completed_event_count > 0) codes.push(C.NOT_COMPLETED_EXCLUDED);
+    if (d.roles?.eligibility) codes.push(C.ELIGIBILITY_COLUMN_APPLIED);
+    if (counts.completed_without_date_count > 0) codes.push(C.RECORDS_WITHOUT_DATE_EXCLUDED);
+    if ([SERVICE_EVENT_METRICS.DISTINCT_ENTITIES, SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES].includes(d.metric)) codes.push(C.EACH_KEY_ONCE, C.ENTITIES_COUNTED_ONCE);
+    else codes.push(C.ENCOUNTERS_NOT_PEOPLE);
   } else if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) {
     codes.push(C.MATCHED_SUBSET_ONLY, C.NO_REPORTING_PERIOD);
     codes.push(["higher_is_better", "lower_is_better"].includes(interpretation?.score_direction) ? C.DIRECTION_HUMAN_STATED : C.DIRECTION_NOT_ESTABLISHED);
@@ -2039,6 +2264,12 @@ const DERIVED_DISCLOSURES = Object.freeze({
   [C.PARTLY_COVERED_MONTHS_EMPTY]: "The reporting period starts or ends part-way through a month; none of the measured records fall in those months, so the period's actual dates were applied exactly.",
   // Worded without "verified": the values themselves are not verified, and the report's wording rules keep it that way.
   [C.EXACT_DAYS_FROM_SOURCE_FILE]: "The reporting period's exact dates were applied to each record's own day, read again from the uploaded file this source version was profiled from.",
+  [C.SINGLE_SOURCE_SERVICE_RECORDS]: "Calculated from one service-record source only: no participant register was linked, so whether each identifier is on a register was not checked.",
+  [C.SOURCE_VALUE_FINDING]: "Not every column role this result uses was established by the source headings or a person at the organization, so it states source values rather than service encounters or households served.",
+  [C.RECORDS_NOT_DISTINCT_ENCOUNTERS]: "No column was established as the encounter identifier, so this counts records; a repeated record of one service is counted again.",
+  [C.ELIGIBILITY_COLUMN_APPLIED]: "A person at the organization stated which value of an eligibility column includes a record; other completed records were excluded and counted.",
+  [C.ENTITIES_COUNTED_ONCE]: "A household, person or family identifier with encounters in more than one programme is counted once in an organization-wide total.",
+  [C.NOT_COMPLETED_EXCLUDED]: "Records whose status is not the completed value (for example cancelled or no-show) are excluded and counted.",
 });
 
 export function describeDerivedLimitationCode(code) {

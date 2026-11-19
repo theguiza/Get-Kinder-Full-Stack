@@ -1,6 +1,8 @@
 import {
   CROSS_SOURCE_METRICS,
   DERIVED_MEASUREMENT_FAMILIES,
+  SERVICE_EVENT_METRICS,
+  countedOnceDuplicateCopyCount,
   interpretationOf,
 } from "../validators/kaiDerivedMeasurementValidators.js";
 
@@ -307,6 +309,53 @@ function crossSourceReading(row, interpretation) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Single-source service-delivery measurements.
+
+function serviceEventReading(row, interpretation) {
+  const c = row.component_counts || {};
+  const d = row.definition || {};
+  const label = interpretation?.indicator_label || null;
+  const lead = label ? `${label}: ` : "";
+  const strong = d.finding_basis === "service_encounters";
+  const period = d.period ? `the reporting period ${d.period.period_start} to ${d.period.period_end} (by the date each service took place)` : "all dates in the source (no reporting period applied)";
+  const group = d.group ? ` in ${d.group.role} ${d.group.value_label}` : "";
+  const unit = d.counted_unit?.label || "record";
+  const encounters = (count) => `${count} completed ${count === 1 ? unit : /s$/.test(unit) ? unit : `${unit}s`}`;
+  const source = " They come from one service log; whether each identifier is on a register was not checked.";
+  const qualifier = strong ? "" : " The columns this uses were not all established, so these are source values rather than confirmed service encounters.";
+  const left = `${d.group ? "across the whole service log, " : ""}${countedOnceDuplicateCopyCount(c)} repeated records of the same encounter were counted once, ${c.not_completed_event_count} records that were not completed were left out`
+    + `${c.conflicting_event_identity_count ? `, and ${c.conflicting_event_identity_count} encounters whose records disagree were left out` : ""}`;
+  switch (d.metric) {
+    case SERVICE_EVENT_METRICS.DISTINCT_ENTITIES:
+    case SERVICE_EVENT_METRICS.GROUP_DISTINCT_ENTITIES: {
+      const kind = strong ? d.roles?.entity_identifier?.entity_kind : null;
+      const plural = kind === "person" ? "people" : kind === "family" ? "families" : kind === "household" ? "households" : "distinct identifiers";
+      const among = d.group ? c.group_encounter_count : c.eligible_encounter_count;
+      const overlap = d.group ? "" : ` ${c.multi_programme_entity_count} of them took part in more than one programme and are counted once.`;
+      return Object.freeze({
+        kind: "reach", indicator: label || `${plural[0].toUpperCase()}${plural.slice(1)} served`, directionKnown: null, signal: "descriptive", clarification: strong ? null : "Confirm which column identifies the household or person served.",
+        text: `${lead}${row.measured_value} ${plural}${group} received at least one of ${among} completed services in ${period}.${overlap} This shows who the organization reached; it does not by itself show what changed for them.${source}${qualifier}`,
+        headline: !d.group && strong ? `${label || `${plural[0].toUpperCase()}${plural.slice(1)} served`}: ${row.measured_value} ${plural} received at least one completed service in ${period}` : null,
+      });
+    }
+    case SERVICE_EVENT_METRICS.MONTHLY: {
+      const months = (c.monthly_activity || []).map((item) => `${item.month} ${item.encounter_count}`).join(", ");
+      return Object.freeze({
+        kind: "activity", indicator: label || "Monthly service activity", directionKnown: null, signal: "descriptive", clarification: null, headline: null,
+        text: `${lead}${encounters(c.eligible_encounter_count)} in ${period}${months ? `, by the month they took place: ${months}` : ""}. These are encounters, not people.${source}${qualifier}`,
+      });
+    }
+    default:
+      return Object.freeze({
+        kind: "activity", indicator: label || (d.group ? `Completed services in ${d.group.value_label}` : "Completed services"), directionKnown: null, signal: "descriptive",
+        clarification: strong ? null : "Confirm which columns identify an encounter and its completed status.",
+        text: `${lead}${encounters(row.measured_value)}${group} in ${period}; ${left}. These are encounters, not people: one household or person can have several.${source}${qualifier}`,
+        headline: !d.group && strong ? `${label || "Completed services"}: ${encounters(row.measured_value)} in ${period}` : null,
+      });
+  }
+}
+
 /**
  * The reading of a derived measurement row (as read with its evidence's
  * interpretation), or null.
@@ -321,6 +370,8 @@ export function composeImpactFindingReading(measurementRow) {
       return tabularRateReading(measurementRow, interpretation);
     case DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH:
       return crossSourceReading(measurementRow, interpretation);
+    case DERIVED_MEASUREMENT_FAMILIES.SERVICE_EVENTS:
+      return serviceEventReading(measurementRow, interpretation);
     default:
       return tabularCountReading(measurementRow, interpretation);
   }

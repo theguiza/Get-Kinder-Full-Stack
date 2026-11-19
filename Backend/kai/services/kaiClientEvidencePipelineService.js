@@ -123,6 +123,7 @@ const PIPELINE_REASONS = Object.freeze([
   "claim_proposal_ready",
   "source_measurement_ready",
   "worksheet_measurement_remaining",
+  "service_measurement_remaining",
   "not_currently_eligible",
   "source_not_promoted",
   "unknown",
@@ -420,10 +421,14 @@ function deriveFileStages(row, clientAuthority = NO_CLIENT_AUTHORITY) {
 // reviews and questions never manufacture an incomplete preparation stage.
 // All writes still enforce their own authority, lineage and permission rules.
 function nextEvidenceWork(row, usableFactCount, clientAuthority) {
-  const remainingWorksheets = count(row.unmeasured_worksheet_count) > 0;
+  // Substantive service-delivery findings (a CSV service log, or a worksheet
+  // counted in unmeasured_worksheet_count) remain until their required set is
+  // saved; they come before a raw-count claim proposal or completion.
+  const serviceRemaining = count(row.service_worksheet_remaining_count ?? 0) > 0 || row.csv_service_measurement_remaining === true;
+  const remainingWorksheets = count(row.unmeasured_worksheet_count) > 0 || serviceRemaining;
   if (usableFactCount > 0 && !remainingWorksheets) return null;
   const incompletePlans = count(row.incomplete_planning_worksheet_count ?? 0) > 0;
-  const proposalReady = !incompletePlans && count(row.evidence_unclaimed_proposable_count) > 0;
+  const proposalReady = !incompletePlans && !serviceRemaining && count(row.evidence_unclaimed_proposable_count) > 0;
   const measurementReady = !proposalReady && (count(row.claim_count) === 0 || remainingWorksheets)
     && RECORD_COUNTABLE_FORMATS.has(row.current_profile_format)
     && isCanonicalUuid(row.current_source_version_id);
@@ -432,7 +437,8 @@ function nextEvidenceWork(row, usableFactCount, clientAuthority) {
   return {
     nextAction: authorized ? (proposalReady ? NEXT_ACTION.proposeClaims : NEXT_ACTION.countRecords)
       : NEXT_ACTION.askOrganizationAdministrator,
-    reason: authorized ? (proposalReady ? "claim_proposal_ready" : remainingWorksheets && count(row.claim_count) > 0 ? "worksheet_measurement_remaining" : "source_measurement_ready")
+    reason: authorized ? (proposalReady ? "claim_proposal_ready" : serviceRemaining ? "service_measurement_remaining"
+      : remainingWorksheets && count(row.claim_count) > 0 ? "worksheet_measurement_remaining" : "source_measurement_ready")
       : "organization_administrator_action_ready",
     responsibleParty: RESPONSIBLE.client,
   };

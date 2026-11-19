@@ -34,7 +34,19 @@
 .kai-measurement-plan ul { padding-left: 18px; margin: 4px 0; }
 .kai-measurement [data-client-planning-target-check-result="fail"] { color: #8a3b12; }
 .kai-measurement [data-client-planning-target-check-result="pass"] { color: #206243; }
+.kai-service-delivery { min-width: 0; padding: 16px; border: 1px solid #c9d7ea; border-radius: 14px; background: #f8fbff; overflow-wrap: anywhere; }
+.kai-service-delivery .kai-measurement-outcome { background: #fff; }
+.kai-service-breakdown { list-style: none; padding: 0; margin: 8px 0 0; }
+.kai-service-breakdown > li { padding: 4px 0; border-bottom: 1px solid #e8eef8; }
+.kai-service-breakdown > li > strong { font-size: 1.25rem; margin-left: 6px; color: #344967; }
+.kai-measurement .kai-service-save:not(:disabled) { background: #455a7c; color: #fff; }
+.kai-service-targets { margin-top: 14px; }
+.kai-service-delivery .kai-measurement-plan { padding: 10px; margin-top: 8px; border-radius: 10px; }
+.kai-service-role-choice { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.kai-service-role-choice label { min-width: 0; flex: 1 1 180px; }
+.kai-service-role-choice select { width: 100%; }
 @media (max-width: 680px) {
+  .kai-service-delivery { padding: 10px; }
   .kai-measurement { padding: 12px !important; }
   .kai-measurement-result { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .kai-measurement-result-label { grid-column: 1 / -1; }

@@ -127,6 +127,11 @@ export async function readCurrentPlanningTargetCandidates(tx, input) {
   return (await createDefaultCrossSourceWorker()).readPlanningTargetCandidates(tx, input);
 }
 
+// The single-source service-delivery reconciliation of one admitted table, by the same worker.
+export async function readCurrentServiceEvents(tx, input) {
+  return (await createDefaultCrossSourceWorker()).readServiceEvents(tx, input);
+}
+
 async function createDefaultCrossSourceRepository() {
   const { createPostgresDerivedMeasurementRepository } = await import("../dictionary/postgresDerivedMeasurementRepository.js");
   return createPostgresDerivedMeasurementRepository({ crossSourceReconciliationWorker: await createDefaultCrossSourceWorker() });
