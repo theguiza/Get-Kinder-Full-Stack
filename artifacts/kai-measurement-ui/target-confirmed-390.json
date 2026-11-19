@@ -1,0 +1,105 @@
+{
+  "viewport": 390,
+  "document_width": 375,
+  "document_client_width": 375,
+  "ancestors": [
+    {
+      "tag": "ARTICLE",
+      "class": "kai-measurement-outcome kai-measurement-plan",
+      "x": 37,
+      "width": 286,
+      "client": 284,
+      "scroll": 284
+    },
+    {
+      "tag": "DIV",
+      "class": "kai-measurement-outcomes",
+      "x": 37,
+      "width": 286,
+      "client": 286,
+      "scroll": 286
+    },
+    {
+      "tag": "SECTION",
+      "class": "mb-3",
+      "x": 37,
+      "width": 286,
+      "client": 286,
+      "scroll": 286
+    },
+    {
+      "tag": "DIV",
+      "class": "border-top pt-2 mt-2 small",
+      "x": 37,
+      "width": 286,
+      "client": 286,
+      "scroll": 286
+    },
+    {
+      "tag": "DIV",
+      "class": "kai-measurement border rounded p-2 mt-2",
+      "x": 24,
+      "width": 312,
+      "client": 310,
+      "scroll": 310
+    },
+    {
+      "tag": "DIV",
+      "class": "w-100",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "d-flex flex-wrap align-items-center gap-2 mt-1 small",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "LI",
+      "class": "list-group-item",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "UL",
+      "class": "list-group kai-measurement-source-list",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    }
+  ],
+  "overflowing_elements": [
+    {
+      "tag": "ASIDE",
+      "class": "gk-shell-sidebar",
+      "right": 387,
+      "width": 387
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-group",
+      "right": 381,
+      "width": 375
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-item",
+      "right": 381,
+      "width": 62.453125
+    },
+    {
+      "tag": "SPAN",
+      "class": "gk-shell-nav-label",
+      "right": 377,
+      "width": 54.453125
+    }
+  ]
+}

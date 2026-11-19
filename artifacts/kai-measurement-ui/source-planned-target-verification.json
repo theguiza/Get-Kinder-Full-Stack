@@ -1,0 +1,282 @@
+{
+  "classification": "TOOL_VERIFIED",
+  "starting_head": "c06b2453b0cdd1a54fadf896f7bc426179067ee8",
+  "application_content_committed_as": "c3ce7360455200b214ff8184f2d311b99d4a9a63",
+  "schema_foundation_commit": "2d3b8113",
+  "postgres_version": "postgres (PostgreSQL) 16.14 (Homebrew)",
+  "checks": [
+    {
+      "name": "standard",
+      "command": "npm test",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel",
+        "KAI_WILLOW_QUAY_PACKAGE": "/Users/mikewoz/Downloads/Willow_Quay_KAI_Synthetic_Impact_Project"
+      },
+      "totals": {
+        "tests": 6336,
+        "pass": 6207,
+        "fail": 0,
+        "skipped": 129
+      },
+      "log": "/tmp/kai-planned-standard-accepted.log",
+      "scope": "129 integration tests require their own disposable runners; these skips are not counted as passes."
+    },
+    {
+      "name": "focused arithmetic, target and progress",
+      "command": "node --test __tests__/kai-source-planned-targets.spec.js __tests__/kai-planning-target-candidates.spec.js __tests__/kai-household-survey-measurement.spec.js __tests__/kai-client-evidence-pipeline.spec.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel",
+        "KAI_WILLOW_QUAY_PACKAGE": "/Users/mikewoz/Downloads/Willow_Quay_KAI_Synthetic_Impact_Project",
+        "KAI_MEASUREMENT_SCREENSHOTS": "artifacts/kai-measurement-ui"
+      },
+      "totals": {
+        "tests": 53,
+        "pass": 53,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-focused-accepted.log"
+    },
+    {
+      "name": "complete workbook browser",
+      "command": "node scripts/kai-customer-xlsx-file-to-report-local-postgres.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel",
+        "KAI_WILLOW_QUAY_PACKAGE": "/Users/mikewoz/Downloads/Willow_Quay_KAI_Synthetic_Impact_Project",
+        "KAI_CEDAR_BRIDGE_PACKAGE": "/Users/mikewoz/Downloads/Cedar Bridge synthetic data/KAI_Synthetic_Impact_Evidence_Project",
+        "KAI_MEASUREMENT_SCREENSHOTS": "artifacts/kai-measurement-ui",
+        "KAI_XLSX_TEST_NAME_PATTERN": "UNSET"
+      },
+      "totals": {
+        "tests": 45,
+        "pass": 45,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-workbook-accepted.log",
+      "scope": "All 45 cases executed, including mandatory W, W2, W3 and separate-source W4; no skips."
+    },
+    {
+      "name": "final whole-page and card visual checks",
+      "command": "node scripts/kai-customer-xlsx-file-to-report-local-postgres.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel",
+        "KAI_WILLOW_QUAY_PACKAGE": "/Users/mikewoz/Downloads/Willow_Quay_KAI_Synthetic_Impact_Project",
+        "KAI_XLSX_TEST_NAME_PATTERN": "B1:|W:|W2:|W3:|W4:|summary",
+        "KAI_MEASUREMENT_SCREENSHOTS": "artifacts/kai-measurement-ui"
+      },
+      "totals": {
+        "tests": 6,
+        "pass": 6,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-visual-accepted.log",
+      "scope": "Focused six-case recheck adds whole-document width assertions; other workbook cases are filtered, not represented as tested by this command. The complete run is recorded separately."
+    },
+    {
+      "name": "report selection",
+      "command": "node scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js __tests__/kai-customer-measured-report-selection-browser-acceptance.integration.spec.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel"
+      },
+      "totals": {
+        "tests": 21,
+        "pass": 21,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-connected-selection.log"
+    },
+    {
+      "name": "source to impact",
+      "command": "node scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js __tests__/kai-source-to-impact-workflow-browser-acceptance.integration.spec.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel"
+      },
+      "totals": {
+        "tests": 16,
+        "pass": 16,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-connected-workflow.log"
+    },
+    {
+      "name": "source promotion",
+      "command": "node scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js __tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel"
+      },
+      "totals": {
+        "tests": 15,
+        "pass": 15,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-connected-promotion.log"
+    },
+    {
+      "name": "Cedar Bridge six-source and PDF regression",
+      "command": "node scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js",
+      "environment": {
+        "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel",
+        "KAI_CEDAR_BRIDGE_PACKAGE": "/Users/mikewoz/Downloads/Cedar Bridge synthetic data/KAI_Synthetic_Impact_Evidence_Project",
+        "KAI_CEDAR_BRIDGE_SURVEY_PDF": "/Users/mikewoz/Downloads/Cedar_Bridge_Survey_Results_Verified.pdf",
+        "KAI_CEDAR_BRIDGE_ORIGINAL_PDF": "/Users/mikewoz/Downloads/Cedar_Bridge_Survey_Results_FY2025-26.pdf"
+      },
+      "totals": {
+        "tests": 51,
+        "pass": 51,
+        "fail": 0,
+        "skipped": 0
+      },
+      "log": "/tmp/kai-planned-cedar-full.log"
+    }
+  ],
+  "schema": {
+    "command": "python3 scripts/kai-source-planned-targets-local-postgres.py",
+    "log": "/tmp/kai-planned-schema-accepted.log",
+    "result": "PASS: canonical fresh chain, additive upgrade, read-only plan and reporting verifiers, unused rollback restoring prior constraints, reapply; browser W additionally proves existing manual rows preserved, invalid references refused and populated rollback refused.",
+    "prior_schema_regression_command": "python3 scripts/kai-measurement-completion-production-preflight-local-postgres.py",
+    "prior_schema_regression_log": "/tmp/kai-planned-prior-preflight.log",
+    "prior_schema_regression_result": "PASS: A/B/C, 19 incompatible states, exact catalog pins and four existing verifiers."
+  },
+  "build": {
+    "command": "npm run build",
+    "environment": {
+      "DATABASE_URL": "postgres://127.0.0.1:9/kai_sentinel"
+    },
+    "result": "PASS",
+    "log": "/tmp/kai-planned-build.log",
+    "bundle_sha256": "0cc59f45a837dfe8cb6839854d78ac81c534d82f0e26ce01445b9d73e0ec8f4a"
+  },
+  "layouts": [
+    {
+      "metadata": "referral-saved-1280.json",
+      "image": "referral-saved-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "referral-saved-390.json",
+      "image": "referral-saved-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "survey-results-1280.json",
+      "image": "survey-results-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "survey-results-390.json",
+      "image": "survey-results-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "survey-saved-1280.json",
+      "image": "survey-saved-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "target-confirmed-1280.json",
+      "image": "target-confirmed-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "target-confirmed-390.json",
+      "image": "target-confirmed-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-candidates-1280.json",
+      "image": "targets-candidates-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-candidates-390.json",
+      "image": "targets-candidates-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-compatible-1280.json",
+      "image": "targets-compatible-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-compatible-390.json",
+      "image": "targets-compatible-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-saved-1280.json",
+      "image": "targets-saved-1280.png",
+      "viewport": 1280,
+      "document_width": 1265,
+      "document_client_width": 1265,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    },
+    {
+      "metadata": "targets-saved-390.json",
+      "image": "targets-saved-390.png",
+      "viewport": 390,
+      "document_width": 375,
+      "document_client_width": 375,
+      "measurement_or_card_overflow": false,
+      "page_overflow": false
+    }
+  ],
+  "download_artifact_hashes_match": true,
+  "database_scope": "New runner-owned disposable loopback PostgreSQL clusters only; all removed by their runners.",
+  "boundaries": "Real services, validators, worker/parser, SQL, React bundle, HTTP, membership authorization and Chrome. Harness session cookie, storage, malware scan and model provider are simulated external boundaries. No production or existing persistent database, cloud, credential, remote repository, operational flag or Current State mutation.",
+  "intermediate_failures_resolved": [
+    "Obsolete read-only persistence assertions reconciled to saving plans.",
+    "Trigger variable/table alias collisions fixed through real insert tests.",
+    "Pending claim proposal no longer hides incomplete planning rows.",
+    "One full-run Chrome startup stalled under concurrent browser load; only that runner-owned child/browser was stopped, its disposable cluster was removed, and the subsequent serial complete 45-case run passed."
+  ]
+}

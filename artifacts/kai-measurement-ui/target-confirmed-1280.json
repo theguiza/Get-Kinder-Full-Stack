@@ -1,0 +1,80 @@
+{
+  "viewport": 1280,
+  "document_width": 1265,
+  "document_client_width": 1265,
+  "ancestors": [
+    {
+      "tag": "ARTICLE",
+      "class": "kai-measurement-outcome kai-measurement-plan",
+      "x": 611.65625,
+      "width": 274.671875,
+      "client": 273,
+      "scroll": 273
+    },
+    {
+      "tag": "DIV",
+      "class": "kai-measurement-outcomes",
+      "x": 325,
+      "width": 848,
+      "client": 848,
+      "scroll": 848
+    },
+    {
+      "tag": "SECTION",
+      "class": "mb-3",
+      "x": 325,
+      "width": 848,
+      "client": 848,
+      "scroll": 848
+    },
+    {
+      "tag": "DIV",
+      "class": "border-top pt-2 mt-2 small",
+      "x": 325,
+      "width": 848,
+      "client": 848,
+      "scroll": 848
+    },
+    {
+      "tag": "DIV",
+      "class": "kai-measurement border rounded p-2 mt-2",
+      "x": 304,
+      "width": 890,
+      "client": 888,
+      "scroll": 888
+    },
+    {
+      "tag": "DIV",
+      "class": "w-100",
+      "x": 304,
+      "width": 890,
+      "client": 890,
+      "scroll": 890
+    },
+    {
+      "tag": "DIV",
+      "class": "d-flex flex-wrap align-items-center gap-2 mt-1 small",
+      "x": 304,
+      "width": 890,
+      "client": 890,
+      "scroll": 890
+    },
+    {
+      "tag": "LI",
+      "class": "list-group-item",
+      "x": 304,
+      "width": 890,
+      "client": 890,
+      "scroll": 890
+    },
+    {
+      "tag": "UL",
+      "class": "list-group kai-measurement-source-list",
+      "x": 304,
+      "width": 890,
+      "client": 890,
+      "scroll": 890
+    }
+  ],
+  "overflowing_elements": []
+}

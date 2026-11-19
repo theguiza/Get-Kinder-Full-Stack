@@ -1,0 +1,36 @@
+{
+  "earlier": "2e5af509-e439-4003-aab4-2d4de6f15f8a",
+  "current": "b44352cc-cd1f-4159-aebb-ba8b71ac31c7",
+  "targets": [
+    {
+      "planned_target_id": "4f84dda0-b272-4def-808e-78f0d2c6331a",
+      "supersedes_target_id": "a4a4f57a-2e75-4283-97e2-21dba34acb76",
+      "row_number": 2
+    },
+    {
+      "planned_target_id": "4dea214c-4a77-4e9f-a927-6d8b6b9e9156",
+      "supersedes_target_id": "016eed47-d648-4f2c-a84e-e3b505aa305a",
+      "row_number": 3
+    },
+    {
+      "planned_target_id": "567f0070-0826-45b4-9661-ab75760a7f84",
+      "supersedes_target_id": "4f648451-2a7d-4c1f-b3ff-c71176d8ab33",
+      "row_number": 4
+    },
+    {
+      "planned_target_id": "e56a6460-7164-4ae7-9879-f8431ebbf885",
+      "supersedes_target_id": "2901e749-34b6-46b2-ab79-cb53f2b5d140",
+      "row_number": 5
+    },
+    {
+      "planned_target_id": "167b169a-f7fe-40b3-962f-a50474aa3dc0",
+      "supersedes_target_id": "e10bcd8d-7197-4c2a-95b4-799713f8a3c2",
+      "row_number": 6
+    },
+    {
+      "planned_target_id": "dcedfb40-19f9-43e4-bda6-3c08200c1484",
+      "supersedes_target_id": "1e72b07b-862a-4a29-bec7-33d6489b3533",
+      "row_number": 7
+    }
+  ]
+}

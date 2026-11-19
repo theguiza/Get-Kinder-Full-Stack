@@ -1,0 +1,105 @@
+{
+  "viewport": 390,
+  "document_width": 375,
+  "document_client_width": 375,
+  "ancestors": [
+    {
+      "tag": "DIV",
+      "class": "kai-measurement border rounded p-2 mt-2",
+      "x": 24,
+      "width": 312,
+      "client": 310,
+      "scroll": 310
+    },
+    {
+      "tag": "DIV",
+      "class": "w-100",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "d-flex flex-wrap align-items-center gap-2 mt-1 small",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "LI",
+      "class": "list-group-item",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "UL",
+      "class": "list-group kai-measurement-source-list",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "admin-card mb-3",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 312
+    },
+    {
+      "tag": "DIV",
+      "class": "",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 341
+    },
+    {
+      "tag": "DIV",
+      "class": "",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 341
+    },
+    {
+      "tag": "SECTION",
+      "class": "",
+      "x": 24,
+      "width": 312,
+      "client": 312,
+      "scroll": 341
+    }
+  ],
+  "overflowing_elements": [
+    {
+      "tag": "ASIDE",
+      "class": "gk-shell-sidebar",
+      "right": 387,
+      "width": 387
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-group",
+      "right": 381,
+      "width": 375
+    },
+    {
+      "tag": "DIV",
+      "class": "gk-shell-nav-item",
+      "right": 381,
+      "width": 62.453125
+    },
+    {
+      "tag": "SPAN",
+      "class": "gk-shell-nav-label",
+      "right": 377,
+      "width": 54.453125
+    }
+  ]
+}

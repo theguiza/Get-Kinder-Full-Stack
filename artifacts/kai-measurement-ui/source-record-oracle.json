@@ -1,0 +1,96 @@
+{
+  "source_file": "04_Surveys_Referrals_and_Targets.xlsx",
+  "source_sha256": "df201f59adfdf5453a5d5ebe265c7d900b0b1812c4b09f747269644d80d6ff9f",
+  "worksheets": {
+    "Self_Rating_Surveys": 121,
+    "Referral_Followups": 49,
+    "Delivery_Targets": 6
+  },
+  "matching_unit": "household",
+  "household_keys": 71,
+  "scope": "all source dates",
+  "food": {
+    "higher": 32,
+    "same": 6,
+    "lower": 5,
+    "unpaired": 21,
+    "version": 3,
+    "missing": 4,
+    "comparable": 43,
+    "percentage": "74.42"
+  },
+  "meal": {
+    "higher": 31,
+    "same": 7,
+    "lower": 3,
+    "unpaired": 21,
+    "version": 3,
+    "missing": 6,
+    "comparable": 41,
+    "percentage": "75.61"
+  },
+  "referral": {
+    "numerator": 9,
+    "denominator": 49,
+    "percentage": "18.37",
+    "fiscal_referral_date": 9,
+    "fiscal_followup_date": 8,
+    "independently_verified": false
+  },
+  "targets": [
+    {
+      "row": 2,
+      "indicator": "distinct_households_served",
+      "programme": "all",
+      "value": "90",
+      "unit": "households",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    },
+    {
+      "row": 3,
+      "indicator": "completed_household_service_encounters",
+      "programme": "all",
+      "value": "250",
+      "unit": "encounters",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    },
+    {
+      "row": 4,
+      "indicator": "pantry_bags_distributed",
+      "programme": "PA",
+      "value": "300",
+      "unit": "bags",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    },
+    {
+      "row": 5,
+      "indicator": "matched_food_planning_surveys",
+      "programme": "all",
+      "value": "60",
+      "unit": "comparable_households",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    },
+    {
+      "row": 6,
+      "indicator": "reported_partner_contacts",
+      "programme": "all",
+      "value": "25",
+      "unit": "self_reports",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    },
+    {
+      "row": 7,
+      "indicator": "food_skills_household_attendances",
+      "programme": "FS",
+      "value": "95",
+      "unit": "encounters",
+      "period": "2025-04-01 to 2026-03-31",
+      "comparison": null
+    }
+  ]
+}
