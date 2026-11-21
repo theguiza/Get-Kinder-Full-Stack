@@ -1,7 +1,7 @@
 {
   "persistence": {
     "funder": {
-      "draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
+      "draft_id": "c4084dee-a71a-49b6-84d1-717a2e96a74e",
       "content_type": "evidence_summary",
       "audience": "funder",
       "lineage": {
@@ -9,7 +9,7 @@
         "relationship": "assessment_adaptation",
         "engagement_id": "7d000000-0000-4000-8000-000000000004",
         "guidance_sha256": null,
-        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "parent_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
         "withheld_blocks": [],
         "reporting_purpose": "funder_report",
         "selected_claim_ids": null,
@@ -32,40 +32,40 @@
           15,
           16
         ],
-        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
-        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
-        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+        "source_assessment_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
+        "source_assessment_content_sha256": "8daa330c5d4cd85f0f1e98d1b2b725ffe417479d6f67940b811f1270aeb64808",
+        "source_assessment_generation_run_id": "ceceaa5d-466e-4c84-aa7f-f6789cd16fbc"
       },
       "block_count": 13,
       "citations": 8,
-      "content_fingerprint": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
-      "assessment_fingerprint_before": "44e3d356d6d7486282ce24394afc0f9e30331226efb7400fcd234ab5b296b5b7",
-      "assessment_fingerprint_after": "44e3d356d6d7486282ce24394afc0f9e30331226efb7400fcd234ab5b296b5b7"
+      "content_fingerprint": "478297a9e1dae6c360be4a363af4804d176c1c2e3aa263cd52d4b262e3dd3b06",
+      "assessment_fingerprint_before": "6c94e62c9d0d63afcbb13e07cacfd83d960492610b07650e6445a6d1e58e2474",
+      "assessment_fingerprint_after": "6c94e62c9d0d63afcbb13e07cacfd83d960492610b07650e6445a6d1e58e2474"
     },
     "revision": {
-      "draft_id": "1b3728c5-cead-4e5f-8e10-7d03fdcb00b7",
+      "draft_id": "b84c9d1e-f30e-4059-9ea7-3ff9e2f9f7ef",
       "lineage": {
         "version": 2,
         "relationship": "organization_revision",
         "engagement_id": "7d000000-0000-4000-8000-000000000004",
-        "parent_draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
+        "parent_draft_id": "c4084dee-a71a-49b6-84d1-717a2e96a74e",
         "revised_by_type": "human",
         "reporting_purpose": "funder_report",
-        "root_report_draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
-        "parent_content_sha256": "fd0d50c0dcd8853c5bafdd35ad34922bf31decd84e015707ae7ac9d32f719f60",
+        "root_report_draft_id": "c4084dee-a71a-49b6-84d1-717a2e96a74e",
+        "parent_content_sha256": "fbbedcd39dce5dc343e61a4c2bc3e0030158e9992c85109a5a8111853c5325fc",
         "revised_block_ordinals": [
           1
         ],
-        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
-        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
-        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+        "source_assessment_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
+        "source_assessment_content_sha256": "8daa330c5d4cd85f0f1e98d1b2b725ffe417479d6f67940b811f1270aeb64808",
+        "source_assessment_generation_run_id": "ceceaa5d-466e-4c84-aa7f-f6789cd16fbc"
       },
-      "v1_fingerprint_before": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
-      "v1_fingerprint_after": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
-      "v2_fingerprint": "4ccaf3392621363b1fe83806195feb3b268835112bbb2631abe0d553cf972de9"
+      "v1_fingerprint_before": "478297a9e1dae6c360be4a363af4804d176c1c2e3aa263cd52d4b262e3dd3b06",
+      "v1_fingerprint_after": "478297a9e1dae6c360be4a363af4804d176c1c2e3aa263cd52d4b262e3dd3b06",
+      "v2_fingerprint": "038d5c3388d07dccc800ff875cdac24f0da0b3847503541ca2036b4189a85c6e"
     },
     "board": {
-      "draft_id": "4c815302-f192-4238-8123-44ab685642bc",
+      "draft_id": "c54d01b0-d089-424e-87c0-c799d08cbf36",
       "content_type": "board_update",
       "audience": "internal",
       "lineage": {
@@ -73,7 +73,7 @@
         "relationship": "assessment_adaptation",
         "engagement_id": "7d000000-0000-4000-8000-000000000004",
         "guidance_sha256": "092059b6c0ba6070c0d5fefad42d56925bdb6e37967f908b44086b23648966bb",
-        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "parent_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
         "withheld_blocks": [],
         "reporting_purpose": "board_update",
         "selected_claim_ids": null,
@@ -96,13 +96,13 @@
           15,
           16
         ],
-        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
-        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
-        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+        "source_assessment_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
+        "source_assessment_content_sha256": "8daa330c5d4cd85f0f1e98d1b2b725ffe417479d6f67940b811f1270aeb64808",
+        "source_assessment_generation_run_id": "ceceaa5d-466e-4c84-aa7f-f6789cd16fbc"
       }
     },
     "annual": {
-      "draft_id": "aebaeccc-89d9-4915-95cc-8dc2697ea108",
+      "draft_id": "1eaec796-080a-4c98-a8f5-a88b3d9c6c72",
       "content_type": "annual_report_section",
       "audience": "public",
       "lineage": {
@@ -110,13 +110,8 @@
         "relationship": "assessment_adaptation",
         "engagement_id": "7d000000-0000-4000-8000-000000000004",
         "guidance_sha256": null,
-        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "parent_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
         "withheld_blocks": [
-          {
-            "reason": "cites_finding_not_selected",
-            "ordinal": 1,
-            "section_key": "executive_snapshot"
-          },
           {
             "reason": "cites_finding_not_selected",
             "ordinal": 2,
@@ -134,7 +129,7 @@
           },
           {
             "reason": "cites_finding_not_selected",
-            "ordinal": 5,
+            "ordinal": 6,
             "section_key": "evidence_findings"
           },
           {
@@ -170,20 +165,21 @@
         ],
         "reporting_purpose": "annual_report",
         "selected_claim_ids": [
-          "390da13e-b48a-43fa-a2ea-968c7db01d5d",
-          "4eaa5af3-6b95-46b5-92b3-e0958f615eb9"
+          "2d88076a-036e-4277-aa3c-16f65bbbefee",
+          "acea4e4d-afaa-46fe-9a0f-6162787baba7"
         ],
         "root_report_draft_id": null,
         "reused_block_ordinals": [
-          6,
+          1,
+          5,
           9,
           10,
           14,
           15
         ],
-        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
-        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
-        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+        "source_assessment_draft_id": "3579e98c-74cc-40c0-bd80-9fde3330944e",
+        "source_assessment_content_sha256": "8daa330c5d4cd85f0f1e98d1b2b725ffe417479d6f67940b811f1270aeb64808",
+        "source_assessment_generation_run_id": "ceceaa5d-466e-4c84-aa7f-f6789cd16fbc"
       }
     }
   },
@@ -273,6 +269,11 @@
       "withheld_blocks": [
         {
           "reason": "cites_finding_not_currently_usable",
+          "ordinal": 1,
+          "section_key": "executive_snapshot"
+        },
+        {
+          "reason": "cites_finding_not_currently_usable",
           "ordinal": 9,
           "section_key": "impact_stories"
         },
@@ -284,7 +285,7 @@
       ],
       "permission_excluded": [
         {
-          "claimId": "390da13e-b48a-43fa-a2ea-968c7db01d5d",
+          "claimId": "2d88076a-036e-4277-aa3c-16f65bbbefee",
           "sourceRole": "primary",
           "validatorKey": "VAL-KAI-B1A-02-004",
           "blockingReason": "ai_processing_not_permitted"
@@ -295,7 +296,8 @@
       "detail_historical": true,
       "download": 200,
       "revise": 422
-    }
+    },
+    "missing_assessment": 404
   },
   "provider": {
     "funder": {
@@ -326,7 +328,7 @@
       "client_followups": 0
     },
     "after": {
-      "drafts": 16,
+      "drafts": 22,
       "claim_review_decisions": 0,
       "evidence_review_decisions": 0,
       "coverage_review_decisions": 0,
@@ -342,31 +344,434 @@
   "layout": {
     "use_assessment_1280": {
       "found": true,
-      "panelScroll": 890,
-      "panelClient": 890,
+      "panelScroll": 868,
+      "panelClient": 868,
       "innerWidth": 1280,
       "outside": 0
     },
     "use_assessment_390": {
       "found": true,
-      "panelScroll": 312,
-      "panelClient": 312,
+      "panelScroll": 266,
+      "panelClient": 266,
       "innerWidth": 390,
       "outside": 0
     },
     "revise_editor_1280": {
       "found": true,
-      "panelScroll": 890,
-      "panelClient": 890,
+      "panelScroll": 868,
+      "panelClient": 868,
       "innerWidth": 1280,
       "outside": 0
     },
     "revise_editor_390": {
       "found": true,
-      "panelScroll": 312,
-      "panelClient": 312,
+      "panelScroll": 266,
+      "panelClient": 266,
       "innerWidth": 390,
       "outside": 0
+    }
+  },
+  "styles": {
+    "bootstrapSheet": true,
+    "bootstrapRules": 1295,
+    "btnPrimaryBackground": "rgb(13, 110, 253)",
+    "appCss": true,
+    "tokensCss": true,
+    "siteHeader": true,
+    "bodyFont": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", \"Noto Sans\", \"Li"
+  },
+  "styled": {
+    "layout": {
+      "use_assessment_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 868,
+        "panelClient": 868,
+        "controls": 7,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "assessment_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 886,
+        "panelClient": 886,
+        "controls": 34,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "use_assessment_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 296,
+        "panelClient": 296,
+        "controls": 7,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "assessment_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 314,
+        "panelClient": 314,
+        "controls": 34,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "internal_planning_report_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 886,
+        "panelClient": 886,
+        "controls": 24,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "internal-planning_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 886,
+        "panelClient": 886,
+        "controls": 24,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "funder_report_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 314,
+        "panelClient": 314,
+        "controls": 24,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "funder-report_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 314,
+        "panelClient": 314,
+        "controls": 24,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "annual-report_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 314,
+        "panelClient": 314,
+        "controls": 24,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "revise_editor_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 868,
+        "panelClient": 868,
+        "controls": 25,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "revise_error_1280": {
+        "found": true,
+        "innerWidth": 1280,
+        "docScrollWidth": 1265,
+        "bodyScrollWidth": 1265,
+        "panelScroll": 868,
+        "panelClient": 868,
+        "controls": 25,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "revise_editor_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 296,
+        "panelClient": 296,
+        "controls": 25,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "revise_error_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 296,
+        "panelClient": 296,
+        "controls": 25,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      },
+      "version_3_390": {
+        "found": true,
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "panelScroll": 314,
+        "panelClient": 314,
+        "controls": 25,
+        "outside": [],
+        "covered": [],
+        "clippedText": []
+      }
+    },
+    "screenshots": [
+      "styled-use-assessment-1280.png",
+      "styled-assessment-1280.png",
+      "styled-assessment-actions-1280.png",
+      "styled-assessment-open-1280.png",
+      "styled-assessment-1280.png",
+      "styled-use-assessment-390.png",
+      "styled-assessment-390.png",
+      "styled-assessment-actions-390.png",
+      "styled-assessment-open-390.png",
+      "styled-assessment-390.png",
+      "styled-creating-internal_planning-1280.png",
+      "styled-internal-planning-actions-1280.png",
+      "styled-internal-planning-open-1280.png",
+      "styled-internal-planning-1280.png",
+      "styled-creating-funder_report-390.png",
+      "styled-funder-report-actions-390.png",
+      "styled-funder-report-open-390.png",
+      "styled-funder-report-390.png",
+      "styled-creating-annual_report-390.png",
+      "styled-annual-report-actions-390.png",
+      "styled-annual-report-open-390.png",
+      "styled-annual-report-390.png",
+      "styled-revise-editor-1280.png",
+      "styled-revise-unchanged-1280.png",
+      "styled-revise-error-1280.png",
+      "styled-previous-version-1280.png",
+      "styled-revise-editor-390.png",
+      "styled-revise-unchanged-390.png",
+      "styled-revise-error-390.png",
+      "styled-previous-version-390.png",
+      "styled-revise-saving-390.png",
+      "styled-version-3-390.png"
+    ],
+    "created": {
+      "internal_planning": {
+        "draft_id": "acaa67bf-883f-4e3f-870d-6dc423822ac9",
+        "width": 1280,
+        "content_type": "evidence_summary",
+        "audience": "internal"
+      },
+      "funder_report": {
+        "draft_id": "00b2030e-80eb-4c39-8f8e-027660eccf58",
+        "width": 390,
+        "content_type": "evidence_summary",
+        "audience": "funder"
+      },
+      "annual_report": {
+        "draft_id": "9351075a-139f-405b-b81b-d609e1f52cfa",
+        "width": 390,
+        "content_type": "annual_report_section",
+        "audience": "public"
+      }
+    },
+    "assessment_1280_download": {
+      "bytes": 63975,
+      "sha256": "9a28a75c20c78459b62a91937b0cb31dfe2a61df0967ff67d771338c30f79113",
+      "content_type": "text/markdown; charset=utf-8",
+      "download_name": "kai-free-impact-assessment.md"
+    },
+    "assessment_390_download": {
+      "bytes": 63975,
+      "sha256": "9a28a75c20c78459b62a91937b0cb31dfe2a61df0967ff67d771338c30f79113",
+      "content_type": "text/markdown; charset=utf-8",
+      "download_name": "kai-free-impact-assessment.md"
+    },
+    "internal-planning_1280_download": {
+      "bytes": 62296,
+      "sha256": "842dca6326448f3a9ce905a0137d9aaca69a0ca2c6cb09977a0a2b5f05e81eb6",
+      "content_type": "text/markdown; charset=utf-8",
+      "download_name": "kai-internal-planning-report.md"
+    },
+    "funder-report_390_download": {
+      "bytes": 62524,
+      "sha256": "f42c857119899157dee85847faf4ecd2fc8252c2edc2359db295294a48ce95f2",
+      "content_type": "text/markdown; charset=utf-8",
+      "download_name": "kai-funder-report.md"
+    },
+    "annual-report_390_download": {
+      "bytes": 62484,
+      "sha256": "d45086162e5970eb19ffe4527547e98a3f4fac08149a586a457cab63fd4ca5ae",
+      "content_type": "text/markdown; charset=utf-8",
+      "download_name": "kai-annual-report-content.md"
+    }
+  },
+  "downloads": {
+    "v1_first": {
+      "draft_id": "c4084dee-a71a-49b6-84d1-717a2e96a74e",
+      "version": 1,
+      "bytes": 62524,
+      "sha256": "7ab1a4906b748ef420a5fded03618ebae5cc94fb06eb6ae3b2c643d16a3f51a2",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report.md\"",
+      "download_name": "kai-funder-report.md"
+    },
+    "v2_first": {
+      "draft_id": "b84c9d1e-f30e-4059-9ea7-3ff9e2f9f7ef",
+      "version": 2,
+      "bytes": 62654,
+      "sha256": "544368ad66cf3d8327745bebc2e6ccc4a898b8e7808f0d37907232ef80e5c9c7",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report-version-2.md\"",
+      "download_name": "kai-funder-report-version-2.md"
+    },
+    "v3_first": {
+      "draft_id": "297035aa-65c9-4b87-9fd9-2777b2f7fd5f",
+      "version": 3,
+      "bytes": 62656,
+      "sha256": "ab5b1204ce769e77fa62b737d2c2d7c25f916680a2f794a4fc56c7cb4aacdf0f",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report-version-3.md\"",
+      "download_name": "kai-funder-report-version-3.md"
+    },
+    "v1_after_reload": {
+      "draft_id": "c4084dee-a71a-49b6-84d1-717a2e96a74e",
+      "version": 1,
+      "bytes": 62524,
+      "sha256": "7ab1a4906b748ef420a5fded03618ebae5cc94fb06eb6ae3b2c643d16a3f51a2",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report.md\"",
+      "download_name": "kai-funder-report.md"
+    },
+    "v2_after_reload": {
+      "draft_id": "b84c9d1e-f30e-4059-9ea7-3ff9e2f9f7ef",
+      "version": 2,
+      "bytes": 62654,
+      "sha256": "544368ad66cf3d8327745bebc2e6ccc4a898b8e7808f0d37907232ef80e5c9c7",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report-version-2.md\"",
+      "download_name": "kai-funder-report-version-2.md"
+    },
+    "v3_after_reload": {
+      "draft_id": "297035aa-65c9-4b87-9fd9-2777b2f7fd5f",
+      "version": 3,
+      "bytes": 62656,
+      "sha256": "ab5b1204ce769e77fa62b737d2c2d7c25f916680a2f794a4fc56c7cb4aacdf0f",
+      "content_type": "text/markdown; charset=utf-8",
+      "disposition": "attachment; filename=\"kai-funder-report-version-3.md\"",
+      "download_name": "kai-funder-report-version-3.md"
+    }
+  },
+  "race": {
+    "revision": {
+      "status": 201,
+      "created_id": "59fc309a-5c5f-4da1-94d0-db2fb8285c0f",
+      "selected_project": "7d000000-0000-4000-8000-0000000000b4",
+      "open_detail": null,
+      "list_text": "No internal drafts for this Project yet.",
+      "late_requests": [],
+      "exceptions": []
+    },
+    "adaptation": {
+      "status": 201,
+      "created_id": "99644ec8-8caf-4887-8757-8c0cf9bde1f4",
+      "selected_project": "7d000000-0000-4000-8000-0000000000b4",
+      "open_detail": null,
+      "list_text": "No internal drafts for this Project yet.",
+      "late_requests": [],
+      "exceptions": []
+    },
+    "back_in_project": {
+      "version_4": "59fc309a-5c5f-4da1-94d0-db2fb8285c0f",
+      "board_report": "99644ec8-8caf-4887-8757-8c0cf9bde1f4",
+      "second_project_list": 0
+    }
+  },
+  "attribution": {
+    "audit_events": [
+      {
+        "actor_user_id": "7fe8ccb0-8be5-4244-82f8-ea9b4eafd604",
+        "actor_type": "human",
+        "action": "generated_content_draft_created"
+      }
+    ],
+    "administrator": "7fe8ccb0-8be5-4244-82f8-ea9b4eafd604",
+    "lineage_revised_by_type": "human",
+    "draft_created_by_type": "system"
+  },
+  "added": [
+    "acaa67bf-883f-4e3f-870d-6dc423822ac9",
+    "00b2030e-80eb-4c39-8f8e-027660eccf58",
+    "9351075a-139f-405b-b81b-d609e1f52cfa",
+    "297035aa-65c9-4b87-9fd9-2777b2f7fd5f",
+    "59fc309a-5c5f-4da1-94d0-db2fb8285c0f",
+    "99644ec8-8caf-4887-8757-8c0cf9bde1f4"
+  ],
+  "capabilities": {
+    "generateDrafts": true,
+    "adaptAssessments": true,
+    "reviseWorkingReports": true,
+    "readInternalDrafts": true,
+    "generateAllDraftTypes": false,
+    "reviewGeneratedDrafts": false,
+    "releaseInternalReports": true,
+    "recordEvidenceReview": false,
+    "recordClaimReview": false
+  },
+  "reopened": {
+    "internal_planning": {
+      "draft_id": "acaa67bf-883f-4e3f-870d-6dc423822ac9",
+      "label": "Internal planning report",
+      "bytes": 62296,
+      "sha256": "842dca6326448f3a9ce905a0137d9aaca69a0ca2c6cb09977a0a2b5f05e81eb6"
+    },
+    "board_update": {
+      "draft_id": "c54d01b0-d089-424e-87c0-c799d08cbf36",
+      "label": "Board report",
+      "bytes": 62288,
+      "sha256": "f207cc02120cb5255b005bfdaec919a0c8b01936501795faa4e3f7691305bedb"
+    },
+    "funder_report": {
+      "draft_id": "00b2030e-80eb-4c39-8f8e-027660eccf58",
+      "label": "Funder report",
+      "bytes": 62524,
+      "sha256": "f42c857119899157dee85847faf4ecd2fc8252c2edc2359db295294a48ce95f2"
+    },
+    "annual_report": {
+      "draft_id": "9351075a-139f-405b-b81b-d609e1f52cfa",
+      "label": "Annual-report content",
+      "bytes": 62484,
+      "sha256": "d45086162e5970eb19ffe4527547e98a3f4fac08149a586a457cab63fd4ca5ae"
     }
   }
 }

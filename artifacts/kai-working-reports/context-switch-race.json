@@ -1,0 +1,20 @@
+{
+  "revision": {
+    "status": 201,
+    "created_id": "59fc309a-5c5f-4da1-94d0-db2fb8285c0f",
+    "selected_project": "7d000000-0000-4000-8000-0000000000b4",
+    "open_detail": null,
+    "list_text": "No internal drafts for this Project yet.",
+    "late_requests": [],
+    "exceptions": []
+  },
+  "adaptation": {
+    "status": 201,
+    "created_id": "99644ec8-8caf-4887-8757-8c0cf9bde1f4",
+    "selected_project": "7d000000-0000-4000-8000-0000000000b4",
+    "open_detail": null,
+    "list_text": "No internal drafts for this Project yet.",
+    "late_requests": [],
+    "exceptions": []
+  }
+}
