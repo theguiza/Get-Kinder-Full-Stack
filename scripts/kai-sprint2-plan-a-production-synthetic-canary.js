@@ -379,7 +379,7 @@ const WORKFLOW_STAGE_TEXT = [
   ["measurement", "Use Count records. For this accepted synthetic fixture, define each nonblank data row as one programme session (header/blank excluded; exact duplicate nonblank rows retained). Enter only the synthetic reporting period your organization can genuinely attest; do not infer a period from row dates. Record the definition/measurement and propose the claim through the UI."],
   ["internal_eligibility", "No human action: the runner verifies that the measured claim is eligible for internal use (Impact Facts). Nobody reviews or approves it."],
   ["generation", "As the customer administrator, create the internal Evidence Summary in the UI using the live generation action. Then provide the generated draft UUID shown by the application."],
-  ["download_validation", "In \"Your internal drafts\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will fetch the same authorized internal report route and validate its content and attachment response."]
+  ["download_validation", "In \"Your assessments and reports\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will fetch the same authorized internal report route and validate its content and attachment response."]
 ];
 // Stages with no human action: the runner only verifies.
 const AUTOMATIC_STAGES = new Set([4]);

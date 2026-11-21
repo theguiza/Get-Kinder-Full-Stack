@@ -39,6 +39,13 @@ function measuredClaimDisclosure(claim) {
 }
 
 const EVIDENCE_SUMMARY_CONTENT_TYPE = "evidence_summary";
+// Owner direction 2026-11-20: every narrative working-report type follows the
+// Evidence Summary disclosure rules (server-composed disclosure, a forbidden
+// word counts only when asserted, every coverage dimension named), so one
+// policy governs every report drawn from the same findings.
+const NARRATIVE_DISCLOSURE_CONTENT_TYPES = new Set([
+  EVIDENCE_SUMMARY_CONTENT_TYPE, "impact_narrative", "board_update", "annual_report_section", "case_for_support", "grant_response_paragraph",
+]);
 
 const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-001",
@@ -763,7 +770,7 @@ export function validateGeneratedContentDraft({
         .filter((claim) => !(summaryBlock && disclosedInFindings.has(claim.claimId)))
         .flatMap((claim) => (claim.limitationCodes || []).filter(isMeasuredClaimCode)));
       const text = block.text || "";
-      const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE;
+      const evidenceSummaryRules = NARRATIVE_DISCLOSURE_CONTENT_TYPES.has(contentType);
       const contradicts = (pattern) => (evidenceSummaryRules ? affirmativeMatches(text, pattern).length > 0 : pattern.test(text));
       for (const rule of [...MEASUREMENT_DISCLOSURE_RULES, ...DERIVED_DISCLOSURE_RULES]) {
         const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
@@ -902,6 +909,84 @@ function audienceAllowed(claim, requestedAudience) {
   if (requestedAudience === "funder") return claim.audienceAuthority?.funder === true;
   if (requestedAudience === "public") return claim.audienceAuthority?.public === true;
   return false;
+}
+
+// A revised working report (owner direction 2026-11-20): a figure in the
+// organization's revised prose keeps the words that describe it - its unit,
+// population or period - in the saved text or the finding it cites. Returns
+// the figures whose first describing word after them (or, when none follows,
+// every nearby word) is not among the words around the same figure in any
+// reference text. A figure that appears in no reference is left to VAL-GEN-004.
+const FIGURE_PATTERN = /(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?/g;
+const FIGURE_STOP_WORDS = new Set(["a", "an", "the", "of", "in", "on", "for", "and", "or", "to", "with", "at", "by", "from", "were", "was", "are", "is",
+  "be", "been", "had", "have", "has", "than", "that", "this", "these", "those", "our", "their", "its", "it", "as", "per", "out", "over", "about", "some",
+  "who", "which", "we", "they", "there", "all", "each", "so", "also", "this", "year", "years", "month", "months", "week", "weeks", "day", "days",
+  "during", "between", "period", "not", "no", "non"]);
+const FIGURE_NEGATIONS = new Set(["not", "no", "non"]);
+
+// Dates and fiscal-year labels are periods, not figures with a unit; their
+// digits stay checked by VAL-GEN-004.
+const FIGURE_DATE_PATTERN = /\b(?:FY)?\d{4}[-/]\d{2,4}(?:[-/]\d{2})?\b/gi;
+
+function figureWords(text) {
+  const tokens = [];
+  text = String(text || "").replace(FIGURE_DATE_PATTERN, " period ");
+  const pattern = /[A-Za-z][A-Za-z'-]*|(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?/g;
+  for (const match of String(text || "").matchAll(pattern)) tokens.push({ token: match[0].toLowerCase(), index: match.index, figure: /\d/.test(match[0]) });
+  return tokens;
+}
+
+// Content words near a figure; a negated word ("not people") never describes it.
+function contentWordsAround(tokens, position, before, after) {
+  const words = [];
+  const describes = (i) => !tokens[i].figure && !FIGURE_STOP_WORDS.has(tokens[i].token) && !(i > 0 && FIGURE_NEGATIONS.has(tokens[i - 1].token));
+  for (let i = position - 1, n = 0; i >= 0 && n < before; i -= 1) {
+    if (!describes(i)) continue;
+    words.push(tokens[i].token);
+    n += 1;
+  }
+  for (let i = position + 1, n = 0; i < tokens.length && n < after; i += 1) {
+    if (!describes(i)) continue;
+    words.push(tokens[i].token);
+    n += 1;
+  }
+  return words;
+}
+
+function firstWordAfter(tokens, position) {
+  for (let i = position + 1; i < tokens.length && i <= position + 3; i += 1) {
+    if (tokens[i].figure) return null;
+    if (!FIGURE_STOP_WORDS.has(tokens[i].token)) return tokens[i].token;
+  }
+  return null;
+}
+
+export function revisedFigureContextViolations(revisedText, referenceTexts) {
+  const revised = figureWords(revisedText);
+  const references = (referenceTexts || []).map(figureWords);
+  const stem = (word) => word.replace(/(?:ies|es|s)$/, "");
+  const violations = [];
+  revised.forEach((entry, position) => {
+    if (!entry.figure) return;
+    const literal = entry.token.replace(/^[-+]/, "");
+    const nearby = new Set();
+    let found = false;
+    for (const tokens of references) {
+      tokens.forEach((candidate, index) => {
+        if (!candidate.figure || candidate.token.replace(/^[-+]/, "") !== literal) return;
+        found = true;
+        contentWordsAround(tokens, index, 5, 5).forEach((word) => nearby.add(stem(word)));
+      });
+    }
+    if (!found) return;
+    const after = firstWordAfter(revised, position);
+    const around = contentWordsAround(revised, position, 3, 3);
+    const ok = after
+      ? nearby.has(stem(after))
+      : around.length === 0 || around.some((word) => nearby.has(stem(word)));
+    if (!ok) violations.push(entry.token);
+  });
+  return unique(violations);
 }
 
 export const __generatedContentValidatorContract = Object.freeze({

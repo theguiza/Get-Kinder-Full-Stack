@@ -3795,7 +3795,7 @@ async function runCedarBridgeAcceptance() {
     // no Cedar Bridge figure is written by the test. The narrative sections
     // come from the deterministic stub above (no language model); the gaps,
     // three proposed improvements and next steps are composed by the server.
-    const ASSESSMENT_TITLES = ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Three Recommended Improvements", "Your Next Steps"];
+    const ASSESSMENT_TITLES = ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"];
     const assessmentState = {};
     await test("F1: a Free Impact Assessment is composed from every currently eligible library claim, saved, and retrievable", { skip: !SURVEY_PDF ? "survey PDF not set" : false }, async () => {
       report.free_impact_assessment = assessmentState;
@@ -3864,13 +3864,15 @@ async function runCedarBridgeAcceptance() {
         assert.ok(blocks.some((b) => b.claim_ids.includes(documentClaims[label]) && b.text.includes(DOCUMENT_ANCHORS[label].text)), `${label}: quoted with its citation`);
       }
       const stories = sections[2].blocks.map((b) => b.body).join("\n");
-      assert.match(stories, /Participant story evidence: none is available/);
+      // Owner direction 2026-11-20: a one-line fact, not a consent task.
+      assert.match(stories, /No participant's own account is among the selected evidence/);
       assert.ok(sections[2].blocks.some((b) => b.claimIds.includes(documentClaims.no_participant_story)), "the missing-story statement cites the source that records it");
       // Three proposed improvements, each grounded in a documented gap that its citations carry.
       const recommendations = sections[4].blocks;
       assert.equal(recommendations.length, 3);
       for (const rec of recommendations) {
-        assert.match(rec.body, /^Proposed change: .+ Basis: .+ This is a proposal for the organization to consider; it is not a measured or confirmed result\.(?: Measurement disclosure for .+)?$/s);
+        // Owner direction 2026-11-20: the action, its basis and what it could show.
+        assert.match(rec.body, /^Proposed change: .+ Basis: .+ What it could show: .+?(?: Measurement disclosure for .+)?$/s);
         assert.ok(rec.claimIds.length >= 1);
       }
       // Owner direction 2026-11-11: the outcome moving in the direction the
@@ -3881,7 +3883,10 @@ async function runCedarBridgeAcceptance() {
       assert.match(recommendations[1].body, /duration/i);
       assert.ok(recommendations[1].claimIds.includes(documentClaims.missing_duration), "duration: grounded in the operations note on missing durations");
       assert.match(recommendations[2].body, /follow-up/i);
-      assert.ok(recommendations[2].claimIds.includes(documentClaims.convenience_sample) && recommendations[2].claimIds.includes(documentClaims.employment_not_verified), "follow-up: grounded in the convenience-sample and check-in statements");
+      assert.ok(recommendations[2].claimIds.includes(documentClaims.convenience_sample), "follow-up: grounded in the convenience-sample statement");
+      // A statement that something was not independently verified is not
+      // turned into a corroboration or verification task (owner direction 2026-11-20).
+      assert.doesNotMatch(recommendations.map((rec) => rec.body).join("\n"), /[Cc]orroborate|independently verif|verify/);
       // Case A (meaning known): the outcome is named, its organization-stated
       // meaning given, its change interpreted in the stated direction, with an
       // implication and its limits; it is never presented as verified or caused.
@@ -4069,7 +4074,7 @@ async function runCedarBridgeAcceptance() {
         await page.waitFor(() => page.visible(`[data-client-internal-draft-detail="${draftId}"]`), "the saved assessment opened", { timeout: 30000 });
         const detail = await page.textOf(`[data-client-internal-draft-detail="${draftId}"]`);
         for (const claimId of selected) assert.ok(await page.textOf(`[data-client-internal-draft-detail="${draftId}"] [data-client-internal-draft-citation="${claimId}"]`), `${claimId} cited`);
-        for (const heading of ASSESSMENT_TITLES) assert.ok(detail.includes(heading) || (heading === "Three Recommended Improvements" && detail.includes("Recommended Improvements")), heading);
+        for (const heading of ASSESSMENT_TITLES) assert.ok(detail.includes(heading), heading);
         assert.match(detail, /Digital confidence: .*self-rated digital confidence on a 1 to 5 scale/);
         assert.match(detail, /a favourable observed change on this outcome/);
         assert.match(detail, /participants' own answers \(self-reported\), not an independent assessment/);

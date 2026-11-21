@@ -522,7 +522,13 @@ function funderInput(overrides = {}) {
   };
 }
 
-test("P14-09 a currently funder-ineligible claim fails BEFORE the generator is invoked, and no durable rows are created", async () => {
+// Owner direction 2026-11-20 supersedes the P14-09 drafting precheck: writing
+// a funder-oriented working draft is normal processing (Operating Model 7.1)
+// and publishes nothing, so current funder eligibility (claim review approval
+// for funder use, effective funder authority, coverage) is a condition of the
+// actual external release, not of drafting. Open review facts travel with the
+// claim as limitations.
+test("P14-09 (2026-11-20): a claim not currently funder-eligible is drafted into a funder working draft, with its open review facts as limitations", async () => {
   const state = makeState();
   const generatorCalls = [];
   const evaluator = makeEvaluator({ eligibleForClaim: () => false });
@@ -531,14 +537,13 @@ test("P14-09 a currently funder-ineligible claim fails BEFORE the generator is i
     draftGenerator: funderGenerator({ calls: generatorCalls }),
     metadataOnlyAudit: auditRecorder(),
   });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "funder_use_not_currently_eligible");
-  assert.equal(generatorCalls.length, 0);
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
-  assert.equal(state.generatedContentBlocks.length, 0);
-  assert.equal(state.generatedContentCitations.length, 0);
-  assert.equal(state.reviewQueueItems.length, 0);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(generatorCalls.length, 1);
+  assert.equal(generatorCalls[0].requestedAudience, "funder");
+  assert.deepEqual(generatorCalls[0].claims[0].limitationCodes, ["claim_review_unresolved"]);
+  assert.equal(state.generatedContentDrafts.length, 1);
+  assert.equal(state.generatedContentDrafts[0].requested_audience, "funder");
+  assert.equal(result.data.requestedAudience, "funder");
 });
 
 test("P14-09 a currently funder-eligible claim reaches the generator and persists engagement binding, requested_audience=funder, content_type=evidence_summary, and an open review row", async () => {
@@ -567,7 +572,7 @@ test("P14-09 a currently funder-eligible claim reaches the generator and persist
   assert.equal(state.reviewQueueItems[0].review_status, GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus);
 });
 
-test("P14-09 post-generation eligibility loss (eligible at pre-check, ineligible at revalidation) fails closed and rolls back all request state", async () => {
+test("P14-09 (2026-11-20): eligibility changing between pre-check and revalidation does not roll a funder working draft back (only identity and recorded rejection do)", async () => {
   const state = makeState();
   const generatorCalls = [];
   // First evaluator call per claim (pre-generation) reports eligible; the
@@ -579,14 +584,9 @@ test("P14-09 post-generation eligibility loss (eligible at pre-check, ineligible
     draftGenerator: funderGenerator({ calls: generatorCalls }),
     metadataOnlyAudit: auditRecorder(),
   });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "funder_use_not_currently_eligible");
-  assert.equal(generatorCalls.length, 1, "the generator was invoked once (pre-check passed) but nothing may be persisted");
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
-  assert.equal(state.generatedContentBlocks.length, 0);
-  assert.equal(state.generatedContentCitations.length, 0);
-  assert.equal(state.reviewQueueItems.length, 0);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(generatorCalls.length, 1);
+  assert.equal(state.generatedContentDrafts.length, 1);
 });
 
 test("P14-09 idempotency/replay: the same idempotency_key returns the same result without re-invoking the generator", async () => {

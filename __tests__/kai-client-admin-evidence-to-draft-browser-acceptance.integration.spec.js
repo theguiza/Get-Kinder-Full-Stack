@@ -815,7 +815,7 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector("[data-client-internal-draft-detail]"))`), "internal draft detail");
       const detail = await adminPage.evaluate(`(() => { const el = document.querySelector("[data-client-internal-draft-detail]"); return el ? el.innerText : null; })()`);
       assert.ok(detail && detail.includes("Internal draft text for:"), `the persisted draft is read back: ${detail}`);
-      for (const text of ["Awaiting Get Kinder review", "Internal use only.", "Not approved for funder or public use, export, or release.", "Get Kinder has not reviewed this draft."]) {
+      for (const text of ["Awaiting Get Kinder review", "Internal use only.", "Working report: KAI has not sent or released it outside your organization.", "Get Kinder has not reviewed this draft."]) {
         assert.ok(detail.includes(text), text);
       }
       results.b5 = "PASS: proposal -> client P2-04 -> evidence summary 201 + impact narrative 201; zero GK audit events or decisions in between";

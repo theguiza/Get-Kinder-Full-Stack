@@ -236,7 +236,7 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
  * recorded correction refreshes the pipeline and the reads only; it runs no
  * step and resumes no "Use for impact" flow.
  *
- * "Your internal drafts" (readInternalDrafts) reads the administrator's own
+ * "Your assessments and reports" (readInternalDrafts) reads the administrator's own
  * persisted internal drafts with their true review state; a draft just
  * generated is opened from that read.
  */
@@ -1294,8 +1294,8 @@ export default function ClientEvidenceWorkflow({
                 {DRAFT_LABELS[lastDraft.contentType]} {lastDraft.replayed ? "already created" : "created"}: {lastDraft.blockCount} block(s) citing {lastDraft.citedClaimCount} claim(s).
               </div>
               <div>
-                Internal use only. {access.readInternalDrafts
-                  ? "It is open below."
+                {access.readInternalDrafts
+                  ? (lastDraft.contentType === "free_impact_assessment" ? "It is open below, where you can use it to create a report." : "It is open below.")
                   : "It appears under Generated Drafts once Get Kinder has reviewed it."}
               </div>
             </div>
@@ -1305,15 +1305,17 @@ export default function ClientEvidenceWorkflow({
 
       {access.readInternalDrafts ? (
         <div className="admin-card mb-3" data-client-internal-drafts="">
-          <h5 className="mb-2">Your internal drafts</h5>
+          <h5 className="mb-2">Your assessments and reports</h5>
           <div className="small text-muted mb-2">
-            Drafts generated for this Project, for internal use only. A draft whose findings are usable internally can be opened and downloaded
-            here; drafts from high-risk sources wait for Get Kinder.
+            Saved for this Project. Open an assessment to read it or use it for a planning, board, funder or annual report; open a report to read,
+            revise or download it. KAI does not send or publish any of them.
           </div>
           <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
             refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null}
             canReadReleasedReports={access.readReleasedInternalReports === true}
-            canReadInternalReports={access.readInternalDrafts === true} />
+            canReadInternalReports={access.readInternalDrafts === true}
+            canAdaptAssessments={access.adaptAssessments === true}
+            canReviseReports={access.reviseWorkingReports === true} />
         </div>
       ) : null}
     </>

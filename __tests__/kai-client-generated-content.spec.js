@@ -508,7 +508,7 @@ test("roles: binding-derived client_admin, client_reviewer, client_contributor, 
   }
 });
 
-test("no client role gains funder generation, GK review, GK draft/packet reads, export, or final authority; only client_admin gains internal generation", async () => {
+test("no client role gains GK review, GK draft/packet reads, export, or final authority; only client_admin drafts working reports (any audience)", async () => {
   const deps = dependencies();
   const generationRequest = (actorContext, requestedAudience) => ({
     organizationId: ORG, engagementId: ENGAGEMENT, requestedAudience, claimIds: [CLAIM_A],
@@ -519,9 +519,18 @@ test("no client role gains funder generation, GK review, GK draft/packet reads, 
     const internal = await createEvidenceSummaryDraft(generationRequest(actorContext, "internal"), noGeneration);
     assert.deepEqual([internal.error.code, internal.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
   }
-  for (const actorContext of [await clientAdminActor(), memberActor("client_reviewer"), memberActor("client_contributor")]) {
+  // Owner direction 2026-11-20: a funder-oriented working report is the
+  // organization's own draft; client_admin passes the role check (and reaches
+  // the Project check), the other client roles do not.
+  const admin = await clientAdminActor();
+  const adminFunder = await createEvidenceSummaryDraft(generationRequest(admin, "funder"), { env: ENV, getEngagementForOrganization: async () => null });
+  assert.equal(adminFunder.error.code, "tenant_boundary_violation", JSON.stringify(adminFunder));
+  for (const actorContext of [memberActor("client_reviewer"), memberActor("client_contributor")]) {
+    const funder = await createEvidenceSummaryDraft(generationRequest(actorContext, "funder"), noGeneration);
+    assert.deepEqual([funder.error.code, funder.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  }
+  for (const actorContext of [admin, memberActor("client_reviewer"), memberActor("client_contributor")]) {
     const denials = {
-      funderGenerate: await createEvidenceSummaryDraft(generationRequest(actorContext, "funder"), noGeneration),
       startReview: await startGeneratedContentReview({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, reviewQueueItemId: id("9", 1), expectedUpdatedAt: NOW, actorContext, now: NOW }, deps),
       completeReview: await completeGeneratedContentReview({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, reviewQueueItemId: id("9", 1), expectedUpdatedAt: NOW, actorContext, now: NOW }, deps),
       gkPacket: await getGeneratedDraftReviewPacket({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, actorContext }, deps),

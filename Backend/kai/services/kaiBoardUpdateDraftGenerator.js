@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import { ADAPTATION_MODEL_INSTRUCTION } from "./kaiAssessmentAdaptation.js";
+
 import {
   GENERATOR_RESULT_REASON,
   GENERATOR_RESULT_REASONS,
@@ -115,7 +117,7 @@ export function createProductionBoardUpdateDraftGenerator({
 
     const response = await createMessage({
       model: MODEL,
-      max_tokens: 1600,
+      max_tokens: generatorInput.adaptation ? 3000 : 1600,
       system: [
         "You generate internal Board Update narratives for Get Kinder.",
         "A Board Update is a standalone evidence-backed internal draft summarizing engagement activity and outcomes for board/reporting purposes - it is not the Board Reporting packet, and it is not a formal board decision, approval, vote, commitment, budget, priority, or recommendation record.",
@@ -128,6 +130,9 @@ export function createProductionBoardUpdateDraftGenerator({
         "Do not state or imply causation; describe only what a cited claim actually asserts.",
         "If a claim carries limitationCodes, the narrative must reflect that limitation rather than stating the claim as an unconditional fact.",
         "Never state or imply that a claim has been reviewed, approved, or is export-eligible -- this is an unreviewed draft.",
+        // "Use this assessment" (owner direction 2026-11-20): the saved
+        // assessment the organization chose, as data.
+        ...(generatorInput.adaptation ? [ADAPTATION_MODEL_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",
@@ -135,6 +140,7 @@ export function createProductionBoardUpdateDraftGenerator({
           contentType: generatorInput.contentType,
           requestedAudience: generatorInput.requestedAudience,
           claims: generatorInput.claims,
+          ...(generatorInput.adaptation ? { adaptation: generatorInput.adaptation } : {}),
         }),
       }],
       output_config: {

@@ -27,7 +27,29 @@ const MARKDOWN_CONTRACT_VERSION = "kai-sprint2-internal-report-markdown-v1";
 const REPORT_TITLES = Object.freeze({
   evidence_summary: "Internal Evidence Summary",
   impact_narrative: "Internal Impact Narrative",
+  board_update: "Board Update",
+  annual_report_section: "Annual Report Section",
+  funder_outcome_table: "Funder Outcome Table",
+  case_for_support: "Case for Support",
+  grant_response_paragraph: "Grant Response",
 });
+// Owner direction 2026-11-20: every working report the organization creates
+// or adapts is titled by its type and intended audience.
+const AUDIENCE_TITLES = Object.freeze({
+  "evidence_summary:funder": "Funder Report",
+  "evidence_summary:public": "Public Evidence Summary",
+});
+const PURPOSE_LABELS = Object.freeze({
+  internal_planning: "internal planning",
+  board_update: "a board report",
+  funder_report: "a funder report",
+  annual_report: "annual-report content",
+});
+
+function reportTitle(model, assessment = false) {
+  if (assessment) return "Free Impact Assessment";
+  return AUDIENCE_TITLES[`${model.report.contentType}:${model.report.audience}`] || REPORT_TITLES[model.report.contentType] || "Working Report";
+}
 
 const REPORT_PURPOSES = Object.freeze({
   evidence_summary: "states what the organization's authorized evidence shows, how it was measured, and its limits.",
@@ -249,9 +271,22 @@ function contextLines(model) {
       .join(", ");
     lines.push(`- **Project / engagement:** ${label || "not recorded"} (${code(context.engagementId)})`);
   }
-  lines.push(`- **Report:** ${REPORT_TITLES[model.report.contentType] || code(model.report.contentType)}, draft ${code(model.report.generatedContentDraftId)}, generated ${model.report.createdAt || "at an unrecorded time"}`);
-  if (REPORT_PURPOSES[model.report.contentType]) lines.push(`- **Purpose:** this report ${REPORT_PURPOSES[model.report.contentType]}`);
-  lines.push("- **Prepared for:** this organization's reporting and planning. Source references and limitations accompany the findings.");
+  const lineage = model.report.lineage || null;
+  const revised = lineage?.relationship === "organization_revision";
+  lines.push(`- **Report:** ${reportTitle(model, Boolean(parseFreeImpactAssessment(model.blocks)))}, draft ${code(model.report.generatedContentDraftId)}, ${revised ? "saved" : "generated"} ${model.report.createdAt || "at an unrecorded time"}`);
+  if (lineage?.reporting_purpose && PURPOSE_LABELS[lineage.reporting_purpose]) {
+    lines.push(`- **Reporting purpose:** ${PURPOSE_LABELS[lineage.reporting_purpose]}, adapted from the organization's saved Free Impact Assessment ${code(lineage.source_assessment_draft_id)}`);
+  } else if (REPORT_PURPOSES[model.report.contentType]) {
+    lines.push(`- **Purpose:** this report ${REPORT_PURPOSES[model.report.contentType]}`);
+  }
+  if (lineage && Number.isInteger(lineage.version)) {
+    lines.push(`- **Version:** ${lineage.version}${revised ? `, revised by the organization from draft ${code(lineage.parent_draft_id)}` : ""}`);
+  }
+  if (model.report.audience && model.report.audience !== "internal") {
+    lines.push(`- **Prepared for:** a ${model.report.audience} audience, as the organization's working report. KAI has not sent or released it outside the organization. Source references and limitations accompany the findings.`);
+  } else {
+    lines.push("- **Prepared for:** this organization's reporting and planning. Source references and limitations accompany the findings.");
+  }
   return lines;
 }
 
@@ -513,7 +548,7 @@ function traceabilityLines(model) {
 }
 
 function authorityLines(model) {
-  const lines = ["- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing. Source story presence is informational metadata."];
+  const lines = ["- **Source permissions:** every cited source has a completed sensitivity and allowed-use decision that permits this use and AI processing. Source story presence is informational metadata."];
   for (const fact of model.facts) {
     const basis = fact.evidenceReviewOutcome || fact.claimReviewOutcome
       ? `recorded review decisions (evidence: ${fact.evidenceReviewOutcome ? code(fact.evidenceReviewOutcome) : "none"}; claim: ${fact.claimReviewOutcome ? code(fact.claimReviewOutcome) : "none"})`
@@ -659,7 +694,7 @@ function assessmentLines(model, sections) {
   const lines = [
     "## Impact assessment",
     "",
-    "_A provisional internal assessment for the organization's own planning and learning. Each figure restates a cited measurement; references in brackets lead to the supporting evidence below._",
+    "_The organization's impact assessment for its own planning and learning. Each figure restates a cited measurement; references in brackets lead to the supporting evidence below._",
   ];
   const disclosures = new Map();
   for (const section of sections) {
@@ -716,7 +751,7 @@ export function serializeInternalReportToMarkdown(model) {
   model = { ...model, facts: model.facts.map((fact) => ({ ...fact, countOnly: Boolean(fact.measurement) })) };
   const assessmentSections = parseFreeImpactAssessment(model.blocks);
   const lines = [
-    `# ${REPORT_TITLES[model.report.contentType] || "Internal Report"}`,
+    `# ${reportTitle(model, Boolean(assessmentSections))}`,
     "",
     `Markdown contract: ${MARKDOWN_CONTRACT_VERSION}`,
     "",
@@ -781,7 +816,7 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     ...traceabilityLines(model),
     "",
-    "## Authority for internal use",
+    "## Source permissions and checks",
     "",
     ...authorityLines(model),
     "",
@@ -793,6 +828,55 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     ...referenceLines(model),
   );
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * A saved report whose cited source changed after it was saved (owner
+ * direction 2026-11-20): its exact saved text and citations, read-only, with
+ * its original reporting context. Nothing is recomputed or restated; current
+ * reporting needs a new report from the current findings.
+ */
+export function serializeSavedReportSnapshotToMarkdown(saved) {
+  const blocks = [...(saved?.blocks || [])].sort((a, b) => a.ordinal - b.ordinal);
+  if (blocks.length === 0) throw new TypeError("A saved report with content is required.");
+  const sections = parseFreeImpactAssessment(blocks);
+  const model = { report: { contentType: saved.contentType, audience: saved.requestedAudience } };
+  const refByKey = new Map();
+  const citations = [];
+  const refsFor = (block) => (block.citations || []).map((citation) => {
+    const key = `${citation.claimId}:${citation.evidenceItemId}`;
+    if (!refByKey.has(key)) {
+      refByKey.set(key, `CIT-${String(citations.length + 1).padStart(3, "0")}`);
+      citations.push(citation);
+    }
+    return refByKey.get(key);
+  });
+  const lines = [
+    `# ${reportTitle(model, Boolean(sections))} (saved version)`,
+    "",
+    `Markdown contract: ${MARKDOWN_CONTRACT_VERSION}`,
+    "",
+    `**Status:** Saved report, shown exactly as it was saved${saved.createdAt ? ` on ${saved.createdAt}` : ""}. A source it cites has changed since, so its figures are as they stood then; prepare a new report to use current figures.`,
+    "",
+    `- **Report:** draft ${code(saved.generatedContentDraftId)}; content fingerprint ${code(saved.contentSha256)}`,
+    ...(saved.lineage?.reporting_purpose && PURPOSE_LABELS[saved.lineage.reporting_purpose]
+      ? [`- **Reporting purpose:** ${PURPOSE_LABELS[saved.lineage.reporting_purpose]}, adapted from Free Impact Assessment ${code(saved.lineage.source_assessment_draft_id)}`]
+      : []),
+    "",
+    "## Saved content",
+  ];
+  let current = null;
+  for (const block of blocks) {
+    const section = parseAssessmentBlockText(block.text);
+    if (section && section.sectionKey !== current) {
+      current = section.sectionKey;
+      lines.push("", `### ${ASSESSMENT_SECTIONS.find((entry) => entry.key === section.sectionKey).title}`);
+    }
+    lines.push("", `${text(section ? section.body : block.text)} ${refs(refsFor(block))}`);
+  }
+  lines.push("", "## Citations as saved", "");
+  citations.forEach((citation, index) => lines.push(`- [CIT-${String(index + 1).padStart(3, "0")}] claim ${code(citation.claimId)}, evidence ${code(citation.evidenceItemId)}`));
   return `${lines.join("\n")}\n`;
 }
 

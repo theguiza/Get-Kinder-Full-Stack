@@ -120,7 +120,7 @@ test("internal report: an available report is returned as complete Markdown with
   const markdown = result.data.markdown;
   for (const section of ["Context", "Key findings", "Reporting period", "Measurement definition and counting method", "Duplicate records",
     "Data quality and limitations", "What this evidence establishes", "What this evidence does not establish", "Analysis", "Generated narrative",
-    "Source and evidence traceability", "Authority for internal use", "Conclusion", "References"]) {
+    "Source and evidence traceability", "Source permissions and checks", "Conclusion", "References"]) {
     assert.ok(markdown.includes(`\n## ${section}\n`), section);
   }
   assert.ok(markdown.startsWith("# Internal Evidence Summary\n"));
@@ -156,9 +156,14 @@ test("internal report: an unavailable report is refused with the server's struct
   ]);
   const stale = await read(dependencies({ report: () => ({ ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } }) }));
   assert.equal(stale.error.code, "conflict_current_state_changed");
+  // Owner direction 2026-11-20: a funder-oriented working report is the
+  // organization's own report too; it is delivered, not released.
   const funder = model();
   funder.report.audience = "funder";
-  assert.equal((await read(dependencies({ report: funder }))).error.code, "not_found", "only internal reports");
+  const funderRead = await read(dependencies({ report: funder }));
+  assert.equal(funderRead.ok, true, JSON.stringify(funderRead.error));
+  assert.match(funderRead.data.markdown, /^# Funder Report\n/);
+  assert.match(funderRead.data.markdown, /KAI has not sent or released it outside the organization/);
   const readiness = model();
   readiness.report.contentType = "readiness_assessment";
   assert.equal((await read(dependencies({ report: readiness }))).error.code, "not_found", "only internal report types");
@@ -184,7 +189,8 @@ test("internal report: only an active client_admin of the organization, for a dr
 });
 
 test("availability: a provisional internal report is readable; review state and recorded sensitivity categories are information, not holds", async () => {
-  assert.deepEqual([...INTERNAL_REPORT_CONTENT_TYPES], ["evidence_summary", "impact_narrative"]);
+  assert.deepEqual([...INTERNAL_REPORT_CONTENT_TYPES], ["evidence_summary", "impact_narrative", "board_update", "annual_report_section",
+    "funder_outcome_table", "case_for_support", "grant_response_paragraph"]);
   // A transaction stand-in for the source classification: one current version with the given decision.
   const tx = (decision) => ({
     async query(sql) {
@@ -212,7 +218,12 @@ test("availability: a provisional internal report is readable; review state and 
   assert.deepEqual([prohibited.available, prohibited.blockedReasons], [false, ["processing_permission_not_established"]]);
   const undecided = await evaluateInternalReportAvailabilityInTransaction(tx(null), { organizationId: ORG, packet: packet("evidence_summary") });
   assert.deepEqual([undecided.available, undecided.getKinderReviewReasons], [false, ["sensitivity_review_not_complete"]]);
-  const other = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet("board_update") });
+  // Owner direction 2026-11-20: every working-report type is the
+  // organization's report; a type the organization does not create (the GK
+  // readiness assessment) still goes to Get Kinder.
+  const board = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet("board_update") });
+  assert.deepEqual([board.available, board.getKinderReviewReasons], [true, []]);
+  const other = await evaluateInternalReportAvailabilityInTransaction(tx(CLEARED), { organizationId: ORG, packet: packet("readiness_assessment") });
   assert.deepEqual([other.available, other.getKinderReviewReasons], [false, ["content_type_requires_get_kinder_review"]]);
 });
 

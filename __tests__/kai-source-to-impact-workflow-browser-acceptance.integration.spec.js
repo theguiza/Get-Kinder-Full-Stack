@@ -1021,7 +1021,7 @@ async function runBrowserAcceptance() {
       const rendered = await adminBPage.evaluate(`document.querySelector("[data-client-internal-drafts]").innerText`);
       assert.ok(rendered.includes("Awaiting Get Kinder review"), rendered);
       assert.ok(rendered.includes("Internal draft text for:"), rendered);
-      assert.ok(rendered.includes("Not approved for funder or public use, export, or release."), rendered);
+      assert.ok(rendered.includes("Working report: KAI has not sent or released it outside your organization."), rendered);
       // The cited claim is named by what it restates; its stored review status
       // is not shown as a pending step (owner prompt 2026-10-26).
       assert.ok(rendered.includes("(structural fact)"), rendered);
@@ -1502,7 +1502,7 @@ async function runBrowserAcceptance() {
           WHERE c.organization_id = $1::uuid AND c.claim_id = $2::uuid`, [ORG_X, claim.claim_id]);
       assert.deepEqual([claimTrace.source_version_id, claimTrace.claim_review_status], [rereviewVersion.source_version_id, "needs_gk_review"], "cited claim -> evidence -> the corrected file's source version");
       const rendered = await adminBPage.evaluate(`document.querySelector("[data-client-internal-drafts]").innerText`);
-      assert.ok(rendered.includes("Awaiting Get Kinder review") && rendered.includes("Not approved for funder or public use, export, or release."), rendered);
+      assert.ok(rendered.includes("Awaiting Get Kinder review") && rendered.includes("Working report: KAI has not sent or released it outside your organization."), rendered);
       const flow = delta(await counts(ORG_X), before);
       assert.deepEqual([flow.promotions, flow.sources, flow.source_versions, flow.evidence, flow.claims, flow.drafts, flow.sensitivity_decisions], [1, 1, 1, 2, 1, 2, 0], JSON.stringify(flow));
       results.step8d.continuation = `Use for impact -> explicit authorization -> promoted by B -> 2 evidence -> claim -> P2-04 -> drafts 201 x2 (${draftCounts.afterUiCorrection} model calls) read back with the real claim citation, awaiting Get Kinder review`;

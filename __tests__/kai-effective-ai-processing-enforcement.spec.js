@@ -229,12 +229,18 @@ test("generation (evidence summary and impact narrative): an AI-prohibited claim
       assert.ok(!(drafted.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY), `${context}: not refused for the left-out claim`);
     }
   }
-  // Funder generation keeps refusing the whole request.
+  // Owner direction 2026-11-20: a funder-oriented working draft follows the
+  // same partial rule - the prohibited claim never reaches the model, the
+  // permitted claim does, and a request with only prohibited claims is refused.
   const funder = generationHarness(headsFor(reviewed("allowed", false)));
-  const refused = await funder.repository.createEvidenceSummaryDraft({ ...funder.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-funder"), requestedAudience: "funder" }, funder.dependencies);
+  const drafted = await funder.repository.createEvidenceSummaryDraft({ ...funder.input([CLAIM_PERMITTED, CLAIM_RESTRICTED], "ai-funder"), requestedAudience: "funder" }, funder.dependencies);
+  assert.deepEqual(funder.modelCalls, [[CLAIM_PERMITTED]]);
+  assert.ok(!(drafted.blockers || []).some((blocker) => blocker.validator_key === EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY));
+  const funderAlone = generationHarness(headsFor(reviewed("allowed", false)));
+  const refused = await funderAlone.repository.createEvidenceSummaryDraft({ ...funderAlone.input([CLAIM_RESTRICTED], "ai-funder-alone"), requestedAudience: "funder" }, funderAlone.dependencies);
   assert.equal(refused.ok, false);
   assert.equal(refused.blockers[0].blocking_reason, "ai_processing_not_permitted");
-  assert.deepEqual(funder.modelCalls, []);
+  assert.deepEqual(funderAlone.modelCalls, []);
 });
 
 test("generation: a stored reviewed AI permission, or no human decision at all, reaches the model without any new approval; an existing not_allowed is left out of an internal draft and refuses alone", async () => {
@@ -319,7 +325,7 @@ test("wiring: both model seams read the AI form before the generator; no other s
   const generation = source("Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   // Owner Package 3: the per-version form, so a refusal names the refusing version's role.
   const check = generation.indexOf("readEffectiveAiProcessingSourceDecisionsForClaims(tx");
-  assert.ok(check > 0 && check < generation.indexOf("const traceabilityResults = [];"));
+  assert.ok(check > 0 && check < generation.indexOf("const traceabilityByClaimId = new Map();"));
   assert.ok(check < generation.indexOf("await dependencies.draftGenerator(generatorInput)"));
   assert.equal(generation.split("dependencies.draftGenerator(").length - 1, 1, "one generation boundary for every content type");
   const impact = source("Backend/kai/dictionary/postgresImpactEvaluationRepository.js");

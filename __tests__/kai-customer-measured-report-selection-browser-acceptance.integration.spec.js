@@ -770,8 +770,8 @@ async function runBrowserAcceptance() {
   const projectDraftCount = async (engagementId) => (await query(
     `SELECT count(*)::int AS n FROM kai.generated_content_drafts d
        JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id AND r.organization_id = d.organization_id
-      WHERE d.organization_id = $1::uuid AND r.engagement_id = $2::uuid AND d.requested_audience = 'internal'
-        AND d.content_type IN ('evidence_summary', 'impact_narrative')`, [ORG_X, engagementId]))[0].n;
+      WHERE d.organization_id = $1::uuid AND r.engagement_id = $2::uuid
+        AND d.content_type IN ('evidence_summary', 'impact_narrative', 'board_update', 'annual_report_section', 'funder_outcome_table', 'case_for_support', 'grant_response_paragraph')`, [ORG_X, engagementId]))[0].n;
   const generateInUi = async (buttonLabel, createdText, click = () => adminPage.clickButton(buttonLabel)) => {
     const before = await draftIds();
     await click();
@@ -1038,15 +1038,24 @@ async function runBrowserAcceptance() {
       const funder = await adminPage.api("POST", `${createEvidenceSummaryPath(ORG_X)}/funder`, {
         claim_ids: [ids.claimId], idempotency_key: "customer-funder-attempt-0001", engagement_id: PROJECT_X,
       });
-      assert.equal(funder.status, 403, JSON.stringify(funder.body));
+      // Owner direction 2026-11-20: the administrator may draft a funder-oriented
+      // working report (it publishes nothing); its release stays Get Kinder's.
+      assert.equal(funder.status, 201, JSON.stringify(funder.body));
+      assert.equal(funder.body.data.requestedAudience, "funder");
       outcomes.funderGeneration = funder.status;
       // Injected orphaned non-current state (no successor), restored below. The final test exercises actual successor promotion.
       await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
+      // Owner direction 2026-11-20: a report whose cited source is no longer
+      // current is the read-only saved version, marked as such, never a current report.
       const stale = await fetchText(adminPage, path);
-      assert.equal(stale.status, 409, stale.body);
+      assert.equal(stale.status, 200, stale.body);
+      assert.match(stale.body, /^# .+ \(saved version\)\n/);
+      assert.match(stale.body, /A source it cites has changed since/);
       await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
-      assert.equal((await fetchText(adminPage, path)).status, 200);
-      outcomes.staleSource = 409;
+      const current = await fetchText(adminPage, path);
+      assert.equal(current.status, 200);
+      assert.doesNotMatch(current.body, /\(saved version\)/);
+      outcomes.staleSource = "saved_version";
       // Denied AI processing and sensitive content are proven through the real corrective review in the assembled acceptance (F).
       assert.deepEqual(await draftState(ids.historicalDraftId), ids.historicalState, "the historical draft is still unchanged");
       results.test5 = outcomes;

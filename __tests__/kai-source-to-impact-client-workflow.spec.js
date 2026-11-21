@@ -174,7 +174,7 @@ function assertNoHidden(value, label) {
   for (const secret of HIDDEN) assert.ok(!serialized.includes(secret), `${label} leaked ${secret}`);
 }
 
-test("internal drafts: the organization administrator lists its Project's internal evidence summaries and impact narratives in every review state, never funder/public or GK-only types, and never a draft that is no longer traceable", async () => {
+test("internal drafts: the organization administrator lists its Project's working reports (any intended audience) in every review state, never GK-only types, and never a draft that is no longer traceable", async () => {
   const calls = [];
   const result = await listClientInternalDrafts({ organizationId: ORG, engagementId: ENGAGEMENT, actorContext: actor("client_admin") }, dependencies(calls));
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -182,11 +182,14 @@ test("internal drafts: the organization administrator lists its Project's intern
     [D_SUMMARY, "evidence_summary", "internal", "awaiting_get_kinder_review", 1],
     [D_NARRATIVE, "impact_narrative", "internal", "in_get_kinder_review", 1],
     [D_REVIEWED, "evidence_summary", "internal", "reviewed_by_get_kinder", 1],
+    // Owner direction 2026-11-20: a funder-oriented working report is the
+    // organization's own report too (delivered, not released).
+    [D_FUNDER, "evidence_summary", "funder", "awaiting_get_kinder_review", 1],
   ]);
   assert.equal(result.data.nextCursor, null);
-  assert.ok(!calls.includes(`packet:${D_FUNDER}`) && !calls.includes(`packet:${D_READINESS}`), "excluded types are never loaded");
+  assert.ok(!calls.includes(`packet:${D_READINESS}`), "GK-only types are never loaded");
   assertNoHidden(result, "list");
-  assert.deepEqual(projectClientInternalDraftList(result.data).items.length, 3);
+  assert.deepEqual(projectClientInternalDraftList(result.data).items.length, 4);
 });
 
 test("internal drafts: the detail is the persisted text with cited claim ids, the true review state, and fixed limitations; other types, audiences, Projects, and stale drafts are not_found", async () => {
@@ -210,12 +213,22 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     // keep it from being the organization's internal report.
     internalReportAvailable: false,
     internalReport: { available: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"], informationReasons: [] },
+    // Owner direction 2026-11-20: the saved relationship (none readable from
+    // this stand-in repository), no historical snapshot, and the editable
+    // prose; an unavailable report is not offered for revision.
+    report: null,
+    historical: null,
+    revisable: false,
+    editableBlocks: [{ ordinal: 1, prose: `Draft text of ${D_SUMMARY}.`, protectedText: null }],
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);
   const reviewed = await getClientInternalDraft({ organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: D_REVIEWED, actorContext: actor("client_admin") }, dependencies());
   assert.deepEqual(reviewed.data.limitations, ["internal_use_only", "not_approved_for_external_use"], "a reviewed draft is still internal only");
-  for (const [label, draftId, engagementId] of [["funder", D_FUNDER, ENGAGEMENT], ["GK-only type", D_READINESS, ENGAGEMENT], ["stale", D_STALE, ENGAGEMENT],
+  const funder = await getClientInternalDraft({ organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: D_FUNDER, actorContext: actor("client_admin") }, dependencies());
+  assert.deepEqual([funder.ok, funder.data?.audience], [true, "funder"]);
+  assert.ok(!funder.data.limitations.includes("internal_use_only") && funder.data.limitations.includes("not_approved_for_external_use"));
+  for (const [label, draftId, engagementId] of [["GK-only type", D_READINESS, ENGAGEMENT], ["stale", D_STALE, ENGAGEMENT],
     ["other Project", D_OTHER_PROJECT, ENGAGEMENT], ["unknown", id("d", 99), ENGAGEMENT]]) {
     const refused = await getClientInternalDraft({ organizationId: ORG, engagementId, generatedContentDraftId: draftId, actorContext: actor("client_admin") }, dependencies());
     assert.equal(refused.error?.code, "not_found", label);

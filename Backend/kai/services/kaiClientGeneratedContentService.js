@@ -13,7 +13,8 @@ import { __generatedContentReviewPacketServiceTestables } from "./kaiGeneratedCo
 import { __testables as generatedDraftLibraryTestables } from "./kaiGeneratedDraftLibraryService.js";
 import { serializeExportManifestRenderModelToMarkdown, __exportManifestMarkdownSerializerTestables } from "./kaiExportManifestMarkdownSerializer.js";
 import { BOARD_REPORTING_PACKET_AUDIENCE } from "./kaiBoardReportingPacketService.js";
-import { serializeInternalReportToMarkdown, __internalReportMarkdownSerializerTestables } from "./kaiInternalReportMarkdownSerializer.js";
+import { serializeInternalReportToMarkdown, serializeSavedReportSnapshotToMarkdown, __internalReportMarkdownSerializerTestables } from "./kaiInternalReportMarkdownSerializer.js";
+import { ADAPTATION_PURPOSE_TARGETS, ORGANIZATION_REVISION_RELATIONSHIP, splitRevisableBlockText } from "./kaiAssessmentAdaptation.js";
 
 /**
  * Client-safe Generated Drafts, Grant Response Packet preview, and Board
@@ -370,8 +371,18 @@ export async function getClientBoardReportingPreview(input, dependencies = {}) {
  */
 const CLIENT_INTERNAL_DRAFT_OPERATION = "read_client_internal_drafts";
 const CLIENT_INTERNAL_DRAFT_READ_ROLES = new Set(["client_admin"]);
-const CLIENT_INTERNAL_DRAFT_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
+// Owner direction 2026-11-20: the organization's own working reports - every
+// report type its administrator creates or adapts from a saved assessment,
+// for any intended audience. Reading, revising or downloading one releases
+// nothing outside the organization.
+const CLIENT_INTERNAL_DRAFT_CONTENT_TYPES = new Set([
+  "evidence_summary", "impact_narrative", "board_update", "annual_report_section", "funder_outcome_table", "case_for_support", "grant_response_paragraph",
+]);
+const CLIENT_REVISABLE_CONTENT_TYPES = new Set([
+  "evidence_summary", "impact_narrative", "board_update", "annual_report_section", "case_for_support", "grant_response_paragraph",
+]);
 const INTERNAL_AUDIENCE = "internal";
+const CLIENT_WORKING_REPORT_REVISION_OPERATION = "revise_client_working_report";
 const CLIENT_INTERNAL_REVIEW_STATE = Object.freeze({
   AWAITING_GET_KINDER: "awaiting_get_kinder_review",
   IN_GET_KINDER: "in_get_kinder_review",
@@ -426,8 +437,18 @@ async function internalReviewView({ organizationId, packet }, dependencies) {
   };
 }
 
+// The organization's working reports (list, detail, download, revision).
+function isWorkingReportSummary(summary) {
+  return CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(summary.contentType);
+}
+
+// The organization's own factual review and internal release (owner
+// amendment 2026-10-23) stay scoped to its internal evidence summaries and
+// impact narratives; a funder- or public-oriented report is never released
+// through them.
+const ORGANIZATION_REVIEW_RELEASE_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
 function isInternalDraftSummary(summary) {
-  return CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(summary.contentType) && summary.requestedAudience === INTERNAL_AUDIENCE;
+  return ORGANIZATION_REVIEW_RELEASE_CONTENT_TYPES.has(summary.contentType) && summary.requestedAudience === INTERNAL_AUDIENCE;
 }
 
 // A draft available as an internal report (owner decision 2026-10-25) needs
@@ -435,14 +456,14 @@ function isInternalDraftSummary(summary) {
 // limitation of it; the review state itself is reported unchanged.
 function internalDraftLimitations(packet, reviewState, internalReportAvailable = false) {
   return [
-    "internal_use_only",
+    ...(packet.requestedAudience === INTERNAL_AUDIENCE ? ["internal_use_only"] : []),
     "not_approved_for_external_use",
     ...(!internalReportAvailable
       && (reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER || reviewState === CLIENT_INTERNAL_REVIEW_STATE.IN_GET_KINDER)
       ? ["awaiting_get_kinder_review"]
       : []),
     ...(!internalReportAvailable && reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION ? ["awaiting_organization_review"] : []),
-    ...(packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
+    ...(internalReportAvailable || packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
   ];
 }
 
@@ -450,7 +471,7 @@ function toClientInternalDraft(packet, reviewState, internalReportAvailable = fa
   return {
     generatedContentDraftId: packet.generatedContentDraftId,
     contentType: packet.contentType,
-    audience: INTERNAL_AUDIENCE,
+    audience: packet.requestedAudience,
     reviewState,
     citedClaimsCurrentlyEligible: packet.currentUseEligible === true,
     internalReportAvailable,
@@ -499,13 +520,33 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
       scanned += 1;
       lastScanned = summary.generatedContentDraftId;
       if (index === page.length - 1 && rows.length > CLIENT_DRAFT_INDEX_PAGE_LIMIT) moreRows = true;
-      if (!isInternalDraftSummary(summary)) continue;
+      if (!isWorkingReportSummary(summary)) continue;
       if (!queueLifecycle(summary)) continue;
       const result = await repository.getGeneratedDraftReviewPacket({
         organizationId,
         generatedContentDraftId: summary.generatedContentDraftId,
       });
       if (!result.ok) {
+        // A saved report whose cited source changed since it was saved is
+        // listed as the saved version it is (owner direction 2026-11-20),
+        // while its content may still be used; otherwise it is not listed.
+        if (result.error?.code === "conflict_current_state_changed") {
+          const snapshot = await savedReportSnapshot({ organizationId, generatedContentDraftId: summary.generatedContentDraftId }, repository);
+          if (snapshot) {
+            items.push({
+              generatedContentDraftId: snapshot.generatedContentDraftId,
+              contentType: snapshot.contentType,
+              audience: snapshot.audience,
+              reviewState: snapshot.reviewState,
+              internalReportAvailable: false,
+              createdAt: summary.createdAt,
+              blockCount: snapshot.blocks.length,
+              report: snapshot.report,
+              historical: true,
+            });
+          }
+          continue;
+        }
         if (DRAFT_NOT_PRESENTABLE_CODES.has(result.error?.code)) continue;
         return buildKaiError(result.error?.code || "system_error");
       }
@@ -514,14 +555,16 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
       const view = await internalReviewView({ organizationId, packet }, dependencies);
       if (!view) continue;
       const internalUse = await (await organizationReviewRepository(dependencies)).evaluateInternalReport({ organizationId, packet });
+      const context = await workingReportContext({ organizationId, generatedContentDraftId: packet.generatedContentDraftId }, repository);
       items.push({
         generatedContentDraftId: packet.generatedContentDraftId,
         contentType: packet.contentType,
-        audience: INTERNAL_AUDIENCE,
+        audience: packet.requestedAudience,
         reviewState: view.reviewState,
         internalReportAvailable: internalUse.available === true,
         createdAt: summary.createdAt,
         blockCount: packet.blocks.length,
+        report: context,
       });
     }
     if (scanned >= CLIENT_DRAFT_SCAN_LIMIT || rows.length <= CLIENT_DRAFT_INDEX_PAGE_LIMIT) break;
@@ -548,13 +591,19 @@ export async function getClientInternalDraft(input, dependencies = {}) {
   const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
   const result = await repository.getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId });
   if (!result.ok) {
+    // A saved report whose cited source has since changed stays readable as
+    // the historical snapshot it is, while its content may still be used.
+    if (result.error?.code === "conflict_current_state_changed") {
+      const snapshot = await savedReportSnapshot({ organizationId, generatedContentDraftId }, repository);
+      if (snapshot) return { ok: true, data: snapshot, error: null, warnings: storySourceWarnings() };
+    }
     return buildKaiError(DRAFT_NOT_PRESENTABLE_CODES.has(result.error?.code) ? "not_found" : result.error?.code || "system_error");
   }
   const packet = singleDraftPacket(result.data);
   if (!packet) return buildKaiError("system_error");
-  // Another audience or content type, or an unknown review state, is
-  // indistinguishable from a draft that does not exist.
-  if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !queueLifecycle(packet)) {
+  // Another content type, or an unknown review state, is indistinguishable
+  // from a draft that does not exist.
+  if (!isWorkingReportSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !queueLifecycle(packet)) {
     return buildKaiError("not_found");
   }
   const { reviewState, evaluation } = await internalReviewView({ organizationId, packet }, dependencies);
@@ -576,14 +625,153 @@ export async function getClientInternalDraft(input, dependencies = {}) {
   // decision for internal use, so neither is offered as a next action.
   const factualReview = clientFactualReviewView({ reviewState, evaluation, actorContext: input.actorContext, organizationId });
   const organizationRelease = clientOrganizationReleaseView({ release, actorContext: input.actorContext, organizationId });
+  const context = await workingReportContext({ organizationId, generatedContentDraftId }, repository);
   return {
     ok: true,
     data: {
       ...toClientInternalDraft(packet, reviewState, internalReport.available),
+      report: context,
+      historical: null,
+      revisable: internalReport.available && context !== null && !context.isAssessment && CLIENT_REVISABLE_CONTENT_TYPES.has(packet.contentType),
+      editableBlocks: editableBlocks(packet.blocks),
       internalReport,
       release: release.value,
       factualReview: internalReport.available ? { ...factualReview, actorMayApprove: false } : factualReview,
       organizationRelease: internalReport.available ? { ...organizationRelease, actorMayRelease: false } : organizationRelease,
+    },
+    error: null,
+    warnings: storySourceWarnings(),
+  };
+}
+
+// The saved relationship of a working report (owner direction 2026-11-20):
+// whether it is a Free Impact Assessment, the purpose and version of an
+// adapted or revised report, its source assessment (and whether that saved
+// assessment is unchanged) and the content left out. IDs and codes only.
+function toWorkingReportContext(data) {
+  const lineage = data?.lineage && typeof data.lineage === "object" ? data.lineage : null;
+  const purpose = typeof lineage?.reporting_purpose === "string" && Object.hasOwn(ADAPTATION_PURPOSE_TARGETS, lineage.reporting_purpose)
+    ? lineage.reporting_purpose
+    : null;
+  return {
+    isAssessment: data?.isAssessment === true,
+    contentSha256: typeof data?.contentSha256 === "string" ? data.contentSha256 : null,
+    relationship: typeof lineage?.relationship === "string" ? lineage.relationship : null,
+    purpose,
+    version: Number.isInteger(lineage?.version) ? lineage.version : 1,
+    sourceAssessmentDraftId: typeof lineage?.source_assessment_draft_id === "string" ? lineage.source_assessment_draft_id : null,
+    sourceAssessmentUnchanged: data?.sourceAssessment ? data.sourceAssessment.unchanged === true : null,
+    parentDraftId: typeof lineage?.parent_draft_id === "string" ? lineage.parent_draft_id : null,
+    previousVersionUnchanged: data?.parent ? data.parent.unchanged === true : null,
+    rootReportDraftId: typeof lineage?.root_report_draft_id === "string" ? lineage.root_report_draft_id : null,
+    revisedByOrganization: lineage?.relationship === ORGANIZATION_REVISION_RELATIONSHIP,
+    revisedBlockOrdinals: Array.isArray(lineage?.revised_block_ordinals) ? lineage.revised_block_ordinals.filter(Number.isInteger) : [],
+    withheldAssessmentBlocks: Array.isArray(lineage?.withheld_blocks)
+      ? lineage.withheld_blocks.map((block) => ({ ordinal: block.ordinal, sectionKey: block.section_key, reason: block.reason }))
+      : [],
+  };
+}
+
+async function workingReportContext({ organizationId, generatedContentDraftId }, repository) {
+  if (typeof repository?.readWorkingReportLineage !== "function") return null;
+  const result = await repository.readWorkingReportLineage({ organizationId, generatedContentDraftId });
+  return result?.ok ? toWorkingReportContext(result.data) : null;
+}
+
+// What the organization may rewrite in each block: its prose. The
+// server-composed disclosure and notes after it are shown and kept verbatim.
+function editableBlocks(blocks) {
+  return (blocks || []).map((block) => {
+    const { prose, tail } = splitRevisableBlockText(block.text);
+    return { ordinal: block.ordinal, prose, protectedText: tail || null };
+  });
+}
+
+// A saved report whose cited source changed since it was saved: read-only,
+// with its original text, citations and reporting context, while every
+// cited source's current decision still permits its use. null otherwise.
+async function savedReportSnapshot({ organizationId, generatedContentDraftId }, repository) {
+  if (typeof repository?.readWorkingReportLineage !== "function") return null;
+  const saved = await repository.readWorkingReportLineage({ organizationId, generatedContentDraftId });
+  if (!saved?.ok || saved.data.contentPermitted !== true || !CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(saved.data.contentType)) return null;
+  const blocks = saved.data.blocks.map((block) => ({
+    ordinal: block.ordinal,
+    text: block.text,
+    supportingClaimIds: [...new Set(block.citations.map((citation) => citation.claimId))].sort(),
+  }));
+  return {
+    generatedContentDraftId: saved.data.generatedContentDraftId,
+    contentType: saved.data.contentType,
+    audience: saved.data.requestedAudience,
+    reviewState: CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER,
+    citedClaimsCurrentlyEligible: false,
+    limitations: [...(saved.data.requestedAudience === INTERNAL_AUDIENCE ? ["internal_use_only"] : []), "not_approved_for_external_use"],
+    blocks,
+    report: toWorkingReportContext(saved.data),
+    historical: { reason: "source_changed_since_saved", savedAt: saved.data.createdAt },
+    revisable: false,
+    editableBlocks: editableBlocks(saved.data.blocks),
+    internalReport: { available: false, getKinderReviewReasons: [], blockedReasons: ["source_version_not_current"], informationReasons: [] },
+    release: { state: RELEASE_STATE.UNAVAILABLE, releasedReportId: null },
+    factualReview: { actorMayApprove: false, getKinderReviewReasons: [], blockedReasons: [] },
+    organizationRelease: { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null },
+  };
+}
+
+/**
+ * The organization's revision of one of its saved working reports (owner
+ * direction 2026-11-20). Admission: mapped human, client_admin with an active
+ * same-organization membership, tenant validation, the Project in this
+ * organization and the draft saved under it. The repository saves the
+ * revised narrative as a new draft (its own identity, version and recorded
+ * relationship to the version it revises) after re-checking every cited
+ * finding and validating the revised text: numbers, causal wording,
+ * quotations, citations and limitation disclosures, and that each figure
+ * keeps the words describing it. The saved version and its citations are
+ * never changed. No review, approval or release is recorded.
+ */
+const REVISION_INPUT_KEYS = ["organizationId", "engagementId", "generatedContentDraftId", "blocks", "idempotencyKey", "actorContext"];
+
+export async function reviseClientWorkingReport(input, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env) || !isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled");
+  if (!hasOnlyKeys(input, REVISION_INPUT_KEYS)
+    || !["organizationId", "engagementId", "generatedContentDraftId"].every((key) => isCanonicalUuid(input[key]))) {
+    return buildKaiError("validation_blocker");
+  }
+  if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied");
+  const auth = validateActorCanPerformOperation(input.actorContext, CLIENT_WORKING_REPORT_REVISION_OPERATION, input.organizationId, {
+    allowedRoles: CLIENT_INTERNAL_DRAFT_READ_ROLES,
+  });
+  if (!auth.ok) return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  const tenant = validateTenantBoundaryConsistency({ expectedOrganizationId: input.organizationId, payload: { organization_id: input.organizationId } });
+  if (tenant.severity === "blocker") return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  const { organizationId, engagementId, generatedContentDraftId } = input;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+  const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const result = await repository.createWorkingReportRevision({
+    organizationId,
+    engagementId,
+    parentDraftId: generatedContentDraftId,
+    blocks: input.blocks,
+    idempotencyKey: input.idempotencyKey,
+    actorContext: input.actorContext,
+    now: (dependencies.now ? dependencies.now() : new Date()).toISOString(),
+  }, { metadataOnlyAudit: dependencies.metadataOnlyAudit });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, { status: result.error.status, ...(result.blockers ? { blockers: result.blockers } : {}) });
+  }
+  return {
+    ok: true,
+    data: {
+      generatedContentDraftId: result.data.generatedContentDraftId,
+      audience: result.data.requestedAudience,
+      lineage: toWorkingReportContext({ lineage: result.data.lineage }),
+      replayed: result.data.replayed === true,
+      blockCount: result.data.blocks.length,
     },
     error: null,
     warnings: storySourceWarnings(),
@@ -620,9 +808,31 @@ export async function getClientInternalReportMarkdown(input, dependencies = {}) 
   const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
   if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
   const report = await (await internalReportRepository(dependencies)).readInternalReport({ organizationId, generatedContentDraftId });
-  if (!report.ok) return buildKaiError(report.error?.code || "system_error");
+  if (!report.ok) {
+    // The historical snapshot of a saved report whose cited source changed:
+    // exactly its saved text and citations, marked as such.
+    if (report.error?.code === "conflict_current_state_changed") {
+      const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+      const saved = typeof repository.readWorkingReportLineage === "function"
+        ? await repository.readWorkingReportLineage({ organizationId, generatedContentDraftId })
+        : null;
+      if (saved?.ok && saved.data.contentPermitted === true && CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(saved.data.contentType)) {
+        return {
+          ok: true,
+          data: {
+            markdownContractVersion: __internalReportMarkdownSerializerTestables.MARKDOWN_CONTRACT_VERSION,
+            contentType: saved.data.contentType,
+            markdown: serializeSavedReportSnapshotToMarkdown(saved.data),
+          },
+          error: null,
+          warnings: storySourceWarnings(),
+        };
+      }
+    }
+    return buildKaiError(report.error?.code || "system_error");
+  }
   const model = report.data;
-  if (model.report.audience !== INTERNAL_AUDIENCE || !CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(model.report.contentType)) return buildKaiError("not_found");
+  if (!CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(model.report.contentType)) return buildKaiError("not_found");
   if (!model.available) {
     return buildKaiError("blocked", {
       blockers: [...model.getKinderReviewReasons, ...model.blockedReasons].map((reason) => ({
@@ -1145,6 +1355,8 @@ export const __clientGeneratedContentServiceContract = Object.freeze({
   CLIENT_INTERNAL_DRAFT_OPERATION,
   CLIENT_INTERNAL_DRAFT_READ_ROLES,
   CLIENT_INTERNAL_DRAFT_CONTENT_TYPES,
+  CLIENT_REVISABLE_CONTENT_TYPES,
+  CLIENT_WORKING_REPORT_REVISION_OPERATION,
   CLIENT_GENERATED_CONTENT_OPERATION,
   CLIENT_GENERATED_CONTENT_ALLOWED_ROLES,
   CLIENT_DRAFT_SCAN_LIMIT,

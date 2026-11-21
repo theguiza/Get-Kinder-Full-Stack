@@ -30,7 +30,7 @@ const STAGES = [
   { key: "measurement", role: "customer", instruction: "In Count records, define one nonblank data row as one programme session; include exact duplicate rows; exclude the header and empty rows. Enter only a reporting period the organization can genuinely attest, then record the definition, measurement, and claim." },
   { key: "internal_eligibility", role: "customer", instruction: "No human action: the runner verifies the measured claim is eligible for internal use (Impact Facts). Nobody reviews or approves it." },
   { key: "generation", role: "customer", instruction: "As the customer administrator, create a live internal Evidence Summary in the product UI." },
-  { key: "download_validation", role: "customer", instruction: "In \"Your internal drafts\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will retrieve and validate that authorized internal report Markdown." },
+  { key: "download_validation", role: "customer", instruction: "In \"Your assessments and reports\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will retrieve and validate that authorized internal report Markdown." },
 ];
 
 function fail(code) { throw new Error(code); }

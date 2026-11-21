@@ -139,7 +139,7 @@ test("every fixed server-composed sentence and disclosure contains no digit and 
 test("model-facing context no longer hands the model 'Impact' titles; customer section titles are unchanged", () => {
   const context = buildAssessmentModelContext(CLAIMS);
   for (const section of context.modelSections) assert.deepEqual([...section.title.matchAll(V.CAUSAL_PATTERN)], [], section.title);
-  assert.deepEqual(ASSESSMENT_SECTIONS.map((s) => s.title), ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Three Recommended Improvements", "Your Next Steps"]);
+  assert.deepEqual(ASSESSMENT_SECTIONS.map((s) => s.title), ["Executive Impact Snapshot", "What Your Evidence Tells Us", "Impact Stories", "Gaps and Opportunities", "Recommended Improvements", "Your Next Steps"]);
   const { assessment } = { assessment: context };
   assert.doesNotMatch(JSON.stringify(assessment), /Impact/);
 });
@@ -267,8 +267,9 @@ function assertPersistedAssessment({ result, store }, attempts) {
   assert.deepEqual(sections.map((s) => s.key), ASSESSMENT_SECTIONS.map((s) => s.key));
   // Owner direction 2026-11-11: these outcomes have no stated direction, so
   // the first proposal is the one clarification they need; with the two
-  // follow-up and exclusion proposals they ground three, none invented.
-  assert.equal(sections[4].title, "Three Recommended Improvements");
+  // follow-up and exclusion proposals they ground three, none invented. The
+  // heading no longer names a count (owner direction 2026-11-20).
+  assert.equal(sections[4].title, "Recommended Improvements");
   const proposals = sections[4].blocks.filter((b) => b.body.startsWith("Proposed change:"));
   assert.equal(proposals.length, 3);
   assert.match(proposals[0].body, /^Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better/);

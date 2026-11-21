@@ -218,7 +218,7 @@ test("wiring: every content-processing seam reads the shared resolver inside its
   // Generation checks allowed use before P2-06 and before the generator call.
   const generation = source("Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   const check = generation.indexOf("readEffectiveAiProcessingSourceDecisionsForClaims(tx");
-  assert.ok(check > 0 && check < generation.indexOf("const traceabilityResults = [];"));
+  assert.ok(check > 0 && check < generation.indexOf("const traceabilityByClaimId = new Map();"));
   assert.ok(check < generation.indexOf("await dependencies.draftGenerator(generatorInput)"));
   // P1-08 refuses only the 'promoted' work; rejection stays decidable.
   const promotion = source("Backend/kai/dictionary/postgresSourcePromotionRepository.js");

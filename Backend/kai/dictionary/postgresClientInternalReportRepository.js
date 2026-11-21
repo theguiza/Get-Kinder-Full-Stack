@@ -5,7 +5,8 @@ import { withTransaction } from "../db/kaiDb.js";
 import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId, getScopedDerivedMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
-import { evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGeneratedContentRepository.js";
+import { REPORT_LINEAGE_RESULT_KEY, evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGeneratedContentRepository.js";
+import { lineageOf } from "../services/kaiAssessmentAdaptation.js";
 import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
 import { MEASUREMENT_EVIDENCE_TYPE, countedDuplicateGroups, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
@@ -277,7 +278,7 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
                 claimId: fact.claimId, evidenceItemId: fact.evidenceItemId,
                 claimStatement: fact.claimStatement, limitationCodes: fact.limitationCodes,
                 requestedAudience: packet.requestedAudience, revalidatedForGeneration: true,
-                audienceAuthority: { internal: true },
+                audienceAuthority: { internal: true, funder: true, public: true },
               })),
               blocks: packet.blocks,
             });
@@ -307,6 +308,8 @@ export function createPostgresClientInternalReportRepository({ runInTransaction 
                 audience: packet.requestedAudience,
                 createdAt: iso(draftRow.created_at),
                 validatorKeys: validatorResults.map((result) => result?.validator_key).filter((key) => typeof key === "string"),
+                // The saved relationship of an adapted or revised report.
+                lineage: lineageOf(validatorResults, REPORT_LINEAGE_RESULT_KEY),
               },
               context: context ? { ...context, engagementType } : null,
               blocks,

@@ -82,7 +82,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports", "reviewInternalDraftFactualContent", "releaseInternalReports", "readClaimTraceabilityDiagnostics", "reviewMeasuredClaimFactualContent"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports", "reviewInternalDraftFactualContent", "releaseInternalReports", "readClaimTraceabilityDiagnostics", "reviewMeasuredClaimFactualContent", "adaptAssessments", "reviseWorkingReports"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -339,14 +339,61 @@ export const CLIENT_INTERNAL_DRAFT_LIMITATIONS = Object.freeze([
   "awaiting_organization_review",
   "cited_claims_not_currently_eligible",
 ]);
-const CLIENT_INTERNAL_DRAFT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
+// Owner direction 2026-11-20: the organization's working reports of every
+// type it creates or adapts, for any intended audience.
+export const CLIENT_INTERNAL_DRAFT_TYPES = Object.freeze([
+  "evidence_summary", "impact_narrative", "board_update", "annual_report_section", "funder_outcome_table", "case_for_support", "grant_response_paragraph",
+]);
+const CLIENT_WORKING_REPORT_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
+export const ASSESSMENT_ADAPTATION_PURPOSES = Object.freeze(["internal_planning", "board_update", "funder_report", "annual_report"]);
 
 function isClientInternalDraftHeader(item) {
   return isPlainClientObject(item)
     && isRouteUuid(item.generatedContentDraftId)
     && CLIENT_INTERNAL_DRAFT_TYPES.includes(item.contentType)
-    && item.audience === "internal"
+    && CLIENT_WORKING_REPORT_AUDIENCES.includes(item.audience)
     && CLIENT_INTERNAL_DRAFT_REVIEW_STATES.includes(item.reviewState);
+}
+
+// The saved relationship of a working report, as the server reports it (null
+// when it could not be read: nothing is inferred). IDs, purpose and version.
+export function projectWorkingReportContext(value) {
+  if (!isPlainClientObject(value)) return null;
+  const uuidOrNull = (id) => (isRouteUuid(id) ? id : null);
+  return {
+    isAssessment: value.isAssessment === true,
+    contentSha256: typeof value.contentSha256 === "string" ? value.contentSha256 : null,
+    relationship: value.relationship === "assessment_adaptation" || value.relationship === "organization_revision" ? value.relationship : null,
+    purpose: ASSESSMENT_ADAPTATION_PURPOSES.includes(value.purpose) ? value.purpose : null,
+    version: Number.isInteger(value.version) && value.version >= 1 ? value.version : 1,
+    sourceAssessmentDraftId: uuidOrNull(value.sourceAssessmentDraftId),
+    sourceAssessmentUnchanged: typeof value.sourceAssessmentUnchanged === "boolean" ? value.sourceAssessmentUnchanged : null,
+    parentDraftId: uuidOrNull(value.parentDraftId),
+    previousVersionUnchanged: typeof value.previousVersionUnchanged === "boolean" ? value.previousVersionUnchanged : null,
+    rootReportDraftId: uuidOrNull(value.rootReportDraftId),
+    revisedByOrganization: value.revisedByOrganization === true,
+    revisedBlockOrdinals: Array.isArray(value.revisedBlockOrdinals) ? value.revisedBlockOrdinals.filter(Number.isInteger) : [],
+    withheldAssessmentBlocks: Array.isArray(value.withheldAssessmentBlocks)
+      ? value.withheldAssessmentBlocks.filter((block) => isPlainClientObject(block) && Number.isInteger(block.ordinal))
+        .map((block) => ({ ordinal: block.ordinal, sectionKey: String(block.sectionKey || ""), reason: String(block.reason || "") }))
+      : [],
+  };
+}
+
+function projectEditableBlocks(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((block) => isPlainClientObject(block) && Number.isInteger(block.ordinal) && typeof block.prose === "string")
+    .map((block) => ({ ordinal: block.ordinal, prose: block.prose, protectedText: typeof block.protectedText === "string" ? block.protectedText : null }));
+}
+
+// "Use this assessment": the saved assessment named in the path is adapted
+// for one purpose; the body names only the Project, purpose and key.
+export function assessmentAdaptationPath(organizationId, generatedContentDraftId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/assessment-adaptations`;
+}
+
+export function clientWorkingReportRevisionPath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/revisions`;
 }
 
 // Returns null (unknown) for any malformed DTO, type, audience, or review state.
@@ -363,6 +410,8 @@ export function projectClientInternalDraftList(dto) {
       internalReportAvailable: item.internalReportAvailable === true,
       createdAt: typeof item.createdAt === "string" ? item.createdAt : null,
       blockCount: item.blockCount,
+      report: projectWorkingReportContext(item.report),
+      historical: item.historical === true,
     });
   }
   if (!(dto.nextCursor === null || (typeof dto.nextCursor === "string" && dto.nextCursor.length > 0))) return null;
@@ -388,6 +437,12 @@ export function projectClientInternalDraft(dto) {
     limitations: [...dto.limitations],
     blocks,
     internalReport: projectClientInternalReport(dto.internalReport),
+    report: projectWorkingReportContext(dto.report),
+    historical: isPlainClientObject(dto.historical) && dto.historical.reason === "source_changed_since_saved"
+      ? { reason: dto.historical.reason, savedAt: typeof dto.historical.savedAt === "string" ? dto.historical.savedAt : null }
+      : null,
+    revisable: dto.revisable === true,
+    editableBlocks: projectEditableBlocks(dto.editableBlocks),
     release: projectClientInternalDraftRelease(dto.release),
     factualReview: projectClientInternalDraftFactualReview(dto.factualReview),
     organizationRelease: projectClientInternalDraftOrganizationRelease(dto.organizationRelease),
@@ -2814,22 +2869,13 @@ export function canSelectClaimForInternalGeneration(claim, audience) {
   return audience === "internal" && claim?.governedAvailable === true;
 }
 
-// P14-09: funder Evidence Summary generation admission is DELIBERATELY
-// stricter than canSelectClaimForInternalGeneration above and must never
-// reuse its "governed but not currently eligible" semantics. A claim is
-// selectable for funder generation only when it is BOTH present in the
-// governed Claim Library (governedAvailable) AND reported as currently
-// eligible by the real, authoritative funder eligible-claims response
-// (audienceEligibility === "eligible", derived in annotateGovernedAvailability
-// solely from the server's own eligible-claims result) - never inferred from
-// libraryStatus, display status, review strings, blocker counts, or any
-// other frontend-computed authority.
+// Owner direction 2026-11-20 (supersedes the P14-09 selection gate): writing
+// a funder-oriented working draft publishes nothing, so a governed claim may
+// be selected for it exactly as for an internal draft; current funder
+// eligibility is a condition of the actual external release, and the server
+// still applies every processing permission and factual check.
 export function canSelectClaimForFunderGeneration(claim, audience) {
-  return (
-    audience === "funder"
-    && claim?.governedAvailable === true
-    && claim?.audienceEligibility === "eligible"
-  );
+  return audience === "funder" && claim?.governedAvailable === true;
 }
 
 // Organization change invalidates both the governed Claim Library and the

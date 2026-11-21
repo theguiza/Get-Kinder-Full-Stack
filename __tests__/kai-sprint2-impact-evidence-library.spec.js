@@ -2012,15 +2012,20 @@ test("P14-09 case A: a governed AND currently funder-eligible claim is selectabl
   ), true);
 });
 
-test("P14-09 case B: a governed but currently funder-INELIGIBLE claim is NOT selectable for funder generation", () => {
+// Owner direction 2026-11-20 supersedes the P14-09 selection gate: a
+// funder-oriented working draft publishes nothing, so a governed claim is
+// selectable for it whatever its current funder eligibility; the server still
+// applies every processing permission and factual check, and the external
+// release keeps eligibility.
+test("P14-09 case B (2026-11-20): a governed claim that is not yet funder-eligible is selectable for a funder working draft", () => {
   assert.equal(canSelectClaimForFunderGeneration(
     { claimId, governedAvailable: true, audienceEligibility: "not_eligible" },
     "funder",
-  ), false);
+  ), true);
   assert.equal(canSelectClaimForFunderGeneration(
     { claimId, governedAvailable: true, audienceEligibility: "eligibility_unavailable" },
     "funder",
-  ), false);
+  ), true);
 });
 
 test("P14-09 case C: a non-governed claim is NOT selectable for funder generation, even if reported eligible", () => {
@@ -2041,7 +2046,7 @@ test("P14-09 case D: the internal and public audiences never admit funder genera
   ), false);
 });
 
-test("P14-09: canSelectClaimForFunderGeneration never derives admission from libraryStatus, eligible, review status, support strength, or blocker count - only governedAvailable + audienceEligibility", () => {
+test("P14-09 (2026-11-20): canSelectClaimForFunderGeneration never derives admission from libraryStatus, eligible, review status, support strength, blocker count or audience eligibility - only governedAvailable", () => {
   assert.equal(canSelectClaimForFunderGeneration({
     claimId,
     governedAvailable: true,
@@ -2058,7 +2063,8 @@ test("P14-09: canSelectClaimForFunderGeneration never derives admission from lib
     audienceEligibility: "not_eligible",
     libraryStatus: "usable",
     eligible: true,
-  }, "funder"), false);
+  }, "funder"), true);
+  assert.equal(canSelectClaimForFunderGeneration({ claimId, governedAvailable: false, audienceEligibility: "eligible", libraryStatus: "usable", eligible: true }, "funder"), false);
 });
 
 test("P14-09: canSelectClaimForInternalGeneration is untouched by the new funder helper (Package 14-05 semantics remain intact)", () => {

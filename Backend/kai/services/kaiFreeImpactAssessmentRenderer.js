@@ -93,7 +93,7 @@ function audienceSentence(audience) {
 
 const READING_NOTE = "Every figure restates a cited claim exactly, with its period, population and limitations. "
   + "Document statements are quoted from the organization's own documents and are source-reported. "
-  + "The three improvements are proposals for the organization to consider, not measured or confirmed results.";
+  + "The recommended improvements are proposals for the organization to consider, not measured or confirmed results.";
 
 export function serializeFreeImpactAssessmentToMarkdown(view, { contractLine }) {
   const lines = [`# ${view.title}`, ""];

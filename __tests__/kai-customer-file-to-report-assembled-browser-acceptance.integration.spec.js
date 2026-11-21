@@ -707,7 +707,7 @@ async function runAssembledAcceptance() {
     assert.ok(shown.startsWith(`${heading}\n`), shown.slice(0, 80));
     for (const section of ["Context", "Key findings", "Reporting period", "Measurement definition and counting method", "Duplicate records",
       "Data quality and limitations", "What this evidence establishes", "What this evidence does not establish", "Analysis", "Generated narrative",
-      "Source and evidence traceability", "Authority for internal use", "Conclusion", "References"]) {
+      "Source and evidence traceability", "Source permissions and checks", "Conclusion", "References"]) {
       assert.ok(shown.includes(`\n## ${section}\n`), `section ${section}`);
     }
     assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);

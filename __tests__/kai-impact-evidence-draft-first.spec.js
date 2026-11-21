@@ -285,7 +285,7 @@ test("3+4 impact discovery and limitations: the end-to-end ordinary NPO assessme
   assert.doesNotMatch(md, /\bis approved for\b/);
 });
 
-test("5 mixed evidence: a claim a recorded review rejected is left out of the assessment and the rest is kept; other generators keep refusing it", async () => {
+test("5 mixed evidence: a claim a recorded review rejected is left out of the assessment and of other drafts, and the rest is kept", async () => {
   const rejectedHead = { decision_id: "74000000-0000-4000-8000-000000000001", decision_outcome: "rejected", approved_audiences: [], decided_by_role: "gk_reviewer" };
   const h = harness([ACTIVITY, FEEDBACK, { ...OUTCOME, claimHead: rejectedHead, claimStrength: "reviewed_not_supported" }]);
   const [activity, feedback, outcome] = h.fixtures;
@@ -296,9 +296,20 @@ test("5 mixed evidence: a claim a recorded review rejected is left out of the as
   const cited = new Set(result.data.blocks.flatMap((block) => block.citations.map((citation) => citation.claimId)));
   assert.equal(cited.has(outcome.claimId), false);
   assert.ok(result.data.blocks.some((block) => block.text.endsWith(ASSESSMENT_SELECTION_NOTE)));
+  // Owner direction 2026-11-20: every working draft leaves the rejected
+  // claim out (never sent to the model, never cited) and keeps the rest; only
+  // a request with nothing usable left is refused.
+  const before = h.providerInputs.length;
   const narrative = await createImpactNarrativeDraft(h.input([activity.claimId, outcome.claimId], "mixed-narrative"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
-  assert.equal(narrative.ok, false);
-  assert.equal(narrative.error.code, "claim_reviewed_not_supported");
+  assert.equal(narrative.ok, true, JSON.stringify(narrative));
+  assert.deepEqual(h.providerInputs.at(-1).claims.map((claim) => claim.claimId), [activity.claimId], "rejected claim text never reaches the model");
+  assert.ok(!narrative.data.blocks.some((block) => block.citations.some((citation) => citation.claimId === outcome.claimId)));
+  assert.ok(narrative.data.blocks.at(-1).text.endsWith(ASSESSMENT_SELECTION_NOTE));
+  assert.deepEqual(narrative.data.excludedClaims, [{ claimId: outcome.claimId, reason: "claim_reviewed_not_supported" }]);
+  const onlyRejected = await createImpactNarrativeDraft(h.input([outcome.claimId], "rejected-only-narrative"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
+  assert.equal(onlyRejected.ok, false);
+  assert.equal(onlyRejected.error.code, "claim_reviewed_not_supported");
+  assert.equal(h.providerInputs.length, before + 1, "no provider call for a request with nothing usable");
 });
 
 test("8 permissions: a recorded AI-processing prohibition stops generation before the provider; the same evidence still yields its deterministic traceability", async () => {
@@ -325,7 +336,7 @@ test("9 integrity: a measurement that no longer matches its claim is not drafted
   assert.deepEqual(h.providerInputs.at(-1).claims.map((claim) => claim.claimId), [feedback.claimId]);
 });
 
-test("12 draft versus release: a provisional draft is readable but not released, not organization-releasable while flagged, and not funder-eligible", async () => {
+test("12 draft versus release: a working draft is readable but not released, a funder-oriented working draft needs no funder eligibility, and its release stays protected", async () => {
   const h = harness([ACTIVITY, FEEDBACK], { sensitivity: { reviewed_minor_data_status: "present" } });
   const result = await createImpactNarrativeDraft(h.input(h.fixtures.map((f) => f.claimId), "draft-versus-release"), { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -337,12 +348,18 @@ test("12 draft versus release: a provisional draft is readable but not released,
   const { detail } = await readReport(h, draftId);
   assert.equal(detail.data.internalReport.available, true);
   assert.equal(detail.data.release.state === "released_for_internal_use", false, "reading is not release");
-  // Funder generation still requires current eligibility, before any provider call.
+  // Owner direction 2026-11-20: writing a funder-oriented working report is
+  // normal processing (Operating Model 7.1) and publishes nothing, so it
+  // needs no claim, coverage or funder approval; the external release keeps
+  // its own conditions and is not available to the organization for it.
   const calls = h.providerInputs.length;
   const funder = await createEvidenceSummaryDraft({ ...h.input([h.fixtures[0].claimId], "funder-request", "funder"), actorContext: GK_ACTOR }, { ...h.dependencies, draftGenerator: narrativeGenerator(h) });
-  assert.equal(funder.ok, false);
-  assert.equal(funder.error.code, "funder_use_not_currently_eligible", JSON.stringify(funder));
-  assert.equal(h.providerInputs.length, calls);
+  assert.equal(funder.ok, true, JSON.stringify(funder));
+  assert.equal(funder.data.requestedAudience, "funder");
+  assert.equal(h.providerInputs.length, calls + 1);
+  const funderRelease = await evaluateOrganizationInternalReleaseInTransaction(h.tx, { organizationId: ORG, generatedContentDraftId: funder.data.generatedContentDraftId });
+  assert.equal(funderRelease.organizationMayRelease, false, "drafting is not a release");
+  assert.ok(funderRelease.getKinderReviewReasons.includes("audience_requires_get_kinder_review"));
 });
 
 // Report composition across evidence types (2026-11-06 completion): the

@@ -264,6 +264,27 @@ function sanitizeUnsupportedAssertionEvidence(blocker) {
   };
 }
 
+// Where a refused revision or report needs fixing (owner direction
+// 2026-11-20): the block ordinals a disclosure, quotation or figure check
+// named, and how many cited findings are no longer usable. Never text or ids.
+function sanitizeBlockLocationEvidence(blocker) {
+  const evidence = blocker?.evidence && typeof blocker.evidence === "object" && !Array.isArray(blocker.evidence) ? blocker.evidence : {};
+  const ordinalsFrom = (values) => [...new Set((Array.isArray(values) ? values : []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 20))]
+    .sort((a, b) => a - b);
+  if (blocker?.validator_key === "VAL-GEN-008" || blocker?.validator_key === "VAL-GEN-010") {
+    const ordinals = ordinalsFrom(evidence.block_ordinals);
+    return ordinals.length > 0 ? { block_ordinals: ordinals } : {};
+  }
+  if (blocker?.validator_key === "VAL-GEN-REVISION-001") {
+    const ordinals = ordinalsFrom((Array.isArray(evidence.figures) ? evidence.figures : []).map((figure) => figure?.block_ordinal));
+    return {
+      ...(ordinals.length > 0 ? { block_ordinals: ordinals } : {}),
+      ...(Array.isArray(evidence.claims) ? { unusable_count: Math.min(evidence.claims.length, 1000) } : {}),
+    };
+  }
+  return {};
+}
+
 function sanitizeServiceBlockers(blockers) {
   if (!Array.isArray(blockers)) return [];
   return blockers.flatMap((blocker) => {
@@ -285,6 +306,7 @@ function sanitizeServiceBlockers(blockers) {
         ...(authorityEffectivenessReason ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
         ...exportEligibilityDiagnostic,
         ...sanitizeUnsupportedAssertionEvidence(blocker),
+        ...sanitizeBlockLocationEvidence(blocker),
         // Owner Package 3: which contributing version's recorded processing
         // decision refused the request (a role, never an identifier).
         ...(blocker.evidence?.source_role === "primary" || blocker.evidence?.source_role === "reference"
@@ -3964,7 +3986,8 @@ router.get(
 
 let clientGeneratedContentServicePromise = null;
 async function getClientGeneratedContentService() {
-  if (intakeServiceOverride?.listClientGeneratedDrafts || intakeServiceOverride?.getClientReleasedReportMarkdown) return intakeServiceOverride;
+  if (intakeServiceOverride?.listClientGeneratedDrafts || intakeServiceOverride?.getClientReleasedReportMarkdown
+    || intakeServiceOverride?.reviseClientWorkingReport) return intakeServiceOverride;
   clientGeneratedContentServicePromise ||= import("../services/kaiClientGeneratedContentService.js");
   return clientGeneratedContentServicePromise;
 }
@@ -4162,6 +4185,7 @@ async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft
     || intakeServiceOverride?.createFreeImpactAssessmentDraft
+    || intakeServiceOverride?.createAssessmentAdaptationDraft
     || intakeServiceOverride?.createImpactNarrativeDraft
     || intakeServiceOverride?.createReadinessAssessmentDraft
     || intakeServiceOverride?.createCaseForSupportDraft
@@ -4360,6 +4384,90 @@ router.post(
       }, {
         draftGenerator: createProductionFreeImpactAssessmentDraftGenerator(),
         claimGapFollowupMetadataOnlyAuditFactory: createProductionMetadataOnlyAuditForClaimGapFollowup,
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+/**
+ * "Use this assessment" (owner direction 2026-11-20): a working report for
+ * one reporting purpose adapted from the saved Free Impact Assessment named
+ * in the path. The body names the Project, the purpose, the idempotency key
+ * and, optionally, a subset of the assessment's cited claims and short
+ * guidance; the assessment's content is read from storage by the service,
+ * never from the browser. The generator for the purpose is chosen here from
+ * the existing adapters. No SQL here.
+ */
+const ASSESSMENT_ADAPTATION_GENERATOR_FACTORIES = Object.freeze({
+  evidence_summary: async () => (await import("../services/kaiEvidenceSummaryDraftGenerator.js")).createProductionEvidenceSummaryDraftGenerator(),
+  board_update: async () => (await import("../services/kaiBoardUpdateDraftGenerator.js")).createProductionBoardUpdateDraftGenerator(),
+  annual_report_section: async () => (await import("../services/kaiAnnualReportSectionDraftGenerator.js")).createProductionAnnualReportSectionDraftGenerator(),
+});
+
+function validateAssessmentAdaptationRequestOrSend(req, res, adaptationPurposes) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentDraftIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  const allowed = new Set(["engagement_id", "purpose", "idempotency_key", "claim_ids", "guidance"]);
+  const claimIds = payload.claim_ids;
+  if (
+    !identifiers
+    || !keys.every((key) => allowed.has(key))
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
+    || typeof payload.purpose !== "string"
+    || !adaptationPurposes.includes(payload.purpose)
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+    || (claimIds !== undefined && (!Array.isArray(claimIds) || claimIds.length < 1 || claimIds.length > 20
+      || claimIds.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+      || claimIds.length !== new Set(claimIds).size))
+    || (payload.guidance !== undefined && (typeof payload.guidance !== "string" || payload.guidance.trim().length === 0 || payload.guidance.length > 500))
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_assessment_adaptation_request",
+        "engagement_id_purpose_idempotency_key_claim_ids_or_guidance",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    sourceAssessmentDraftId: identifiers.generatedContentDraftId,
+    engagementId: payload.engagement_id,
+    purpose: payload.purpose,
+    idempotencyKey: payload.idempotency_key,
+    selectedClaimIds: claimIds === undefined ? null : [...claimIds].sort(),
+    guidance: payload.guidance === undefined ? null : payload.guidance.trim(),
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/assessment-adaptations",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const { ADAPTATION_PURPOSES, ADAPTATION_PURPOSE_TARGETS } = await import("../services/kaiAssessmentAdaptation.js");
+    const parsed = validateAssessmentAdaptationRequestOrSend(req, res, ADAPTATION_PURPOSES);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const draftGenerator = await ASSESSMENT_ADAPTATION_GENERATOR_FACTORIES[ADAPTATION_PURPOSE_TARGETS[parsed.purpose].contentType]();
+      return service.createAssessmentAdaptationDraft({ ...parsed, actorContext, now }, {
+        draftGenerator,
         metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
           organizationId: parsed.organizationId,
           actorContext,
@@ -6204,6 +6312,57 @@ router.post(
         }),
       });
     });
+  },
+);
+
+// The organization's revision of one of its saved working reports (owner
+// direction 2026-11-20; reviseClientWorkingReport). The body names the
+// idempotency key and the revised prose of each changed block by ordinal;
+// citations, disclosures and notes cannot be sent and are kept by the server.
+// The revision is saved as a new version; the saved version is unchanged.
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/revisions",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const keys = ["organizationId", "engagementId", "generatedContentDraftId"];
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    const payload = requestPayload(req);
+    const blocks = payload.blocks;
+    if (
+      Object.keys(payload).length !== 2
+      || typeof payload.idempotency_key !== "string"
+      || payload.idempotency_key !== payload.idempotency_key.trim()
+      || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+      || !Array.isArray(blocks) || blocks.length < 1 || blocks.length > 20
+      || !blocks.every((block) => block && typeof block === "object" && !Array.isArray(block)
+        && Object.keys(block).length === 2 && Number.isInteger(block.ordinal) && typeof block.text === "string" && block.text.length <= 3500)
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_working_report_revision", "idempotency_key_or_blocks")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getClientGeneratedContentService();
+      return service.reviseClientWorkingReport({
+        ...ids,
+        blocks: blocks.map((block) => ({ ordinal: block.ordinal, text: block.text })),
+        idempotencyKey: payload.idempotency_key,
+        actorContext,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: ids.organizationId,
+          actorContext,
+          now: new Date().toISOString(),
+        }),
+      });
+    }, 201);
   },
 );
 

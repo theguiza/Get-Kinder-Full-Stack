@@ -37,6 +37,10 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   // Owner authorization 2026-10-24: the organization administrator's own
   // factual review of an ordinary measured claim.
   "reviewMeasuredClaimFactualContent",
+  // Owner direction 2026-11-20: "Use this assessment" and the organization's
+  // revision of its saved working reports.
+  "adaptAssessments",
+  "reviseWorkingReports",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -921,10 +925,113 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
 export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
   ...INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
   content_type_requires_get_kinder_review: "Get Kinder reviews this type of draft.",
-  audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
+  audience_requires_get_kinder_review: "This draft's audience is not available as one of your reports.",
   validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
   structural_facts_only: "Every claim it cites is a structural fact (which columns a source has), so it documents source structure, not a programme result.",
 });
+
+// ---------------------------------------------------------------------------
+// Working reports (owner direction 2026-11-20): "Use this assessment",
+// purposes, versions and revision. Display text only; the server decides.
+
+export const ADAPTATION_PURPOSE_OPTIONS = Object.freeze([
+  Object.freeze({ purpose: "internal_planning", label: "Internal planning", description: "A working summary for staff planning and learning." }),
+  Object.freeze({ purpose: "board_update", label: "Board report", description: "An update for your board on what the evidence shows." }),
+  Object.freeze({ purpose: "funder_report", label: "Funder report", description: "A report for a funder you report to (KAI does not send it)." }),
+  Object.freeze({ purpose: "annual_report", label: "Annual-report content", description: "A section for your annual report (KAI does not publish it)." }),
+]);
+const PURPOSE_REPORT_LABELS = Object.freeze({
+  internal_planning: "Internal planning report",
+  board_update: "Board report",
+  funder_report: "Funder report",
+  annual_report: "Annual-report content",
+});
+const WORKING_REPORT_TYPE_LABELS = Object.freeze({
+  "evidence_summary:internal": "Internal evidence summary",
+  "evidence_summary:funder": "Funder evidence summary",
+  "evidence_summary:public": "Public evidence summary",
+  "impact_narrative:internal": "Internal impact narrative",
+  "board_update:internal": "Board update",
+  "annual_report_section:internal": "Annual-report section",
+  "annual_report_section:funder": "Annual-report section",
+  "annual_report_section:public": "Annual-report section",
+  "funder_outcome_table:funder": "Funder outcome table",
+  "case_for_support:internal": "Case for support",
+  "case_for_support:funder": "Case for support",
+  "grant_response_paragraph:internal": "Grant response",
+  "grant_response_paragraph:funder": "Grant response",
+  "grant_response_paragraph:public": "Grant response",
+});
+
+// What a saved draft is, in the organization's words: a Free Impact
+// Assessment, a report for its purpose (with its version), or its type.
+export function workingReportLabel(item) {
+  const context = item?.report || null;
+  if (context?.isAssessment) return "Free Impact Assessment";
+  const base = (context?.purpose && PURPOSE_REPORT_LABELS[context.purpose])
+    || WORKING_REPORT_TYPE_LABELS[`${item?.contentType}:${item?.audience}`]
+    || "Saved report";
+  return context && context.version > 1 ? `${base} · version ${context.version}` : base;
+}
+
+export function workingReportDownloadName(item) {
+  const label = workingReportLabel(item).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `kai-${label || "report"}.md`;
+}
+
+export const ADAPTATION_WITHHELD_MESSAGES = Object.freeze({
+  cites_finding_not_currently_usable: "it cites a finding that is no longer usable (for example a changed source or a measurement that no longer matches)",
+  cites_finding_not_selected: "it cites a finding you did not select",
+});
+
+export function withheldAssessmentMessage(context) {
+  const withheld = context?.withheldAssessmentBlocks || [];
+  if (withheld.length === 0) return "";
+  const reasons = [...new Set(withheld.map((block) => ADAPTATION_WITHHELD_MESSAGES[block.reason]).filter(Boolean))];
+  return `${withheld.length === 1 ? "One passage" : `${withheld.length} passages`} of the assessment ${withheld.length === 1 ? "was" : "were"} not reused, because ${reasons.join("; or ") || "its findings are no longer usable"}.`;
+}
+
+// A refused "Use this assessment" request, in plain words.
+export function adaptationFailureMessage(result, fallback) {
+  const reason = result?.body?.blockers?.[0]?.blocking_reason;
+  const messages = {
+    source_is_not_a_free_impact_assessment: "Only a saved Free Impact Assessment can be used this way.",
+    assessment_content_not_reusable: "None of this assessment's findings are usable now (their sources changed or a finding was rejected). Create a new assessment from current findings.",
+    selected_claim_not_in_assessment: "Only findings this assessment cites can be selected.",
+  };
+  if (result?.statusCode === 409 && result?.body?.error?.code === "duplicate_conflict") {
+    return "This request was already used for a different report. Choose the purpose again to create a new report.";
+  }
+  return messages[reason] || fallback;
+}
+
+const REVISION_REASON_MESSAGES = Object.freeze({
+  revision_unchanged: "Nothing was changed, so no new version was saved.",
+  revision_figure_context_changed: "A figure no longer keeps the words that describe it (its unit, group or period as the finding states it).",
+  cited_finding_not_currently_usable: "A finding this report cites is no longer usable, so a new version of it cannot be saved. Use the saved assessment to create a new report from current findings.",
+  draft_type_not_revisable: "This saved document cannot be revised here.",
+  revision_exceeds_report_limits: "The revised text is longer than a saved report allows.",
+  unsupported_numeric_or_causal_assertion: "A number or cause-and-effect wording is not supported by the findings the passage cites.",
+  material_limitation_not_disclosed: "A sentence contradicts a limitation of the figures the passage cites.",
+  unsupported_quotation: "A quotation is not in the source statement the passage cites.",
+});
+
+// A refused revision: what to fix and in which passages (server ordinals).
+export function revisionFailureMessage(result, fallback) {
+  const blockers = Array.isArray(result?.body?.blockers) ? result.body.blockers : [];
+  const lines = blockers.map((blocker) => {
+    const message = REVISION_REASON_MESSAGES[blocker?.blocking_reason];
+    if (!message) return null;
+    const ordinals = Array.isArray(blocker?.evidence?.block_ordinals) ? blocker.evidence.block_ordinals : [];
+    return ordinals.length > 0 ? `${message} (passage ${ordinals.join(", ")})` : message;
+  }).filter(Boolean);
+  return lines.length > 0 ? `Not saved. ${[...new Set(lines)].join(" ")}` : fallback;
+}
+
+export function newIdempotencyKey(prefix) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${random}`.slice(0, 120);
+}
 
 export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "
   + "not a measured programme result, so it is not an impact report, and a review would not make it one. It is kept exactly as it was "
@@ -966,7 +1073,7 @@ export const INTERNAL_DRAFT_RELEASE_REASON_MESSAGES = Object.freeze({
 
 export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   internal_use_only: "Internal use only.",
-  not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
+  not_approved_for_external_use: "Working report: KAI has not sent or released it outside your organization.",
   awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
   awaiting_organization_review: "At least one cited claim or source is not yet usable for internal reports.",
   cited_claims_not_currently_eligible: "At least one cited claim is not usable for internal use now.",

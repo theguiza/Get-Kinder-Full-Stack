@@ -131,7 +131,12 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
  * required for internal use; a high-risk source still keeps Get Kinder's
  * review, and nothing here grants funder or public use. Read-only.
  */
-export const INTERNAL_REPORT_CONTENT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
+// Owner direction 2026-11-20: the organization's working report of any type
+// it creates, for any intended audience; delivering it to its own
+// organization is not an external release.
+export const INTERNAL_REPORT_CONTENT_TYPES = Object.freeze([
+  "evidence_summary", "impact_narrative", "board_update", "annual_report_section", "funder_outcome_table", "case_for_support", "grant_response_paragraph",
+]);
 
 // Owner prompt 2026-10-26: a draft whose every cited claim restates a
 // dictionary field-presence fact (which columns a source has) documents
@@ -187,8 +192,9 @@ export async function evaluateInternalReportAvailabilityInTransaction(tx, { orga
   const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
   const rejected = evaluation.blockedReasons.includes("cited_claims_not_currently_eligible") && await citesRejectedClaim(tx, { organizationId, packet });
   const informational = (reason) => PROVISIONAL_REPORT_INFORMATION_REASONS.has(reason) && !rejected;
+  const workingReport = INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType);
   const getKinderReviewReasons = evaluation.getKinderReviewReasons
-    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType))
+    .filter((reason) => !workingReport || (reason !== "content_type_requires_get_kinder_review" && reason !== "audience_requires_get_kinder_review"))
     .filter((reason) => !SENSITIVITY_INFORMATION_REASONS.has(reason));
   const blockedReasons = [
     ...evaluation.blockedReasons.filter((reason) => !informational(reason)),

@@ -6,16 +6,14 @@ import crypto from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
 import { readEffectiveAiProcessingSourceDecisionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
-import {
-  evaluateClaimTraceabilityInTransaction,
-  AUDIENCE_AUTHORITY_BLOCKER_CODES,
-} from "./postgresClaimTraceabilityRepository.js";
+import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import {
   composeCountOnlyFindingText,
   ASSESSMENT_SELECTION_NOTE,
   composeEvidenceSummaryMeasurementDisclosures,
   composeEvidenceSummaryWithWordingFallback,
   WORDING_FALLBACK_RESULT_KEY,
+  revisedFigureContextViolations,
   unsupportedAssertionViolations,
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
@@ -34,6 +32,20 @@ import {
   withAssessmentSection,
 } from "../services/kaiFreeImpactAssessmentComposition.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import {
+  ADAPTATION_AUDIT_CONTRACT,
+  ADAPTATION_GUIDANCE_MAX_LENGTH,
+  ADAPTATION_NOT_REUSED_NOTE,
+  ADAPTATION_PURPOSE_TARGETS,
+  ORGANIZATION_REVISION_RELATIONSHIP,
+  REVISION_AUDIT_CONTRACT,
+  composeAssessmentAdaptation,
+  lineageOf,
+  parseSavedAssessment,
+  savedContentSha256,
+  sha256Hex,
+  splitRevisableBlockText,
+} from "../services/kaiAssessmentAdaptation.js";
 import { composeImpactFindingReading } from "../services/kaiImpactFindingReading.js";
 import {
   DERIVED_MEASUREMENT_EVIDENCE_TYPE,
@@ -199,6 +211,9 @@ const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
 // The Free Impact Assessment's structure (six sections, three grounded
 // recommendations, quotations only from cited evidence).
 const FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY = "VAL-GEN-ASSESSMENT-001";
+// "Use this assessment" (owner direction 2026-11-20): a report adapted from a
+// saved Free Impact Assessment.
+const ASSESSMENT_ADAPTATION_VALIDATOR_KEY = "VAL-GEN-ADAPTATION-001";
 // Phase-13 governance repair: the earliest shared generated-content
 // admission boundary at which every current content type's claims are
 // already freshly traceability-revalidated (see traceabilityResults in
@@ -707,7 +722,19 @@ function restateAssessmentModelBlocks(generatorResult, modelProjections) {
 
 // Owner direction 2026-11-11: individually prohibited selected claims.
 export const PERMISSION_EXCLUSION_RESULT_KEY = "KAI-GEN-PERMISSION-EXCLUSION-001";
-const PARTIAL_PERMISSION_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
+// Owner direction 2026-11-20: every working-report type, for every audience
+// (the 2026-11-11 rule first applied to internal Evidence Summaries and
+// Impact Narratives). The GK-only readiness assessment and data-gap memo keep
+// their whole-request rule.
+const PARTIAL_PERMISSION_CONTENT_TYPES = new Set([
+  CONTENT_TYPE,
+  IMPACT_NARRATIVE_CONTENT_TYPE,
+  CASE_FOR_SUPPORT_CONTENT_TYPE,
+  BOARD_UPDATE_CONTENT_TYPE,
+  ANNUAL_REPORT_SECTION_CONTENT_TYPE,
+  FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
+  GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE,
+]);
 const INDIVIDUAL_SOURCE_PROHIBITIONS = new Set([
   "reviewed_llm_processing_not_allowed",
   "sensitivity_ai_processing_unresolved",
@@ -727,6 +754,32 @@ function isAssessmentFindingsBlock(block) {
   return parseAssessmentBlockText(block?.text)?.sectionKey === "evidence_findings";
 }
 
+// The saved-assessment context of an adaptation, as the model receives it:
+// the purpose, the reusable section blocks (text and the claims each cites,
+// every one among the request's claims) and optional bounded guidance from
+// the organization. Nothing else.
+function isAdaptationGeneratorContext(value, input) {
+  if (!hasExactKeys(value, new Set(["purpose", "sourceAssessment", "guidance", "notReused"]))) return false;
+  if (!ADAPTATION_PURPOSE_TARGETS[value.purpose]) return false;
+  const target = ADAPTATION_PURPOSE_TARGETS[value.purpose];
+  if (target.contentType !== input.contentType || target.requestedAudience !== input.requestedAudience) return false;
+  if (value.guidance !== null && (typeof value.guidance !== "string" || value.guidance.length === 0 || value.guidance.length > ADAPTATION_GUIDANCE_MAX_LENGTH)) return false;
+  const claimIds = new Set((input.claims || []).map((claim) => claim?.claimId));
+  const assessment = value.sourceAssessment;
+  if (!hasExactKeys(assessment, new Set(["title", "sections"])) || typeof assessment.title !== "string") return false;
+  if (!Array.isArray(assessment.sections) || assessment.sections.length === 0 || assessment.sections.length > 6) return false;
+  for (const section of assessment.sections) {
+    if (!hasExactKeys(section, new Set(["key", "title", "blocks"])) || typeof section.key !== "string" || typeof section.title !== "string") return false;
+    if (!Array.isArray(section.blocks) || section.blocks.length === 0 || section.blocks.length > 20) return false;
+    for (const block of section.blocks) {
+      if (!hasExactKeys(block, new Set(["text", "claimIds"])) || typeof block.text !== "string" || block.text.length === 0 || block.text.length > 4000) return false;
+      if (!Array.isArray(block.claimIds) || block.claimIds.length === 0 || !block.claimIds.every((claimId) => claimIds.has(claimId))) return false;
+    }
+  }
+  return Array.isArray(value.notReused) && value.notReused.every((item) => hasExactKeys(item, new Set(["sectionKey", "reason"]))
+    && typeof item.sectionKey === "string" && typeof item.reason === "string");
+}
+
 function validateGeneratorInput(input) {
   let allowedInputKeys = new Set(["contentType", "requestedAudience", "claims"]);
   if (input?.contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
@@ -737,6 +790,9 @@ function validateGeneratorInput(input) {
     allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "assessment", ...(input.correction !== undefined ? ["correction"] : [])]);
     if (input.requestedAudience !== "internal" || input.assessment?.composition !== FREE_IMPACT_ASSESSMENT_COMPOSITION) return false;
     if (input.correction !== undefined && !isAssessmentCorrection(input.correction)) return false;
+  } else if (input?.adaptation !== undefined) {
+    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "adaptation"]);
+    if (!isAdaptationGeneratorContext(input.adaptation, input)) return false;
   }
   if (!hasExactKeys(input, allowedInputKeys)) return false;
   if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
@@ -1421,7 +1477,7 @@ async function toReviewPacket(tx, state, input, validation, evaluator, { boardRe
   });
 }
 
-async function loadGenerationProjection(tx, { organizationId, claimIds, requestedAudience }, funderAuthorityByClaimId) {
+async function loadGenerationProjection(tx, { organizationId, claimIds, requestedAudience }) {
   const { rows } = await tx.query(
     `SELECT c.claim_id::text AS claim_id,
             c.statement AS claim_statement,
@@ -1467,26 +1523,24 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
     evidenceType: row.evidence_type,
     intakeFileId: row.intake_file_id,
     uploadState: row.upload_state,
+    // Drafting authority for the requested audience (VAL-GEN-005). Owner
+    // direction 2026-11-20: writing a funder- or public-oriented working
+    // draft is normal service processing (Operating Model section 7.1) and
+    // publishes nothing; this claim reaches the projection only after its
+    // source's current use and AI-processing decision permitted it. The
+    // release authority (a claim review approving the audience and the
+    // effective funder/public authority, P2-06 approvalForAudience) is a
+    // condition of the actual external release, not of drafting. The legacy
+    // claims.funder_use_allowed / public_use_allowed columns stay unread.
     audienceAuthority: {
       internal: row.internal_only === true,
-      // The funder key must reflect the exact same effective funder
-      // authority verdict P2-06 (evaluateClaimTraceabilityInTransaction, via
-      // approvalForAudience) already computed for this exact claim/audience
-      // in the fresh per-claim evaluation this function's caller performed
-      // just above it - never the legacy claims.funder_use_allowed column,
-      // which is schema-pinned false and carries no authority. Only
-      // computed when the request is actually for the funder audience;
-      // internal/public generation never depend on this value (see
-      // audienceAllowed in kaiGeneratedContentValidators.js).
-      funder: requestedAudience === "funder"
-        ? funderAuthorityByClaimId?.get(row.claim_id) === true
-        : row.funder_use_allowed === true,
-      public: row.public_use_allowed === true,
+      funder: true,
+      public: true,
     },
   }));
 }
 
-function toGeneratorInput({ requestedAudience, projections, contentType, authoritativeReadiness, assessment = false }) {
+function toGeneratorInput({ requestedAudience, projections, contentType, authoritativeReadiness, assessment = false, adaptation = null }) {
   const input = {
     contentType,
     requestedAudience,
@@ -1508,6 +1562,7 @@ function toGeneratorInput({ requestedAudience, projections, contentType, authori
     input.gaps = authoritativeReadiness;
   }
   if (assessment) input.assessment = buildAssessmentModelContext(projections);
+  if (adaptation) input.adaptation = adaptation;
   if (!validateGeneratorInput(input)) throw new Error("invalid_generator_input_contract");
   return input;
 }
@@ -1574,7 +1629,7 @@ async function persistCompleteSet(tx, { input, runId, generatorResult, validatio
   };
 }
 
-async function insertAudit(tx, { input, persisted, projections }) {
+async function insertAudit(tx, { input, persisted, projections, contract = AUDIT_CONTRACT }) {
   await tx.query(
     `INSERT INTO kai.upload_lifecycle_audit (
        organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
@@ -1587,7 +1642,7 @@ async function insertAudit(tx, { input, persisted, projections }) {
       persisted.auditUploadState,
       JSON.stringify({
         metadata_only: true,
-        contract: AUDIT_CONTRACT,
+        contract: contract || AUDIT_CONTRACT,
         generation_run_id: persisted.generationRunId,
         generated_content_draft_id: persisted.generatedContentDraftId,
         queue_type: REVIEW_QUEUE_TYPE,
@@ -1622,6 +1677,13 @@ function toResult(state, replayed = false) {
     ...((draft.validator_results || []).some((result) => result.validator_key === PERMISSION_EXCLUSION_RESULT_KEY)
       ? { permissionExcludedClaims: draft.validator_results.find((result) => result.validator_key === PERMISSION_EXCLUSION_RESULT_KEY).evidence.excluded_claims }
       : {}),
+    // A working draft's left-out findings (recorded rejection, measurement no
+    // longer matching its basis, stale derived measurement or plan).
+    ...((draft.validator_results || []).some((result) => result.validator_key === SELECTION_RESULT_KEY)
+      ? { excludedClaims: draft.validator_results.find((result) => result.validator_key === SELECTION_RESULT_KEY).evidence.excluded_claims }
+      : {}),
+    // The saved relationship of an adapted or revised report.
+    ...(lineageOf(draft.validator_results, REPORT_LINEAGE_RESULT_KEY) ? { lineage: lineageOf(draft.validator_results, REPORT_LINEAGE_RESULT_KEY) } : {}),
     generatedContentDraftId: draft.generated_content_draft_id,
     requestedAudience: draft.requested_audience,
     draftStatus: draft.draft_status,
@@ -1660,532 +1722,9 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
   const requestFingerprint = fingerprintRequest(input);
 
   try {
-    return await runInTransaction(async (tx) => {
-      const reservation = await insertRunReservation(tx, input, requestFingerprint, contentType);
-      if (!reservation) return rereadAsResult(tx, input, requestFingerprint, true, contentType);
-
-      // Package 14-05: governed INTERNAL draft generation requires fresh
-      // P2-06 traceability revalidation of every requested claim -- proof
-      // that the transaction is still about the same governed claim and
-      // evidence object -- but current audience/use eligibility
-      // (result.data.eligible) is a separate, stricter downstream fact
-      // and is intentionally NOT required here. `eligible=false` alone
-      // must never reject INTERNAL draft creation.
-      // VAL-KAI-B1A-02-003: a claim whose file's effective allowed use is
-      // not_allowed never reaches traceability or the generator (the model
-      // provider), for any audience or content type. VAL-KAI-B1A-02-004: nor
-      // does a claim whose file's current human decision does not permit AI
-      // processing; one such claim refuses the whole request, never dropped.
-      // A claim whose lineage cannot be walked is left to the P2-06
-      // revalidation below.
-      // Owner Package 3: each contributing version's decision is read, so the
-      // refusal names which one (primary or reference) refused the claim.
-      const sourceDecisions = await readEffectiveAiProcessingSourceDecisionsForClaims(tx, {
-        organizationId: input.organizationId,
-        claimIds: input.claimIds,
-      });
-      // Owner direction 2026-11-11 (amends the B1A-02 whole-request rule for
-      // provisional INTERNAL drafts only): a selected claim whose own source
-      // decision prohibits AI processing or its use is left out before any
-      // model call and disclosed; the draft is generated from the remaining
-      // authorized claims. Lineage, tenant and request-wide refusals, and all
-      // funder/public requests, keep refusing the whole request. When every
-      // selected claim is prohibited, the specific refusal is returned with
-      // no model call.
-      const partialPermitted = input.requestedAudience === "internal" && PARTIAL_PERMISSION_CONTENT_TYPES.has(contentType);
-      const permissionExcluded = [];
-      let firstPermissionRefusal = null;
-      for (const claimId of input.claimIds) {
-        const refusing = (sourceDecisions.get(claimId) || [{ sourceRole: null, prohibition: "claim_lineage_missing" }])
-          .find((decision) => decision.prohibition !== null);
-        const allowedUse = validateEffectiveAllowedUsePermitsOperation(refusing?.prohibition ?? null, {
-          operation: `create_${contentType}_draft`,
-          objectType: "claim",
-          objectId: claimId,
-          sourceRole: refusing?.sourceRole ?? null,
-        });
-        if (allowedUse.ok || allowedUse.code === "not_found") continue;
-        if (partialPermitted && INDIVIDUAL_SOURCE_PROHIBITIONS.has(refusing?.prohibition)) {
-          firstPermissionRefusal ??= allowedUse;
-          permissionExcluded.push({
-            claimId,
-            blockingReason: allowedUse.blockers?.[0]?.blocking_reason ?? refusing.prohibition,
-            validatorKey: allowedUse.blockers?.[0]?.validator_key ?? null,
-            sourceRole: refusing?.sourceRole ?? null,
-          });
-          continue;
-        }
-        rollbackFailure(allowedUse.code, allowedUse.blockers);
-      }
-      if (permissionExcluded.length === input.claimIds.length) {
-        rollbackFailure(firstPermissionRefusal.code, firstPermissionRefusal.blockers);
-      }
-      const permissionExcludedIds = new Set(permissionExcluded.map((item) => item.claimId));
-      const generationClaimIds = input.claimIds.filter((claimId) => !permissionExcludedIds.has(claimId));
-
-      const traceabilityResults = [];
-      for (const claimId of generationClaimIds) {
-        const result = await evaluator(tx, {
-          organizationId: input.organizationId,
-          claimId,
-          requestedAudience: input.requestedAudience,
-        });
-        if (
-          !result.ok
-          || result.data?.requestedAudience !== input.requestedAudience
-          || result.data?.claim?.claim_id !== claimId
-          || !result.data?.evidence?.evidence_item_id
-        ) {
-          rollbackFailure(
-            "validation_blocker",
-            stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "traceability_result_contract_invalid"),
-          );
-        }
-        if (result.data.blockerCodes?.includes("p204_evaluation_required")) {
-          rollbackFailure("validation_blocker", stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "p204_evaluation_required"));
-        }
-        traceabilityResults.push(result.data);
-      }
-
-      // Phase-13 governance repair: a terminal "reviewed_not_supported"
-      // claim_strength must fail BEFORE the generator is ever invoked, for
-      // every requested audience and content type - preventing a terminally
-      // rejected claim from reaching the generator, rather than generating
-      // text and rejecting it only afterward. This is strictly narrower than
-      // (and must not be conflated with) the merely unresolved/unassessed
-      // `eligible=false` case Package 14-05 still admits for INTERNAL above.
-      // A Free Impact Assessment instead leaves such a claim out (below) and
-      // continues with the rest of the selected evidence.
-      for (const traceability of traceabilityResults) {
-        if (!assessment && traceability.claim?.claim_strength === TERMINAL_REJECTED_CLAIM_STRENGTH) {
-          rollbackFailure(
-            "claim_reviewed_not_supported",
-            stageBlocker(CLAIM_STRENGTH_VALIDATOR_KEY, "claim_terminally_not_supported"),
-          );
-        }
-      }
-
-      // Authority-source repair: derive generation-time funder audience
-      // authority from the SAME fresh per-claim P2-06 result just computed
-      // above, for this exact claim/requestedAudience - never from the
-      // legacy claims.funder_use_allowed column. A claim's blockerCodes
-      // excludes every AUDIENCE_AUTHORITY_BLOCKER_CODES entry if and only if
-      // P2-06's approvalForAudience granted authority; this is a strictly
-      // narrower signal than `eligible` (which also reflects unrelated
-      // blockers such as evidence/coverage/follow-up state), so authority
-      // and current-use eligibility remain distinct even though both derive
-      // from the same evaluation.
-      const funderAuthorityByClaimId = new Map(
-        traceabilityResults.map((traceability) => [
-          traceability.claim.claim_id,
-          !AUDIENCE_AUTHORITY_BLOCKER_CODES.some((code) => (traceability.blockerCodes || []).includes(code)),
-        ]),
-      );
-
-      // P14-09: governed FUNDER draft generation additionally requires every
-      // requested claim's fresh P2-06 traceability evaluation (just above,
-      // for this exact transaction) to be currently funder-eligible. Unlike
-      // INTERNAL (Package 14-05, unchanged above), eligible=false must fail
-      // closed here - before the generator is ever invoked - using the
-      // authoritative evaluator result only (never libraryStatus, display
-      // state, or blocker counts).
-      if (
-        input.requestedAudience === "funder"
-        && !traceabilityResults.every((traceability) => traceability.eligible === true)
-      ) {
-        rollbackFailure("funder_use_not_currently_eligible");
-      }
-
-      let projections = await loadGenerationProjection(tx, { ...input, claimIds: generationClaimIds }, funderAuthorityByClaimId);
-      if (!projections) rollbackFailure("conflict_current_state_changed");
-      // Owner direction 2026-11-06 (draft first): an INTERNAL provisional
-      // draft does not wait for review, coverage acceptance or final-use
-      // eligibility. Current eligibility stays a limitation carried with the
-      // claim; funder and public generation keep requiring it. An assessment
-      // leaves out only a claim a recorded review rejected, or a measurement
-      // that no longer matches its own basis, and keeps every other selected
-      // claim, with a selection note in the saved content. Left-out claim text
-      // never enters the model or acquires a citation.
-      const provisionalInternal = input.requestedAudience === "internal";
-      const excludedClaims = [];
-      if (assessment) {
-        for (const traceability of traceabilityResults) {
-          if (recordedReviewRejects(traceability)
-            || (traceability.eligible !== true && !(await provisionalMeasuredFactIntact(tx, input.organizationId, traceability)))) {
-            excludedClaims.push(traceability);
-          }
-        }
-        const excludedIds = new Set(excludedClaims.map((item) => item.claim.claim_id));
-        projections = projections.filter((item) => !excludedIds.has(item.claimId));
-        if (projections.length === 0) rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, "assessment_no_eligible_evidence"));
-      }
-      const excludedClaimIds = new Set(excludedClaims.map((item) => item.claim.claim_id));
-      const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
-      const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
-      const measuredValueByClaimId = new Map();
-      for (const traceability of traceabilityResults) {
-        if (excludedClaimIds.has(traceability.claim.claim_id)) continue;
-        const projection = projectionByClaim.get(traceability.claim.claim_id);
-        if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
-          rollbackFailure("conflict_current_state_changed");
-        }
-        // Preserve real current limitations/blockers into the existing
-        // limitationCodes generator channel: an internally admitted but
-        // currently ineligible claim must not have its blockers silently
-        // erased. Deterministic ordering, de-duplicated, no fabrication.
-        const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
-        // P2-01M: a measured claim also carries its material limitations
-        // (human-defined record meaning, attested or absent period, excluded
-        // blanks, included duplicates, every coverage dimension that is not
-        // clear - accepted or not), which blockerCodes alone lose once the
-        // claim is eligible. Field-presence claims keep exactly blockerCodes.
-        let measurementCodes = [];
-        // A measured claim reaches a non-internal draft only while currently
-        // eligible. An internal provisional draft needs the measurement to
-        // be intact (it still matches its own basis) and no recorded review
-        // rejection; review, coverage and flags remain carried limitations.
-        const measuredAdmitted = async () => traceability.eligible === true || (
-          provisionalInternal
-          && !recordedReviewRejects(traceability)
-          && await provisionalMeasuredFactIntact(tx, input.organizationId, traceability)
-        );
-        if (projection.evidenceType === MEASUREMENT_EVIDENCE_TYPE) {
-          if (!(await measuredAdmitted())) {
-            rollbackFailure(
-              "validation_blocker",
-              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
-            );
-          }
-          const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
-            { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
-            tx,
-          );
-          if (!measurementRow) rollbackFailure("conflict_current_state_changed");
-          // A parser row count establishes rows, not the human label's meaning.
-          // Apply this factual projection for every source-presence value.
-          projection.modelClaimStatement = composeCountOnlyFindingText(measurementRow);
-          measuredValueByClaimId.set(projection.claimId, measurementRow.measured_value);
-          measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
-        }
-        // Measurement MVP: a derived measurement (paired outcome, tabular
-        // count or rate) is generated from on the same terms: currently
-        // eligible, its material limitations carried beside the claim, and
-        // its measured value attributed for the server disclosure.
-        if (projection.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
-          if (!(await measuredAdmitted())) {
-            rollbackFailure(
-              "validation_blocker",
-              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
-            );
-          }
-          const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
-            { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
-            tx,
-          );
-          if (!derivedRow) rollbackFailure("conflict_current_state_changed");
-          // Evidence stated under a corrected interpretation, or arithmetic
-          // that no longer holds, never reaches the model.
-          if (!derivedEvidenceIsCurrent(derivedRow) || !derivedContributingSourcesCurrent(derivedRow) || !derivedMeasurementArithmeticHolds(derivedRow)) {
-            rollbackFailure(
-              "validation_blocker",
-              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "derived_measurement_not_current"),
-            );
-          }
-          measuredValueByClaimId.set(projection.claimId, derivedRow.measured_value);
-          measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
-          // What the measurement means, in plain language, from the same
-          // persisted row and the interpretation its evidence is stated under
-          // (the organization's meaning, direction and evidence basis).
-          // Internal drafts only: external generation is unchanged.
-          const reading = provisionalInternal ? composeImpactFindingReading(derivedRow) : null;
-          if (reading) {
-            projection.plainReading = reading.text;
-            projection.impactReading = reading;
-          }
-        }
-        // Owner Package 4: a document statement's caveats and meaning (its
-        // source-reported status, uncertainty, estimate or method/instruction
-        // wording) travel with it, from the persisted claim's quoted excerpt,
-        // so the model and the validators know it is what the source says.
-        if (projection.evidenceType === PLANNED_TARGET_EVIDENCE_TYPE) {
-          if (!(await measuredAdmitted())) rollbackFailure('validation_blocker', stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY,'planned_target_not_intact'));
-          const plan = await readPlannedTargetEvidence(tx, { organizationId:input.organizationId,evidenceItemId:projection.evidenceItemId });
-          if (!plan || !plan.decision_is_current) rollbackFailure('conflict_current_state_changed');
-          projection.modelClaimStatement = composePlannedTargetStatement(plan);
-          measurementCodes = plannedTargetLimitationCodes(plan);
-        }
-        if (projection.evidenceType === DOCUMENT_EVIDENCE_TYPE) {
-          measurementCodes = documentGenerationLimitationCodes(projection.claimStatement);
-        }
-        projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
-      }
-
-      // Owner direction 2026-11-06: external (funder/public) content omits
-      // direct participant identifiers by default. The generalized claim text
-      // is what the model sees and what the validators check, so the draft
-      // keeps every other finding, number and citation. Internal drafts and
-      // the stored claim, evidence and source records are unchanged.
-      if (input.requestedAudience !== "internal") {
-        for (const projection of projections) {
-          projection.claimStatement = omitDirectIdentifiersForExternalUse(projection.claimStatement);
-        }
-      }
-
-      // All selected findings follow the same generator path, irrespective of
-      // source story presence. Numerical support and disclosures still validate.
-      const modelProjections = projections;
-      let generatorInput = modelProjections.length > 0
-        ? toGeneratorInput({
-            requestedAudience: input.requestedAudience,
-            projections: modelProjections,
-            contentType,
-            authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
-              ? dependencies.authoritativeDataGaps
-              : dependencies.authoritativeReadiness,
-            assessment,
-          })
-        : null;
-      // The one model boundary for every content type. Only a Free Impact
-      // Assessment may pass through it a second time, and only as the single
-      // bounded correction below: the same governed claims (already checked
-      // for AI-processing permission above) plus block-level diagnostics.
-      let generatorResult = null;
-      let assessmentModelAttempts = 0;
-      while (generatorInput) {
-        generatorResult = await dependencies.draftGenerator(generatorInput);
-        assessmentModelAttempts += 1;
-        generatorInput = assessment ? assessmentCorrectionInput(generatorInput, generatorResult, modelProjections, assessmentModelAttempts) : null;
-      }
-      // Assembly after the model call: the assessment's restatement and
-      // composed sections, disclosures, selection notes and every validator.
-      const rawModelResult = generatorResult;
-      const assemble = (modelResult) => {
-        let generatorResult = modelResult;
-        let assessmentRestated = [];
-        if (assessment && modelProjections.length > 0) {
-          const restated = restateAssessmentModelBlocks(generatorResult, modelProjections);
-          generatorResult = { blocks: restated.blocks };
-          assessmentRestated = restated.restated;
-        }
-        const assessmentWordingFallback = assessment && (assessmentRestated === "all" || assessmentRestated.length > 0)
-          ? { model_generation_attempts: assessmentModelAttempts, restated_model_block_ordinals: assessmentRestated }
-          : null;
-        // Free Impact Assessment: the model's section blocks pass the result
-        // contract, then the server adds the composed sections (story
-        // evidence, documented gaps, three proposed improvements, next steps)
-        // from the same projections. Disclosures, the combined result contract
-        // and every validator below then run on the whole assessment.
-        if (assessment && modelProjections.length > 0) {
-          const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
-          if (!composedAssessment.ok) {
-            rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
-          }
-          generatorResult = { blocks: composedAssessment.blocks };
-        }
-        // An Evidence Summary block citing an ordinary measured claim carries
-        // that claim's server-composed disclosure after the model's own text
-        // (composeEvidenceSummaryMeasurementDisclosures). The model result
-        // passes the result contract first; the combined result passes it
-        // again below, so a disclosure that does not fit is refused, never
-        // truncated, and the validators then run on exactly what persists.
-        // Owner direction 2026-11-10: in an Evidence Summary the model's
-        // wording never fails the request on its own. Refused blocks (or an
-        // unusable result) are restated from the cited claims' own governed
-        // text with their disclosures; every validator still runs on the
-        // whole draft below, and a non-wording refusal is never repaired.
-        let wordingFallback = null;
-        let composedWithDisclosures = false;
-        if (contentType === CONTENT_TYPE && !assessment && modelProjections.length > 0) {
-          const validationClaims = projections.map((projection) => ({
-            ...projection,
-            revalidatedForGeneration: true,
-            currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-          }));
-          const repaired = composeEvidenceSummaryWithWordingFallback({
-            modelBlocks: generatorResult?.blocks,
-            modelResultUsable: classifyGeneratorResult(generatorResult).ok,
-            claims: modelProjections,
-            measuredValueByClaimId,
-            blockFits: (block) => classifyGeneratorResult({ blocks: [{ ...block, ordinal: 1 }] }).ok,
-            resultFits: (blocks) => classifyGeneratorResult({ blocks }).ok,
-            validate: (blocks) => validateGeneratedContentDraft({
-              requestedAudience: input.requestedAudience,
-              generationClaims: validationClaims,
-              blocks,
-              draftAudience: input.requestedAudience,
-              contentType,
-            }),
-          });
-          if (repaired.ok && classifyGeneratorResult({ blocks: repaired.blocks }).ok) {
-            generatorResult = { blocks: repaired.blocks };
-            composedWithDisclosures = true;
-            if (repaired.evidence.fallback_block_count > 0) wordingFallback = repaired.evidence;
-          }
-        }
-        if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0 && !composedWithDisclosures) {
-          const modelClassification = classifyGeneratorResult(generatorResult);
-          if (!modelClassification.ok) {
-            rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
-          }
-          // A Free Impact Assessment discloses each measured claim once, in the
-          // findings block that states it (every selected claim has one; see
-          // composeFreeImpactAssessmentBlocks); summary blocks are not repeated.
-          const disclosed = assessment ? generatorResult.blocks.filter(isAssessmentFindingsBlock) : generatorResult.blocks;
-          const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: disclosed, claims: modelProjections, measuredValueByClaimId });
-          if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
-          const byOrdinal = new Map(composed.blocks.map((block) => [block.ordinal, block]));
-          generatorResult = { blocks: generatorResult.blocks.map((block) => byOrdinal.get(block.ordinal) ?? block) };
-        }
-        if (assessment && excludedClaims.length > 0) {
-          const gapBlock = generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"));
-          gapBlock.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
-        }
-        // Claims left out for their source's processing permission are
-        // disclosed in the saved content (never cited) and in the results.
-        if (permissionExcluded.length > 0) {
-          const note = permissionExclusionNote(permissionExcluded);
-          const target = assessment
-            ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
-            : generatorResult.blocks[generatorResult.blocks.length - 1];
-          target.text += ` ${note}`;
-        }
-        const generatorResultClassification = classifyGeneratorResult(generatorResult);
-        if (!generatorResultClassification.ok) {
-          rollbackFailure(
-            "validation_blocker",
-            stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, generatorResultClassification.reason),
-          );
-        }
-
-        const validation = validateGeneratedContentDraft({
-          requestedAudience: input.requestedAudience,
-          generationClaims: projections.map((projection) => ({
-            ...projection,
-            revalidatedForGeneration: true,
-            currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-          })),
-          blocks: generatorResult.blocks,
-          draftAudience: input.requestedAudience,
-          contentType,
-          authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
-            ? dependencies.authoritativeDataGaps
-            : dependencies.authoritativeReadiness,
-        });
-        return { generatorResult, validation, assessmentRestated, assessmentWordingFallback, wordingFallback };
-      };
-      let assembled = assemble(rawModelResult);
-      // Owner direction 2026-11-11: a Free Impact Assessment is not refused for
-      // the model's wording. When the assembled draft is refused only for a
-      // wording rule (an undisclosed or contradicted limitation, VAL-GEN-008,
-      // or an ungrounded quotation, VAL-GEN-010), every model section is
-      // restated from the claims' own readings and governed text, which the
-      // validators accept by construction, and the whole draft is validated
-      // again. Nothing refused is saved; any other refusal stands.
-      if (assessment && modelProjections.length > 0 && !assembled.validation.ok
-        && assembled.validation.blockers.every((item) => ["VAL-GEN-008", "VAL-GEN-010"].includes(item.validator_key))) {
-        assembled = assemble({ blocks: [] });
-      }
-      generatorResult = assembled.generatorResult;
-      let validation = assembled.validation;
-      let wordingFallback = assembled.wordingFallback;
-      const assessmentRestated = assembled.assessmentRestated;
-      const assessmentWordingFallback = assembled.assessmentWordingFallback;
-      if (!validation.ok) {
-        // The model text already passed VAL-GEN-004 on its own, so a
-        // VAL-GEN-004 refusal of the assembled assessment is in
-        // server-composed text: a deterministic defect, never retried.
-        rollbackFailure("validation_blocker", assessment
-          ? validation.blockers.map((item) => (item.validator_key === "VAL-GEN-004"
-            ? { ...item, evidence: { ...item.evidence, origin: "composed_draft", generation_attempts: assessmentModelAttempts } }
-            : item))
-          : validation.blockers);
-      }
-      if (assessmentWordingFallback) wordingFallback = assessmentWordingFallback;
-      if (wordingFallback) {
-        // Which blocks were restated from the claims' own wording and why
-        // (IDs, ordinals and codes only; never the refused text).
-        validation = { ...validation, results: [...validation.results, { validator_key: WORDING_FALLBACK_RESULT_KEY, severity: "pass", evidence: wordingFallback }] };
-      }
-      if (assessment) {
-        // Keep the exact selection outcome on the saved draft and its
-        // idempotent response, without creating a citation or review authority
-        // for evidence that was not used. IDs and codes only; no source text.
-        validation = { ...validation, results: [...validation.results, {
-          validator_key: FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, severity: "pass", evidence: {
-            excluded_claims: excludedClaims.map((item) => ({ claimId: item.claim.claim_id, blockerCodes: item.blockerCodes })),
-            model_generation_attempts: assessmentModelAttempts,
-            restated_model_block_ordinals: assessmentRestated,
-          },
-        }] };
-      }
-
-      if (permissionExcluded.length > 0) {
-        validation = { ...validation, results: [...validation.results, { validator_key: PERMISSION_EXCLUSION_RESULT_KEY, severity: "pass", evidence: {
-          excluded_claims: permissionExcluded.map((item) => ({ claimId: item.claimId, blockingReason: item.blockingReason, validatorKey: item.validatorKey, sourceRole: item.sourceRole })),
-        } }] };
-      }
-
-      // Persist an informational reminder separately from generated prose and
-      // citations. It has no severity/eligibility dependence on a source flag.
-      validation = { ...validation, results: [...validation.results, STORY_SOURCE_NOTE_RESULT] };
-
-      // Post-generation revalidation remains a current-state/lineage
-      // integrity check only: it must still fail closed if traceability
-      // fails, or returns a different claim/evidence identity than the
-      // object generation began against. It must NOT require
-      // eligible=true, and must NOT convert eligible=false into true.
-      for (const claim of projections) {
-        const result = await evaluator(tx, {
-          organizationId: input.organizationId,
-          claimId: claim.claimId,
-          requestedAudience: input.requestedAudience,
-        });
-        if (
-          !result.ok
-          || result.data?.claim?.claim_id !== claim.claimId
-          || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
-        ) {
-          rollbackFailure("conflict_current_state_changed");
-        }
-        // P14-09: for FUNDER only, this same post-generation revalidation
-        // pass must also fail closed (rolling back everything generated
-        // above, before any persistence) if current funder eligibility was
-        // lost between the pre-generation check and now. An internal
-        // provisional draft (assessments included) requires the same claim
-        // and evidence identity, not final-use eligibility; a review that
-        // rejected an asserted claim meanwhile still rolls the draft back.
-        if (input.requestedAudience === "funder" && result.data?.eligible !== true) {
-          rollbackFailure("funder_use_not_currently_eligible");
-        }
-        if (assessment && recordedReviewRejects(result.data)) {
-          rollbackFailure("conflict_current_state_changed");
-        }
-      }
-
-      const persisted = await persistCompleteSet(tx, {
-        input,
-        runId: reservation.generation_run_id,
-        generatorResult,
-        validation,
-        projections,
-        contentType,
-      });
-      await afterPersist(tx, persisted);
-      const postWrite = await rereadAsResult(tx, input, requestFingerprint, false, contentType);
-      if (!postWrite.ok) throw new RollbackResultError(postWrite);
-
-      const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
-        attempted_operation: AUDIT_OPERATION,
-        actor_type: "human",
-        object_type: "generated_content_draft",
-        request_scope: "organization_generated_content_draft",
-        contract: AUDIT_CONTRACT,
-        generated_content_draft_id: persisted.generatedContentDraftId,
-      }, tx);
-      await insertAudit(tx, { input, persisted, projections });
-      await preparedAudit.publish();
-      return postWrite;
-    });
+    return await runInTransaction((tx) => generateDraftInTransaction(tx, {
+      contentType, input, requestFingerprint, dependencies, evaluator, afterPersist, assessment,
+    }));
   } catch (error) {
     if (error instanceof RollbackResultError) return error.result;
     if (error?.code === "23505") return failure("conflict_current_state_changed");
@@ -2197,6 +1736,834 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
     }
     return failure("system_error");
   }
+}
+
+/**
+ * Drafting admission for one generation, adaptation or revision (owner
+ * direction 2026-11-20, "working report" vs "external release"): which of the
+ * requested claims may be stated in a new working draft now, and the governed
+ * projection the model and the validators receive for each.
+ *
+ * Writing a draft for any intended audience (internal, funder, public) is
+ * normal service processing (Operating Model section 7.1); it publishes
+ * nothing. So the same rules apply to every audience and content type:
+ * - a claim whose source decision prohibits the use or AI processing is left
+ *   out before any model call and disclosed (VAL-KAI-B1A-02-003/004); a
+ *   lineage or request-wide refusal still refuses the whole request;
+ * - every remaining claim is freshly re-evaluated through P2-06 at the
+ *   requested audience (identity, currentness, and the audience's open
+ *   review/approval facts, which travel with the claim as limitations);
+ * - a claim a recorded review rejected, a measurement that no longer matches
+ *   its own basis, a derived measurement whose interpretation or arithmetic
+ *   is no longer current, and a plan whose decision changed are left out and
+ *   disclosed; the draft is written from the rest;
+ * - only when nothing usable remains is the request refused.
+ * Claim, evidence and coverage approval, audience approval (approved
+ * audiences / effective funder or public authority) and strict P2-06
+ * eligibility are NOT conditions of drafting; they remain the conditions of
+ * the actual external release (export review, final eligibility, manifest).
+ */
+const SELECTION_RESULT_KEY = "KAI-GEN-SELECTION-001";
+export const REPORT_LINEAGE_RESULT_KEY = "KAI-REPORT-LINEAGE-001";
+export const DRAFTING_EXCLUSION_REASONS = Object.freeze([
+  "claim_reviewed_not_supported",
+  "measured_claim_integrity_not_established",
+  "derived_measurement_not_current",
+  "planned_target_not_current",
+]);
+// Narrative working-report types: an unusable or refused model wording is
+// restated from the cited claims' own governed text, and every measured claim
+// a block cites carries the server-composed disclosure, exactly as for an
+// Evidence Summary (owner directions 2026-11-01 / 2026-11-10, extended to
+// every narrative report type on 2026-11-20).
+export const NARRATIVE_WORKING_REPORT_CONTENT_TYPES = new Set([
+  CONTENT_TYPE,
+  IMPACT_NARRATIVE_CONTENT_TYPE,
+  BOARD_UPDATE_CONTENT_TYPE,
+  ANNUAL_REPORT_SECTION_CONTENT_TYPE,
+  CASE_FOR_SUPPORT_CONTENT_TYPE,
+  GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE,
+]);
+const MEASURED_EVIDENCE_TYPES = new Set([MEASUREMENT_EVIDENCE_TYPE, DERIVED_MEASUREMENT_EVIDENCE_TYPE, PLANNED_TARGET_EVIDENCE_TYPE]);
+export const POTENTIAL_CONFLICT_LIMITATION_CODE = "conflict.potential_conflict_recorded";
+
+async function prepareDraftingClaimsInTransaction(tx, { organizationId, claimIds, requestedAudience, contentType, evaluator }) {
+  const sourceDecisions = await readEffectiveAiProcessingSourceDecisionsForClaims(tx, { organizationId, claimIds });
+  const partialPermitted = PARTIAL_PERMISSION_CONTENT_TYPES.has(contentType);
+  const permissionExcluded = [];
+  let firstPermissionRefusal = null;
+  for (const claimId of claimIds) {
+    const refusing = (sourceDecisions.get(claimId) || [{ sourceRole: null, prohibition: "claim_lineage_missing" }])
+      .find((decision) => decision.prohibition !== null);
+    const allowedUse = validateEffectiveAllowedUsePermitsOperation(refusing?.prohibition ?? null, {
+      operation: `create_${contentType}_draft`,
+      objectType: "claim",
+      objectId: claimId,
+      sourceRole: refusing?.sourceRole ?? null,
+    });
+    if (allowedUse.ok || allowedUse.code === "not_found") continue;
+    if (partialPermitted && INDIVIDUAL_SOURCE_PROHIBITIONS.has(refusing?.prohibition)) {
+      firstPermissionRefusal ??= allowedUse;
+      permissionExcluded.push({
+        claimId,
+        blockingReason: allowedUse.blockers?.[0]?.blocking_reason ?? refusing.prohibition,
+        validatorKey: allowedUse.blockers?.[0]?.validator_key ?? null,
+        sourceRole: refusing?.sourceRole ?? null,
+      });
+      continue;
+    }
+    rollbackFailure(allowedUse.code, allowedUse.blockers);
+  }
+  if (permissionExcluded.length === claimIds.length) {
+    rollbackFailure(firstPermissionRefusal.code, firstPermissionRefusal.blockers);
+  }
+  const permissionExcludedIds = new Set(permissionExcluded.map((item) => item.claimId));
+  const generationClaimIds = claimIds.filter((claimId) => !permissionExcludedIds.has(claimId));
+
+  const traceabilityByClaimId = new Map();
+  for (const claimId of generationClaimIds) {
+    const result = await evaluator(tx, { organizationId, claimId, requestedAudience });
+    if (
+      !result.ok
+      || result.data?.requestedAudience !== requestedAudience
+      || result.data?.claim?.claim_id !== claimId
+      || !result.data?.evidence?.evidence_item_id
+    ) {
+      rollbackFailure(
+        "validation_blocker",
+        stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "traceability_result_contract_invalid"),
+      );
+    }
+    if (result.data.blockerCodes?.includes("p204_evaluation_required")) {
+      rollbackFailure("validation_blocker", stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "p204_evaluation_required"));
+    }
+    traceabilityByClaimId.set(claimId, result.data);
+  }
+
+  const loaded = await loadGenerationProjection(tx, { organizationId, claimIds: generationClaimIds, requestedAudience });
+  if (!loaded) rollbackFailure("conflict_current_state_changed");
+
+  const projections = [];
+  const excluded = [];
+  const measuredValueByClaimId = new Map();
+  for (const projection of loaded) {
+    const traceability = traceabilityByClaimId.get(projection.claimId);
+    if (!traceability || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
+      rollbackFailure("conflict_current_state_changed");
+    }
+    const exclude = (reason) => excluded.push({ claimId: projection.claimId, reason, blockerCodes: [...(traceability.blockerCodes || [])] });
+    // A recorded review that found the claim or its evidence unsupported
+    // (including the terminal "reviewed_not_supported" strength) is never
+    // stated as support.
+    if (recordedReviewRejects(traceability)) { exclude("claim_reviewed_not_supported"); continue; }
+    // A measured claim is stated only while its measurement still matches
+    // its own basis (or it is currently eligible).
+    if (MEASURED_EVIDENCE_TYPES.has(projection.evidenceType) && traceability.eligible !== true
+      && !(await provisionalMeasuredFactIntact(tx, organizationId, traceability))) {
+      exclude("measured_claim_integrity_not_established");
+      continue;
+    }
+    let measurementCodes = [];
+    if (projection.evidenceType === MEASUREMENT_EVIDENCE_TYPE) {
+      const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
+        { organizationId, evidenceItemId: projection.evidenceItemId },
+        tx,
+      );
+      if (!measurementRow) rollbackFailure("conflict_current_state_changed");
+      // A parser row count establishes rows, not the human label's meaning.
+      projection.modelClaimStatement = composeCountOnlyFindingText(measurementRow);
+      measuredValueByClaimId.set(projection.claimId, measurementRow.measured_value);
+      measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
+    }
+    if (projection.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+      const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
+        { organizationId, evidenceItemId: projection.evidenceItemId },
+        tx,
+      );
+      if (!derivedRow) rollbackFailure("conflict_current_state_changed");
+      // Evidence stated under a corrected interpretation, or arithmetic that
+      // no longer holds, never reaches the model as a current finding.
+      if (!derivedEvidenceIsCurrent(derivedRow) || !derivedContributingSourcesCurrent(derivedRow) || !derivedMeasurementArithmeticHolds(derivedRow)) {
+        exclude("derived_measurement_not_current");
+        continue;
+      }
+      measuredValueByClaimId.set(projection.claimId, derivedRow.measured_value);
+      measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
+      // What the measurement means, in plain language, from the same
+      // persisted row and the interpretation its evidence is stated under.
+      // Every audience: it is governed text composed from the recorded
+      // values, and the validators accept it as support.
+      const reading = composeImpactFindingReading(derivedRow);
+      if (reading) {
+        projection.plainReading = reading.text;
+        projection.impactReading = reading;
+      }
+    }
+    if (projection.evidenceType === PLANNED_TARGET_EVIDENCE_TYPE) {
+      const plan = await readPlannedTargetEvidence(tx, { organizationId, evidenceItemId: projection.evidenceItemId });
+      if (!plan || !plan.decision_is_current) { exclude("planned_target_not_current"); continue; }
+      projection.modelClaimStatement = composePlannedTargetStatement(plan);
+      measurementCodes = plannedTargetLimitationCodes(plan);
+    }
+    // Owner Package 4: a document statement's caveats and meaning travel
+    // with it, so the model and the validators know it is what the source says.
+    if (projection.evidenceType === DOCUMENT_EVIDENCE_TYPE) {
+      measurementCodes = documentGenerationLimitationCodes(projection.claimStatement);
+    }
+    // A recorded potential conflict about this claim is a real disagreement
+    // between sources, carried so it is never silently dropped.
+    const conflictCodes = Array.isArray(traceability.potential_conflict_groups) && traceability.potential_conflict_groups.length > 0
+      ? [POTENTIAL_CONFLICT_LIMITATION_CODE]
+      : [];
+    const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
+    projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes, ...conflictCodes])].sort();
+    projections.push(projection);
+  }
+
+  // Owner direction 2026-11-06: external (funder or public) content omits
+  // direct participant identifiers by default. The generalized claim text is
+  // what the model sees and what the validators check; the stored claim,
+  // evidence and source records are unchanged.
+  if (requestedAudience !== "internal") {
+    for (const projection of projections) {
+      projection.claimStatement = omitDirectIdentifiersForExternalUse(projection.claimStatement);
+    }
+  }
+  return { projections, excluded, permissionExcluded, traceabilityByClaimId, measuredValueByClaimId };
+}
+
+function refuseNothingUsable({ excluded, assessment }) {
+  if (assessment) rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, "assessment_no_eligible_evidence"));
+  if (excluded.length > 0 && excluded.every((item) => item.reason === "claim_reviewed_not_supported")) {
+    rollbackFailure("claim_reviewed_not_supported", stageBlocker(CLAIM_STRENGTH_VALIDATOR_KEY, "claim_terminally_not_supported"));
+  }
+  const reason = excluded.find((item) => item.reason !== "claim_reviewed_not_supported")?.reason;
+  rollbackFailure("validation_blocker", stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, ({
+    measured_claim_integrity_not_established: "measured_claim_not_currently_eligible",
+    derived_measurement_not_current: "derived_measurement_not_current",
+    planned_target_not_current: "planned_target_not_intact",
+  })[reason] || "measured_claim_not_currently_eligible"));
+}
+
+async function generateDraftInTransaction(tx, { contentType, input, requestFingerprint, dependencies, evaluator, afterPersist, assessment }) {
+  const reservation = await insertRunReservation(tx, input, requestFingerprint, contentType);
+  if (!reservation) return rereadAsResult(tx, input, requestFingerprint, true, contentType);
+
+  const prepared = await prepareDraftingClaimsInTransaction(tx, {
+    organizationId: input.organizationId,
+    claimIds: input.claimIds,
+    requestedAudience: input.requestedAudience,
+    contentType,
+    evaluator,
+  });
+  const { projections, excluded, permissionExcluded, traceabilityByClaimId, measuredValueByClaimId } = prepared;
+  if (projections.length === 0) refuseNothingUsable({ excluded, assessment });
+  const excludedClaims = excluded;
+  // An assessment adaptation (owner direction 2026-11-20): the saved
+  // assessment's blocks whose every citation is still usable now, and the
+  // ones withheld, from the persisted assessment the caller loaded.
+  const adaptation = typeof dependencies.adaptation?.contextFor === "function"
+    ? dependencies.adaptation.contextFor(new Set(projections.map((projection) => projection.claimId)))
+    : null;
+  if (dependencies.adaptation && (!adaptation || adaptation.context.sourceAssessment.sections.length === 0)) {
+    rollbackFailure("validation_blocker", stageBlocker(ASSESSMENT_ADAPTATION_VALIDATOR_KEY, "assessment_content_not_reusable"));
+  }
+
+  // All selected findings follow the same generator path, irrespective of
+  // source story presence. Numerical support and disclosures still validate.
+  const modelProjections = projections;
+  let generatorInput = modelProjections.length > 0
+    ? toGeneratorInput({
+        requestedAudience: input.requestedAudience,
+        projections: modelProjections,
+        contentType,
+        authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+          ? dependencies.authoritativeDataGaps
+          : dependencies.authoritativeReadiness,
+        assessment,
+        adaptation: adaptation?.context ?? null,
+      })
+    : null;
+  // The one model boundary for every content type. Only a Free Impact
+  // Assessment may pass through it a second time, and only as the single
+  // bounded correction below: the same governed claims (already checked
+  // for AI-processing permission above) plus block-level diagnostics.
+  let generatorResult = null;
+  let assessmentModelAttempts = 0;
+  while (generatorInput) {
+    generatorResult = await dependencies.draftGenerator(generatorInput);
+    assessmentModelAttempts += 1;
+    generatorInput = assessment ? assessmentCorrectionInput(generatorInput, generatorResult, modelProjections, assessmentModelAttempts) : null;
+  }
+  // Assembly after the model call: the assessment's restatement and
+  // composed sections, disclosures, selection notes and every validator.
+  const rawModelResult = generatorResult;
+  const assemble = (modelResult) => {
+    let generatorResult = modelResult;
+    let assessmentRestated = [];
+    if (assessment && modelProjections.length > 0) {
+      const restated = restateAssessmentModelBlocks(generatorResult, modelProjections);
+      generatorResult = { blocks: restated.blocks };
+      assessmentRestated = restated.restated;
+    }
+    const assessmentWordingFallback = assessment && (assessmentRestated === "all" || assessmentRestated.length > 0)
+      ? { model_generation_attempts: assessmentModelAttempts, restated_model_block_ordinals: assessmentRestated }
+      : null;
+    // Free Impact Assessment: the model's section blocks pass the result
+    // contract, then the server adds the composed sections (story
+    // evidence, documented gaps, three proposed improvements, next steps)
+    // from the same projections. Disclosures, the combined result contract
+    // and every validator below then run on the whole assessment.
+    if (assessment && modelProjections.length > 0) {
+      const composedAssessment = composeFreeImpactAssessmentBlocks({ modelBlocks: generatorResult.blocks, claims: modelProjections });
+      if (!composedAssessment.ok) {
+        rollbackFailure("validation_blocker", stageBlocker(FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, composedAssessment.reason));
+      }
+      generatorResult = { blocks: composedAssessment.blocks };
+    }
+    // An Evidence Summary block citing an ordinary measured claim carries
+    // that claim's server-composed disclosure after the model's own text
+    // (composeEvidenceSummaryMeasurementDisclosures). The model result
+    // passes the result contract first; the combined result passes it
+    // again below, so a disclosure that does not fit is refused, never
+    // truncated, and the validators then run on exactly what persists.
+    // Owner direction 2026-11-10: in an Evidence Summary the model's
+    // wording never fails the request on its own. Refused blocks (or an
+    // unusable result) are restated from the cited claims' own governed
+    // text with their disclosures; every validator still runs on the
+    // whole draft below, and a non-wording refusal is never repaired.
+    let wordingFallback = null;
+    let composedWithDisclosures = false;
+    if (NARRATIVE_WORKING_REPORT_CONTENT_TYPES.has(contentType) && !assessment && modelProjections.length > 0) {
+      const validationClaims = projections.map((projection) => ({
+        ...projection,
+        revalidatedForGeneration: true,
+        currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+      }));
+      const repaired = composeEvidenceSummaryWithWordingFallback({
+        modelBlocks: generatorResult?.blocks,
+        modelResultUsable: classifyGeneratorResult(generatorResult).ok,
+        claims: modelProjections,
+        measuredValueByClaimId,
+        blockFits: (block) => classifyGeneratorResult({ blocks: [{ ...block, ordinal: 1 }] }).ok,
+        resultFits: (blocks) => classifyGeneratorResult({ blocks }).ok,
+        validate: (blocks) => validateGeneratedContentDraft({
+          requestedAudience: input.requestedAudience,
+          generationClaims: validationClaims,
+          blocks,
+          draftAudience: input.requestedAudience,
+          contentType,
+        }),
+      });
+      if (repaired.ok && classifyGeneratorResult({ blocks: repaired.blocks }).ok) {
+        generatorResult = { blocks: repaired.blocks };
+        composedWithDisclosures = true;
+        if (repaired.evidence.fallback_block_count > 0) wordingFallback = repaired.evidence;
+      }
+    }
+    if (NARRATIVE_WORKING_REPORT_CONTENT_TYPES.has(contentType) && generatorResult && measuredValueByClaimId.size > 0 && !composedWithDisclosures) {
+      const modelClassification = classifyGeneratorResult(generatorResult);
+      if (!modelClassification.ok) {
+        rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+      }
+      // A Free Impact Assessment discloses each measured claim once, in the
+      // findings block that states it (every selected claim has one; see
+      // composeFreeImpactAssessmentBlocks); summary blocks are not repeated.
+      const disclosed = assessment ? generatorResult.blocks.filter(isAssessmentFindingsBlock) : generatorResult.blocks;
+      const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: disclosed, claims: modelProjections, measuredValueByClaimId });
+      if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
+      const byOrdinal = new Map(composed.blocks.map((block) => [block.ordinal, block]));
+      generatorResult = { blocks: generatorResult.blocks.map((block) => byOrdinal.get(block.ordinal) ?? block) };
+    }
+    // A claim left out (recorded rejection, measurement no longer
+    // matching its basis, stale derived measurement or plan) is named as
+    // left out in the saved content, never cited.
+    if (excludedClaims.length > 0 && generatorResult?.blocks?.length > 0) {
+      const target = assessment
+        ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
+        : generatorResult.blocks[generatorResult.blocks.length - 1];
+      target.text += ` ${ASSESSMENT_SELECTION_NOTE}`;
+    }
+    // Saved assessment content that was not reused is named once.
+    if (adaptation && adaptation.lineage.withheld_blocks.length > 0 && generatorResult?.blocks?.length > 0) {
+      generatorResult.blocks[generatorResult.blocks.length - 1].text += ` ${ADAPTATION_NOT_REUSED_NOTE}`;
+    }
+    // Claims left out for their source's processing permission are
+    // disclosed in the saved content (never cited) and in the results.
+    if (permissionExcluded.length > 0 && generatorResult?.blocks?.length > 0) {
+      const note = permissionExclusionNote(permissionExcluded);
+      const target = assessment
+        ? generatorResult.blocks.find((block) => block.text.startsWith("[[assessment:gaps_opportunities]]\n"))
+        : generatorResult.blocks[generatorResult.blocks.length - 1];
+      target.text += ` ${note}`;
+    }
+    const generatorResultClassification = classifyGeneratorResult(generatorResult);
+    if (!generatorResultClassification.ok) {
+      rollbackFailure(
+        "validation_blocker",
+        stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, generatorResultClassification.reason),
+      );
+    }
+
+    const validation = validateGeneratedContentDraft({
+      requestedAudience: input.requestedAudience,
+      generationClaims: projections.map((projection) => ({
+        ...projection,
+        revalidatedForGeneration: true,
+        currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+      })),
+      blocks: generatorResult.blocks,
+      draftAudience: input.requestedAudience,
+      contentType,
+      authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+        ? dependencies.authoritativeDataGaps
+        : dependencies.authoritativeReadiness,
+    });
+    return { generatorResult, validation, assessmentRestated, assessmentWordingFallback, wordingFallback };
+  };
+  let assembled = assemble(rawModelResult);
+  // Owner direction 2026-11-11: a Free Impact Assessment is not refused for
+  // the model's wording. When the assembled draft is refused only for a
+  // wording rule (an undisclosed or contradicted limitation, VAL-GEN-008,
+  // or an ungrounded quotation, VAL-GEN-010), every model section is
+  // restated from the claims' own readings and governed text, which the
+  // validators accept by construction, and the whole draft is validated
+  // again. Nothing refused is saved; any other refusal stands.
+  if (assessment && modelProjections.length > 0 && !assembled.validation.ok
+    && assembled.validation.blockers.every((item) => ["VAL-GEN-008", "VAL-GEN-010"].includes(item.validator_key))) {
+    assembled = assemble({ blocks: [] });
+  }
+  generatorResult = assembled.generatorResult;
+  let validation = assembled.validation;
+  let wordingFallback = assembled.wordingFallback;
+  const assessmentRestated = assembled.assessmentRestated;
+  const assessmentWordingFallback = assembled.assessmentWordingFallback;
+  if (!validation.ok) {
+    // The model text already passed VAL-GEN-004 on its own, so a
+    // VAL-GEN-004 refusal of the assembled assessment is in
+    // server-composed text: a deterministic defect, never retried.
+    rollbackFailure("validation_blocker", assessment
+      ? validation.blockers.map((item) => (item.validator_key === "VAL-GEN-004"
+        ? { ...item, evidence: { ...item.evidence, origin: "composed_draft", generation_attempts: assessmentModelAttempts } }
+        : item))
+      : validation.blockers);
+  }
+  if (assessmentWordingFallback) wordingFallback = assessmentWordingFallback;
+  if (wordingFallback) {
+    // Which blocks were restated from the claims' own wording and why
+    // (IDs, ordinals and codes only; never the refused text).
+    validation = { ...validation, results: [...validation.results, { validator_key: WORDING_FALLBACK_RESULT_KEY, severity: "pass", evidence: wordingFallback }] };
+  }
+  if (assessment) {
+    // Keep the exact selection outcome on the saved draft and its
+    // idempotent response, without creating a citation or review authority
+    // for evidence that was not used. IDs and codes only; no source text.
+    validation = { ...validation, results: [...validation.results, {
+      validator_key: FREE_IMPACT_ASSESSMENT_VALIDATOR_KEY, severity: "pass", evidence: {
+        excluded_claims: excludedClaims.map((item) => ({ claimId: item.claimId, blockerCodes: item.blockerCodes, reason: item.reason })),
+        model_generation_attempts: assessmentModelAttempts,
+        restated_model_block_ordinals: assessmentRestated,
+      },
+    }] };
+  }
+
+  if (!assessment && excludedClaims.length > 0) {
+    validation = { ...validation, results: [...validation.results, {
+      validator_key: SELECTION_RESULT_KEY, severity: "pass", evidence: {
+        excluded_claims: excludedClaims.map((item) => ({ claimId: item.claimId, reason: item.reason })),
+      },
+    }] };
+  }
+
+  if (permissionExcluded.length > 0) {
+    validation = { ...validation, results: [...validation.results, { validator_key: PERMISSION_EXCLUSION_RESULT_KEY, severity: "pass", evidence: {
+      excluded_claims: permissionExcluded.map((item) => ({ claimId: item.claimId, blockingReason: item.blockingReason, validatorKey: item.validatorKey, sourceRole: item.sourceRole })),
+    } }] };
+  }
+
+  // Persist an informational reminder separately from generated prose and
+  // citations. It has no severity/eligibility dependence on a source flag.
+  validation = { ...validation, results: [...validation.results, STORY_SOURCE_NOTE_RESULT] };
+
+  // The saved report's durable relationship to the assessment it was
+  // adapted from (purpose, source identity and content fingerprint,
+  // reused and withheld content), recorded on the report's own immutable
+  // row in this transaction.
+  if (adaptation) {
+    validation = { ...validation, results: [...validation.results, {
+      validator_key: REPORT_LINEAGE_RESULT_KEY, severity: "pass", evidence: adaptation.lineage,
+    }] };
+  }
+
+  // Post-generation revalidation remains a current-state/lineage
+  // integrity check only: it must still fail closed if traceability
+  // fails, or returns a different claim/evidence identity than the
+  // object generation began against. It must NOT require
+  // eligible=true, and must NOT convert eligible=false into true.
+  for (const claim of projections) {
+    const result = await evaluator(tx, {
+      organizationId: input.organizationId,
+      claimId: claim.claimId,
+      requestedAudience: input.requestedAudience,
+    });
+    if (
+      !result.ok
+      || result.data?.claim?.claim_id !== claim.claimId
+      || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
+    ) {
+      rollbackFailure("conflict_current_state_changed");
+    }
+    // Every working draft (any audience) requires the same claim and
+    // evidence identity, not final-use eligibility; a review that
+    // rejected an asserted claim meanwhile rolls the draft back. Funder
+    // and public eligibility remain conditions of the actual release.
+    if (recordedReviewRejects(result.data)) {
+      rollbackFailure("conflict_current_state_changed");
+    }
+  }
+
+  const persisted = await persistCompleteSet(tx, {
+    input,
+    runId: reservation.generation_run_id,
+    generatorResult,
+    validation,
+    projections,
+    contentType,
+  });
+  await afterPersist(tx, persisted);
+  const postWrite = await rereadAsResult(tx, input, requestFingerprint, false, contentType);
+  if (!postWrite.ok) throw new RollbackResultError(postWrite);
+
+  const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
+    attempted_operation: AUDIT_OPERATION,
+    actor_type: "human",
+    object_type: "generated_content_draft",
+    request_scope: "organization_generated_content_draft",
+    contract: dependencies.auditContract || AUDIT_CONTRACT,
+    generated_content_draft_id: persisted.generatedContentDraftId,
+  }, tx);
+  await insertAudit(tx, { input, persisted, projections, contract: dependencies.auditContract });
+  await preparedAudit.publish();
+  return postWrite;
+}
+
+// ---------------------------------------------------------------------------
+// Working reports: "Use this assessment" and organization revisions (owner
+// direction 2026-11-20). Both write a new draft under its own identity through
+// the same reservation, persistence, review-queue row and audit contract as
+// every generated draft; the saved source is never changed.
+
+const ADAPTATION_INPUT_KEYS = new Set([
+  "organizationId", "engagementId", "sourceAssessmentDraftId", "purpose", "selectedClaimIds", "guidance", "idempotencyKey", "actorContext", "now",
+]);
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+
+function validateAdaptationInput(input) {
+  if (!hasExactKeys(input, ADAPTATION_INPUT_KEYS)) return false;
+  if (![input.organizationId, input.engagementId, input.sourceAssessmentDraftId].every((id) => UUID_PATTERN.test(id ?? ""))) return false;
+  if (!Object.hasOwn(ADAPTATION_PURPOSE_TARGETS, input.purpose)) return false;
+  if (input.selectedClaimIds !== null && (!Array.isArray(input.selectedClaimIds) || input.selectedClaimIds.length === 0
+    || input.selectedClaimIds.length > 20 || !input.selectedClaimIds.every((id) => UUID_PATTERN.test(id))
+    || new Set(input.selectedClaimIds).size !== input.selectedClaimIds.length)) return false;
+  if (input.guidance !== null && (typeof input.guidance !== "string" || input.guidance.trim().length === 0
+    || input.guidance.length > ADAPTATION_GUIDANCE_MAX_LENGTH || CONTROL_CHARACTERS.test(input.guidance))) return false;
+  let normalizedNow = null;
+  try { normalizedNow = new Date(input.now).toISOString(); } catch { return false; }
+  return typeof input.idempotencyKey === "string" && input.idempotencyKey === input.idempotencyKey.trim()
+    && /^[ -~]{8,128}$/.test(input.idempotencyKey)
+    && Boolean(input.actorContext) && typeof input.actorContext === "object" && !Array.isArray(input.actorContext)
+    && normalizedNow === input.now;
+}
+
+export function fingerprintAssessmentAdaptationRequest(input) {
+  const target = ADAPTATION_PURPOSE_TARGETS[input.purpose];
+  return sha256Hex({
+    operation: "assessment_adaptation",
+    contentType: target.contentType,
+    requestedAudience: target.requestedAudience,
+    engagementId: input.engagementId,
+    sourceAssessmentDraftId: input.sourceAssessmentDraftId,
+    purpose: input.purpose,
+    selectedClaimIds: input.selectedClaimIds ? [...input.selectedClaimIds].sort() : null,
+    guidance: input.guidance ?? null,
+  });
+}
+
+// One saved draft of this organization with its run, blocks and citations,
+// read in the caller's transaction. null when it does not exist here.
+async function loadSavedDraftInTransaction(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT d.generated_content_draft_id::text AS generated_content_draft_id, d.content_type, d.requested_audience,
+            d.validator_results, d.created_at, r.generation_run_id::text AS generation_run_id, r.engagement_id::text AS engagement_id
+       FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r ON r.organization_id = d.organization_id AND r.generation_run_id = d.generation_run_id
+      WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid`,
+    [organizationId, generatedContentDraftId],
+  );
+  const draft = rows[0];
+  if (!draft) return null;
+  const blockRows = await tx.query(
+    `SELECT generated_content_block_id::text AS block_id, ordinal, text
+       FROM kai.generated_content_blocks
+      WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid
+      ORDER BY ordinal ASC`,
+    [organizationId, generatedContentDraftId],
+  );
+  const citationRows = await tx.query(
+    `SELECT c.generated_content_block_id::text AS block_id, c.claim_id::text AS claim_id, c.evidence_item_id::text AS evidence_item_id
+       FROM kai.generated_content_citations c
+       JOIN kai.generated_content_blocks b ON b.generated_content_block_id = c.generated_content_block_id AND b.organization_id = c.organization_id
+      WHERE c.organization_id = $1::uuid AND b.generated_content_draft_id = $2::uuid
+      ORDER BY b.ordinal ASC, c.claim_id ASC, c.evidence_item_id ASC`,
+    [organizationId, generatedContentDraftId],
+  );
+  const citationsByBlock = new Map();
+  for (const row of citationRows.rows) {
+    citationsByBlock.set(row.block_id, [...(citationsByBlock.get(row.block_id) || []), { claimId: row.claim_id, evidenceItemId: row.evidence_item_id }]);
+  }
+  return {
+    draftId: draft.generated_content_draft_id,
+    contentType: draft.content_type,
+    requestedAudience: draft.requested_audience,
+    validatorResults: Array.isArray(draft.validator_results) ? draft.validator_results : [],
+    createdAt: draft.created_at,
+    generationRunId: draft.generation_run_id,
+    engagementId: draft.engagement_id,
+    blocks: blockRows.rows.map((row) => ({ ordinal: row.ordinal, text: row.text, citations: citationsByBlock.get(row.block_id) || [] })),
+  };
+}
+
+async function adaptAssessmentInTransaction(tx, input, { dependencies, evaluator, afterPersist, requestFingerprint }) {
+  const target = ADAPTATION_PURPOSE_TARGETS[input.purpose];
+  const replayInput = { ...input, requestedAudience: target.requestedAudience };
+  if (await readExistingState(tx, input)) return rereadAsResult(tx, replayInput, requestFingerprint, true, target.contentType);
+  const saved = await loadSavedDraftInTransaction(tx, { organizationId: input.organizationId, generatedContentDraftId: input.sourceAssessmentDraftId });
+  // Another organization's or another Project's draft is indistinguishable
+  // from one that does not exist.
+  if (!saved || saved.engagementId !== input.engagementId) rollbackFailure("not_found");
+  const parsed = saved.contentType === CONTENT_TYPE && saved.requestedAudience === "internal" ? parseSavedAssessment(saved.blocks) : null;
+  if (!parsed) rollbackFailure("validation_blocker", stageBlocker(ASSESSMENT_ADAPTATION_VALIDATOR_KEY, "source_is_not_a_free_impact_assessment"));
+  if (input.selectedClaimIds && !input.selectedClaimIds.every((claimId) => parsed.claimIds.includes(claimId))) {
+    rollbackFailure("validation_blocker", stageBlocker(ASSESSMENT_ADAPTATION_VALIDATOR_KEY, "selected_claim_not_in_assessment"));
+  }
+  const claimIds = (input.selectedClaimIds ? [...input.selectedClaimIds] : [...parsed.claimIds]).sort();
+  const generationInput = {
+    organizationId: input.organizationId,
+    engagementId: input.engagementId,
+    requestedAudience: target.requestedAudience,
+    claimIds,
+    idempotencyKey: input.idempotencyKey,
+    actorContext: input.actorContext,
+    now: input.now,
+  };
+  if (!validateInput(generationInput)) rollbackFailure("validation_blocker", stageBlocker(ASSESSMENT_ADAPTATION_VALIDATOR_KEY, "assessment_claim_set_invalid"));
+  const source = {
+    draftId: saved.draftId,
+    generationRunId: saved.generationRunId,
+    engagementId: saved.engagementId,
+    contentSha256: parsed.contentSha256,
+    sections: parsed.sections,
+  };
+  return generateDraftInTransaction(tx, {
+    contentType: target.contentType,
+    input: generationInput,
+    requestFingerprint,
+    dependencies: {
+      ...dependencies,
+      auditContract: ADAPTATION_AUDIT_CONTRACT,
+      adaptation: {
+        contextFor: (admittedClaimIds) => composeAssessmentAdaptation({
+          source, admittedClaimIds, purpose: input.purpose, guidance: input.guidance, selectedClaimIds: input.selectedClaimIds,
+        }),
+      },
+    },
+    evaluator,
+    afterPersist,
+    assessment: false,
+  });
+}
+
+// Revision (owner direction 2026-11-20): the organization rewrites the
+// narrative of a saved working report. A new draft is saved under its own
+// identity; the saved version and its citations are never changed.
+const REVISION_INPUT_KEYS = new Set(["organizationId", "engagementId", "parentDraftId", "blocks", "idempotencyKey", "actorContext", "now"]);
+const REVISION_BLOCK_TEXT_MAX_LENGTH = 3500;
+
+function validateRevisionInput(input) {
+  if (!hasExactKeys(input, REVISION_INPUT_KEYS)) return false;
+  if (![input.organizationId, input.engagementId, input.parentDraftId].every((id) => UUID_PATTERN.test(id ?? ""))) return false;
+  if (!Array.isArray(input.blocks) || input.blocks.length === 0 || input.blocks.length > 20) return false;
+  const ordinals = new Set();
+  for (const block of input.blocks) {
+    if (!hasExactKeys(block, new Set(["ordinal", "text"])) || !Number.isInteger(block.ordinal) || block.ordinal < 1 || block.ordinal > 20) return false;
+    if (ordinals.has(block.ordinal)) return false;
+    ordinals.add(block.ordinal);
+    if (typeof block.text !== "string" || block.text.trim().length === 0 || block.text.length > REVISION_BLOCK_TEXT_MAX_LENGTH
+      || CONTROL_CHARACTERS.test(block.text)) return false;
+  }
+  let normalizedNow = null;
+  try { normalizedNow = new Date(input.now).toISOString(); } catch { return false; }
+  return typeof input.idempotencyKey === "string" && input.idempotencyKey === input.idempotencyKey.trim()
+    && /^[ -~]{8,128}$/.test(input.idempotencyKey)
+    && Boolean(input.actorContext) && typeof input.actorContext === "object" && !Array.isArray(input.actorContext)
+    && normalizedNow === input.now;
+}
+
+export function fingerprintWorkingReportRevision(input) {
+  return sha256Hex({
+    operation: "organization_revision",
+    engagementId: input.engagementId,
+    parentDraftId: input.parentDraftId,
+    blocks: [...input.blocks].sort((a, b) => a.ordinal - b.ordinal).map((block) => ({ ordinal: block.ordinal, text: block.text })),
+  });
+}
+
+function revisionRefusal(code, reason, evidence = {}) {
+  rollbackFailure(code, [{ validator_key: WORKING_REPORT_REVISION_VALIDATOR_KEY, severity: "blocker", blocking_reason: reason, evidence }]);
+}
+
+export const WORKING_REPORT_REVISION_VALIDATOR_KEY = "VAL-GEN-REVISION-001";
+const USE_PROHIBITIONS = new Set(["reviewed_allowed_use_not_allowed", "intake_allowed_use_not_allowed", "claim_lineage_missing", "sensitivity_profile_missing"]);
+
+async function reviseWorkingReportInTransaction(tx, input, { dependencies, evaluator, afterPersist, requestFingerprint }) {
+  const parent = await loadSavedDraftInTransaction(tx, { organizationId: input.organizationId, generatedContentDraftId: input.parentDraftId });
+  if (!parent || parent.engagementId !== input.engagementId) rollbackFailure("not_found");
+  const draftInput = {
+    organizationId: input.organizationId,
+    engagementId: input.engagementId,
+    requestedAudience: parent.requestedAudience,
+    claimIds: [...new Set(parent.blocks.flatMap((block) => block.citations.map((citation) => citation.claimId)))].sort(),
+    idempotencyKey: input.idempotencyKey,
+    actorContext: input.actorContext,
+    now: input.now,
+  };
+  const reservation = await insertRunReservation(tx, draftInput, requestFingerprint, parent.contentType);
+  if (!reservation) return rereadAsResult(tx, draftInput, requestFingerprint, true, parent.contentType);
+  // The narrative of a working report is revisable; the assessment itself
+  // (its six fixed sections) is the analysis the reports are drawn from.
+  if (!NARRATIVE_WORKING_REPORT_CONTENT_TYPES.has(parent.contentType) || parseSavedAssessment(parent.blocks)) {
+    revisionRefusal("validation_blocker", "draft_type_not_revisable");
+  }
+  const byOrdinal = new Map(parent.blocks.map((block) => [block.ordinal, block]));
+  if (!input.blocks.every((block) => byOrdinal.has(block.ordinal))) revisionRefusal("validation_blocker", "revision_block_not_found");
+  const edits = new Map(input.blocks.map((block) => [block.ordinal, block.text.trim()]));
+  const revised = [];
+  const blocks = parent.blocks.map((block) => {
+    if (!edits.has(block.ordinal)) return { ordinal: block.ordinal, text: block.text, citations: block.citations };
+    const { prose, tail } = splitRevisableBlockText(block.text);
+    const nextProse = edits.get(block.ordinal);
+    if (nextProse === prose) return { ordinal: block.ordinal, text: block.text, citations: block.citations };
+    revised.push(block.ordinal);
+    return { ordinal: block.ordinal, text: tail ? `${nextProse} ${tail}` : nextProse, citations: block.citations };
+  });
+  if (revised.length === 0) revisionRefusal("validation_blocker", "revision_unchanged");
+
+  // Every cited finding is re-checked now: a revision is new current
+  // reporting, so a finding that is no longer usable cannot be restated in it
+  // (the saved version stays readable as it was).
+  const prepared = await prepareDraftingClaimsInTransaction(tx, {
+    organizationId: input.organizationId,
+    claimIds: draftInput.claimIds,
+    requestedAudience: parent.requestedAudience,
+    contentType: parent.contentType,
+    evaluator,
+  });
+  const unusable = [...prepared.excluded.map((item) => ({ claimId: item.claimId, reason: item.reason })),
+    ...prepared.permissionExcluded.map((item) => ({ claimId: item.claimId, reason: item.blockingReason }))];
+  if (unusable.length > 0) revisionRefusal("conflict_current_state_changed", "cited_finding_not_currently_usable", { claims: unusable });
+
+  const generationClaims = prepared.projections.map((projection) => ({
+    ...projection,
+    revalidatedForGeneration: true,
+    currentEligible: prepared.traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+  }));
+  // A figure keeps the unit and population its source gives it: a number in
+  // revised prose must keep the words that describe it in the saved text or
+  // the finding it cites.
+  const claimById = new Map(prepared.projections.map((projection) => [projection.claimId, projection]));
+  const figureViolations = revised.flatMap((ordinal) => {
+    const block = blocks.find((item) => item.ordinal === ordinal);
+    const references = [byOrdinal.get(ordinal).text, ...block.citations.flatMap((citation) => {
+      const claim = claimById.get(citation.claimId);
+      return claim ? [claim.claimStatement, claim.modelClaimStatement, claim.plainReading].filter(Boolean) : [];
+    })];
+    return revisedFigureContextViolations(splitRevisableBlockText(block.text).prose, references).map((literal) => ({ block_ordinal: ordinal, literal }));
+  });
+  if (figureViolations.length > 0) revisionRefusal("validation_blocker", "revision_figure_context_changed", { figures: figureViolations });
+  if (!classifyGeneratorResult({ blocks }).ok) revisionRefusal("validation_blocker", "revision_exceeds_report_limits");
+  const validation = validateGeneratedContentDraft({
+    requestedAudience: parent.requestedAudience,
+    generationClaims,
+    blocks,
+    draftAudience: parent.requestedAudience,
+    contentType: parent.contentType,
+  });
+  if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
+
+
+  const parentLineage = lineageOf(parent.validatorResults, REPORT_LINEAGE_RESULT_KEY);
+  const carried = parent.validatorResults.filter((result) => [SELECTION_RESULT_KEY, PERMISSION_EXCLUSION_RESULT_KEY].includes(result?.validator_key));
+  const results = [
+    ...validation.results,
+    ...carried,
+    STORY_SOURCE_NOTE_RESULT,
+    {
+      validator_key: REPORT_LINEAGE_RESULT_KEY,
+      severity: "pass",
+      evidence: {
+        relationship: ORGANIZATION_REVISION_RELATIONSHIP,
+        reporting_purpose: parentLineage?.reporting_purpose ?? null,
+        version: (Number.isInteger(parentLineage?.version) ? parentLineage.version : 1) + 1,
+        source_assessment_draft_id: parentLineage?.source_assessment_draft_id ?? null,
+        source_assessment_generation_run_id: parentLineage?.source_assessment_generation_run_id ?? null,
+        source_assessment_content_sha256: parentLineage?.source_assessment_content_sha256 ?? null,
+        parent_draft_id: parent.draftId,
+        parent_content_sha256: savedContentSha256(parent.blocks),
+        root_report_draft_id: parentLineage?.root_report_draft_id ?? parent.draftId,
+        engagement_id: parent.engagementId,
+        revised_block_ordinals: revised,
+        revised_by_type: "human",
+      },
+    },
+  ];
+  // Re-checked after validation: the claims and evidence the revision cites
+  // are still the same objects, and none was rejected meanwhile.
+  for (const projection of prepared.projections) {
+    const result = await evaluator(tx, { organizationId: input.organizationId, claimId: projection.claimId, requestedAudience: parent.requestedAudience });
+    if (!result.ok || result.data?.claim?.claim_id !== projection.claimId || result.data?.evidence?.evidence_item_id !== projection.evidenceItemId
+      || recordedReviewRejects(result.data)) rollbackFailure("conflict_current_state_changed");
+  }
+  const persisted = await persistCompleteSet(tx, {
+    input: draftInput,
+    runId: reservation.generation_run_id,
+    generatorResult: { blocks },
+    validation: { ...validation, results },
+    projections: prepared.projections,
+    contentType: parent.contentType,
+  });
+  await afterPersist(tx, persisted);
+  const postWrite = await rereadAsResult(tx, draftInput, requestFingerprint, false, parent.contentType);
+  if (!postWrite.ok) throw new RollbackResultError(postWrite);
+  const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
+    attempted_operation: AUDIT_OPERATION,
+    actor_type: "human",
+    object_type: "generated_content_draft",
+    request_scope: "organization_generated_content_draft",
+    contract: REVISION_AUDIT_CONTRACT,
+    generated_content_draft_id: persisted.generatedContentDraftId,
+  }, tx);
+  await insertAudit(tx, { input: draftInput, persisted, projections: prepared.projections, contract: REVISION_AUDIT_CONTRACT });
+  await preparedAudit.publish();
+  return postWrite;
+}
+
+function transactionFailure(error) {
+  if (error instanceof RollbackResultError) return error.result;
+  if (error?.code === "23505") return failure("conflict_current_state_changed");
+  if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+    return failure("validation_blocker", stageBlocker(PERSISTENCE_VALIDATION_VALIDATOR_KEY, "persistence_validation_rejected"));
+  }
+  return failure("system_error");
 }
 
 async function rereadAsResult(tx, input, requestFingerprint, replayed, contentType) {
@@ -3516,6 +3883,81 @@ export function createPostgresGeneratedContentRepository({
           );
         }
         return failure("system_error");
+      }
+    },
+    // "Use this assessment": a report for the chosen purpose from the
+    // persisted Free Impact Assessment (adaptAssessmentInTransaction).
+    async createAssessmentAdaptationDraft(input, dependencies = {}) {
+      if (!validateAdaptationInput(input)) return failure("validation_blocker");
+      if (typeof dependencies.draftGenerator !== "function" || !dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      const requestFingerprint = fingerprintAssessmentAdaptationRequest(input);
+      try {
+        return await runInTransaction((tx) => adaptAssessmentInTransaction(tx, input, { dependencies, evaluator, afterPersist, requestFingerprint }));
+      } catch (error) {
+        return transactionFailure(error);
+      }
+    },
+    // The organization's revision of a saved working report.
+    async createWorkingReportRevision(input, dependencies = {}) {
+      if (!validateRevisionInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      const requestFingerprint = fingerprintWorkingReportRevision(input);
+      try {
+        return await runInTransaction((tx) => reviseWorkingReportInTransaction(tx, input, { dependencies, evaluator, afterPersist, requestFingerprint }));
+      } catch (error) {
+        return transactionFailure(error);
+      }
+    },
+    // The saved relationship records of drafts in this organization (for the
+    // client reads): lineage, content fingerprint and assessment shape.
+    async readWorkingReportLineage({ organizationId, generatedContentDraftId }) {
+      if (![organizationId, generatedContentDraftId].every((id) => UUID_PATTERN.test(id ?? ""))) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const saved = await loadSavedDraftInTransaction(tx, { organizationId, generatedContentDraftId });
+          if (!saved) return failure("not_found");
+          const lineage = lineageOf(saved.validatorResults, REPORT_LINEAGE_RESULT_KEY);
+          let sourceAssessment = null;
+          if (lineage?.source_assessment_draft_id) {
+            const source = await loadSavedDraftInTransaction(tx, { organizationId, generatedContentDraftId: lineage.source_assessment_draft_id });
+            sourceAssessment = source && source.engagementId === saved.engagementId
+              ? { draftId: source.draftId, unchanged: savedContentSha256(source.blocks) === lineage.source_assessment_content_sha256, createdAt: source.createdAt }
+              : { draftId: lineage.source_assessment_draft_id, unchanged: false, createdAt: null };
+          }
+          let parent = null;
+          if (lineage?.relationship === ORGANIZATION_REVISION_RELATIONSHIP && lineage.parent_draft_id) {
+            const previous = await loadSavedDraftInTransaction(tx, { organizationId, generatedContentDraftId: lineage.parent_draft_id });
+            parent = previous && previous.engagementId === saved.engagementId
+              ? { draftId: previous.draftId, unchanged: savedContentSha256(previous.blocks) === lineage.parent_content_sha256 }
+              : { draftId: lineage.parent_draft_id, unchanged: false };
+          }
+          // Whether the saved text may still be shown: every cited source's
+          // current decision still permits its use (AI processing is not
+          // needed to read text already written).
+          const citedClaimIds = [...new Set(saved.blocks.flatMap((block) => block.citations.map((citation) => citation.claimId)))];
+          const decisions = citedClaimIds.length > 0
+            ? await readEffectiveAiProcessingSourceDecisionsForClaims(tx, { organizationId, claimIds: citedClaimIds })
+            : new Map();
+          const contentPermitted = citedClaimIds.length > 0 && citedClaimIds.every((claimId) => (decisions.get(claimId) || [{ prohibition: "claim_lineage_missing" }])
+            .every((decision) => !USE_PROHIBITIONS.has(decision.prohibition)));
+          return success({
+            contentPermitted,
+            generatedContentDraftId: saved.draftId,
+            engagementId: saved.engagementId,
+            contentType: saved.contentType,
+            requestedAudience: saved.requestedAudience,
+            createdAt: saved.createdAt instanceof Date ? saved.createdAt.toISOString() : saved.createdAt,
+            isAssessment: parseSavedAssessment(saved.blocks) !== null,
+            contentSha256: savedContentSha256(saved.blocks),
+            lineage,
+            sourceAssessment,
+            parent,
+            blocks: saved.blocks,
+          });
+        });
+      } catch (error) {
+        return transactionFailure(error);
       }
     },
     async createEvidenceSummaryDraft(input, dependencies = {}) {

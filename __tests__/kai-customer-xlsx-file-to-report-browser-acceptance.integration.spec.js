@@ -399,6 +399,16 @@ function sha256(bytes) {
 }
 
 async function runXlsxAcceptance() {
+  // Owner direction 2026-11-20: a saved report whose cited source version was
+  // replaced is the read-only saved version (exact saved text, marked), never a
+  // current report recomputed from replaced data.
+  const assertSavedVersion = (response, label) => {
+    assert.equal(response.status, 200, `${label}: ${JSON.stringify(response.body).slice(0, 300)}`);
+    const text = typeof response.body === "string" ? response.body : "";
+    assert.match(text, /^# .+ \(saved version\)\n/, label);
+    assert.match(text, /A source it cites has changed since, so its figures are as they stood then/, label);
+    assert.doesNotMatch(text, /\*\*Status:\*\* Working report\./, `${label}: not presented as a current report`);
+  };
   const J = JSON.stringify;
   const XLSX_METHOD = "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1";
   const SELECTED_XLSX_METHOD = "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1";
@@ -2434,7 +2444,7 @@ async function runXlsxAcceptance() {
     const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const REPORT_SECTIONS = ["Context", "Key findings", "Reporting period", "Measurement definition and counting method", "Duplicate records",
       "Data quality and limitations", "What this evidence establishes", "What this evidence does not establish", "Analysis", "Generated narrative",
-      "Source and evidence traceability", "Authority for internal use", "Conclusion", "References"];
+      "Source and evidence traceability", "Source permissions and checks", "Conclusion", "References"];
     const sectionsOf = (markdown) => Object.fromEntries(markdown.split(/\n## /).slice(1).map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n"))]));
 
     await test("L1 (A-D): one story-present workbook is uploaded and promoted once; in Count records the administrator records and claims Data_Dictionary (sheet_5, 37) and Service_Events (sheet_3, 364 with 2 exact duplicates) on that version, switches with a delayed earlier read and reloads; each keeps its own identity", async () => {
@@ -4753,12 +4763,12 @@ async function runXlsxAcceptance() {
       const sv = successor.body.data.source_version.source_version_id;
       assert.equal((await query("SELECT is_current FROM kai.source_versions WHERE source_version_id = $1::uuid", [earlier.sv]))[0].is_current, false);
       assert.equal((await adminApi("GET", derivedMeasurementBasisPath(ORG_X, earlier.sv, "sheet_3"))).status, 409, "a replaced version's worksheet is not read again for targets or results");
-      // The existing saved-report rule (postgresClientInternalReportRepository):
-      // a report is re-evaluated on every read and is available only while its
-      // cited source versions are current, so the earlier version's report is
-      // refused, not silently served from replaced data. Unchanged by this package.
+      // Owner direction 2026-11-20: a report whose cited source version was
+      // replaced is no longer refused; it is served as the read-only saved
+      // version it is, clearly marked, never as a current report from the
+      // replaced data (current reporting needs a new report).
       const savedAfter = await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, earlier.draftId));
-      assert.deepEqual([savedAfter.status, savedAfter.body?.error?.code], [409, "conflict_current_state_changed"]);
+      assertSavedVersion(savedAfter, "the earlier version's report");
       const guidanceOf = async () => {
         const entry = (await adminApi("GET", `${orgPath()}/engagements/${PROJECT_X}/client-evidence-pipeline`)).body.data.files.find((item) => item.intakeFileId === fileId);
         return [entry.currentStage, entry.currentStatus, entry.nextAction, entry.reason];
@@ -4866,7 +4876,7 @@ async function runXlsxAcceptance() {
       const candidate=await candidateOf(replacementSensitivity.intake_sensitivity_profile_id);
       assert.equal((await adminApi('POST',sourceCandidateDecisionPath(ORG_X,candidate.intake_source_candidate_id),{outcome:'promoted',reviewed_source_type:'organization_primary_record',supersedes_source_version_id:actual.sv})).status,200);
       const stale=await readPlan();assert.equal(stale.saved.planned_value,'6.00');assert.equal(stale.saved.actual_value,null);assert.equal(stale.comparison_result,null);
-      assert.equal((await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,report.draft.generated_content_draft_id))).status,409,'a replaced actual source preserves the existing current-source report rule');
+      assertSavedVersion(await adminApi('GET',clientInternalReportMarkdownPath(ORG_X,PROJECT_X,report.draft.generated_content_draft_id)),'a replaced actual source: the saved version, not a current report');
       const unresolved=await adminApi('POST',decisionPath,{...input,expected_decision_id:confirmed.body.data.target.decision_id,relationship_status:'unresolved',actual_measurement_id:null,metric_confirmed:false,population_confirmed:false,date_basis_confirmed:false});
       assert.equal(unresolved.status,200,J(unresolved.body));
       assert.equal(unresolved.body.data.target.planned_value,'6.00','the usable plan survives the unavailable actual');
@@ -5196,7 +5206,7 @@ async function runXlsxAcceptance() {
         assert.equal(successor.status, 200, J(successor.body));
         assert.equal((await adminApi("GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_1"))).status, 409);
         assert.equal((await adminApi("POST", servicePath, { measurement_keys: required })).status, 409);
-        assert.equal((await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, report.draft.generated_content_draft_id))).status, 409, "the existing current-source rule for saved reports is unchanged");
+        assertSavedVersion(await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, report.draft.generated_content_draft_id)), "the replaced service source's report");
         assert.equal((await measurementRows(sv)).length, saved.length + 1, "earlier measurements and evidence are kept, not rewritten");
         writeFileSync(join("artifacts/kai-measurement-ui", "service-delivery-persistence.json"), JSON.stringify({
           sourceVersionId: sv, fileId, expected, expectedAllDates: expectedAllDates.inScope,

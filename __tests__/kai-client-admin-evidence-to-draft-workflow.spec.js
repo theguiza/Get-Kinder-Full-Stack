@@ -448,21 +448,27 @@ test("read safety: Claims keep status, review status, and strength but drop the 
 // D. Protected operations
 // ---------------------------------------------------------------------------
 
-test("D: client_admin is denied the seven other generators, funder evidence summary, generated-content review, P2-02, and P1-08; its P2-12 decisions are its own, admitted per claim", async () => {
+test("D: client_admin drafts its own working reports but is denied the readiness assessment, data-gap memo, generated-content review and P2-02; its P2-12 decisions are its own, admitted per claim", async () => {
   const actor = await bindingDerivedClientAdmin();
   const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
   const deps = { env: ENV, getEngagementForOrganization: async () => assert.fail("engagement read"), generatedContentRepository: tripwire, draftGenerator: async () => ({ blocks: [] }), metadataOnlyAudit: noAudit() };
   const base = { organizationId: ORG_X, engagementId: ENGAGEMENT_X, claimIds: [CLAIM], idempotencyKey: "client-admin-protected-1", actorContext: actor, now: NOW };
+  // Owner direction 2026-11-20: every working-report generator (any intended
+  // audience) admits the organization's administrator; each reaches the
+  // Project check (tenant), which a missing engagement refuses.
+  const admitted = { ...deps, getEngagementForOrganization: async () => null };
+  for (const [label, result] of Object.entries({
+    caseForSupport: await createCaseForSupportDraft({ ...base, requestedAudience: "internal" }, admitted),
+    boardUpdate: await createBoardUpdateDraft({ ...base, requestedAudience: "internal" }, admitted),
+    annualReport: await createAnnualReportSectionDraft({ ...base, requestedAudience: "public" }, admitted),
+    funderOutcomeTable: await createFunderOutcomeTableDraft({ ...base, requestedAudience: "funder" }, admitted),
+    grantResponse: await createGrantResponseParagraphDraft({ ...base, requestedAudience: "internal" }, admitted),
+    funderEvidenceSummary: await createEvidenceSummaryDraft({ ...base, requestedAudience: "funder" }, admitted),
+    publicEvidenceSummary: await createEvidenceSummaryDraft({ ...base, requestedAudience: "public" }, admitted),
+  })) assert.equal(result.error?.code, "tenant_boundary_violation", `${label}: ${JSON.stringify(result.error)}`);
   const results = {
     readiness: await createReadinessAssessmentDraft({ ...base, requestedAudience: "internal" }, deps),
-    caseForSupport: await createCaseForSupportDraft({ ...base, requestedAudience: "internal" }, deps),
-    boardUpdate: await createBoardUpdateDraft({ ...base, requestedAudience: "internal" }, deps),
-    annualReport: await createAnnualReportSectionDraft({ ...base, requestedAudience: "internal" }, deps),
-    funderOutcomeTable: await createFunderOutcomeTableDraft({ ...base, requestedAudience: "funder" }, deps),
-    grantResponse: await createGrantResponseParagraphDraft({ ...base, requestedAudience: "internal" }, deps),
     dataGapMemo: await createDataGapMemoDraft({ organizationId: ORG_X, engagementId: ENGAGEMENT_X, requestedAudience: "internal", idempotencyKey: "client-admin-protected-2", actorContext: actor, now: NOW }, deps),
-    funderEvidenceSummary: await createEvidenceSummaryDraft({ ...base, requestedAudience: "funder" }, deps),
-    publicEvidenceSummary: await createEvidenceSummaryDraft({ ...base, requestedAudience: "public" }, deps),
     startReview: await startGeneratedContentReview({ organizationId: ORG_X, generatedContentDraftId: DRAFT, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, generatedContentRepository: tripwire }),
     completeReview: await completeGeneratedContentReview({ organizationId: ORG_X, generatedContentDraftId: DRAFT, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, generatedContentRepository: tripwire }),
     coverage: await assessEvidenceCoverageForSourceVersion({ organizationId: ORG_X, sourceVersionId: SOURCE_VERSION, actorContext: actor }, { env: ENV, evidenceCoverageAssessmentRepository: tripwire }),
@@ -563,6 +569,8 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
       reviewSensitivity: true, promoteSource: true, generateDrafts: true, readInternalDrafts: true, extractEvidence: true, proposeClaim: true,
       generateClaimGapFollowups: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
       releaseInternalReports: true, readClaimTraceabilityDiagnostics: true, reviewMeasuredClaimFactualContent: true,
+      // Owner direction 2026-11-20: "Use this assessment" and revision of its own working reports.
+      adaptAssessments: true, reviseWorkingReports: true,
     },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
@@ -586,6 +594,7 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
     visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
     readInternalDrafts: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
     releaseInternalReports: true, readClaimTraceabilityDiagnostics: true, reviewMeasuredClaimFactualContent: true,
+    adaptAssessments: true, reviseWorkingReports: true,
   });
 });
 

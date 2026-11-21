@@ -120,10 +120,11 @@ function passes(actorContext, operation, organizationId, allowedRoles) {
 
 // Each UI capability projects the governing service's exact role set and mode.
 // These booleans never replace service authorization or object eligibility.
-// generateDrafts is the internal evidence-summary and impact-narrative
-// authority (CLIENT_ADMIN_DRAFT_ALLOWED_ROLES); generateAllDraftTypes is the
-// funder evidence summary and the seven other generators
-// (GENERATED_CONTENT_ALLOWED_ROLES), which client_admin never holds.
+// generateDrafts is the working-report generation authority
+// (CLIENT_ADMIN_DRAFT_ALLOWED_ROLES: every report type for any audience since
+// owner direction 2026-11-20); generateAllDraftTypes is the readiness
+// assessment and data-gap memo (GENERATED_CONTENT_ALLOWED_ROLES), which
+// client_admin never holds.
 // reviewSensitivity is the review-cockpit sensitivity decision gate
 // (GK roles, or an organization administrator: binding-derived or a delegated
 // stored client_admin grant, owner decisions 2026-10-19). promoteSource
@@ -155,6 +156,17 @@ function workflowOperations(actorContext, organizationId) {
     generateAllDraftTypes: validateActorCanPerformOperation(
       actorContext, __generatedContentServiceContract.CREATE_READINESS_ASSESSMENT_OPERATION, organizationId,
       { allowedRoles: __generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES },
+    ).ok === true,
+    // Owner direction 2026-11-20: "Use this assessment" (the service's own
+    // role check) and the organization's revision of its saved working
+    // reports. Which assessment or report qualifies is per object.
+    adaptAssessments: validateActorCanPerformOperation(
+      actorContext, __generatedContentServiceContract.ADAPT_FREE_IMPACT_ASSESSMENT_OPERATION, organizationId,
+      { allowedRoles: __generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
+    ).ok === true,
+    reviseWorkingReports: validateActorCanPerformOperation(
+      actorContext, __clientGeneratedContentServiceContract.CLIENT_WORKING_REPORT_REVISION_OPERATION, organizationId,
+      { allowedRoles: __clientGeneratedContentServiceContract.CLIENT_INTERNAL_DRAFT_READ_ROLES },
     ).ok === true,
     reviewGeneratedDrafts: validateActorCanPerformOperation(
       actorContext, __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION, organizationId,

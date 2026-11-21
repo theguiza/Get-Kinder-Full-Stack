@@ -502,10 +502,11 @@ test("P14-09 diagnostic propagation CASE H: a successful generation carries no b
   assert.equal(Object.hasOwn(result, "blockers"), false);
 });
 
-// --- CASE I: funder eligibility branches are untouched by this repair (no
-// blockers attached; distinct error code from validation_blocker) ---
+// --- CASE I (owner direction 2026-11-20): funder eligibility is a condition
+// of the actual release, not of drafting; a funder-oriented working draft of a
+// not-yet-eligible claim is saved with no refusal diagnostics attached. ---
 
-test("P14-09 diagnostic propagation CASE I: funder eligibility loss still returns funder_use_not_currently_eligible with no blockers attached (unchanged by this repair)", async () => {
+test("P14-09 diagnostic propagation CASE I (2026-11-20): a funder working draft of a not-yet-eligible claim is saved, with no refusal attached", async () => {
   const state = makeState();
   const evaluator = makeEvaluator({ eligibleForClaim: () => false });
   const repository = makeRepository(state, evaluator);
@@ -515,8 +516,8 @@ test("P14-09 diagnostic propagation CASE I: funder eligibility loss still return
     { draftGenerator: goodGenerator(), metadataOnlyAudit: auditRecorder() },
   );
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "funder_use_not_currently_eligible");
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.requestedAudience, "funder");
   assert.equal(Object.hasOwn(result, "blockers"), false);
 });
 

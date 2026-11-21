@@ -540,7 +540,7 @@
     if (draft.internalReport?.available !== true) failed.push(`internal report not available: ${[...(draft.internalReport?.getKinderReviewReasons || []), ...(draft.internalReport?.blockedReasons || [])].join(", ") || "no reason given"}`);
     if (failed.length) return result(S.FAIL, `${observed}. Failed: ${failed.join("; ")}`, "Do not use this draft. Record the failure; KAI_CANARY.report() shows the details.");
     return result(S.PASS, `${observed}. Count, unit, period, blank/duplicate and attestation disclosures present${findings.negated.length ? `; negated mentions: ${findings.negated.length}` : ""}; ready for internal use`,
-      `"Your internal drafts" > "Read draft" on ${draft.generatedContentDraftId}, then "Open report" and "Download Markdown"; then KAI_CANARY.next().`);
+      `"Your assessments and reports" > "Open" on ${draft.generatedContentDraftId}, then "Open report" and "Download Markdown"; then KAI_CANARY.next().`);
   }
 
   // The internal report (kaiInternalReportMarkdownSerializer.js): its

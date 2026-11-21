@@ -660,7 +660,12 @@ test("[impact_narrative] predicate 2 - documented variance: the PURE VALIDATOR (
   assert.equal(rejectedResult.ok, true, JSON.stringify(rejectedResult.blockers));
 });
 
-test("[evidence_summary] predicate 2 - a currently-ineligible governed claim requested for FUNDER use cannot become an accepted generated assertion (repository pre-generation gate, funder_use_not_currently_eligible)", async () => {
+// Owner direction 2026-11-20 supersedes the funder drafting gate: a claim
+// that is merely not yet funder-eligible (open review, coverage, funder
+// approval) is drafted into a funder-oriented working draft with those facts
+// as limitations - writing publishes nothing; the release keeps eligibility.
+// A claim a recorded review rejected is never drafted, for any audience.
+test("[evidence_summary] predicate 2 (2026-11-20) - a not-yet-funder-eligible governed claim is drafted for a funder working draft with its open facts as limitations; a rejected claim is never drafted", async () => {
   const state = makeState();
   const evaluator = makeEvaluator({ eligibleForClaim: () => false });
   const repository = makeRepository(state, evaluator);
@@ -675,11 +680,25 @@ test("[evidence_summary] predicate 2 - a currently-ineligible governed claim req
     now: "2026-09-01T00:00:00.000Z",
   }, { draftGenerator: goodGenerator(), metadataOnlyAudit: auditRecorder() });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "funder_use_not_currently_eligible");
-  // Fail-closed before any durable state is written.
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(state.generatedContentDrafts.length, 1);
+  assert.equal(state.generatedContentDrafts[0].requested_audience, "funder");
+
+  const rejectedState = makeState();
+  const rejected = await makeRepository(rejectedState, makeEvaluator({ eligibleForClaim: () => false, claimStrengthForClaim: () => "reviewed_not_supported" }))
+    .createEvidenceSummaryDraft({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience: "funder",
+      claimIds: [CLAIM],
+      idempotencyKey: "phase13-governance-funder-rejected",
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001" },
+      now: "2026-09-01T00:00:00.000Z",
+    }, { draftGenerator: goodGenerator(), metadataOnlyAudit: auditRecorder() });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error.code, "claim_reviewed_not_supported");
+  assert.equal(rejectedState.generationRuns.length, 0);
+  assert.equal(rejectedState.generatedContentDrafts.length, 0);
 });
 
 // P13-EXT-4: funder_outcome_table is funder-audience-only in production, so
@@ -691,7 +710,7 @@ test("[evidence_summary] predicate 2 - a currently-ineligible governed claim req
 // Proved directly through repository.createFunderOutcomeTableDraft, not just
 // the service-level input validator, using the identical fixture pattern
 // already established above for evidence_summary.
-test("[funder_outcome_table] predicate 2 - a currently-ineligible governed claim requested for FUNDER use cannot become an accepted generated assertion (repository pre-generation gate, funder_use_not_currently_eligible)", async () => {
+test("[funder_outcome_table] predicate 2 (2026-11-20) - a not-yet-funder-eligible governed claim reaches the outcome-table working draft through the same shared admission", async () => {
   const state = makeState();
   const evaluator = makeEvaluator({ eligibleForClaim: () => false });
   const repository = makeRepository(state, evaluator);
@@ -711,13 +730,9 @@ test("[funder_outcome_table] predicate 2 - a currently-ineligible governed claim
     now: "2026-09-01T00:00:00.000Z",
   }, { draftGenerator: countingGenerator, metadataOnlyAudit: auditRecorder() });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "funder_use_not_currently_eligible");
-  // The production generator is never invoked, and no draft/run is
-  // persisted, for an ineligible claim - fail-closed before generation.
-  assert.equal(generatorCalls, 0);
-  assert.equal(state.generationRuns.length, 0);
-  assert.equal(state.generatedContentDrafts.length, 0);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(generatorCalls, 1);
+  assert.equal(state.generatedContentDrafts.length, 1);
 });
 
 // ---------------------------------------------------------------------

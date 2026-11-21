@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import { ADAPTATION_MODEL_INSTRUCTION } from "./kaiAssessmentAdaptation.js";
+
 import {
   GENERATOR_RESULT_REASON,
   GENERATOR_RESULT_REASONS,
@@ -103,7 +105,7 @@ export function createProductionAnnualReportSectionDraftGenerator({
 
     const response = await createMessage({
       model: MODEL,
-      max_tokens: 1600,
+      max_tokens: generatorInput.adaptation ? 3000 : 1600,
       system: [
         audiencePrompt(generatorInput.requestedAudience),
         "An annual report section is a standalone traceable draft for reporting context; it is not a final report, approval, publication, export, release, funder-ready decision, or public-ready decision.",
@@ -115,6 +117,9 @@ export function createProductionAnnualReportSectionDraftGenerator({
         "Do not state or imply causation; describe only what a cited claim actually asserts.",
         "If a claim carries limitationCodes, the section must reflect that limitation rather than stating the claim as an unconditional fact.",
         "Never state or imply that a claim has been reviewed, approved, finalized, published, export-eligible, funder-ready, or public-ready -- this is an unreviewed draft.",
+        // "Use this assessment" (owner direction 2026-11-20): the saved
+        // assessment the organization chose, as data.
+        ...(generatorInput.adaptation ? [ADAPTATION_MODEL_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",
@@ -122,6 +127,7 @@ export function createProductionAnnualReportSectionDraftGenerator({
           contentType: generatorInput.contentType,
           requestedAudience: generatorInput.requestedAudience,
           claims: generatorInput.claims,
+          ...(generatorInput.adaptation ? { adaptation: generatorInput.adaptation } : {}),
         }),
       }],
       output_config: {

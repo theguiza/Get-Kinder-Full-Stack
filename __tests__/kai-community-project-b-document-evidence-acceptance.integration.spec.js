@@ -242,6 +242,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   return {
     requests: () => requests.slice(), mark: () => requests.length, requestsSince: (mark) => requests.slice(mark), exceptions,
     evaluate, text, idle, waitFor, visible, clickVisible, clickButton, clickNav, clickTab, choose, type, textOf, attrOf, responseBody, api,
+    sessionId,
     async selectProject(engagementId) { assert.ok(await choose("#gk-shell-project-select", engagementId), "the Project selector lists the Project"); },
     async goto(path) { await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId); await idle(); },
     async close() { browser.listeners.delete(listener); await browser.send("Target.closeTarget", { targetId }); },
@@ -270,9 +271,40 @@ async function runPackage4Acceptance() {
   // model-style assessment blocks (never a copy of plainReading). The exact
   // text returned is recorded with the call.
   let assessmentRespond = null;
+  // Scenario J ("Use this assessment", owner direction 2026-11-20): a report
+  // request carrying the saved assessment. The simulated provider writes the
+  // way the adaptation instruction asks, and no more: one opening sentence
+  // for the purpose, then the assessment's own passages carried forward, each
+  // citing what that passage cites (one passage per measured finding, as the
+  // assessment's findings are written; summary, next-step and multi-finding
+  // passages are left to the report's own structure). Copied, never invented.
+  const ADAPTATION_OPENINGS = Object.freeze({
+    internal_planning: "For the organization's own planning, this summary carries forward what the organization's saved assessment found.",
+    board_update: "For the board: this update carries forward what the organization's saved assessment found, with each figure's sources and limitations.",
+    funder_report: "For a funder the organization reports to: this report carries forward what the organization's saved assessment found, with each figure's sources and limitations.",
+    annual_report: "For the annual report: this section carries forward what the organization's saved assessment found.",
+  });
+  const isMeasuredClaim = (claim) => (claim?.limitationCodes || []).some((code) => /^(?:derived|measurement)\./.test(code));
+  const defaultAdaptation = (requestBody) => {
+    const byId = new Map(requestBody.claims.map((claim) => [claim.claimId, claim]));
+    const cite = (ids) => ids.map((claimId) => ({ claimId, evidenceItemId: byId.get(claimId).evidenceItemId }));
+    const opening = requestBody.claims.find((claim) => !isMeasuredClaim(claim)) || requestBody.claims[0];
+    const passages = requestBody.adaptation.sourceAssessment.sections
+      .filter((section) => !["executive_snapshot", "next_steps"].includes(section.key))
+      .flatMap((section) => section.blocks)
+      .filter((block) => block.claimIds.filter((claimId) => isMeasuredClaim(byId.get(claimId))).length <= 1);
+    return [{ text: ADAPTATION_OPENINGS[requestBody.adaptation.purpose], citations: cite([opening.claimId]) },
+      ...passages.map((block) => ({ text: block.text, citations: cite(block.claimIds) }))];
+  };
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
-    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, assessment: requestBody.assessment ?? null, correction: requestBody.correction ?? null, system: payload.system, serialized: J(payload) });
+    modelCalls.push({ claims: requestBody.claims, requestedAudience: requestBody.requestedAudience ?? null, assessment: requestBody.assessment ?? null, correction: requestBody.correction ?? null,
+      adaptation: requestBody.adaptation ?? null, contentType: requestBody.contentType ?? null, system: payload.system, serialized: J(payload) });
+    if (requestBody.adaptation) {
+      const blocks = defaultAdaptation(requestBody);
+      modelCalls.at(-1).responseBlocks = blocks;
+      return { content: [{ type: "text", text: J({ blocks }) }] };
+    }
     if (requestBody.assessment && assessmentRespond) {
       const blocks = assessmentRespond(requestBody);
       modelCalls.at(-1).responseBlocks = blocks;
@@ -309,6 +341,7 @@ async function runPackage4Acceptance() {
   const {
     BASE_PATH, claimProposalPath, claimTraceabilityPath, clientInternalDraftPath, clientInternalDraftsPath, clientInternalReportMarkdownPath,
     createEvidenceSummaryPath, createFreeImpactAssessmentPath, errorText, evidenceExtractionPath, sourceCandidateDecisionPath,
+    assessmentAdaptationPath, clientWorkingReportRevisionPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { claimUseDiagnosis, claimDraftAdmission, provisionalDraftRefusalMessage } = await import("../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js");
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
@@ -1535,6 +1568,502 @@ async function runPackage4Acceptance() {
       } finally {
         assessmentRespond = null;
       }
+    });
+
+    // ---- J: "Use this assessment" -> purpose report -> revision -> download (owner direction 2026-11-20) ----
+    // The organization's saved Free Impact Assessment from O4 is the source.
+    // Real: every route, service, repository, validator and SQL write on this
+    // cluster; the built bundle in Chrome. Simulated: the session login,
+    // object storage, malware scan and the model provider (deterministic; it
+    // carries the saved passages forward and never invents text).
+    const WR = { reports: {}, negatives: {}, persistence: {} };
+    report.workingReports = WR;
+    const ARTIFACTS = process.env.KAI_WORKING_REPORT_ARTIFACTS || null;
+    if (ARTIFACTS) mkdirSync(ARTIFACTS, { recursive: true });
+    const savedBlocks = async (draftId) => query(`SELECT b.ordinal, b.text,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('claimId', c.claim_id::text, 'evidenceItemId', c.evidence_item_id::text) ORDER BY c.claim_id, c.evidence_item_id)
+           FROM kai.generated_content_citations c WHERE c.generated_content_block_id = b.generated_content_block_id), '[]'::jsonb) AS citations
+       FROM kai.generated_content_blocks b WHERE b.organization_id = $1::uuid AND b.generated_content_draft_id = $2::uuid ORDER BY b.ordinal`, [O.organizationId, draftId]);
+    const draftRow = async (draftId) => (await query(`SELECT d.content_type, d.requested_audience, d.draft_status, d.review_status, d.created_by_type,
+        d.validator_results, r.engagement_id::text AS engagement_id, r.idempotency_key
+       FROM kai.generated_content_drafts d JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id AND r.organization_id = d.organization_id
+      WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid`, [O.organizationId, draftId]))[0];
+    const lineageOfRow = (row) => (row?.validator_results || []).find((result) => result.validator_key === "KAI-REPORT-LINEAGE-001")?.evidence ?? null;
+    // The test's own fingerprint of saved content (independent of KAI's).
+    const fingerprint = (blocks) => sha256(J(blocks.map((block) => [block.ordinal, block.text, block.citations.map((c) => `${c.claimId}:${c.evidenceItemId}`).sort()])));
+    const WITHOUT_TAILS = (text) => text.replace(/\s*Measurement disclosure for [\s\S]*$/, "").replace(/\s*Selection note: [\s\S]*$/, "").trim();
+    const bodyOf = (text) => text.replace(/^\[\[assessment:[a-z_]+\]\]\n/, "");
+    const workingCounts = async () => ({ ...(await counts(O.organizationId)), ...(await query(`SELECT
+        (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS limitation_snapshots,
+        (SELECT count(*) FROM kai.export_manifests WHERE organization_id = $1::uuid)::int AS manifests,
+        (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'export_review')::int AS export_reviews,
+        (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'generated_content_review' AND queue_status <> 'open')::int AS draft_reviews_started,
+        (SELECT count(*) FROM kai.client_followup_items WHERE organization_id = $1::uuid)::int AS client_followups`, [O.organizationId]))[0] });
+    const assessmentId = () => report.outcomes.browser.draft_id;
+    let assessmentBefore = null;
+    let approvalsBefore = null;
+    let pageJ = null;
+    const openStudioJ = async (view) => {
+      await pageJ.goto("/impact-library");
+      await pageJ.clickNav("Knowledge Studio");
+      await pageJ.waitFor(() => pageJ.visible("#gk-shell-project-select"), "the Project selector");
+      await pageJ.idle();
+      await pageJ.selectProject(O.projectId);
+      await pageJ.idle();
+      await pageJ.clickTab(view);
+      await pageJ.idle();
+    };
+    const openSaved = async (draftId, label) => {
+      await openStudioJ("Drafts");
+      await pageJ.clickVisible(`[data-client-internal-draft-open="${draftId}"]`, `Open ${label}`);
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${draftId}"]`), `${label} opened`, { timeout: 30000 });
+      await pageJ.idle();
+    };
+    // The shown report and the downloaded file, through the visible controls.
+    const openAndDownload = async (draftId, label) => {
+      const mark = pageJ.mark();
+      await pageJ.clickVisible(`[data-client-open-internal-report="${draftId}"]`, `Open ${label} report`);
+      await pageJ.waitFor(() => pageJ.visible("[data-client-internal-report-markdown]"), `${label} report shown`, { timeout: 30000 });
+      await pageJ.idle();
+      assert.deepEqual(pageJ.requestsSince(mark).filter((r) => r.method !== "GET"), [], "opening a report writes nothing");
+      const shown = await pageJ.textOf("[data-client-internal-report-markdown]");
+      const href = await pageJ.attrOf(`[data-client-download-internal-report="${draftId}"]`, "href");
+      assert.equal(href, clientInternalReportMarkdownPath(O.organizationId, O.projectId, draftId));
+      const downloaded = await pageJ.evaluate(`(async () => { const r = await fetch(${J(href)}, { credentials: "same-origin" });
+        return { status: r.status, disposition: r.headers.get("content-disposition"), body: await r.text() }; })()`);
+      assert.equal(downloaded.status, 200);
+      assert.match(downloaded.disposition || "", /attachment/);
+      assert.equal(downloaded.body.trimEnd(), shown.trimEnd(), `${label}: the download is the report shown`);
+      return downloaded.body;
+    };
+    const setTextarea = (selector, value) => pageJ.evaluate(`(() => {
+      const el = document.querySelector(${J(selector)});
+      if (!el || el.offsetParent === null || el.disabled) return false;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(el, ${J(value)});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    // Layout at a width: the panel fits its column and every control is inside the viewport.
+    const fits = (selector) => pageJ.evaluate(`(() => {
+      const el = document.querySelector(${J(selector)});
+      if (!el) return { found: false };
+      const controls = [...el.querySelectorAll("button, input, textarea, label")].filter((c) => c.offsetParent !== null);
+      return { found: true, panelScroll: el.scrollWidth, panelClient: el.clientWidth, innerWidth: window.innerWidth,
+        outside: controls.filter((c) => { const r = c.getBoundingClientRect(); return r.right > window.innerWidth + 1 || r.left < -1; }).length };
+    })()`);
+    const screenshot = async (name, selector) => {
+      if (!ARTIFACTS) return;
+      if (selector) await pageJ.evaluate(`document.querySelector(${J(selector)})?.scrollIntoView({ block: "start" })`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const { data } = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, pageJ.sessionId);
+      writeFileSync(join(ARTIFACTS, `${name}.png`), Buffer.from(data, "base64"));
+    };
+    const adaptViaApi = (body, sourceId = assessmentId(), api = O.api) => api("POST", assessmentAdaptationPath(O.organizationId, sourceId), body);
+    const reviseViaApi = (draftId, body, api = O.api) => api("POST", clientWorkingReportRevisionPath(O.organizationId, O.projectId, draftId), body);
+
+    await test("J1 (browser): the saved assessment offers Use this assessment; Funder report is created from the persisted assessment (its saved passages reach the provider) with no reselection of findings", async () => {
+      pageJ = await openPage(browser, { baseUrl, legacyUserId: O.adminUserId });
+      // Desktop width for the journey (J9 also checks 390 px).
+      await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }, pageJ.sessionId);
+      assessmentBefore = await savedBlocks(assessmentId());
+      approvalsBefore = await workingCounts();
+      await openSaved(assessmentId(), "the saved assessment");
+      assert.ok(await pageJ.visible(`[data-client-use-assessment="${assessmentId()}"]`), "Use this assessment is shown on the saved assessment");
+      assert.equal(await pageJ.attrOf(`[data-client-internal-draft-detail-label]`, "data-client-internal-draft-detail-label"), "assessment");
+      const detailText = await pageJ.textOf(`[data-client-internal-draft-detail="${assessmentId()}"]`);
+      assert.doesNotMatch(detailText, /wait for Get Kinder|Get Kinder has not reviewed|before any funder or public use|provisional internal draft/i);
+      await screenshot("use-assessment-1280", `[data-client-use-assessment="${assessmentId()}"]`);
+      const calls = modelCalls.length;
+      const mark = pageJ.mark();
+      await pageJ.clickVisible('[data-client-adaptation-purpose="funder_report"] input', "Funder report");
+      await pageJ.clickVisible("[data-client-create-adapted-report]", "Create report");
+      await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the adaptation request", { timeout: 60000 });
+      await pageJ.idle();
+      const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+      assert.deepEqual([new URL(posted.url).pathname, posted.status], [assessmentAdaptationPath(O.organizationId, assessmentId()), 201]);
+      const sentBody = JSON.parse(posted.postData);
+      assert.deepEqual(Object.keys(sentBody).sort(), ["engagement_id", "idempotency_key", "purpose"], "the browser sends no claims and no assessment content");
+      assert.equal(sentBody.purpose, "funder_report");
+      const funderId = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
+      WR.reports.funder = { draftId: funderId };
+      // Exactly one provider call, carrying the persisted assessment.
+      const call = modelCalls.slice(calls);
+      assert.equal(call.length, 1);
+      assert.equal(call[0].contentType, "evidence_summary");
+      assert.equal(call[0].requestedAudience, "funder");
+      assert.equal(call[0].adaptation.purpose, "funder_report");
+      const sentPassages = call[0].adaptation.sourceAssessment.sections.flatMap((section) => section.blocks.map((block) => ({ section: section.key, ...block })));
+      // Every passage sent is a persisted assessment block's own prose, in its section, with that block's citations.
+      for (const passage of sentPassages) {
+        const saved = assessmentBefore.find((block) => block.text.startsWith(`[[assessment:${passage.section}]]\n`) && WITHOUT_TAILS(bodyOf(block.text)) === passage.text);
+        assert.ok(saved, `persisted passage: ${passage.text.slice(0, 80)}`);
+        assert.deepEqual([...new Set(saved.citations.map((c) => c.claimId))].sort(), [...passage.claimIds].sort());
+      }
+      const sentText = sentPassages.map((passage) => passage.text).join("\n");
+      assert.match(sentText, /Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better/, "the saved recommendations reach the provider");
+      assert.match(sentText, /What the results suggest:/, "the saved interpretation reaches the provider");
+      assert.ok(sentText.includes("Exactly half of the 36 comparable participants had unchanged Community-connection confidence scores."), "the saved outcome interpretation reaches the provider");
+      assert.doesNotMatch(J(call[0].adaptation), /Measurement disclosure for|Selection note:/, "server disclosures and notes are composed again, not resent");
+      assert.deepEqual(call[0].claims.map((claim) => claim.claimId).sort(), [...new Set(assessmentBefore.flatMap((block) => block.citations.map((c) => c.claimId)))].sort(),
+        "the claims are the assessment's own citations, read from storage");
+      assert.doesNotMatch(call[0].serialized, RAW_IDENTIFIER, "no participant identifier reaches the provider");
+      WR.provider = { funder: { passages_sent: sentPassages.length, sections: [...new Set(sentPassages.map((p) => p.section))], claims_sent: call[0].claims.length } };
+
+      // The saved report opens, named by its purpose, with its source assessment.
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${funderId}"]`), "the funder report opened", { timeout: 30000 });
+      assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-purpose"), "funder_report");
+      assert.equal(await pageJ.attrOf("[data-client-open-source-assessment]", "data-client-open-source-assessment"), assessmentId());
+      const detail = await pageJ.textOf(`[data-client-internal-draft-detail="${funderId}"]`);
+      assert.match(detail, /^Funder report/);
+      assert.match(detail, /Prepared from your saved Free Impact Assessment\./);
+      assert.match(detail, /Working report: KAI has not sent or released it outside your organization\./);
+      assert.doesNotMatch(detail, /Get Kinder has not reviewed|wait for Get Kinder|Not approved for funder or public use/);
+      assert.ok(detail.includes(ADAPTATION_OPENINGS.funder_report));
+      assert.ok(detail.includes("Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better"), "the saved recommendation is in the report");
+      assert.ok(detail.includes("Exactly half of the 36 comparable participants had unchanged Community-connection confidence scores."), "the saved interpretation is in the report");
+      assert.match(detail, new RegExp(`${EXPECTED.people} distinct people on the participant register`), "the calculated reach is carried with its population");
+      assert.deepEqual(pageJ.exceptions, []);
+    });
+
+    await test("J2 (PostgreSQL): the funder report is its own saved draft with a durable relationship to the unchanged assessment; citations, values and limitations are preserved", async () => {
+      const funderId = WR.reports.funder.draftId;
+      const row = await draftRow(funderId);
+      assert.deepEqual([row.content_type, row.requested_audience, row.draft_status, row.review_status, row.created_by_type, row.engagement_id],
+        ["evidence_summary", "funder", "draft", "needs_gk_review", "system", O.projectId]);
+      const lineage = lineageOfRow(row);
+      const assessmentRow = await draftRow(assessmentId());
+      assert.deepEqual({ ...lineage, source_assessment_content_sha256: undefined }, {
+        relationship: "assessment_adaptation", reporting_purpose: "funder_report", version: 1,
+        source_assessment_draft_id: assessmentId(), source_assessment_generation_run_id: (await query("SELECT generation_run_id::text FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [assessmentId()]))[0].generation_run_id,
+        source_assessment_content_sha256: undefined, parent_draft_id: assessmentId(), root_report_draft_id: null, engagement_id: O.projectId,
+        reused_block_ordinals: lineage.reused_block_ordinals, withheld_blocks: [], selected_claim_ids: null, guidance_sha256: null,
+      });
+      assert.match(lineage.source_assessment_content_sha256, /^[0-9a-f]{64}$/);
+      assert.equal(lineage.reused_block_ordinals.length, (await savedBlocks(assessmentId())).length, "every saved passage was usable and reused");
+      assert.equal(assessmentRow.requested_audience, "internal");
+      // The assessment itself is unchanged by being used.
+      assert.equal(fingerprint(await savedBlocks(assessmentId())), fingerprint(assessmentBefore), "the saved assessment is not rewritten");
+      // Citations: only the assessment's own claim/evidence pairs.
+      const blocks = await savedBlocks(funderId);
+      const allowed = new Set(assessmentBefore.flatMap((block) => block.citations.map((c) => `${c.claimId}:${c.evidenceItemId}`)));
+      assert.ok(blocks.every((block) => block.citations.length > 0 && block.citations.every((c) => allowed.has(`${c.claimId}:${c.evidenceItemId}`))));
+      // Each calculated value keeps its basis: the people count and both outcome splits, with their disclosures.
+      const text = blocks.map((block) => block.text).join("\n");
+      assert.ok(text.includes(`${EXPECTED.people} distinct people`));
+      assert.ok(text.includes(`${EXPECTED_OUTCOMES.connection.higher} (${EXPECTED_OUTCOMES.connection.percentage}%)`));
+      assert.match(text, /Measurement disclosure for the cited measurement/);
+      assert.doesNotMatch(text, /\bapproved\b|\breleased\b|verified by KAI/i, "the provider's approval claims change nothing");
+      const validatorKeys = row.validator_results.map((result) => [result.validator_key, result.severity]);
+      for (const key of ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005", "VAL-GEN-008"]) assert.ok(validatorKeys.some(([k, sev]) => k === key && sev === "pass"), key);
+      // The generation run records the browser's own idempotency key; the audit names the adaptation.
+      const [audit] = await query(`SELECT metadata FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'generated_content_draft_created'
+        AND metadata->>'generated_content_draft_id' = $2`, [O.organizationId, funderId]);
+      assert.equal(audit.metadata.contract, "kai_assessment_adaptation_v1");
+      WR.persistence.funder = { draft_id: funderId, content_type: row.content_type, audience: row.requested_audience, lineage, block_count: blocks.length,
+        citations: [...new Set(blocks.flatMap((block) => block.citations.map((c) => c.claimId)))].length, content_fingerprint: fingerprint(blocks),
+        assessment_fingerprint_before: fingerprint(assessmentBefore), assessment_fingerprint_after: fingerprint(await savedBlocks(assessmentId())) };
+    });
+
+    await test("J3 (browser): the funder report opens and downloads; the download is the report shown; Markdown names its purpose, source assessment and that KAI has not released it", async () => {
+      const funderId = WR.reports.funder.draftId;
+      await openSaved(funderId, "the funder report");
+      const markdown = await openAndDownload(funderId, "funder report");
+      assert.match(markdown, /^# Funder Report\n/);
+      assert.ok(markdown.includes(`**Reporting purpose:** a funder report, adapted from the organization's saved Free Impact Assessment \`${assessmentId()}\``));
+      assert.match(markdown, /\*\*Prepared for:\*\* a funder audience, as the organization's working report\. KAI has not sent or released it outside the organization\./);
+      assert.ok(markdown.includes("Proposed change: Record, on each outcome measure that does not yet state it, whether a higher value is better"));
+      assert.match(markdown, /## Source permissions and checks/);
+      assert.doesNotMatch(markdown, /Authority for internal use|before any funder or public use|internal use only/i);
+      WR.reports.funder.markdown_sha256 = sha256(markdown);
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "funder-report-v1.md"), markdown);
+      // The source assessment opens from the report and is the same saved content.
+      await pageJ.clickVisible(`[data-client-open-source-assessment="${assessmentId()}"]`, "Open the assessment");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${assessmentId()}"]`), "the assessment from the report", { timeout: 30000 });
+      assert.ok(await pageJ.visible(`[data-client-use-assessment="${assessmentId()}"]`));
+    });
+
+    await test("J4 (browser): the administrator revises the funder report's wording and saves version 2; both versions and the assessment reopen independently; the download is version 2 as saved", async () => {
+      const v1 = WR.reports.funder.draftId;
+      const v1Before = await savedBlocks(v1);
+      await openSaved(v1, "the funder report");
+      await pageJ.clickVisible(`[data-client-revise-report="${v1}"]`, "Revise wording");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-revise-editor="${v1}"]`), "the revision editor");
+      await screenshot("revise-report-1280", `[data-client-revise-editor="${v1}"]`);
+      const REVISED = "For a funder the organization reports to: this report sets out what the organization's saved assessment found about the people it reached and the ratings participants gave, with each figure's sources and limitations.";
+      assert.ok(await setTextarea('[data-client-revise-block="1"]', REVISED), "passage 1 is editable");
+      assert.ok(await pageJ.visible(`[data-client-revise-protected="2"]`), "a passage's disclosure is shown as kept by KAI, not editable");
+      const mark = pageJ.mark();
+      await pageJ.clickVisible("[data-client-save-revision]", "Save as version 2");
+      await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the revision request", { timeout: 30000 });
+      await pageJ.idle();
+      const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+      assert.deepEqual([new URL(posted.url).pathname, posted.status], [clientWorkingReportRevisionPath(O.organizationId, O.projectId, v1), 201]);
+      const sent = JSON.parse(posted.postData);
+      assert.deepEqual(sent.blocks, [{ ordinal: 1, text: REVISED }], "only the changed passage is sent; citations and disclosures are never sent");
+      const v2 = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
+      WR.reports.funderV2 = { draftId: v2, idempotencyKey: sent.idempotency_key };
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v2}"]`), "version 2 opened", { timeout: 30000 });
+      assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-version"), "2");
+      assert.match(await pageJ.textOf(`[data-client-internal-draft-detail="${v2}"]`), /^Funder report · version 2/);
+      assert.match(await pageJ.textOf("[data-client-report-revision]"), /Version 2, revised by your organization \(passage 1\)\./);
+      const v2Markdown = await openAndDownload(v2, "version 2");
+      assert.ok(v2Markdown.includes(REVISED));
+      assert.ok(v2Markdown.includes(`**Version:** 2, revised by the organization from draft \`${v1}\``));
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "funder-report-v2.md"), v2Markdown);
+      // PostgreSQL: a new draft; only passage 1's prose differs; every citation and disclosure is the same.
+      const v1After = await savedBlocks(v1);
+      const v2Blocks = await savedBlocks(v2);
+      assert.equal(fingerprint(v1After), fingerprint(v1Before), "version 1 is not rewritten");
+      assert.equal(v2Blocks.length, v1Before.length);
+      for (const [index, block] of v2Blocks.entries()) {
+        assert.deepEqual(block.citations, v1Before[index].citations, `passage ${block.ordinal} keeps its citations`);
+        if (block.ordinal === 1) assert.ok(block.text.startsWith(REVISED));
+        else assert.equal(block.text, v1Before[index].text, `passage ${block.ordinal} unchanged`);
+      }
+      const v2Row = await draftRow(v2);
+      const lineage = lineageOfRow(v2Row);
+      assert.deepEqual([v2Row.content_type, v2Row.requested_audience, v2Row.engagement_id, lineage.relationship, lineage.version, lineage.parent_draft_id, lineage.root_report_draft_id,
+        lineage.reporting_purpose, lineage.source_assessment_draft_id, lineage.revised_block_ordinals, lineage.revised_by_type],
+      ["evidence_summary", "funder", O.projectId, "organization_revision", 2, v1, v1, "funder_report", assessmentId(), [1], "human"]);
+      assert.equal(lineage.parent_content_sha256.length, 64);
+      const [audit] = await query(`SELECT metadata FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'generated_content_draft_created'
+        AND metadata->>'generated_content_draft_id' = $2`, [O.organizationId, v2]);
+      assert.equal(audit.metadata.contract, "kai_working_report_revision_v1");
+      WR.persistence.revision = { draft_id: v2, lineage, v1_fingerprint_before: fingerprint(v1Before), v1_fingerprint_after: fingerprint(v1After), v2_fingerprint: fingerprint(v2Blocks) };
+      // The previous version and the assessment reopen as saved.
+      await pageJ.clickVisible(`[data-client-open-previous-version="${v1}"]`, "Open the previous version");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v1}"]`), "version 1 reopened", { timeout: 30000 });
+      assert.ok(!(await pageJ.textOf(`[data-client-internal-draft-detail="${v1}"]`)).includes(REVISED));
+      const v1Markdown = await openAndDownload(v1, "version 1 again");
+      assert.equal(sha256(v1Markdown), WR.reports.funder.markdown_sha256, "version 1's report is unchanged");
+      assert.deepEqual(pageJ.exceptions, []);
+    });
+
+    await test("J5 (HTTP): a revision may not change what a figure describes, add unsupported numbers, causes or quotations, or repeat nothing; replay is idempotent and a conflicting retry fails", async () => {
+      const v2 = WR.reports.funderV2.draftId;
+      const blocks = await savedBlocks(v2);
+      const prose = (block) => block.text.replace(/\s*(?:Measurement disclosure for |Selection note: |Reuse note: )[\s\S]*$/, "").trim();
+      const people = blocks.find((block) => block.text.includes(`${EXPECTED.people} distinct people`));
+      assert.ok(people, "a passage states the people reached");
+      const before = await counts(O.organizationId);
+      const attempt = async (label, edits, key = `revise-negative-${randomUUID()}`) => {
+        const response = await reviseViaApi(v2, { idempotency_key: key, blocks: edits });
+        WR.negatives[label] = { status: response.status, blockers: (response.body?.blockers || []).map((b) => [b.validator_key, b.blocking_reason, b.evidence?.block_ordinals ?? null]) };
+        return response;
+      };
+      const household = await attempt("figure_unit_changed", [{ ordinal: people.ordinal, text: prose(people).replace(`${EXPECTED.people} distinct people`, `${EXPECTED.people} households`) }]);
+      assert.equal(household.status, 422, J(household.body));
+      assert.ok(household.body.blockers.some((b) => b.blocking_reason === "revision_figure_context_changed" && J(b.evidence.block_ordinals) === J([people.ordinal])), J(household.body.blockers));
+      const unsupported = await attempt("unsupported_number", [{ ordinal: 1, text: `${prose(blocks[0])} The programme also trained 999 volunteers.` }]);
+      assert.equal(unsupported.status, 422);
+      assert.ok(unsupported.body.blockers.some((b) => b.validator_key === "VAL-GEN-004" && (b.evidence.assertion_classes || []).includes("numeric_literal")), J(unsupported.body.blockers));
+      const causal = await attempt("causal_claim", [{ ordinal: 1, text: `${prose(blocks[0])} Confidence rose because of the programme.` }]);
+      assert.equal(causal.status, 422);
+      assert.ok(causal.body.blockers.some((b) => b.validator_key === "VAL-GEN-004"), J(causal.body.blockers));
+      const quotation = await attempt("invented_quotation", [{ ordinal: 1, text: `${prose(blocks[0])} One participant said "this changed my whole life".` }]);
+      assert.equal(quotation.status, 422);
+      assert.ok(quotation.body.blockers.some((b) => b.validator_key === "VAL-GEN-010"), J(quotation.body.blockers));
+      const unchanged = await attempt("unchanged", [{ ordinal: 1, text: prose(blocks[0]) }]);
+      assert.deepEqual([unchanged.status, unchanged.body.blockers[0].blocking_reason], [422, "revision_unchanged"]);
+      assert.deepEqual(await counts(O.organizationId), before, "no refused revision wrote anything");
+      // Idempotent replay of the browser's own request; a different text under the same key is refused.
+      const replay = await reviseViaApi(WR.reports.funder.draftId, { idempotency_key: WR.reports.funderV2.idempotencyKey,
+        blocks: [{ ordinal: 1, text: prose(blocks[0]) }] });
+      assert.deepEqual([replay.status, replay.body.data?.generatedContentDraftId, replay.body.data?.replayed], [201, v2, true], J(replay.body));
+      const conflict = await reviseViaApi(WR.reports.funder.draftId, { idempotency_key: WR.reports.funderV2.idempotencyKey, blocks: [{ ordinal: 1, text: "A different wording." }] });
+      assert.deepEqual([conflict.status, conflict.body.error?.code], [409, "duplicate_conflict"]);
+      assert.deepEqual(await counts(O.organizationId), before, "replay and conflict wrote nothing");
+      WR.negatives.replay = { status: replay.status, same_draft: replay.body.data.generatedContentDraftId === v2 };
+      WR.negatives.conflicting_retry = { status: conflict.status, code: conflict.body.error.code };
+    });
+
+    await test("J6 (browser + HTTP): the same assessment adapts into a board report (browser, with guidance) and annual-report content (selected findings); each is its own saved report with its purpose, generator and audience", async () => {
+      const calls = modelCalls.length;
+      await openSaved(assessmentId(), "the saved assessment");
+      await pageJ.clickVisible('[data-client-adaptation-purpose="board_update"] input', "Board report");
+      await pageJ.clickVisible("[data-client-adaptation-guidance-toggle]", "Add guidance");
+      assert.ok(await setTextarea("[data-client-adaptation-guidance]", "Lead with the follow-up ratings for the board's programme committee."));
+      const mark = pageJ.mark();
+      await pageJ.clickVisible("[data-client-create-adapted-report]", "Create report");
+      await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the board adaptation", { timeout: 60000 });
+      await pageJ.idle();
+      const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+      assert.equal(posted.status, 201, J(await pageJ.responseBody(posted)));
+      const boardId = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${boardId}"]`), "the board report opened", { timeout: 30000 });
+      assert.match(await pageJ.textOf(`[data-client-internal-draft-detail="${boardId}"]`), /^Board report/);
+      const boardMarkdown = await openAndDownload(boardId, "board report");
+      assert.match(boardMarkdown, /^# Board Update\n/);
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "board-report.md"), boardMarkdown);
+      const boardCall = modelCalls.slice(calls)[0];
+      assert.deepEqual([boardCall.contentType, boardCall.requestedAudience, boardCall.adaptation.purpose, boardCall.adaptation.guidance],
+        ["board_update", "internal", "board_update", "Lead with the follow-up ratings for the board's programme committee."]);
+      // Annual-report content from two selected findings (API, the same route the browser uses).
+      const selected = [O.outcomes.connection.claimId, O.docs.C.claimId].sort();
+      const annual = await adaptViaApi({ engagement_id: O.projectId, purpose: "annual_report", idempotency_key: `annual-${randomUUID()}`, claim_ids: selected });
+      assert.equal(annual.status, 201, J({ body: annual.body, provider: modelCalls.at(-1)?.responseBlocks?.map((b, i) => `${i + 1}: ${b.text.slice(0, 400)}`) }));
+      const annualId = annual.body.data.generatedContentDraftId;
+      const annualCall = modelCalls.at(-1);
+      assert.deepEqual([annualCall.contentType, annualCall.requestedAudience], ["annual_report_section", "public"]);
+      assert.deepEqual(annualCall.claims.map((claim) => claim.claimId).sort(), selected, "only the selected findings reach the provider");
+      const annualReads = await clientReads(O, annualId);
+      assert.deepEqual([annualReads.listed, annualReads.detail, annualReads.markdown], [true, 200, 200]);
+      assert.match(annualReads.markdownText, /^# Annual Report Section\n/);
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "annual-report-content.md"), annualReads.markdownText);
+      for (const [label, draftId, contentType, audience, purpose] of [["board", boardId, "board_update", "internal", "board_update"], ["annual", annualId, "annual_report_section", "public", "annual_report"]]) {
+        const row = await draftRow(draftId);
+        const lineage = lineageOfRow(row);
+        assert.deepEqual([row.content_type, row.requested_audience, lineage.relationship, lineage.reporting_purpose, lineage.source_assessment_draft_id, lineage.version],
+          [contentType, audience, "assessment_adaptation", purpose, assessmentId(), 1], label);
+        WR.persistence[label] = { draft_id: draftId, content_type: row.content_type, audience: row.requested_audience, lineage };
+      }
+      const annualLineage = lineageOfRow(await draftRow(annualId));
+      assert.deepEqual(annualLineage.selected_claim_ids, selected);
+      assert.ok(annualLineage.withheld_blocks.length > 0 && annualLineage.withheld_blocks.every((block) => block.reason === "cites_finding_not_selected"));
+      assert.match(lineageOfRow(await draftRow(boardId)).guidance_sha256, /^[0-9a-f]{64}$/);
+      assert.match((await savedBlocks(annualId)).map((block) => block.text).join("\n"), /Reuse note: some content of the source assessment was not reused/);
+      assert.equal(fingerprint(await savedBlocks(assessmentId())), fingerprint(assessmentBefore), "still the same saved assessment");
+      WR.reports.board = { draftId: boardId };
+      WR.reports.annual = { draftId: annualId };
+    });
+
+    await test("J7 (HTTP): adaptation is idempotent, refuses conflicting retries, other organizations, Projects, roles and non-assessments, and never sends a prohibited source's content", async () => {
+      const key = `adapt-replay-${randomUUID()}`;
+      const first = await adaptViaApi({ engagement_id: O.projectId, purpose: "internal_planning", idempotency_key: key });
+      assert.equal(first.status, 201, J({ body: first.body, provider: modelCalls.at(-1)?.responseBlocks?.map((b, i) => `${i + 1}: ${b.text.slice(0, 400)}`) }));
+      const calls = modelCalls.length;
+      const drafts = (await counts(O.organizationId)).drafts;
+      const replay = await adaptViaApi({ engagement_id: O.projectId, purpose: "internal_planning", idempotency_key: key });
+      assert.deepEqual([replay.status, replay.body.data.generatedContentDraftId, replay.body.data.replayed], [201, first.body.data.generatedContentDraftId, true]);
+      assert.equal(modelCalls.length, calls, "a replay never calls the provider");
+      const conflict = await adaptViaApi({ engagement_id: O.projectId, purpose: "funder_report", idempotency_key: key });
+      assert.deepEqual([conflict.status, conflict.body.error?.code], [409, "duplicate_conflict"]);
+      // Another organization's administrator, another Project, a contributor, a non-assessment.
+      const otherOrg = await adaptViaApi({ engagement_id: O.projectId, purpose: "funder_report", idempotency_key: `adapt-other-${randomUUID()}` }, assessmentId(), ORGS.D.api);
+      assert.equal(otherOrg.status, 403, J(otherOrg.body));
+      const otherProject = await adaptViaApi({ engagement_id: ORGS.P.projectId, purpose: "funder_report", idempotency_key: `adapt-project-${randomUUID()}` });
+      assert.ok([403, 404].includes(otherProject.status), J(otherProject.body));
+      const contributorLegacy = 2999;
+      await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [contributorLegacy]);
+      const contributor = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: contributorLegacy, email: `user${contributorLegacy}@package4.test` });
+      await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_contributor', 'active') ON CONFLICT DO NOTHING", [O.organizationId, contributor.user_id]);
+      const contributorApi = client(baseUrl, contributorLegacy);
+      const byContributor = await adaptViaApi({ engagement_id: O.projectId, purpose: "funder_report", idempotency_key: `adapt-contributor-${randomUUID()}` }, assessmentId(), contributorApi);
+      assert.equal(byContributor.status, 403, J(byContributor.body));
+      const contributorRevision = await reviseViaApi(WR.reports.funder.draftId, { idempotency_key: `revise-contributor-${randomUUID()}`, blocks: [{ ordinal: 1, text: "A contributor's wording." }] }, contributorApi);
+      assert.equal(contributorRevision.status, 403, J(contributorRevision.body));
+      const otherOrgRevision = await reviseViaApi(WR.reports.funder.draftId, { idempotency_key: `revise-other-${randomUUID()}`, blocks: [{ ordinal: 1, text: "Another organization's wording." }] }, ORGS.D.api);
+      assert.equal(otherOrgRevision.status, 403, J(otherOrgRevision.body));
+      const notAssessment = await adaptViaApi({ engagement_id: O.projectId, purpose: "board_update", idempotency_key: `adapt-not-assessment-${randomUUID()}` }, WR.reports.funder.draftId);
+      assert.deepEqual([notAssessment.status, notAssessment.body.blockers?.[0]?.blocking_reason], [422, "source_is_not_a_free_impact_assessment"]);
+      // No session at all: both new routes refuse before any service runs.
+      const anonymous = async (path, body) => {
+        const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: J(body) });
+        return response.status;
+      };
+      const anonymousAdapt = await anonymous(assessmentAdaptationPath(O.organizationId, assessmentId()), { engagement_id: O.projectId, purpose: "funder_report", idempotency_key: `adapt-anon-${randomUUID()}` });
+      const anonymousRevise = await anonymous(clientWorkingReportRevisionPath(O.organizationId, O.projectId, WR.reports.funder.draftId), { idempotency_key: `revise-anon-${randomUUID()}`, blocks: [{ ordinal: 1, text: "Anonymous wording." }] });
+      assert.deepEqual([anonymousAdapt, anonymousRevise], [401, 401]);
+      assert.equal((await counts(O.organizationId)).drafts, drafts, "no refused request wrote a draft");
+      WR.negatives.unauthenticated = { adapt: anonymousAdapt, revise: anonymousRevise };
+      WR.negatives.adaptation = { replay: replay.status, conflict: conflict.status, other_organization: otherOrg.status, other_project: otherProject.status,
+        contributor: byContributor.status, contributor_revision: contributorRevision.status, other_organization_revision: otherOrgRevision.status, not_assessment: notAssessment.status };
+
+      // The review PDF's AI processing is withdrawn: its finding never reaches the provider; the rest of the assessment is reused and the omission is recorded.
+      await reviewPermissionsAgain(O, O.review, { reviewed_llm_processing_allowed: false });
+      try {
+        const callsBefore = modelCalls.length;
+        const withdrawn = await adaptViaApi({ engagement_id: O.projectId, purpose: "funder_report", idempotency_key: `adapt-withdrawn-${randomUUID()}` });
+        assert.equal(withdrawn.status, 201, J(withdrawn.body));
+        const sent = modelCalls.slice(callsBefore);
+        assert.equal(sent.length, 1);
+        assert.ok(!sent[0].claims.some((claim) => claim.claimId === O.docs.C.claimId), "the prohibited finding never reaches the provider");
+        assert.doesNotMatch(sent[0].serialized, /at least 90|rough tally|management review/i, "no PDF content reaches the provider");
+        const lineage = lineageOfRow(await draftRow(withdrawn.body.data.generatedContentDraftId));
+        assert.ok(lineage.withheld_blocks.some((block) => block.section_key === "impact_stories" && block.reason === "cites_finding_not_currently_usable"), J(lineage.withheld_blocks));
+        assert.deepEqual(withdrawn.body.data.permissionExcludedClaims.map((item) => item.claimId), [O.docs.C.claimId]);
+        const savedText = (await savedBlocks(withdrawn.body.data.generatedContentDraftId)).map((block) => block.text).join("\n");
+        assert.match(savedText, /Selection note: one selected finding was not sent to the AI model/);
+        assert.match(savedText, /Reuse note:/);
+        assert.doesNotMatch(savedText, /at least 90/);
+        WR.negatives.ai_withdrawn = { status: withdrawn.status, withheld_blocks: lineage.withheld_blocks, permission_excluded: withdrawn.body.data.permissionExcludedClaims };
+      } finally {
+        await reviewPermissionsAgain(O, O.review, { reviewed_llm_processing_allowed: true });
+      }
+    });
+
+    await test("J8 (browser + PostgreSQL): when a cited source is replaced, the saved report stays readable as saved (with its context) and downloads as saved; it cannot be revised as current; restoring the source restores current use", async () => {
+      const v1 = WR.reports.funder.draftId;
+      const savedBefore = await savedBlocks(v1);
+      await query("UPDATE kai.source_versions SET is_current = false WHERE organization_id = $1::uuid AND source_version_id = $2::uuid", [O.organizationId, O.review.sourceVersionId]);
+      try {
+        await openSaved(v1, "the funder report after its source changed");
+        assert.equal(await pageJ.attrOf("[data-client-report-historical]", "data-client-report-historical"), "source_changed_since_saved");
+        assert.ok(!(await pageJ.visible(`[data-client-revise-report="${v1}"]`)), "a changed-source report is not offered for revision");
+        const href = await pageJ.attrOf(`[data-client-download-saved-version="${v1}"]`, "href");
+        const downloaded = await pageJ.evaluate(`(async () => { const r = await fetch(${J(href)}, { credentials: "same-origin" }); return { status: r.status, body: await r.text() }; })()`);
+        assert.equal(downloaded.status, 200);
+        assert.match(downloaded.body, /^# Funder Report \(saved version\)\n/);
+        for (const block of savedBefore) assert.ok(downloaded.body.includes(block.text.trim().slice(0, 120)), `saved passage ${block.ordinal} as saved`);
+        const revise = await reviseViaApi(v1, { idempotency_key: `revise-stale-${randomUUID()}`, blocks: [{ ordinal: 1, text: "New wording while a source changed." }] });
+        assert.ok([409, 422].includes(revise.status), J(revise.body));
+        if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "funder-report-saved-version.md"), downloaded.body);
+        WR.negatives.changed_source = { detail_historical: true, download: downloaded.status, revise: revise.status };
+      } finally {
+        await query("UPDATE kai.source_versions SET is_current = true WHERE organization_id = $1::uuid AND source_version_id = $2::uuid", [O.organizationId, O.review.sourceVersionId]);
+      }
+      assert.equal(fingerprint(await savedBlocks(v1)), fingerprint(savedBefore), "the saved report was never rewritten");
+      const restored = await clientReads(O, v1);
+      assert.deepEqual([restored.detail, restored.markdown], [200, 200]);
+    });
+
+    await test("J9 (390 px): Use this assessment and the revision editor fit a phone-width screen; every control is reachable", async () => {
+      // Opened at desktop width, then shown at 390 px (the reader re-lays out in place).
+      const phone = () => browser.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }, pageJ.sessionId);
+      const desktop = () => browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }, pageJ.sessionId);
+      WR.layout = {};
+      await openSaved(assessmentId(), "the assessment");
+      WR.layout.use_assessment_1280 = await fits(`[data-client-use-assessment="${assessmentId()}"]`);
+      await phone();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const panel = await fits(`[data-client-use-assessment="${assessmentId()}"]`);
+        assert.ok(panel.found && panel.innerWidth <= 400 && panel.panelScroll <= panel.panelClient + 1 && panel.outside === 0, J(panel));
+        await screenshot("use-assessment-390", `[data-client-use-assessment="${assessmentId()}"]`);
+        WR.layout.use_assessment_390 = panel;
+      } finally {
+        await desktop();
+      }
+      await openSaved(WR.reports.funderV2.draftId, "version 2");
+      await pageJ.clickVisible(`[data-client-revise-report="${WR.reports.funderV2.draftId}"]`, "Revise wording");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-revise-editor="${WR.reports.funderV2.draftId}"]`), "the editor");
+      WR.layout.revise_editor_1280 = await fits(`[data-client-revise-editor="${WR.reports.funderV2.draftId}"]`);
+      await phone();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const editor = await fits(`[data-client-revise-editor="${WR.reports.funderV2.draftId}"]`);
+        assert.ok(editor.found && editor.innerWidth <= 400 && editor.panelScroll <= editor.panelClient + 1 && editor.outside === 0, J(editor));
+        await screenshot("revise-report-390", `[data-client-revise-editor="${WR.reports.funderV2.draftId}"]`);
+        WR.layout.revise_editor_390 = editor;
+      } finally {
+        await desktop();
+      }
+      for (const [label, value] of Object.entries(WR.layout)) {
+        assert.ok(value.found && value.outside === 0 && value.panelScroll <= value.panelClient + 1, `${label}: ${J(value)}`);
+        assert.equal(value.innerWidth, label.endsWith("_390") ? 390 : 1280, label);
+      }
+    });
+
+    await test("J10: the whole journey - assessment reuse, three purpose reports, a revision, reads and downloads - wrote zero evidence, claim, coverage, follow-up, review, release or export decisions", async () => {
+      const after = await workingCounts();
+      const { drafts: draftsAfter, ...decisionsAfter } = after;
+      const { drafts: draftsBefore, ...decisionsBefore } = approvalsBefore;
+      assert.deepEqual(decisionsAfter, decisionsBefore, "no approval of any kind was needed or recorded");
+      // The funder report (+ version 2), board, annual, internal planning and the AI-withdrawn funder report.
+      assert.equal(draftsAfter - draftsBefore, 6);
+      WR.approvals = { before: approvalsBefore, after };
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "working-report-persistence.json"), `${J({ persistence: WR.persistence, negatives: WR.negatives, provider: WR.provider, approvals: WR.approvals, layout: WR.layout }, null, 2)}\n`);
+      await pageJ.close().catch(() => {});
     });
 
     await test("agreement: for every admission-governed generation attempt the server's admission predicted whether the provider was called", () => {

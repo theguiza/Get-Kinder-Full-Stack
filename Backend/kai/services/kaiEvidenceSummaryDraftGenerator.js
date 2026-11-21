@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import { ADAPTATION_MODEL_INSTRUCTION } from "./kaiAssessmentAdaptation.js";
+
 import {
   GENERATOR_RESULT_REASON,
   GENERATOR_RESULT_REASONS,
@@ -162,7 +164,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
 
     const response = await createMessage({
       model: MODEL,
-      max_tokens: 1200,
+      max_tokens: generatorInput.adaptation ? 3000 : 1200,
       system: [
         generatorInput.requestedAudience === FUNDER_REQUESTED_AUDIENCE
           ? "You generate funder-facing evidence summaries for Get Kinder."
@@ -175,6 +177,9 @@ export function createProductionEvidenceSummaryDraftGenerator({
         ...(hasMeasurementLimitations(generatorInput.claims) ? [MEASUREMENT_INSTRUCTION] : []),
         ...(hasDerivedMeasurementClaims(generatorInput.claims) ? [DERIVED_MEASUREMENT_INSTRUCTION] : []),
         ...(hasDocumentStatementClaims(generatorInput.claims) ? [DOCUMENT_STATEMENT_INSTRUCTION] : []),
+        // "Use this assessment" (owner direction 2026-11-20): the saved
+        // assessment the organization chose, as data.
+        ...(generatorInput.adaptation ? [ADAPTATION_MODEL_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",
@@ -182,6 +187,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
           contentType: generatorInput.contentType,
           requestedAudience: generatorInput.requestedAudience,
           claims: generatorInput.claims,
+          ...(generatorInput.adaptation ? { adaptation: generatorInput.adaptation } : {}),
         }),
       }],
       output_config: {

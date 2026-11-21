@@ -58,14 +58,31 @@ function generationClaims() {
   return CLAIMS.map((c) => ({ ...c, requestedAudience: "internal", revalidatedForGeneration: true, audienceAuthority: { internal: true } }));
 }
 
-test("documented gaps come only from structural signals and are each grounded in cited claims", () => {
+test("documented gaps come only from established signals and are each grounded in cited claims", () => {
   const gaps = detectAssessmentGaps(CLAIMS);
-  assert.deepEqual(gaps.map((gap) => gap.key), ["recorded_duration_incomplete", "follow_up_evidence_limited", "duplicate_records", "participant_story_missing", "external_use_alignment", "source_reported_statements"]);
+  // Owner direction 2026-11-20: a cited source statement that is not
+  // independently corroborated, story permission, and coverage dimensions
+  // that were not assessed (requirement alignment, conflicting sources) are
+  // not programme gaps; no corroboration, consent or Get Kinder task appears.
+  assert.deepEqual(gaps.map((gap) => gap.key), ["recorded_duration_incomplete", "follow_up_evidence_limited", "duplicate_records"]);
   assert.deepEqual(gaps[0].documentGrounding.map((c) => c.claimId), [id(4)]);
   assert.deepEqual(gaps[0].measuredGrounding.map((c) => c.claimId), [id(2)]);
   assert.deepEqual(gaps[1].documentGrounding.map((c) => c.claimId), [id(5)]);
+  assert.deepEqual(gaps[1].measuredGrounding.map((c) => c.claimId), [id(3)]);
   assert.deepEqual(gaps[2].documentGrounding, []);
   assert.deepEqual(gaps[2].measuredGrounding.map((c) => c.claimId), [id(1)]);
+  // A document statement alone grounds a gap only when it itself reports the
+  // weakness: the duration statement does; a statement merely naming a
+  // subject (meeting "minutes", "outcomes") does not.
+  const documentsOnly = detectAssessmentGaps([CLAIMS[3], claim(7, DOC, "Source-reported, not independently verified (line 2): \"The board approved the minutes and outcomes framework.\"")]);
+  assert.deepEqual(documentsOnly.map((gap) => gap.key), ["recorded_duration_incomplete"]);
+  assert.match(documentsOnly[0].text, /^The organization's own documents report that session duration is not always recorded/);
+  // A recorded potential conflict (a real disagreement) is a gap; an
+  // unassessed conflicting-source dimension is not.
+  const conflict = claim(8, DERIVED, "Recorded observation: 12 observations.", ["derived.meaning_human_stated", "conflict.potential_conflict_recorded"]);
+  const unassessed = claim(9, DERIVED, "Recorded observation: 13 observations.", ["derived.meaning_human_stated", "coverage.conflicting_source_indicators.unresolved"]);
+  assert.deepEqual(detectAssessmentGaps([conflict, unassessed]).map((gap) => gap.key), ["conflicting_information"]);
+  assert.deepEqual(detectAssessmentGaps([unassessed]), []);
   // No signal, no gap: without a duration claim or statement there is no duration recommendation.
   assert.ok(!detectAssessmentGaps(CLAIMS.filter((c) => ![id(2), id(4)].includes(c.claimId))).some((gap) => gap.key === "recorded_duration_incomplete"));
   const context = buildAssessmentModelContext(CLAIMS);
@@ -86,9 +103,16 @@ test("the composed assessment has six ordered sections and three grounded propos
   assert.match(recommendations[1].body, /follow-up point/);
   assert.match(recommendations[2].body, /duplicate check/);
   assert.deepEqual(recommendations[2].citations, cite(CLAIMS[0]));
-  for (const rec of recommendations) assert.match(rec.body, /This is a proposal for the organization to consider; it is not a measured or confirmed result\.$/);
-  assert.match(sections[2].blocks.at(-1).body, /^Participant story evidence: none is available\./);
+  // Each proposal states its action, its basis and what it could show.
+  for (const rec of recommendations) assert.match(rec.body, /^Proposed change: .+ Basis: .+ What it could show: .+\.$/);
+  const all = composed.blocks.map((block) => block.text).join("\n");
+  // No manufactured corroboration, consent, review, release or
+  // internal-only boilerplate in the working assessment.
+  assert.doesNotMatch(all, /[Cc]orroborate|recorded permission|before any funder or public use|Get Kinder|provisional internal draft|review and release|cleared for funder/);
+  assert.doesNotMatch(all, /fewer than three|have been invented/);
+  assert.match(sections[2].blocks.at(-1).body, /^No participant's own account is among the selected evidence/);
   assert.deepEqual(sections[2].blocks.at(-1).citations, cite(CLAIMS[5]));
+  assert.match(sections[5].blocks.at(-1).body, /Reuse this assessment for internal planning, a board update, a funder report or an annual-report section/);
   assert.doesNotMatch(sections[5].blocks.map((block) => block.body).join("\n"), /(?:is|been) approved for internal use/i,
     "eligibility of cited claims does not approve the generated assessment");
   // The same disclosure composition and validators as any internal Evidence Summary.
@@ -207,7 +231,9 @@ test("zero, one or two grounded improvements retain six sections without padding
     assert.equal(sections.length, 6);
     assert.equal(sections[4].title, "Recommended Improvements");
     assert.equal(sections[4].blocks.filter((block) => block.body.startsWith("Proposed change:")).length, codes.length);
-    assert.match(sections[4].blocks.map((b) => b.body).join(" "), /[Nn]o (?:further )?recommendations have been invented/);
+    // No filler proposal, and no sentence apologising for the count.
+    if (codes.length === 0) assert.match(sections[4].blocks[0].body, /^The selected evidence does not establish a specific change to propose\./);
+    assert.doesNotMatch(sections[4].blocks.map((b) => b.body).join(" "), /fewer than three|have been invented/);
     assert.ok(composed.blocks.every((block) => block.citations.length > 0));
     const markdown = serializeFreeImpactAssessmentToMarkdown({ title: "Free Impact Assessment", references: [], limitations: [],
       sections: sections.map((section, index) => ({ ...section, number: index + 1, blocks: section.blocks.map((block) => ({ prose: block.body, citationRefs: [] })) })),

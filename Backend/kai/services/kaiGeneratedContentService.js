@@ -25,12 +25,20 @@
   const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
 
   const GENERATED_CONTENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
-  // Owner decision 2026-10-18: an active organization administrator of this
-  // exact organization (client_admin, stored or binding-derived) may create
-  // INTERNAL evidence-summary and impact-narrative drafts only. Funder
-  // evidence summaries and the other seven generators keep
-  // GENERATED_CONTENT_ALLOWED_ROLES. Organization membership only.
+  // Owner decision 2026-10-18, widened by owner direction 2026-11-20: an
+  // active organization administrator of this exact organization
+  // (client_admin, stored or binding-derived) may create the organization's
+  // own working reports - evidence summaries for any audience, impact
+  // narratives, board updates, annual-report sections, funder outcome tables,
+  // cases for support and grant-response paragraphs - and adapt a saved Free
+  // Impact Assessment into one. Writing a report for an intended funder or
+  // public audience publishes nothing (Operating Model section 7.1); the
+  // external release keeps its own GK-held authority. The readiness
+  // assessment and the data-gap memo (organization-wide gap reads) keep
+  // GENERATED_CONTENT_ALLOWED_ROLES. Organization membership only; no GK
+  // role, cross-tenant access, source override or release authority.
   const CLIENT_ADMIN_DRAFT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
+  const ADAPT_FREE_IMPACT_ASSESSMENT_OPERATION = "adapt_free_impact_assessment";
   const GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_reviewer"]);
   const COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
   const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
@@ -288,11 +296,7 @@
       input.actorContext,
       CREATE_EVIDENCE_SUMMARY_OPERATION,
       input.organizationId,
-      {
-        allowedRoles: input.requestedAudience === "internal"
-          ? CLIENT_ADMIN_DRAFT_ALLOWED_ROLES
-          : GENERATED_CONTENT_ALLOWED_ROLES,
-      },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -386,6 +390,81 @@
     const repository =
       dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
     const result = await repository.createFreeImpactAssessmentDraft(input, {
+      draftGenerator: dependencies.draftGenerator,
+      metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
+    return { ok: true, data: result.data, error: null, ...(result.warnings ? { warnings: result.warnings } : {}) };
+  }
+
+  /**
+   * "Use this assessment" (owner direction 2026-11-20): a working report for
+   * one reporting purpose (internal_planning, board_update, funder_report,
+   * annual_report) adapted from a saved Free Impact Assessment of this
+   * organization and Project. The repository reads the persisted assessment
+   * in its own transaction, re-applies drafting admission to every finding it
+   * cites, sends the reusable saved content to the existing generator for the
+   * purpose, validates, and saves the report under its own identity with its
+   * relationship to the assessment. Same gates as the other working reports:
+   * feature flags, a mapped human, an organization role in
+   * CLIENT_ADMIN_DRAFT_ALLOWED_ROLES, and the Project in this organization.
+   */
+  const ADAPTATION_SERVICE_INPUT_KEYS = new Set([
+    "organizationId", "engagementId", "sourceAssessmentDraftId", "purpose", "selectedClaimIds", "guidance", "idempotencyKey", "actorContext", "now",
+  ]);
+
+  export async function createAssessmentAdaptationDraft(input, dependencies = {}) {
+    const env = dependencies.env || process.env;
+    if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+    if (!isKaiGenerationEnabled(env) || !areKaiSprint2GenerationFeaturesEnabled(env)) {
+      return buildKaiError("feature_disabled");
+    }
+    if (!hasExactKeys(input, ADAPTATION_SERVICE_INPUT_KEYS)
+      || !UUID_PATTERN.test(input.organizationId) || !UUID_PATTERN.test(input.engagementId) || !UUID_PATTERN.test(input.sourceAssessmentDraftId)
+      || typeof input.purpose !== "string" || !isCanonicalUtcTimestamp(input.now)) {
+      return buildKaiError("validation_blocker");
+    }
+    if (!isMappedHumanActor(input.actorContext)) {
+      return buildKaiError("authorization_denied");
+    }
+    const auth = validateActorCanPerformOperation(
+      input.actorContext,
+      ADAPT_FREE_IMPACT_ASSESSMENT_OPERATION,
+      input.organizationId,
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
+    );
+    if (!auth.ok) {
+      return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+    }
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({ organizationId: input.organizationId, engagementId: input.engagementId });
+    const tenant = validateTenantBoundaryConsistency({
+      expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
+    });
+    if (tenant.severity === "blocker") {
+      return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+    const repository =
+      dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+    // The saved assessment's cited claims get the same P2-04 reconciliation
+    // (in its own authorized transaction) as any internal draft, before the
+    // adapting transaction re-reads the assessment and drafts from it.
+    if (typeof repository.readWorkingReportLineage === "function") {
+      const saved = await repository.readWorkingReportLineage({ organizationId: input.organizationId, generatedContentDraftId: input.sourceAssessmentDraftId });
+      if (saved?.ok && saved.data.engagementId === input.engagementId && saved.data.isAssessment === true) {
+        const claimIds = [...new Set(saved.data.blocks.flatMap((block) => block.citations.map((citation) => citation.claimId)))].sort();
+        const reconciliation = await reconcileInternalClaimGapsForGeneration({ ...input, claimIds }, dependencies);
+        if (reconciliation) return reconciliation;
+      }
+    }
+    const result = await repository.createAssessmentAdaptationDraft(input, {
       draftGenerator: dependencies.draftGenerator,
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
@@ -540,7 +619,7 @@
       input.actorContext,
       CREATE_CASE_FOR_SUPPORT_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -593,7 +672,7 @@
       input.actorContext,
       CREATE_BOARD_UPDATE_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -646,7 +725,7 @@
       input.actorContext,
       CREATE_ANNUAL_REPORT_SECTION_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -699,7 +778,7 @@
       input.actorContext,
       CREATE_FUNDER_OUTCOME_TABLE_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -752,7 +831,7 @@
       input.actorContext,
       CREATE_GRANT_RESPONSE_PARAGRAPH_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -1167,6 +1246,7 @@
   export const __generatedContentServiceContract = Object.freeze({
     GENERATED_CONTENT_ALLOWED_ROLES,
     CLIENT_ADMIN_DRAFT_ALLOWED_ROLES,
+    ADAPT_FREE_IMPACT_ASSESSMENT_OPERATION,
     GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     CREATE_EVIDENCE_SUMMARY_OPERATION,

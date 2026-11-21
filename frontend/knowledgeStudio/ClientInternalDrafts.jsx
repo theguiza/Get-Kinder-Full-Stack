@@ -26,18 +26,19 @@ import {
   internalDraftFactualReviewNextActions,
   isStructuralOnlyDraft,
   mergeInternalDraftPages,
+  workingReportDownloadName,
+  workingReportLabel,
 } from "./clientEvidenceWorkflowLogic.js";
+import { ReportLineage, ReviseReport, UseThisAssessment } from "./WorkingReportActions.jsx";
 
 const READY_FOR_INTERNAL_USE = "Ready for internal use";
+const READY_TO_USE = "Ready to use";
+const readyLabel = (item) => (item.audience === "internal" ? READY_FOR_INTERNAL_USE : READY_TO_USE);
 // Release states that named the organization's own factual review or release
 // decision as the next step; neither is required for internal use any more
 // (owner decision 2026-10-25), so they are not shown.
 const ORGANIZATION_RELEASE_STEPS = new Set(["awaiting_organization_review", "awaiting_organization_release"]);
 
-const DRAFT_LABELS = Object.freeze({
-  evidence_summary: "Internal evidence summary",
-  impact_narrative: "Internal impact narrative",
-});
 // What a cited claim restates; its stored review status is not shown as a
 // pending step (the draft's own internal-report state says whether it is usable).
 const CITED_CLAIM_KIND_LABELS = Object.freeze({ measurement: "measured finding", structural: "structural fact" });
@@ -74,8 +75,13 @@ const CITED_CLAIM_KIND_LABELS = Object.freeze({ measurement: "measured finding",
  */
 export default function ClientInternalDrafts({
   organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false, canReadInternalReports = false,
+  canAdaptAssessments = false, canReviseReports = false,
 }) {
   const [list, setList] = useState({ status: "idle", items: [], error: "", nextCursor: null, key: "" });
+  // A report created or revised here reloads the list (newest first) and
+  // opens the saved report by its own id.
+  const [localRefresh, setLocalRefresh] = useState(0);
+  const [revising, setRevising] = useState(false);
   const [detail, setDetail] = useState({ status: "idle", draft: null, error: "" });
   const [report, setReport] = useState({ status: "idle", draftId: "", markdown: "", error: "" });
   const keyRef = useRef("");
@@ -125,6 +131,7 @@ export default function ClientInternalDrafts({
   };
 
   const openDraft = async (generatedContentDraftId) => {
+    setRevising(false);
     detailSeqRef.current += 1;
     const seq = detailSeqRef.current;
     const requestContext = contextRef.current;
@@ -148,14 +155,14 @@ export default function ClientInternalDrafts({
 
   useEffect(() => {
     if (!organizationId || !engagementId) return undefined;
-    const key = `${organizationId}:${engagementId}:${refreshToken}`;
+    const key = `${organizationId}:${engagementId}:${refreshToken}:${localRefresh}`;
     keyRef.current = key;
     setList((current) => ({ ...current, status: "loading", error: "" }));
     readPage(key, null);
     return () => { keyRef.current = ""; };
     // readPage is recreated each render; the ids and refresh are the triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId, engagementId, refreshToken]);
+  }, [organizationId, engagementId, refreshToken, localRefresh]);
 
   const loadOlder = () => {
     if (list.status !== "success" || !list.nextCursor || list.key !== keyRef.current) return;
@@ -211,14 +218,17 @@ export default function ClientInternalDrafts({
           {list.items.map((item) => (
             <li key={item.generatedContentDraftId} className="list-group-item small d-flex flex-wrap align-items-center gap-2"
               data-client-internal-draft={item.generatedContentDraftId}>
-              <span className="fw-semibold">{DRAFT_LABELS[item.contentType]}</span>
+              <span className="fw-semibold" data-client-internal-draft-label={item.report?.isAssessment ? "assessment" : item.report?.purpose || item.contentType}>
+                {workingReportLabel(item)}
+              </span>
               <span className="badge text-bg-light" data-client-internal-draft-review-state={item.reviewState}
                 data-client-internal-draft-report-available={item.internalReportAvailable ? "true" : "false"}>
-                {item.internalReportAvailable ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[item.reviewState]}
+                {item.historical ? "Saved version" : item.internalReportAvailable ? readyLabel(item) : INTERNAL_DRAFT_REVIEW_STATE_LABELS[item.reviewState]}
               </span>
               <span className="text-muted">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""} · {item.blockCount} block(s)</span>
-              <button type="button" className="btn btn-sm btn-outline-primary ms-auto" onClick={() => openDraft(item.generatedContentDraftId)}>
-                Read draft
+              <button type="button" className="btn btn-sm btn-outline-primary ms-auto" data-client-internal-draft-open={item.generatedContentDraftId}
+                onClick={() => openDraft(item.generatedContentDraftId)}>
+                {item.report?.isAssessment ? "Open assessment" : "Open"}
               </button>
             </li>
           ))}
@@ -241,20 +251,61 @@ export default function ClientInternalDrafts({
       {draft ? (
         <div className="border rounded p-2" data-client-internal-draft-detail={draft.generatedContentDraftId}>
           <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-            <span className="fw-semibold">{DRAFT_LABELS[draft.contentType]}</span>
-            <span className={`badge ${draft.internalReport.available ? "text-bg-success" : "text-bg-warning"}`}
-              data-client-internal-draft-detail-review-state={draft.reviewState}>
-              {draft.internalReport.available ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState] || "Review state unavailable"}
+            <span className="fw-semibold" data-client-internal-draft-detail-label={draft.report?.isAssessment ? "assessment" : draft.report?.purpose || draft.contentType}>
+              {workingReportLabel(draft)}
             </span>
+            {draft.historical ? (
+              <span className="badge text-bg-secondary" data-client-internal-draft-detail-review-state="saved_version">Saved version</span>
+            ) : (
+              <span className={`badge ${draft.internalReport.available ? "text-bg-success" : "text-bg-warning"}`}
+                data-client-internal-draft-detail-review-state={draft.reviewState}>
+                {draft.internalReport.available ? readyLabel(draft) : INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState] || "Review state unavailable"}
+              </span>
+            )}
           </div>
+          <ReportLineage draft={draft} onOpen={openDraft} />
+          {draft.historical ? (
+            <div className="alert alert-secondary py-2 small mb-2" data-client-report-historical={draft.historical.reason}>
+              This is the report exactly as it was saved. A source it cites has changed since, so its figures are as they stood then.
+              {draft.report?.sourceAssessmentDraftId || draft.report?.isAssessment
+                ? " To use current figures, create a new assessment or report from your current findings."
+                : " To use current figures, create a new report from your current findings."}
+              {canReadInternalReports ? (
+                <div className="mt-1">
+                  <a className="btn btn-sm btn-outline-primary" data-client-download-saved-version={draft.generatedContentDraftId}
+                    href={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} download={workingReportDownloadName(draft)}>
+                    Download saved version
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {canAdaptAssessments && draft.report?.isAssessment && draft.internalReport.available && !draft.historical ? (
+            <UseThisAssessment organizationId={organizationId} engagementId={engagementId} draft={draft}
+              onCreated={(newDraftId) => { setLocalRefresh((value) => value + 1); openDraft(newDraftId); }} />
+          ) : null}
+          {canReviseReports && draft.revisable && !draft.historical ? (
+            revising ? (
+              <ReviseReport key={draft.generatedContentDraftId} organizationId={organizationId} engagementId={engagementId} draft={draft}
+                onCancel={() => setRevising(false)}
+                onSaved={(newDraftId) => { setLocalRefresh((value) => value + 1); openDraft(newDraftId); }} />
+            ) : (
+              <div className="mb-2">
+                <button type="button" className="btn btn-sm btn-outline-primary" data-client-revise-report={draft.generatedContentDraftId}
+                  onClick={() => setRevising(true)}>
+                  Revise wording
+                </button>
+              </div>
+            )
+          ) : null}
           <StorySourceInformation />
           {draft.internalReport.available ? <ReportInformation reasons={draft.internalReport.informationReasons} /> : null}
           {structuralOnly ? (
             <div className="alert alert-secondary py-2 small mb-2" data-client-internal-draft-metadata-only="">{STRUCTURAL_ONLY_DRAFT_MESSAGE}</div>
           ) : null}
-          <InternalReport draft={draft} canRead={canReadInternalReports} report={report} structuralOnly={structuralOnly}
+          {draft.historical ? null : <InternalReport draft={draft} canRead={canReadInternalReports} report={report} structuralOnly={structuralOnly}
             onOpen={() => openMarkdown(draft.generatedContentDraftId, clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId))}
-            downloadPath={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} />
+            downloadPath={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} />}
           {draft.release && (!draft.internalReport.available || draft.release.state === "released_for_internal_use") && !ORGANIZATION_RELEASE_STEPS.has(draft.release.state) ? (
             <div className="small mb-2" data-client-internal-draft-release-state={draft.release.state}>
               <span className="badge text-bg-light me-2">{INTERNAL_DRAFT_RELEASE_STATE_LABELS[draft.release.state]}</span>
@@ -342,7 +393,9 @@ function InternalReport({ draft, canRead, report, onOpen, downloadPath, structur
       <div className="small mb-2" data-client-internal-report="available"
         data-client-internal-report-provisional={provisional ? "true" : "false"}>
         <div className="mb-1">
-          This is your organization&rsquo;s report. Open or download it with its source references and limitations. No review or release approval is required.
+          {draft.report?.isAssessment
+            ? "This is your organization's assessment. Open or download it with its source references and limitations, or use it to create a report below. No review or release approval is required."
+            : "This is your organization's report. Open or download it with its source references and limitations. No review or release approval is required."}
         </div>
         {canRead ? (
           <div className="d-flex flex-wrap gap-2">
@@ -351,7 +404,7 @@ function InternalReport({ draft, canRead, report, onOpen, downloadPath, structur
               {report.status === "loading" ? "Opening..." : "Open report"}
             </button>
             <a className="btn btn-sm btn-outline-primary" data-client-download-internal-report={draft.generatedContentDraftId}
-              href={downloadPath} download={draft.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md"}>
+              href={downloadPath} download={workingReportDownloadName(draft)}>
               Download Markdown
             </a>
           </div>

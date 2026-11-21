@@ -154,13 +154,21 @@ test("VAL-GEN-008 still rejects omitted material disclosures in model text alone
   }
 });
 
-test("outside Evidence Summary the existing VAL-GEN-008 rules are unchanged", () => {
-  // Owner scope: the narrowed negation and named-coverage rules apply to
-  // Evidence Summary only; other generators keep the prior lexical rules.
-  assert.equal(validate([block(`${COMPLETE_112} Limitations apply.`, M112)], [M112], "impact_narrative").ok, true);
+test("narrative report types share the Evidence Summary VAL-GEN-008 rules; other content keeps the prior lexical rules", () => {
+  // Owner direction 2026-11-20 (one policy across the reporting journey): the
+  // negation-aware and named-coverage rules apply to every narrative working
+  // report type, so "not unique" is not read as asserting uniqueness; content
+  // outside those types keeps the prior lexical rules.
   const notUnique = `${COMPLETE_37} These limitations apply. The counted records are not unique.`;
-  assert.deepEqual(blockerClasses(validate([block(notUnique, M37)], [M37], "impact_narrative")), [["VAL-GEN-008", "limitation_contradicted"]]);
-  assert.deepEqual(blockerClasses(validate([block(notUnique, M37)], [M37], null)), [["VAL-GEN-008", "limitation_contradicted"]]);
+  const summaryNotUnique = blockerClasses(validate([block(notUnique, M37)], [M37], "evidence_summary"));
+  const summaryShort = validate([block(`${COMPLETE_112} Limitations apply.`, M112)], [M112], "evidence_summary").ok;
+  for (const contentType of ["impact_narrative", "board_update", "annual_report_section", "case_for_support", "grant_response_paragraph"]) {
+    assert.deepEqual(blockerClasses(validate([block(notUnique, M37)], [M37], contentType)), summaryNotUnique, contentType);
+    assert.equal(validate([block(`${COMPLETE_112} Limitations apply.`, M112)], [M112], contentType).ok, summaryShort, contentType);
+  }
+  for (const contentType of [null, "funder_outcome_table"]) {
+    assert.deepEqual(blockerClasses(validate([block(notUnique, M37)], [M37], contentType)), [["VAL-GEN-008", "limitation_contradicted"]], String(contentType));
+  }
 });
 
 test("composition: the ordinary 112-record paraphrase gains an authoritative disclosure and passes every validator", () => {
@@ -515,14 +523,18 @@ test("orchestration: audience authority is unchanged by composition", async () =
   assert.equal(state.drafts.length, 0);
 });
 
-test("orchestration: non-Evidence-Summary generation gets no composed disclosure and keeps the prior rules", async () => {
+test("orchestration: narrative report generation gets the same composed disclosure as an Evidence Summary", async () => {
+  // Owner direction 2026-11-20: an Impact Narrative (like every narrative
+  // report type) keeps the model's wording verbatim and gains the
+  // authoritative disclosure, instead of being refused for its wording.
   const paraphrase = await generateThroughRepository([M112], recordingGenerator(() => [{ text: PARAPHRASE_112, citations: cite(M112) }]), { contentType: "impact_narrative" });
-  assert.deepEqual([paraphrase.result.ok, paraphrase.result.error?.code], [false, "validation_blocker"]);
-  assert.ok(paraphrase.result.blockers.some((blocker) => blocker.validator_key === "VAL-GEN-008"));
+  assert.equal(paraphrase.result.ok, true, JSON.stringify(paraphrase.result));
+  assert.ok(paraphrase.state.blocks[0].text.startsWith(`${PARAPHRASE_112} `), "the model text is kept verbatim");
+  assert.match(paraphrase.state.blocks[0].text, /Measurement disclosure for the cited count/);
   const legacyCompliant = `${COMPLETE_112} Internal limitations: conflicting sources, requirement alignment and small-cell risk.`;
   const accepted = await generateThroughRepository([M112], recordingGenerator(() => [{ text: legacyCompliant, citations: cite(M112) }]), { contentType: "impact_narrative" });
   assert.equal(accepted.result.ok, true, JSON.stringify(accepted.result));
-  assert.equal(accepted.state.blocks[0].text, legacyCompliant, "persisted exactly as the model wrote it");
+  assert.ok(accepted.state.blocks[0].text.startsWith(legacyCompliant), "the model wording is kept verbatim");
 });
 
 // --- Owner prompt "KAI VAL-GEN-008 — Final local safety acceptance"

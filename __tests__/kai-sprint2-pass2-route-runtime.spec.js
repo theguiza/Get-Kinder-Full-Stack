@@ -278,6 +278,8 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/markdown",
     // Owner amendment 2026-10-23: the organization's own final release of an ordinary internal evidence summary.
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/release",
+    // Owner direction 2026-11-20: the organization's revision of a saved working report.
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/revisions",
     "/admin/organizations/:organizationId/engagements/:engagementId/client-released-reports/:exportManifestId/markdown",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment
@@ -372,6 +374,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Generated Drafts library index: read-only, additive, and every prior
     // entry preserved verbatim.
     "/admin/organizations/:organizationId/generated-content-drafts",
+    // Owner direction 2026-11-20: "Use this assessment" - a working report
+    // adapted from a saved Free Impact Assessment.
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/assessment-adaptations",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-candidates",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",

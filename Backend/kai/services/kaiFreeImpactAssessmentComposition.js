@@ -14,18 +14,24 @@ import { DOCUMENT_EVIDENCE_TYPE } from "../validators/kaiDocumentEvidenceValidat
  *
  * The model writes the first three sections (and optionally a gaps
  * narrative). The server composes, from the cited claims only:
- * - the missing participant-story statement, when no story evidence is cited;
+ * - a one-line note when no participant's own account is cited;
+ * - what the measured results suggest (strengths, results needing attention,
+ *   the clarification an unresolved outcome needs);
  * - the documented gaps, each grounded in the claims that carry it;
- * - up to three recommendations, each a proposed change (never an outcome)
- *   tied to one documented gap and citing the claims that ground it;
- * - the next steps, from the draft's governance state (internal only).
+ * - up to three recommendations, each a proposed action (never an outcome)
+ *   tied to one documented gap, with its basis and what it could show;
+ * - the next steps the organization can take now.
  *
- * Gap detection reads only structural signals: limitation codes on measured
- * claims, the document-statement evidence type, and, for a document
- * statement, whether its quoted words name the gap's subject. Nothing here
- * is specific to one organization. The composed text contains no digits and
- * none of the causal or verification words VAL-GEN-004/-008 refuse, so it
- * passes the same validators as model text.
+ * Gap detection reads only established signals: a calculation's own
+ * limitation codes (records excluded, duplicates counted once, a matched
+ * subset, a duration subtotal, an outcome direction not stated), a recorded
+ * potential conflict, and a document statement that itself reports the same
+ * weakness. A review that has not happened, a source-reported statement that
+ * is not independently corroborated, a story-permission flag or a validation
+ * dimension that does not apply is not a programme gap (owner direction
+ * 2026-11-20). Nothing here is specific to one organization. The composed
+ * text contains no digits and none of the causal or verification words
+ * VAL-GEN-004/-008 refuse, so it passes the same validators as model text.
  */
 
 export const FREE_IMPACT_ASSESSMENT_COMPOSITION = "free_impact_assessment";
@@ -35,7 +41,7 @@ export const ASSESSMENT_SECTIONS = Object.freeze([
   Object.freeze({ key: "evidence_findings", title: "What Your Evidence Tells Us" }),
   Object.freeze({ key: "impact_stories", title: "Impact Stories" }),
   Object.freeze({ key: "gaps_opportunities", title: "Gaps and Opportunities" }),
-  Object.freeze({ key: "recommended_improvements", title: "Three Recommended Improvements" }),
+  Object.freeze({ key: "recommended_improvements", title: "Recommended Improvements" }),
   Object.freeze({ key: "next_steps", title: "Your Next Steps" }),
 ]);
 
@@ -98,10 +104,6 @@ export function parseFreeImpactAssessment(blocks) {
   }
   if (sections.some((section) => section.blocks.length === 0)) return null;
   if (sections[SECTION_INDEX.get("recommended_improvements")].blocks.length > RECOMMENDATION_COUNT) return null;
-  const improvements = sections[SECTION_INDEX.get("recommended_improvements")];
-  if (improvements.blocks.filter((block) => block.body.startsWith("Proposed change:")).length < RECOMMENDATION_COUNT) {
-    improvements.title = "Recommended Improvements";
-  }
   return sections;
 }
 
@@ -114,18 +116,20 @@ export function isFreeImpactAssessmentBlocks(blocks) {
 
 const STORY_PATTERN = /\b(?:stor(?:y|ies)|quotes?|quotations?|testimon\w*|permission|consent)\b/i;
 
-// P2-06 limitation codes that mean only that a review or acceptance has not
-// happened yet (never that a review found the claim unsupported).
-const PROVISIONAL_REVIEW_CODES = Object.freeze([
-  "claim_not_approved_for_requested_audience",
-  "claim_review_unresolved",
-  "evidence_review_unresolved",
-  "support_strength_unassessed",
-  "coverage_dimension_unresolved",
-  "client_followup_unresolved",
-  "potential_conflict_review_unresolved",
-]);
-
+// Each entry is a weakness, missing essential information, conflict or
+// opportunity that a calculation or a recorded fact establishes:
+// - `codes` / `readingSignals`: the measured claims that carry it (their own
+//   limitation codes, or the plain reading's signal);
+// - `documentPattern`: a document statement naming the same subject, cited
+//   beside the measured basis (it never creates the gap on its own);
+// - `documentWeakness` with `documentGap`: a document statement that itself
+//   reports the weakness (subject and problem in its own words), which may
+//   ground the gap when no calculation carries it.
+// Each recommendation states the proposed action; `learning` states what
+// the organization could learn from it. A review that has not happened, an
+// attributed source statement, story permission and a check that does not
+// apply to the evidence are never gaps (owner direction 2026-11-20).
+const PROBLEM_WORDS = /\b(?:missing|not recorded|not always recorded|incomplete|blank|cannot|unable|inconsistent|not captured)\b/i;
 const GAP_CATALOGUE = Object.freeze([
   // Owner direction 2026-11-11: outcome results come first. An outcome whose
   // direction is not stated needs one clarification; a favourable outcome is
@@ -134,14 +138,16 @@ const GAP_CATALOGUE = Object.freeze([
     key: "outcome_direction_unresolved",
     codes: ["derived.direction_not_established"],
     gap: "For at least one outcome measure, the organization has not yet stated whether a higher value is better, so its change between baseline and follow-up is reported only as a numerical change.",
-    recommendation: "Record, on each outcome measure that does not yet state it, whether a higher value is better (a short confirmation on the measurement in Knowledge Studio), so the next assessment can read its change as progress or decline.",
+    recommendation: "Record, on each outcome measure that does not yet state it, whether a higher value is better (a short confirmation on the measurement in Knowledge Studio).",
+    learning: "The next assessment can then describe the change for participants in the organization's own terms instead of as a numerical change only.",
     nextStep: "confirm whether a higher value is better for each outcome measure that does not yet state it",
   }),
   Object.freeze({
     key: "favourable_outcome_to_build_on",
     readingSignals: ["favourable"],
     gap: "At least one outcome measure moved in the direction the organization states is better for more than half of the comparable participants, but it describes only participants with both a baseline and a follow-up value.",
-    recommendation: "Build on the outcome that is moving in the right direction: record the same baseline and follow-up rating for every new participant, at intake and at a fixed follow-up point, and review the results each quarter with programme staff so the organization can see whether the favourable pattern holds and where it does not.",
+    recommendation: "Build on the outcome that is moving in the right direction: record the same baseline and follow-up rating for every new participant, at intake and at a fixed follow-up point, and review the results each quarter with programme staff.",
+    learning: "The organization can see whether the favourable pattern holds for later participants and where it does not.",
     nextStep: "agree the fixed follow-up point and who will review the outcome ratings each quarter",
   }),
   Object.freeze({
@@ -152,71 +158,58 @@ const GAP_CATALOGUE = Object.freeze([
     // share for the unchanged group, which the finding states exactly.
     gap: "For at least one outcome measure, no more than half of the comparable participants moved in the direction the organization states is better; the others had the same value at follow-up or moved the other way.",
     recommendation: "Ask participants at the follow-up rating what would help them move further on that outcome, and review with programme staff which parts of the programme could do more for participants whose rating stayed the same or moved the other way.",
+    learning: "The answers show which parts of the programme participants value and where they need something different.",
     nextStep: "add a short follow-up question asking participants what would help them move further",
+  }),
+  Object.freeze({
+    key: "conflicting_information",
+    codes: ["conflict.potential_conflict_recorded", "coverage.conflicting_source_indicators.resolved_risk_flagged"],
+    gap: "Some sources may disagree about at least one cited finding; the possible conflict is recorded and has not yet been settled.",
+    recommendation: "Compare the disagreeing records side by side, decide which value the organization stands behind, and record that decision with the finding.",
+    learning: "The finding can then be stated once, without the disagreement.",
+    nextStep: "compare the records behind the finding with a possible conflict",
   }),
   Object.freeze({
     key: "recorded_duration_incomplete",
     codes: ["derived.known_recorded_minutes_subtotal"],
-    documentPattern: /\b(?:duration|minutes)\b/i,
+    documentPattern: /\bduration\b/i,
+    documentWeakness: [/\b(?:duration|session length|minutes delivered|delivered minutes)\b/i, PROBLEM_WORDS],
     gap: "Session duration is not recorded for each service event, so delivered service time is known only as a subtotal of the events that carry a valid duration.",
-    recommendation: "Make session duration a required entry for each completed service event, with a short monthly check for events saved without it, so delivered service time can be reported in full rather than as a subtotal.",
+    documentGap: "The organization's own documents report that session duration is not always recorded, which limits how delivered service time can be reported.",
+    recommendation: "Make session duration a required entry for each completed service event, with a short monthly check for events saved without it.",
+    learning: "Delivered service time can then be reported in full rather than as a subtotal.",
     nextStep: "agree who will add the duration check to the service-event record",
   }),
   Object.freeze({
     key: "follow_up_evidence_limited",
-    codes: ["derived.matched_subset_only", "derived.measured_population_only", "derived.self_reported", "derived.direction_not_established"],
-    documentPattern: /\b(?:outcomes?|follow-?ups?|check-ins?|sample|census|employment)\b/i,
-    gap: "Follow-up information describes only the people who were reached or who have comparable observations, and it is the organization's own or self-reported information, so it describes a subset rather than the whole group served.",
-    recommendation: "Set one follow-up point for each person served (for example, a fixed interval after their last session), use the same outcome choices each time, and record who could not be reached, so follow-up information describes a defined group rather than whoever happened to be contacted.",
+    codes: ["derived.matched_subset_only", "derived.measured_population_only"],
+    documentPattern: /\b(?:follow-?ups?|check-ins?|convenience sample|census)\b/i,
+    documentWeakness: [/\b(?:follow-?ups?|check-ins?|sample)\b/i, /\b(?:convenience sample|not a census|not everyone|only some|could not be reached|not reached)\b/i],
+    gap: "Follow-up information describes only the people who were reached or who have comparable observations, so it describes a subset rather than the whole group served.",
+    documentGap: "The organization's own documents report that follow-up information covers only some of the people served, so it describes a subset rather than the whole group.",
+    recommendation: "Set one follow-up point for each person served (for example, a fixed interval after their last session), use the same outcome choices each time, and record who could not be reached.",
+    learning: "Follow-up information then describes a defined group rather than whoever happened to be contacted.",
     nextStep: "choose the follow-up interval and the outcome choices to use from the next period",
   }),
   Object.freeze({
     key: "duplicate_records",
     codes: ["derived.duplicate_event_copies_counted_once", "derived.duplicate_rows_counted", "measurement.duplicate_records_included"],
-    codePrefixes: ["coverage.duplicates."],
     documentPattern: /\b(?:duplicates?|duplicated|repeated (?:entries|records))\b/i,
+    documentWeakness: [/\b(?:duplicates?|duplicated|repeated (?:entries|records))\b/i, /./],
     gap: "Some service records were entered more than once. The measurements state how repeats were treated, but the repeats remain in the source records.",
-    recommendation: "Add a duplicate check where service events are entered or exported, so each event is recorded once and the figures no longer depend on removing repeats afterwards.",
+    documentGap: "The organization's own documents report repeated entries in its records.",
+    recommendation: "Add a duplicate check where service events are entered or exported, so each event is recorded once.",
+    learning: "The figures no longer depend on removing repeats afterwards.",
     nextStep: "ask whoever exports the service records to add a duplicate check",
-  }),
-  Object.freeze({
-    key: "participant_story_missing",
-    story: true,
-    documentPattern: STORY_PATTERN,
-    gap: "No consented participant story or quotation is among the cited evidence, so the assessment cannot show a participant's own account.",
-    recommendation: "Invite a small number of participants to share a short account of their experience, and record their written permission with it before it is used.",
-    nextStep: "decide who will ask for consented participant accounts and how permission will be recorded",
   }),
   Object.freeze({
     key: "records_excluded",
     codes: ["derived.unmatched_identifiers_excluded", "derived.records_without_date_excluded", "derived.conflicting_event_identities_excluded",
       "derived.records_without_identifier_excluded", "derived.observations_excluded", "measurement.blank_records_excluded"],
     gap: "Some records could not be used (for example, records without a date, without a matching identifier, or without a comparable observation); they were excluded and counted.",
-    recommendation: "Review the excluded records each month and correct missing dates or identifiers at the source, so fewer records fall outside the measurements.",
+    recommendation: "Review the excluded records each month and correct missing dates or identifiers at the source.",
+    learning: "Fewer records fall outside the measurements, and the organization can see whether exclusions follow a pattern.",
     nextStep: "set a monthly review of excluded records",
-  }),
-  Object.freeze({
-    key: "external_use_alignment",
-    codePrefixes: ["coverage.requirement_alignment.", "coverage.conflicting_source_indicators."],
-    gap: "Alignment with funder requirements and conflicting-source checks are recorded as limitations for internal use only.",
-    recommendation: "Before any funder or public use, map each indicator to the funder's stated requirements and work through the alignment and conflicting-source limitations with Get Kinder.",
-    nextStep: "list the funders whose requirements these indicators should be mapped to",
-  }),
-  Object.freeze({
-    key: "source_reported_statements",
-    documents: true,
-    gap: "The document statements are source-reported: they are quoted exactly from the organization's documents and were not independently verified.",
-    recommendation: "Corroborate the most important source-reported statements with records the organization already keeps (for example, referral or attendance records) before relying on them beyond internal planning.",
-    nextStep: "pick the source-reported statements that matter most and the records that could corroborate them",
-  }),
-  // Owner direction 2026-11-06 (draft first): review state is information.
-  // A cited claim without a completed review is a provisional finding; it is
-  // stated as such and never turned into a request or recommendation.
-  Object.freeze({
-    key: "provisional_findings",
-    informational: true,
-    reviewCodes: PROVISIONAL_REVIEW_CODES,
-    gap: "Some cited findings have not yet had a review for final use. They are presented as provisional interpretations for internal planning and drafting, and the applicable review comes before any funder or public use.",
   }),
 ]);
 
@@ -234,43 +227,42 @@ function byClaimId(a, b) {
 
 function carriesGap(claim, entry) {
   const codes = claim.limitationCodes || [];
-  return (entry.codes || []).some((code) => codes.includes(code))
-    || (entry.codePrefixes || []).some((prefix) => codes.some((code) => code.startsWith(prefix)));
+  return (entry.codes || []).some((code) => codes.includes(code));
 }
 
 function citationOf(claim) {
   return { claimId: claim.claimId, evidenceItemId: claim.evidenceItemId };
 }
 
+function reportsWeakness(claim, entry) {
+  const text = claim.claimStatement || "";
+  return Array.isArray(entry.documentWeakness) && entry.documentWeakness.every((pattern) => pattern.test(text));
+}
+
 /**
- * Every documented gap among the cited claims, in catalogue order. A gap's
- * grounding is the document statements whose quoted words name its subject
- * and the measured claims that carry its limitation codes. Only grounded gaps
- * are returned, so every composed block can cite its basis.
+ * Every documented gap among the cited claims, in catalogue order. A gap is
+ * grounded in the claims that carry it (their own codes or reading signal)
+ * and, beside them, the document statements naming the same subject; a
+ * document statement alone grounds a gap only when it itself reports the
+ * weakness. Only grounded gaps are returned, so every composed block can cite
+ * its basis. `gap.text` is the wording that fits the grounding.
  */
 export function detectAssessmentGaps(claims) {
   const list = [...(claims || [])].sort(byClaimId);
   const documents = list.filter(isDocumentClaim);
-  const measured = list.filter(isMeasuredClaim);
+  const measured = list.filter((claim) => !isDocumentClaim(claim));
   const gaps = [];
   for (const entry of GAP_CATALOGUE) {
-    if (entry.reviewCodes) {
-      const pending = list.filter((claim) => (claim.limitationCodes || []).some((code) => entry.reviewCodes.includes(code)));
-      if (pending.length === 0) continue;
-      gaps.push({ key: entry.key, entry, documentGrounding: pending.filter(isDocumentClaim), measuredGrounding: pending.filter((claim) => !isDocumentClaim(claim)) });
-      continue;
-    }
-    const documentGrounding = entry.documents
-      ? documents
-      : entry.documentPattern
-        ? documents.filter((claim) => entry.documentPattern.test(claim.claimStatement || ""))
-        : [];
     const measuredGrounding = entry.readingSignals
       ? measured.filter((claim) => entry.readingSignals.includes(claim.impactReading?.signal))
-      : entry.codes || entry.codePrefixes ? measured.filter((claim) => carriesGap(claim, entry)) : [];
-    if (entry.story && documentGrounding.length === 0) continue;
-    if (documentGrounding.length === 0 && measuredGrounding.length === 0) continue;
-    gaps.push({ key: entry.key, entry, documentGrounding, measuredGrounding });
+      : entry.codes ? measured.filter((claim) => carriesGap(claim, entry)) : [];
+    if (measuredGrounding.length > 0) {
+      const documentGrounding = entry.documentPattern ? documents.filter((claim) => entry.documentPattern.test(claim.claimStatement || "")) : [];
+      gaps.push({ key: entry.key, entry, text: entry.gap, documentGrounding, measuredGrounding });
+      continue;
+    }
+    const reported = entry.documentGap ? documents.filter((claim) => reportsWeakness(claim, entry)) : [];
+    if (reported.length > 0) gaps.push({ key: entry.key, entry, text: entry.documentGap, documentGrounding: reported, measuredGrounding: [] });
   }
   return assignMeasuredAnchors(gaps);
 }
@@ -315,7 +307,7 @@ export function buildAssessmentModelContext(claims) {
     participantStoryEvidence: storyEvidenceCited(claims) ? "cited" : "none_cited",
     documentedGaps: detectAssessmentGaps(claims).map((gap) => ({
       key: gap.key,
-      gap: gap.entry.gap,
+      gap: gap.text,
       claimIds: [...gap.documentGrounding, ...gap.measuredGrounding].map((claim) => claim.claimId),
     })),
   };
@@ -456,14 +448,17 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
   bySection.get("evidence_findings").push(...uncitedFindings(bySection, claims));
 
   const gaps = detectAssessmentGaps(claims);
-  const story = gaps.find((gap) => gap.key === "participant_story_missing");
+  // A one-line fact, not a task: the stories section draws on the
+  // organization's records and documents, and no participant's own words
+  // are presented. A document statement about stories or permission is cited
+  // when one is selected.
   if (!storyEvidenceCited(claims)) {
+    const storyStatements = [...(claims || [])].filter((claim) => isDocumentClaim(claim) && STORY_PATTERN.test(claim.claimStatement || "")).sort(byClaimId);
     const fallback = bySection.get("impact_stories")[0].citations;
     bySection.get("impact_stories").push({
       text: withAssessmentSection("impact_stories",
-        "Participant story evidence: none is available. No consented participant story or quotation is among the cited evidence, so this section gives only a source-backed account of the programme. "
-        + "A participant story would need the participant's recorded permission before it could be used."),
-      citations: story ? gapCitations(story) : fallback.map((citation) => ({ ...citation })),
+        "No participant's own account is among the selected evidence, so this section draws on the organization's records and documents only."),
+      citations: storyStatements.length > 0 ? storyStatements.map(citationOf) : fallback.map((citation) => ({ ...citation })),
     });
   }
 
@@ -481,45 +476,43 @@ export function composeFreeImpactAssessmentBlocks({ modelBlocks, claims }) {
       }
     }
     bySection.get("gaps_opportunities").push({
-      text: withAssessmentSection("gaps_opportunities", `Documented gaps in the cited evidence:\n${sentenceList(documented.map((gap) => gap.entry.gap))}`),
+      text: withAssessmentSection("gaps_opportunities", `Documented gaps in the cited evidence:\n${sentenceList(documented.map((gap) => gap.text))}`),
       citations,
     });
   }
 
-  const chosen = gaps.filter((gap) => !gap.entry.informational && (!gap.entry.story || gap.documentGrounding.length > 0)).slice(0, RECOMMENDATION_COUNT);
+  // Up to three proposals, one per established gap in catalogue order; no
+  // proposal is added to reach a count.
+  const chosen = gaps.slice(0, RECOMMENDATION_COUNT);
   const fallbackCitations = modelBlocks[0].citations.map((citation) => ({ ...citation }));
   if (documented.length === 0) {
     bySection.get("gaps_opportunities").push({
-      text: withAssessmentSection("gaps_opportunities", "No specific improvement gap is established by the cited evidence. This does not establish that no gaps exist; the assessment is limited to the selected evidence."),
+      text: withAssessmentSection("gaps_opportunities", "The selected evidence does not establish a specific weakness or gap. That does not mean none exists; the assessment covers only the selected evidence."),
       citations: fallbackCitations,
     });
   }
   if (chosen.length === 0) {
     bySection.get("recommended_improvements").push({
-      text: withAssessmentSection("recommended_improvements", "The cited evidence does not support a specific improvement proposal. No recommendations have been invented to fill this section. Identify what further evidence would show where a change is needed."),
+      text: withAssessmentSection("recommended_improvements", "The selected evidence does not establish a specific change to propose. Choose which further information would show where a change is needed."),
       citations: fallbackCitations,
     });
   }
   for (const gap of chosen) {
     bySection.get("recommended_improvements").push({
       text: withAssessmentSection("recommended_improvements",
-        `Proposed change: ${gap.entry.recommendation} Basis: ${gap.entry.gap} This is a proposal for the organization to consider; it is not a measured or confirmed result.`),
+        `Proposed change: ${gap.entry.recommendation} Basis: ${gap.text} What it could show: ${gap.entry.learning}`),
       citations: gapCitations(gap),
     });
   }
 
-  if (chosen.length > 0 && chosen.length < RECOMMENDATION_COUNT) {
-    const first = bySection.get("recommended_improvements")[0];
-    first.text += " The cited evidence supports fewer than three specific proposals; no further recommendations have been invented.";
-  }
-
+  // Actions the organization can take now: the proposals' first steps, and
+  // reuse of this assessment for its own reporting. No review, release or
+  // approval step is listed; none is needed to use the assessment.
   const nextSteps = [
-    "Use this provisional internal draft for planning and drafting now. Complete the applicable review and release before final use; none of its findings is cleared for funder or public use.",
     chosen.length > 0
       ? `Decide which proposed change to try first, then ${chosen.map((gap) => gap.entry.nextStep).join("; ")}.`
-      : "Identify what further evidence would be needed before proposing changes.",
-    "Keep the limitations named in this assessment with any figure you reuse, and address them before external use.",
-    ...(storyEvidenceCited(claims) ? [] : ["If a future assessment should include a participant story, collect it with the participant's recorded permission first."]),
+      : "Choose which further information would help most, and add it before the next assessment.",
+    "Reuse this assessment for internal planning, a board update, a funder report or an annual-report section; its figures, sources and limitations carry over.",
   ];
   const nextCitations = [];
   const nextSeen = new Set();
