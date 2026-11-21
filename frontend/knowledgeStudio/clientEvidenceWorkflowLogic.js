@@ -940,44 +940,9 @@ export const ADAPTATION_PURPOSE_OPTIONS = Object.freeze([
   Object.freeze({ purpose: "funder_report", label: "Funder report", description: "A report for a funder you report to (KAI does not send it)." }),
   Object.freeze({ purpose: "annual_report", label: "Annual-report content", description: "A section for your annual report (KAI does not publish it)." }),
 ]);
-const PURPOSE_REPORT_LABELS = Object.freeze({
-  internal_planning: "Internal planning report",
-  board_update: "Board report",
-  funder_report: "Funder report",
-  annual_report: "Annual-report content",
-});
-const WORKING_REPORT_TYPE_LABELS = Object.freeze({
-  "evidence_summary:internal": "Internal evidence summary",
-  "evidence_summary:funder": "Funder evidence summary",
-  "evidence_summary:public": "Public evidence summary",
-  "impact_narrative:internal": "Internal impact narrative",
-  "board_update:internal": "Board update",
-  "annual_report_section:internal": "Annual-report section",
-  "annual_report_section:funder": "Annual-report section",
-  "annual_report_section:public": "Annual-report section",
-  "funder_outcome_table:funder": "Funder outcome table",
-  "case_for_support:internal": "Case for support",
-  "case_for_support:funder": "Case for support",
-  "grant_response_paragraph:internal": "Grant response",
-  "grant_response_paragraph:funder": "Grant response",
-  "grant_response_paragraph:public": "Grant response",
-});
-
-// What a saved draft is, in the organization's words: a Free Impact
-// Assessment, a report for its purpose (with its version), or its type.
-export function workingReportLabel(item) {
-  const context = item?.report || null;
-  if (context?.isAssessment) return "Free Impact Assessment";
-  const base = (context?.purpose && PURPOSE_REPORT_LABELS[context.purpose])
-    || WORKING_REPORT_TYPE_LABELS[`${item?.contentType}:${item?.audience}`]
-    || "Saved report";
-  return context && context.version > 1 ? `${base} · version ${context.version}` : base;
-}
-
-export function workingReportDownloadName(item) {
-  const label = workingReportLabel(item).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  return `kai-${label || "report"}.md`;
-}
+// The organization's names for its saved working reports (and the file a
+// download is saved as) are shared with the Markdown route.
+export { workingReportDownloadName, workingReportLabel } from "../../shared/kaiWorkingReportNames.js";
 
 export const ADAPTATION_WITHHELD_MESSAGES = Object.freeze({
   cites_finding_not_currently_usable: "it cites a finding that is no longer usable (for example a changed source or a measurement that no longer matches)",

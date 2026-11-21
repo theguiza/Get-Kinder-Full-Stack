@@ -15,6 +15,8 @@ import { serializeExportManifestRenderModelToMarkdown, __exportManifestMarkdownS
 import { BOARD_REPORTING_PACKET_AUDIENCE } from "./kaiBoardReportingPacketService.js";
 import { serializeInternalReportToMarkdown, serializeSavedReportSnapshotToMarkdown, __internalReportMarkdownSerializerTestables } from "./kaiInternalReportMarkdownSerializer.js";
 import { ADAPTATION_PURPOSE_TARGETS, ORGANIZATION_REVISION_RELATIONSHIP, splitRevisableBlockText } from "./kaiAssessmentAdaptation.js";
+import { parseFreeImpactAssessment } from "./kaiFreeImpactAssessmentComposition.js";
+import { workingReportDownloadName } from "../../../shared/kaiWorkingReportNames.js";
 
 /**
  * Client-safe Generated Drafts, Grant Response Packet preview, and Board
@@ -672,6 +674,13 @@ function toWorkingReportContext(data) {
   };
 }
 
+// The saved report's Markdown file name: the name the organization's reports
+// view gives it and offers on its download link (purpose and version, or type
+// and audience), so the file a person saves is named as the report they opened.
+function workingReportFilename({ contentType, audience, lineage, isAssessment }) {
+  return workingReportDownloadName({ contentType, audience, report: toWorkingReportContext({ lineage, isAssessment }) });
+}
+
 async function workingReportContext({ organizationId, generatedContentDraftId }, repository) {
   if (typeof repository?.readWorkingReportLineage !== "function") return null;
   const result = await repository.readWorkingReportLineage({ organizationId, generatedContentDraftId });
@@ -822,6 +831,8 @@ export async function getClientInternalReportMarkdown(input, dependencies = {}) 
           data: {
             markdownContractVersion: __internalReportMarkdownSerializerTestables.MARKDOWN_CONTRACT_VERSION,
             contentType: saved.data.contentType,
+            filename: workingReportFilename({ contentType: saved.data.contentType, audience: saved.data.requestedAudience,
+              lineage: saved.data.lineage, isAssessment: saved.data.isAssessment === true }),
             markdown: serializeSavedReportSnapshotToMarkdown(saved.data),
           },
           error: null,
@@ -847,6 +858,8 @@ export async function getClientInternalReportMarkdown(input, dependencies = {}) 
     data: {
       markdownContractVersion: __internalReportMarkdownSerializerTestables.MARKDOWN_CONTRACT_VERSION,
       contentType: model.report.contentType,
+      filename: workingReportFilename({ contentType: model.report.contentType, audience: model.report.audience,
+        lineage: model.report.lineage ?? null, isAssessment: Boolean(parseFreeImpactAssessment(model.blocks)) }),
       markdown: serializeInternalReportToMarkdown(model),
     },
     error: null,

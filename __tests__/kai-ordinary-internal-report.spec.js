@@ -110,6 +110,32 @@ const read = (deps, overrides = {}) => getClientInternalReportMarkdown({
   organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: DRAFT, actorContext: actor("client_admin"), ...overrides,
 }, deps);
 
+test("internal report: the attachment is named as the organization's reports view names the saved report (type and audience, or purpose and version)", async () => {
+  const { workingReportDownloadName } = await import("../shared/kaiWorkingReportNames.js");
+  const { workingReportDownloadName: viewName } = await import("../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js");
+  assert.equal(viewName, workingReportDownloadName, "the reports view and the route share one naming rule");
+  const named = async (change) => {
+    const report = model();
+    change(report);
+    const result = await read(dependencies({ report }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.data.filename;
+  };
+  assert.equal(await named(() => {}), "kai-internal-evidence-summary.md");
+  assert.equal(await named((report) => { report.report.contentType = "impact_narrative"; }), "kai-internal-impact-narrative.md");
+  assert.equal(await named((report) => { report.report.audience = "funder"; }), "kai-funder-evidence-summary.md");
+  const adapted = { relationship: "assessment_adaptation", reporting_purpose: "funder_report", version: 1 };
+  assert.equal(await named((report) => { report.report.audience = "funder"; report.report.lineage = adapted; }), "kai-funder-report.md");
+  assert.equal(await named((report) => { report.report.audience = "funder"; report.report.lineage = { ...adapted, relationship: "organization_revision", version: 2 }; }),
+    "kai-funder-report-version-2.md");
+  assert.equal(await named((report) => { report.report.contentType = "board_update"; report.report.lineage = { ...adapted, reporting_purpose: "board_update" }; }), "kai-board-report.md");
+  assert.equal(await named((report) => { report.report.contentType = "annual_report_section"; report.report.audience = "public"; report.report.lineage = { ...adapted, reporting_purpose: "annual_report" }; }),
+    "kai-annual-report-content.md");
+  assert.equal(await named((report) => { report.report.lineage = { ...adapted, reporting_purpose: "internal_planning" }; }), "kai-internal-planning-report.md");
+  // An unknown purpose is not trusted as a label: the type and audience name it.
+  assert.equal(await named((report) => { report.report.lineage = { ...adapted, reporting_purpose: "press_release" }; }), "kai-internal-evidence-summary.md");
+});
+
 test("internal report: an available report is returned as complete Markdown with no approval, release, or export flag", async () => {
   const calls = [];
   const result = await read(dependencies({ calls }));

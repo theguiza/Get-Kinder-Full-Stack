@@ -551,7 +551,11 @@ function sendInternalReportMarkdownAttachment(res, result) {
   if (!result?.ok) return sendServiceResult(res, result);
   const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
   if (markdown == null) return sendKaiError(res, "system_error");
-  const filename = result.data.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md";
+  // The service names the saved report as the organization's reports view
+  // does (its purpose and version, or its type and audience).
+  const filename = typeof result.data.filename === "string" && /^kai-[a-z0-9-]{1,120}\.md$/.test(result.data.filename)
+    ? result.data.filename
+    : (result.data.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md");
 
   res.status(200);
   res.setHeader("X-KAI-Information", STORY_SOURCE_NOTE);

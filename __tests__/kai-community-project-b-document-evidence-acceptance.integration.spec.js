@@ -341,7 +341,7 @@ async function runPackage4Acceptance() {
   const {
     BASE_PATH, claimProposalPath, claimTraceabilityPath, clientInternalDraftPath, clientInternalDraftsPath, clientInternalReportMarkdownPath,
     createEvidenceSummaryPath, createFreeImpactAssessmentPath, errorText, evidenceExtractionPath, sourceCandidateDecisionPath,
-    assessmentAdaptationPath, clientWorkingReportRevisionPath,
+    assessmentAdaptationPath, clientWorkingReportRevisionPath, organizationAccessCapabilitiesPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { claimUseDiagnosis, claimDraftAdmission, provisionalDraftRefusalMessage } = await import("../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js");
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
@@ -469,6 +469,15 @@ async function runPackage4Acceptance() {
     <link rel="stylesheet" href="/css/style.css" /><link rel="stylesheet" href="/css/gk-design-tokens.css" /></head>
     <body><div id="impact-evidence-library-root"></div><script src="/js/bundles/entry.js"></script>
     <script>window.renderImpactEvidenceLibrary();</script></body></html>`));
+  // The real application page for scenario J: views/impact-library.ejs (site
+  // header, Bootstrap 5.3.5 from its CDN with its SRI hash, fonts,
+  // /css/style.css, /css/gk-design-tokens.css, inline styles) with the same
+  // built bundle, rendered as the four-view direct acceptance renders it.
+  const ejs = (await import("ejs")).default;
+  const viewsDir = new URL("../views/", import.meta.url).pathname;
+  app.get("/impact-library-app", async (_req, res) => {
+    res.send(await ejs.renderFile(join(viewsDir, "impact-library.ejs"), { csrfToken: "", assetTag: "", user: null, currentPage: "impact-library" }));
+  });
   app.use(express.static(publicDir));
   const server = await new Promise((resolve) => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -1603,8 +1612,10 @@ async function runPackage4Acceptance() {
     let assessmentBefore = null;
     let approvalsBefore = null;
     let pageJ = null;
+    // Scenario J runs on the real application page (Bootstrap and site styles).
+    const J_PAGE = "/impact-library-app";
     const openStudioJ = async (view) => {
-      await pageJ.goto("/impact-library");
+      await pageJ.goto(J_PAGE);
       await pageJ.clickNav("Knowledge Studio");
       await pageJ.waitFor(() => pageJ.visible("#gk-shell-project-select"), "the Project selector");
       await pageJ.idle();
@@ -1651,13 +1662,191 @@ async function runPackage4Acceptance() {
       return { found: true, panelScroll: el.scrollWidth, panelClient: el.clientWidth, innerWidth: window.innerWidth,
         outside: controls.filter((c) => { const r = c.getBoundingClientRect(); return r.right > window.innerWidth + 1 || r.left < -1; }).length };
     })()`);
-    const screenshot = async (name, selector) => {
+    // The real page has a fixed site header and (on phones) a fixed bottom tab
+    // bar; the app shell scrolls inside its own area. A capture keeps the page
+    // at the top and scrolls the shell's area so the region starts just below
+    // its visible top ("top"), or a small control sits in the middle ("center").
+    const screenshot = async (name, selector, align = "top") => {
       if (!ARTIFACTS) return;
-      if (selector) await pageJ.evaluate(`document.querySelector(${J(selector)})?.scrollIntoView({ block: "start" })`);
+      if (selector) {
+        await pageJ.evaluate(`(() => {
+          const el = document.querySelector(${J(selector)});
+          if (!el) return false;
+          window.scrollTo(0, 0);
+          let area = el.parentElement;
+          while (area && area !== document.body) {
+            if (/(auto|scroll)/.test(getComputedStyle(area).overflowY) && area.scrollHeight > area.clientHeight + 1) break;
+            area = area.parentElement;
+          }
+          if (!area || area === document.body) { el.scrollIntoView({ behavior: "instant", block: "center" }); return true; }
+          const a = area.getBoundingClientRect();
+          const r = el.getBoundingClientRect();
+          area.scrollTop += ${J(align)} === "center" ? (r.top - a.top) - (Math.min(a.height, window.innerHeight - a.top) - r.height) / 2 : (r.top - a.top) - 12;
+          return true;
+        })()`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 200));
       const { data } = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, pageJ.sessionId);
       writeFileSync(join(ARTIFACTS, `${name}.png`), Buffer.from(data, "base64"));
     };
+
+    // --- Real-page helpers (owner task 2026-11-21: styling, exact downloads, context switches) ---
+    const DESKTOP_J = Object.freeze({ width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    const PHONE_J = Object.freeze({ width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    const viewportJ = async (metrics) => {
+      await browser.send("Page.bringToFront", {}, pageJ.sessionId);
+      await browser.send("Emulation.setDeviceMetricsOverride", metrics, pageJ.sessionId);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    };
+    // A real mouse click at the centre of a visible, enabled control that
+    // nothing covers (hit-tested at that point), as a person clicks it.
+    const realClick = async (selector, description) => {
+      await pageJ.waitFor(() => pageJ.evaluate(`(() => { const el = document.querySelector(${J(selector)});
+        return Boolean(el && el.offsetParent !== null && !el.disabled && !el.closest("[hidden]")); })()`), description, { timeout: 30000 });
+      await browser.send("Page.bringToFront", {}, pageJ.sessionId);
+      const point = await pageJ.evaluate(`(() => {
+        const el = document.querySelector(${J(selector)});
+        el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        const x = r.x + Math.min(r.width / 2, 20), y = r.y + r.height / 2;
+        const target = document.elementFromPoint(x, y);
+        const hit = el === target || el.contains(target) || Boolean(target?.closest("label")?.contains(el));
+        return hit ? { x, y } : { blockedBy: target ? target.outerHTML.slice(0, 200) : "nothing at that point" };
+      })()`);
+      if (point.blockedBy !== undefined) throw new Error(`${description}: not clickable, covered by ${point.blockedBy}`);
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await browser.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, button: "left", clickCount: 1 }, pageJ.sessionId);
+      }
+    };
+    const checked = (selector) => pageJ.evaluate(`Boolean(document.querySelector(${J(selector)})?.checked)`);
+    // Hold a real server response (CDP Fetch at the response stage) so the
+    // administrator can act before it arrives; release delivers it unchanged.
+    const held = [];
+    const holdListener = (message) => {
+      if (message.sessionId === pageJ.sessionId && message.method === "Fetch.requestPaused") held.push(message.params);
+    };
+    const holdResponses = async (urlPattern) => {
+      held.length = 0;
+      browser.listeners.add(holdListener);
+      await browser.send("Fetch.enable", { patterns: [{ urlPattern, requestStage: "Response" }] }, pageJ.sessionId);
+    };
+    const releaseHeld = async () => {
+      for (const params of held.splice(0)) await browser.send("Fetch.continueRequest", { requestId: params.requestId }, pageJ.sessionId);
+      await browser.send("Fetch.disable", {}, pageJ.sessionId);
+      browser.listeners.delete(holdListener);
+    };
+    // The real stylesheet stack, as the browser applied it.
+    const styleAudit = () => pageJ.evaluate(`(() => {
+      const sheets = [...document.styleSheets];
+      const bootstrap = sheets.find((s) => (s.href || "").includes("bootstrap@5.3.5/dist/css/bootstrap.min.css"));
+      let rules = 0; try { rules = bootstrap ? bootstrap.cssRules.length : 0; } catch { rules = -1; }
+      const probe = document.createElement("button"); probe.className = "btn btn-primary"; document.body.appendChild(probe);
+      const btnPrimaryBackground = getComputedStyle(probe).backgroundColor; probe.remove();
+      return { bootstrapSheet: Boolean(bootstrap), bootstrapRules: rules, btnPrimaryBackground,
+        appCss: sheets.some((s) => (s.href || "").endsWith("/css/style.css")), tokensCss: sheets.some((s) => (s.href || "").endsWith("/css/gk-design-tokens.css")),
+        siteHeader: Boolean(document.querySelector("header, nav")), bodyFont: getComputedStyle(document.body).fontFamily.slice(0, 80) };
+    })()`);
+    // Layout of one region: page-level horizontal overflow, controls outside the
+    // screen, and controls another element covers at their own centre.
+    const layoutAudit = (selector) => pageJ.evaluate(`(() => {
+      const root = document.querySelector(${J(selector)});
+      if (!root) return { found: false };
+      const doc = document.documentElement;
+      const controls = [...root.querySelectorAll("button, a[href], input, select, textarea, summary")]
+        .filter((el) => el.offsetParent !== null && !el.closest("[hidden]") && !el.closest("details:not([open]) > :not(summary)"));
+      const outside = [];
+      const covered = [];
+      for (const el of controls) {
+        el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        if (r.right > window.innerWidth + 1 || r.left < -1 || r.width === 0 || r.height === 0) { outside.push(el.outerHTML.slice(0, 120)); continue; }
+        const target = document.elementFromPoint(r.x + Math.min(r.width / 2, 20), r.y + r.height / 2);
+        if (!(el === target || el.contains(target) || target?.closest("label")?.contains(el))) covered.push(el.outerHTML.slice(0, 100) + " <- " + (target ? target.outerHTML.slice(0, 100) : "nothing"));
+      }
+      root.scrollIntoView({ behavior: "instant", block: "start" });
+      const clippedText = [...root.querySelectorAll("button, a.btn, label, .alert")].filter((el) => el.offsetParent !== null
+        && el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== "visible").map((el) => el.outerHTML.slice(0, 100));
+      return { found: true, innerWidth: window.innerWidth, docScrollWidth: doc.scrollWidth, bodyScrollWidth: document.body.scrollWidth,
+        panelScroll: root.scrollWidth, panelClient: root.clientWidth, controls: controls.length, outside, covered, clippedText };
+    })()`);
+    const assertLayout = (label, layout, width) => {
+      assert.ok(layout.found, label);
+      assert.equal(layout.innerWidth, width, `${label}: viewport`);
+      assert.ok(layout.docScrollWidth <= width + 1 && layout.bodyScrollWidth <= width + 1, `${label}: no page-level horizontal overflow ${J(layout)}`);
+      assert.ok(layout.panelScroll <= layout.panelClient + 1, `${label}: the region fits its column ${J(layout)}`);
+      assert.deepEqual([layout.outside, layout.covered, layout.clippedText], [[], [], []], `${label}: every control on screen, uncovered and unclipped ${J(layout)}`);
+      assert.ok(layout.controls > 0, label);
+    };
+    // The server-persisted Markdown of a working report: the established
+    // serializer over the persisted report model, read directly from
+    // PostgreSQL (no route, service or browser).
+    const { createPostgresClientInternalReportRepository } = await import("../Backend/kai/dictionary/postgresClientInternalReportRepository.js");
+    const { serializeInternalReportToMarkdown } = await import("../Backend/kai/services/kaiInternalReportMarkdownSerializer.js");
+    const { savedContentSha256 } = await import("../Backend/kai/services/kaiAssessmentAdaptation.js");
+    const persistedMarkdown = async (draftId) => {
+      const read = await createPostgresClientInternalReportRepository().readInternalReport({ organizationId: O.organizationId, generatedContentDraftId: draftId });
+      assert.equal(read.ok, true, J(read.error));
+      assert.equal(read.data.available, true, J({ gk: read.data.getKinderReviewReasons, blocked: read.data.blockedReasons }));
+      return serializeInternalReportToMarkdown(read.data);
+    };
+    // Open the report with its visible control, download it with the link the
+    // page offers, and compare the bytes with the server-persisted Markdown.
+    const exactDownload = async (draftId, label) => {
+      const expected = Buffer.from(await persistedMarkdown(draftId), "utf8");
+      const mark = pageJ.mark();
+      await realClick(`[data-client-open-internal-report="${draftId}"]`, `Open report (${label})`);
+      await pageJ.waitFor(() => pageJ.visible("[data-client-internal-report-markdown]"), `${label}: report shown`, { timeout: 30000 });
+      await pageJ.idle();
+      assert.deepEqual(pageJ.requestsSince(mark).filter((r) => r.method !== "GET"), [], `${label}: opening writes nothing`);
+      const shown = await pageJ.evaluate(`document.querySelector("[data-client-internal-report-markdown]").textContent`);
+      const link = `[data-client-download-internal-report="${draftId}"]`;
+      const href = await pageJ.attrOf(link, "href");
+      assert.equal(href, clientInternalReportMarkdownPath(O.organizationId, O.projectId, draftId), `${label}: the link downloads this saved report`);
+      const fetched = await pageJ.evaluate(`(async () => { const r = await fetch(${J(href)}, { credentials: "same-origin" });
+        const bytes = new Uint8Array(await r.arrayBuffer()); let binary = ""; for (const b of bytes) binary += String.fromCharCode(b);
+        return { status: r.status, type: r.headers.get("content-type"), disposition: r.headers.get("content-disposition"), base64: btoa(binary) }; })()`);
+      const downloaded = Buffer.from(fetched.base64, "base64");
+      assert.equal(fetched.status, 200, label);
+      assert.match(fetched.disposition || "", /attachment/, label);
+      assert.ok(downloaded.equals(expected), `${label}: downloaded bytes equal the server-persisted Markdown (${downloaded.length} vs ${expected.length} bytes; first difference at ${[...downloaded].findIndex((b, i) => b !== expected[i])})`);
+      assert.equal(shown, expected.toString("utf8"), `${label}: the report shown is the saved Markdown, character for character`);
+      // The real download: a person's click on the visible Download link; the
+      // file the browser saves is named as the link offers and holds exactly
+      // the server-persisted Markdown.
+      const offeredName = await pageJ.attrOf(link, "download");
+      const saved = await browserDownload(link, `${label}: Download Markdown`);
+      assert.equal(saved.suggestedFilename, offeredName, `${label}: the browser saves the file under the name the page shows (${J(saved)})`);
+      assert.ok(saved.bytes.equals(expected), `${label}: the saved file is the server-persisted Markdown, byte for byte`);
+      return { bytes: downloaded.length, sha256: sha256(downloaded), content_type: fetched.type, disposition: fetched.disposition,
+        download_name: offeredName, saved_file_name: saved.suggestedFilename, saved_file_sha256: sha256(saved.bytes), markdown: expected.toString("utf8") };
+    };
+    // Browser downloads for the page's own browser context, saved to the
+    // runner's work directory (removed with it).
+    let downloadCount = 0;
+    const browserDownload = async (selector, description) => {
+      const { targetInfo } = await browser.send("Target.getTargetInfo", {}, pageJ.sessionId);
+      downloadCount += 1;
+      const dir = join(WORKDIR, "j-downloads", String(downloadCount));
+      mkdirSync(dir, { recursive: true });
+      await browser.send("Browser.setDownloadBehavior", { behavior: "allow", browserContextId: targetInfo.browserContextId, downloadPath: dir, eventsEnabled: true });
+      let begun = null;
+      let finished = null;
+      const listener = (message) => {
+        if (message.method === "Browser.downloadWillBegin" && !begun) begun = message.params;
+        if (message.method === "Browser.downloadProgress" && begun && message.params.guid === begun.guid && ["completed", "canceled"].includes(message.params.state)) finished = message.params;
+      };
+      browser.listeners.add(listener);
+      try {
+        await realClick(selector, description);
+        await pageJ.waitFor(async () => Boolean(finished), `${description}: the browser download`, { timeout: 30000 });
+      } finally {
+        browser.listeners.delete(listener);
+      }
+      assert.equal(finished.state, "completed", description);
+      return { suggestedFilename: begun.suggestedFilename, bytes: readFileSync(join(dir, begun.suggestedFilename)) };
+    };
+    // A second Project of organization O (synthetic), for the context switches.
+    const SECOND_PROJECT = "7d000000-0000-4000-8000-0000000000b4";
     const adaptViaApi = (body, sourceId = assessmentId(), api = O.api) => api("POST", assessmentAdaptationPath(O.organizationId, sourceId), body);
     const reviseViaApi = (draftId, body, api = O.api) => api("POST", clientWorkingReportRevisionPath(O.organizationId, O.projectId, draftId), body);
 
@@ -1668,6 +1857,14 @@ async function runPackage4Acceptance() {
       assessmentBefore = await savedBlocks(assessmentId());
       approvalsBefore = await workingCounts();
       await openSaved(assessmentId(), "the saved assessment");
+      // The real application page: Bootstrap 5.3.5 (its SRI hash checked by the
+      // browser; rules readable only after the integrity check), the site styles and tokens.
+      const styles = await styleAudit();
+      assert.equal(styles.bootstrapSheet, true, `the Bootstrap stylesheet is attached ${J(styles)}`);
+      assert.ok(styles.bootstrapRules > 100, `the Bootstrap stylesheet loaded ${J(styles)}`);
+      assert.equal(styles.btnPrimaryBackground, "rgb(13, 110, 253)", "Bootstrap's .btn-primary applies");
+      assert.deepEqual([styles.appCss, styles.tokensCss], [true, true], "the site stylesheets are attached");
+      WR.styles = styles;
       assert.ok(await pageJ.visible(`[data-client-use-assessment="${assessmentId()}"]`), "Use this assessment is shown on the saved assessment");
       assert.equal(await pageJ.attrOf(`[data-client-internal-draft-detail-label]`, "data-client-internal-draft-detail-label"), "assessment");
       const detailText = await pageJ.textOf(`[data-client-internal-draft-detail="${assessmentId()}"]`);
@@ -1739,6 +1936,8 @@ async function runPackage4Acceptance() {
         reused_block_ordinals: lineage.reused_block_ordinals, withheld_blocks: [], selected_claim_ids: null, guidance_sha256: null,
       });
       assert.match(lineage.source_assessment_content_sha256, /^[0-9a-f]{64}$/);
+      // The recorded fingerprint is the saved assessment's: recomputed here from the SQL-read blocks and citations.
+      assert.equal(lineage.source_assessment_content_sha256, savedContentSha256(assessmentBefore), "the lineage fingerprints the assessment actually used");
       assert.equal(lineage.reused_block_ordinals.length, (await savedBlocks(assessmentId())).length, "every saved passage was usable and reused");
       assert.equal(assessmentRow.requested_audience, "internal");
       // The assessment itself is unchanged by being used.
@@ -1801,7 +2000,7 @@ async function runPackage4Acceptance() {
       const sent = JSON.parse(posted.postData);
       assert.deepEqual(sent.blocks, [{ ordinal: 1, text: REVISED }], "only the changed passage is sent; citations and disclosures are never sent");
       const v2 = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
-      WR.reports.funderV2 = { draftId: v2, idempotencyKey: sent.idempotency_key };
+      WR.reports.funderV2 = { draftId: v2, idempotencyKey: sent.idempotency_key, revisedText: REVISED };
       await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v2}"]`), "version 2 opened", { timeout: 30000 });
       assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-version"), "2");
       assert.match(await pageJ.textOf(`[data-client-internal-draft-detail="${v2}"]`), /^Funder report · version 2/);
@@ -1825,10 +2024,21 @@ async function runPackage4Acceptance() {
       assert.deepEqual([v2Row.content_type, v2Row.requested_audience, v2Row.engagement_id, lineage.relationship, lineage.version, lineage.parent_draft_id, lineage.root_report_draft_id,
         lineage.reporting_purpose, lineage.source_assessment_draft_id, lineage.revised_block_ordinals, lineage.revised_by_type],
       ["evidence_summary", "funder", O.projectId, "organization_revision", 2, v1, v1, "funder_report", assessmentId(), [1], "human"]);
-      assert.equal(lineage.parent_content_sha256.length, 64);
+      assert.equal(lineage.parent_content_sha256, savedContentSha256(v1Before), "the lineage fingerprints the version that was revised");
+      assert.equal(lineage.source_assessment_content_sha256, savedContentSha256(assessmentBefore), "and still the source assessment's");
       const [audit] = await query(`SELECT metadata FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'generated_content_draft_created'
         AND metadata->>'generated_content_draft_id' = $2`, [O.organizationId, v2]);
       assert.equal(audit.metadata.contract, "kai_working_report_revision_v1");
+      // The human who revised it: attributed in the metadata-only audit event
+      // (kai.audit_events actor) and the lineage record; the draft row's
+      // system-writer field (created_by_type, pinned by the P3-01 CHECK) is not rewritten.
+      const [adminKai] = await query("SELECT user_id::text FROM kai.users WHERE legacy_public_userdata_id = $1", [O.adminUserId]);
+      const actorEvents = await query(`SELECT actor_user_id::text, actor_type::text, action FROM kai.audit_events
+        WHERE organization_id = $1::uuid AND metadata::text LIKE '%' || $2 || '%'`, [O.organizationId, v2]);
+      assert.ok(actorEvents.some((event) => event.actor_user_id === adminKai.user_id && event.actor_type === "human"), `the audit event names the administrator: ${J(actorEvents)}`);
+      assert.ok(actorEvents.every((event) => event.actor_user_id === adminKai.user_id), `no other actor is recorded for the revision: ${J(actorEvents)}`);
+      assert.equal(v2Row.created_by_type, "system", "the system-writer field is unchanged");
+      WR.attribution = { audit_events: actorEvents, administrator: adminKai.user_id, lineage_revised_by_type: lineage.revised_by_type, draft_created_by_type: v2Row.created_by_type };
       WR.persistence.revision = { draft_id: v2, lineage, v1_fingerprint_before: fingerprint(v1Before), v1_fingerprint_after: fingerprint(v1After), v2_fingerprint: fingerprint(v2Blocks) };
       // The previous version and the assessment reopen as saved.
       await pageJ.clickVisible(`[data-client-open-previous-version="${v1}"]`, "Open the previous version");
@@ -2054,15 +2264,376 @@ async function runPackage4Acceptance() {
       }
     });
 
+    // ---- J11-J13 (owner task 2026-11-21): the real application page at 1280 and
+    // 390 px, exact downloads, and late responses after a Project switch ----
+    WR.added = [];
+    // Unescape the serializer's Markdown escapes so saved prose can be found as text.
+    const plainMarkdown = (markdown) => markdown.replace(/\\([\\`*_{}\[\]()#+\-.!|>])/g, "$1");
+
+    await test("J11 (browser, real application page with Bootstrap 5.3.5 and the site styles, 1280 and 390 px): the saved assessment, Use this assessment with all four purposes, report creation, source-assessment and previous-version navigation, revision fields with save, cancel, loading and messages, and open/download are visible, usable and inside the screen", async () => {
+      WR.styled = { layout: {}, screenshots: [], created: {} };
+      // The ordinary nonprofit administrator's projected capabilities (the same
+      // read the interface uses): working reports, adaptation and revision yes;
+      // the readiness assessment / data-gap memo, GK review and release no.
+      const capabilities = await O.api("GET", organizationAccessCapabilitiesPath(O.organizationId));
+      assert.equal(capabilities.status, 200, J(capabilities.body));
+      const ops = capabilities.body.data.workflowOperations;
+      WR.capabilities = Object.fromEntries(["generateDrafts", "adaptAssessments", "reviseWorkingReports", "readInternalDrafts", "generateAllDraftTypes",
+        "reviewGeneratedDrafts", "releaseInternalReports", "recordEvidenceReview", "recordClaimReview"].map((key) => [key, ops[key]]));
+      assert.deepEqual([ops.generateDrafts, ops.adaptAssessments, ops.reviseWorkingReports, ops.readInternalDrafts], [true, true, true, true], J(WR.capabilities));
+      assert.deepEqual([ops.generateAllDraftTypes, ops.reviewGeneratedDrafts], [false, false], J(WR.capabilities));
+      assert.equal(capabilities.body.data.internalKnowledgeWorkspace === true, false, "the client Knowledge Studio, not Get Kinder's workspace");
+      const shot = async (name, selector, align = "top") => { await screenshot(name, selector, align); WR.styled.screenshots.push(`${name}.png`); };
+      const audit = async (label, selector, width) => {
+        const layout = await layoutAudit(selector);
+        WR.styled.layout[label] = layout;
+        assertLayout(label, layout, width);
+      };
+      const metricsOf = (width) => (width === 1280 ? DESKTOP_J : PHONE_J);
+      const openAt = async (draftId, label, width) => {
+        // Navigate at desktop width (the shell's navigation), then show the opened report at the width under test.
+        await viewportJ(DESKTOP_J);
+        await openSaved(draftId, label);
+        await viewportJ(metricsOf(width));
+        await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${draftId}"]`), `${label} at ${width}`);
+      };
+      const createFromAssessment = async (purpose, width) => {
+        await openAt(assessmentId(), "the saved assessment", width);
+        await realClick(`[data-client-adaptation-purpose="${purpose}"] input`, `purpose ${purpose}`);
+        assert.equal(await checked(`[data-client-adaptation-purpose="${purpose}"] input`), true, purpose);
+        const mark = pageJ.mark();
+        await holdResponses(`*/generated-content-drafts/${assessmentId()}/assessment-adaptations`);
+        try {
+          await realClick("[data-client-create-adapted-report]", "Create report");
+          await pageJ.waitFor(async () => held.length === 1, `${purpose}: the adaptation response`, { timeout: 60000 });
+          // The loading state is shown and readable while the server works.
+          assert.equal(await pageJ.evaluate(`document.querySelector("[data-client-create-adapted-report]").innerText.trim()`), "Creating report...");
+          assert.equal(await pageJ.evaluate(`document.querySelector("[data-client-create-adapted-report]").disabled`), true);
+          await shot(`styled-creating-${purpose}-${width}`, "[data-client-create-adapted-report]", "center");
+        } finally {
+          await releaseHeld();
+        }
+        await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), `${purpose}: the adaptation request`, { timeout: 60000 });
+        await pageJ.idle();
+        const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [assessmentAdaptationPath(O.organizationId, assessmentId()), 201], J(await pageJ.responseBody(posted)));
+        const sentBody = JSON.parse(posted.postData);
+        assert.deepEqual([Object.keys(sentBody).sort(), sentBody.purpose, sentBody.engagement_id], [["engagement_id", "idempotency_key", "purpose"], purpose, O.projectId]);
+        const draftId = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
+        WR.added.push(draftId);
+        await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${draftId}"]`), `the ${purpose} report opened`, { timeout: 30000 });
+        assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-purpose"), purpose);
+        const row = await draftRow(draftId);
+        const lineage = lineageOfRow(row);
+        assert.deepEqual([row.engagement_id, lineage.relationship, lineage.reporting_purpose, lineage.source_assessment_draft_id, lineage.source_assessment_content_sha256],
+          [O.projectId, "assessment_adaptation", purpose, assessmentId(), savedContentSha256(assessmentBefore)], purpose);
+        WR.styled.created[purpose] = { draft_id: draftId, width, content_type: row.content_type, audience: row.requested_audience };
+        return draftId;
+      };
+      const reviseNegatives = async (draftId, width) => {
+        const editor = `[data-client-revise-editor="${draftId}"]`;
+        await realClick(`[data-client-revise-report="${draftId}"]`, "Revise wording");
+        await pageJ.waitFor(() => pageJ.visible(editor), "the revision editor");
+        await audit(`revise_editor_${width}`, editor, width);
+        await shot(`styled-revise-editor-${width}`, editor);
+        const before = await savedBlocks(draftId);
+        // Save with nothing changed: the message says so; nothing is sent.
+        let mark = pageJ.mark();
+        await realClick("[data-client-save-revision]", "Save (unchanged)");
+        await pageJ.waitFor(() => pageJ.visible("[data-client-revision-error]"), "the unchanged message");
+        assert.equal(await pageJ.textOf("[data-client-revision-error]"), "Nothing was changed, so no new version was saved.");
+        assert.deepEqual(pageJ.requestsSince(mark).filter((r) => r.method === "POST"), [], "nothing is sent");
+        await shot(`styled-revise-unchanged-${width}`, "[data-client-revision-error]", "center");
+        // A figure whose describing words change: the server refuses it and the message names the passage.
+        const people = before.find((block) => block.text.includes(`${EXPECTED.people} distinct people`));
+        assert.ok(people, "a passage states the people reached");
+        const current = await pageJ.evaluate(`document.querySelector('[data-client-revise-block="${people.ordinal}"]').value`);
+        assert.ok(current.includes(`${EXPECTED.people} distinct people`), "the editable prose carries the figure");
+        assert.ok(await setTextarea(`[data-client-revise-block="${people.ordinal}"]`, current.replace(`${EXPECTED.people} distinct people`, `${EXPECTED.people} households`)));
+        mark = pageJ.mark();
+        await realClick("[data-client-save-revision]", "Save (figure changed)");
+        await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the refused revision", { timeout: 30000 });
+        await pageJ.waitFor(async () => /A figure no longer keeps the words that describe it/.test((await pageJ.textOf("[data-client-revision-error]")) || ""), "the figure message");
+        assert.equal(pageJ.requestsSince(mark).find((r) => r.method === "POST").status, 422);
+        assert.match(await pageJ.textOf("[data-client-revision-error]"), new RegExp(`^Not saved\\. .*\\(passage ${people.ordinal}\\)`));
+        await audit(`revise_error_${width}`, editor, width);
+        await shot(`styled-revise-error-${width}`, "[data-client-revision-error]", "center");
+        // Cancel closes the editor and saves nothing.
+        await realClick("[data-client-cancel-revision]", "Cancel");
+        await pageJ.waitFor(async () => !(await pageJ.visible(editor)), "the editor closed");
+        assert.ok(await pageJ.visible(`[data-client-revise-report="${draftId}"]`), "Revise wording is offered again");
+        assert.equal(fingerprint(await savedBlocks(draftId)), fingerprint(before), "nothing was saved");
+      };
+      const openAndDownloadAt = async (draftId, label, width) => {
+        const download = await exactDownload(draftId, `${label} at ${width}`);
+        await audit(`${label}_${width}`, `[data-client-internal-draft-detail="${draftId}"]`, width);
+        await shot(`styled-${label}-actions-${width}`, `[data-client-download-internal-report="${draftId}"]`, "center");
+        await shot(`styled-${label}-open-${width}`, "[data-client-internal-report-markdown]");
+        await shot(`styled-${label}-${width}`, `[data-client-internal-draft-detail="${draftId}"]`);
+        WR.styled[`${label}_${width}_download`] = { bytes: download.bytes, sha256: download.sha256, content_type: download.content_type, download_name: download.download_name };
+      };
+
+      for (const width of [1280, 390]) {
+        // The saved assessment opens - navigated entirely at this width (shell
+        // navigation, Project selector, Drafts, Open assessment); Use this
+        // assessment offers every purpose, each selectable.
+        await viewportJ(metricsOf(width));
+        await openSaved(assessmentId(), `the saved assessment (navigated at ${width})`);
+        assert.equal(await pageJ.evaluate("window.innerWidth"), width);
+        const panel = `[data-client-use-assessment="${assessmentId()}"]`;
+        for (const option of ["internal_planning", "board_update", "funder_report", "annual_report"]) {
+          await realClick(`[data-client-adaptation-purpose="${option}"] input`, `purpose ${option} at ${width}`);
+          assert.equal(await checked(`[data-client-adaptation-purpose="${option}"] input`), true, `${option} selectable at ${width}`);
+        }
+        await realClick("[data-client-adaptation-guidance-toggle]", "Add guidance (optional)");
+        await pageJ.waitFor(() => pageJ.visible("[data-client-adaptation-guidance]"), "the guidance field");
+        await audit(`use_assessment_${width}`, panel, width);
+        await shot(`styled-use-assessment-${width}`, panel);
+        await realClick("[data-client-adaptation-guidance-toggle]", "Hide guidance");
+        await audit(`assessment_${width}`, `[data-client-internal-draft-detail="${assessmentId()}"]`, width);
+        await shot(`styled-assessment-${width}`, `[data-client-internal-draft-detail="${assessmentId()}"]`);
+        await openAndDownloadAt(assessmentId(), "assessment", width);
+      }
+
+      // 1280: internal planning from the assessment; its source assessment opens from it.
+      const planning = await createFromAssessment("internal_planning", 1280);
+      await audit("internal_planning_report_1280", `[data-client-internal-draft-detail="${planning}"]`, 1280);
+      await openAndDownloadAt(planning, "internal-planning", 1280);
+      await realClick(`[data-client-open-source-assessment="${assessmentId()}"]`, "Open the assessment");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${assessmentId()}"]`), "the assessment from the planning report", { timeout: 30000 });
+      // 390: a funder report and annual-report content from the assessment.
+      const funder390 = await createFromAssessment("funder_report", 390);
+      await audit("funder_report_390", `[data-client-internal-draft-detail="${funder390}"]`, 390);
+      await openAndDownloadAt(funder390, "funder-report", 390);
+      await realClick(`[data-client-open-source-assessment="${assessmentId()}"]`, "Open the assessment (390)");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${assessmentId()}"]`), "the assessment from the funder report", { timeout: 30000 });
+      const annual390 = await createFromAssessment("annual_report", 390);
+      await openAndDownloadAt(annual390, "annual-report", 390);
+
+      // Revision at each width on version 2: unchanged and figure messages, cancel; then previous-version and source navigation.
+      const v1 = WR.reports.funder.draftId;
+      const v2 = WR.reports.funderV2.draftId;
+      for (const width of [1280, 390]) {
+        await openAt(v2, "version 2", width);
+        await reviseNegatives(v2, width);
+        await realClick(`[data-client-open-previous-version="${v1}"]`, `Open the previous version (${width})`);
+        await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v1}"]`), `version 1 from version 2 at ${width}`, { timeout: 30000 });
+        await shot(`styled-previous-version-${width}`, `[data-client-internal-draft-detail="${v1}"]`);
+        await realClick(`[data-client-open-source-assessment="${assessmentId()}"]`, `Open the assessment from version 1 (${width})`);
+        await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${assessmentId()}"]`), `the assessment from version 1 at ${width}`, { timeout: 30000 });
+      }
+      // 390: a valid revision is saved as version 3 (the Saving... state shown while the server works).
+      await openAt(v2, "version 2", 390);
+      await realClick(`[data-client-revise-report="${v2}"]`, "Revise wording (390)");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-revise-editor="${v2}"]`), "the editor (390)");
+      const REVISED_390 = "For a funder the organization reports to: this version summarises what the saved assessment found about the people the organization reached and the ratings participants gave, with each figure's sources and limitations.";
+      assert.ok(await setTextarea('[data-client-revise-block="1"]', REVISED_390));
+      const mark = pageJ.mark();
+      await holdResponses(`*/client-internal-drafts/${v2}/revisions`);
+      try {
+        await realClick("[data-client-save-revision]", "Save as version 3");
+        await pageJ.waitFor(async () => held.length === 1, "the revision response", { timeout: 60000 });
+        assert.equal(await pageJ.evaluate(`document.querySelector("[data-client-save-revision]").innerText.trim()`), "Saving...");
+        assert.deepEqual(await pageJ.evaluate(`[document.querySelector("[data-client-save-revision]").disabled, document.querySelector("[data-client-cancel-revision]").disabled]`), [true, true]);
+        await shot("styled-revise-saving-390", "[data-client-save-revision]", "center");
+      } finally {
+        await releaseHeld();
+      }
+      await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), "the revision request", { timeout: 60000 });
+      await pageJ.idle();
+      const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+      assert.equal(posted.status, 201, J(await pageJ.responseBody(posted)));
+      assert.deepEqual(JSON.parse(posted.postData).blocks, [{ ordinal: 1, text: REVISED_390 }]);
+      const v3 = (await pageJ.responseBody(posted)).data.generatedContentDraftId;
+      WR.added.push(v3);
+      WR.reports.funderV3 = { draftId: v3, revisedText: REVISED_390 };
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v3}"]`), "version 3 opened", { timeout: 30000 });
+      assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-version"), "3");
+      const v3Lineage = lineageOfRow(await draftRow(v3));
+      assert.deepEqual([v3Lineage.relationship, v3Lineage.version, v3Lineage.parent_draft_id, v3Lineage.root_report_draft_id, v3Lineage.revised_by_type],
+        ["organization_revision", 3, v2, v1, "human"]);
+      await audit("version_3_390", `[data-client-internal-draft-detail="${v3}"]`, 390);
+      await shot("styled-version-3-390", `[data-client-internal-draft-detail="${v3}"]`);
+      await realClick(`[data-client-open-previous-version="${v2}"]`, "Open the previous version (version 2, 390)");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v2}"]`), "version 2 from version 3", { timeout: 30000 });
+      assert.deepEqual(pageJ.exceptions, [], "no page error on the real page");
+      await viewportJ(DESKTOP_J);
+    });
+
+    await test("J12 (browser + PostgreSQL): funder report versions 1, 2 and 3 download byte-for-byte as their server-persisted Markdown and as shown, with their own version, purpose, citations and disclosures, and again after a reload", async () => {
+      const v1 = WR.reports.funder.draftId;
+      const v2 = WR.reports.funderV2.draftId;
+      const v3 = WR.reports.funderV3.draftId;
+      WR.downloads = {};
+      for (const pass of ["first", "after_reload"]) {
+        for (const [label, draftId, version] of [["v1", v1, 1], ["v2", v2, 2], ["v3", v3, 3]]) {
+          // openSaved navigates to the page again: every pass is a fresh page load.
+          await openSaved(draftId, `${label} (${pass})`);
+          await viewportJ(DESKTOP_J);
+          const shownVersion = await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-version");
+          const shownLabel = await pageJ.textOf("[data-client-internal-draft-detail-label]");
+          const result = await exactDownload(draftId, `${label} ${pass}`);
+          const markdown = result.markdown;
+          const plain = plainMarkdown(markdown);
+          assert.equal(shownVersion, String(version), `${label}: the version shown`);
+          assert.equal(shownLabel, version === 1 ? "Funder report" : `Funder report · version ${version}`);
+          assert.match(markdown, /^# Funder Report\n/);
+          assert.ok(markdown.includes(`draft \`${draftId}\``), `${label}: the Markdown is this saved draft`);
+          assert.ok(markdown.includes(`**Version:** ${version}${version > 1 ? `, revised by the organization from draft \`${version === 2 ? v1 : v2}\`` : ""}`), `${label}: its version line`);
+          assert.ok(markdown.includes(`**Reporting purpose:** a funder report, adapted from the organization's saved Free Impact Assessment \`${assessmentId()}\``), `${label}: purpose and source`);
+          assert.match(markdown, /KAI has not sent or released it outside the organization\./);
+          const blocks = await savedBlocks(draftId);
+          for (const claimId of new Set(blocks.flatMap((block) => block.citations.map((citation) => citation.claimId)))) {
+            assert.ok(markdown.includes(`\`${claimId}\``), `${label}: cites ${claimId}`);
+          }
+          for (const block of blocks) {
+            const [prose, ...tails] = block.text.split(/\s(?=Measurement disclosure for |Selection note: |Reuse note: )/);
+            assert.ok(plain.includes(prose.trim().slice(0, 160)), `${label}: passage ${block.ordinal} as saved`);
+            for (const tail of tails) assert.ok(plain.includes(tail.trim().slice(0, 120)), `${label}: passage ${block.ordinal} disclosure as saved`);
+          }
+          if (version === 2) assert.ok(plain.includes(WR.reports.funderV2.revisedText));
+          if (version === 3) assert.ok(plain.includes(WR.reports.funderV3.revisedText));
+          if (version === 1) assert.ok(!plain.includes(WR.reports.funderV2.revisedText) && !plain.includes(WR.reports.funderV3.revisedText), "version 1 carries no later wording");
+          WR.downloads[`${label}_${pass}`] = { draft_id: draftId, version, bytes: result.bytes, sha256: result.sha256, content_type: result.content_type,
+            disposition: result.disposition, download_name: result.download_name };
+          if (ARTIFACTS && pass === "after_reload") writeFileSync(join(ARTIFACTS, `funder-report-v${version}.md`), markdown);
+        }
+      }
+      for (const label of ["v1", "v2", "v3"]) assert.equal(WR.downloads[`${label}_after_reload`].sha256, WR.downloads[`${label}_first`].sha256, `${label}: identical after a reload`);
+      assert.equal(WR.downloads.v1_first.sha256, WR.reports.funder.markdown_sha256, "version 1 downloads exactly as when it was first saved (J3), after versions 2 and 3");
+      assert.equal(new Set(["v1", "v2", "v3"].map((label) => WR.downloads[`${label}_first`].sha256)).size, 3, "each version is its own content");
+      // Every reporting purpose created in the interface reopens after a fresh page load as itself and downloads as saved.
+      WR.reopened = {};
+      for (const [purpose, draftId, label] of [
+        ["internal_planning", WR.styled.created.internal_planning.draft_id, "Internal planning report"],
+        ["board_update", WR.reports.board.draftId, "Board report"],
+        ["funder_report", WR.styled.created.funder_report.draft_id, "Funder report"],
+        ["annual_report", WR.styled.created.annual_report.draft_id, "Annual-report content"],
+      ]) {
+        await openSaved(draftId, `${purpose} (reopened)`);
+        assert.equal(await pageJ.textOf("[data-client-internal-draft-detail-label]"), label, purpose);
+        assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-purpose"), purpose);
+        const result = await exactDownload(draftId, `${purpose} reopened`);
+        WR.reopened[purpose] = { draft_id: draftId, label, bytes: result.bytes, sha256: result.sha256 };
+      }
+    });
+
+    await test("J13 (browser, real page): a revision or adaptation response that arrives after the administrator switched to another Project opens nothing and leaves the new Project's view as it is; each saved report stays in its own Project", async () => {
+      await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, $3, '{}'::jsonb) ON CONFLICT (engagement_id) DO NOTHING",
+        [SECOND_PROJECT, O.organizationId, "Project B O planning (second Project)"]);
+      WR.race = {};
+      const switchProjectWhileHeld = async (label, pattern, startAction) => {
+        const mark = pageJ.mark();
+        let releaseMark = null;
+        await holdResponses(pattern);
+        try {
+          await startAction();
+          await pageJ.waitFor(async () => held.length === 1, `${label}: the response held`, { timeout: 60000 });
+          await pageJ.selectProject(SECOND_PROJECT);
+          await pageJ.waitFor(async () => /No internal drafts for this Project yet\./.test((await pageJ.textOf("[data-client-internal-draft-list]")) || ""),
+            `${label}: the second Project's reports`, { timeout: 30000 });
+          assert.equal(await pageJ.evaluate(`document.querySelector("[data-client-internal-draft-detail]")`), null, `${label}: nothing open before the late response`);
+          releaseMark = pageJ.mark();
+        } finally {
+          await releaseHeld();
+        }
+        await pageJ.waitFor(() => pageJ.requestsSince(mark).some((r) => r.method === "POST" && r.done), `${label}: the original request completed`, { timeout: 60000 });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await pageJ.idle();
+        const posted = pageJ.requestsSince(mark).find((r) => r.method === "POST");
+        const createdId = (await pageJ.responseBody(posted))?.data?.generatedContentDraftId ?? null;
+        const after = {
+          status: posted.status,
+          created_id: createdId,
+          selected_project: await pageJ.evaluate(`document.getElementById("gk-shell-project-select").value`),
+          open_detail: await pageJ.evaluate(`(() => { const el = document.querySelector("[data-client-internal-draft-detail]"); return el ? el.getAttribute("data-client-internal-draft-detail") : null; })()`),
+          list_text: ((await pageJ.textOf("[data-client-internal-draft-list]")) || "").slice(0, 400),
+          late_requests: pageJ.requestsSince(releaseMark).filter((r) => (createdId && r.url.includes(createdId)) || r.url.includes(`/engagements/${O.projectId}/`))
+            .map((r) => `${r.method} ${new URL(r.url).pathname} ${r.status}`),
+          exceptions: [...pageJ.exceptions],
+        };
+        WR.race[label] = after;
+        if (createdId) WR.added.push(createdId);
+        return createdId;
+      };
+      // Both races are recorded before either is judged, so each path's behavior is observed.
+      const assertRace = (label) => {
+        const after = WR.race[label];
+        assert.equal(after.status, 201, `${label}: ${J(after)}`);
+        assert.equal(after.selected_project, SECOND_PROJECT, label);
+        assert.equal(after.open_detail, null, `${label}: the late response must not open the original Project's report in the second Project: ${J(after)}`);
+        assert.match(after.list_text, /No internal drafts for this Project yet\./, `${label}: the second Project's view is unchanged: ${J(after)}`);
+        assert.deepEqual(after.late_requests, [], `${label}: the late response requested nothing for the original Project: ${J(after)}`);
+        assert.deepEqual(after.exceptions, [], label);
+      };
+
+      // Revision of the latest funder version, delayed past a Project switch.
+      const v3 = WR.reports.funderV3.draftId;
+      await openSaved(v3, "version 3");
+      await viewportJ(DESKTOP_J);
+      await realClick(`[data-client-revise-report="${v3}"]`, "Revise wording (version 3)");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-revise-editor="${v3}"]`), "the editor (version 3)");
+      const RACE_TEXT = "For a funder the organization reports to: this version restates the saved assessment's findings on the people reached and the ratings participants gave, with each figure's sources and limitations.";
+      assert.ok(await setTextarea('[data-client-revise-block="1"]', RACE_TEXT));
+      const v4 = await switchProjectWhileHeld("revision", `*/client-internal-drafts/${v3}/revisions`, () => realClick("[data-client-save-revision]", "Save as version 4"));
+
+      // Use this assessment, delayed past a Project switch.
+      await openSaved(assessmentId(), "the saved assessment");
+      await viewportJ(DESKTOP_J);
+      await realClick('[data-client-adaptation-purpose="board_update"] input', "Board report");
+      const board = await switchProjectWhileHeld("adaptation", `*/generated-content-drafts/${assessmentId()}/assessment-adaptations`,
+        () => realClick("[data-client-create-adapted-report]", "Create report"));
+      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "context-switch-race.json"), `${J(WR.race, null, 2)}\n`);
+      assertRace("revision");
+      assertRace("adaptation");
+
+      // Back in the original Project both saved reports are listed and open as themselves.
+      await pageJ.selectProject(O.projectId);
+      await pageJ.waitFor(async () => {
+        const listed = await pageJ.evaluate(`[...document.querySelectorAll("[data-client-internal-draft]")].map((el) => el.getAttribute("data-client-internal-draft"))`);
+        return listed.includes(v4) && listed.includes(board);
+      }, "both reports listed in their own Project", { timeout: 30000 });
+      await realClick(`[data-client-internal-draft-open="${v4}"]`, "Open version 4");
+      await pageJ.waitFor(() => pageJ.visible(`[data-client-internal-draft-detail="${v4}"]`), "version 4 opened in its Project", { timeout: 30000 });
+      assert.equal(await pageJ.attrOf("[data-client-report-lineage]", "data-client-report-version"), "4");
+      const v4Row = await draftRow(v4);
+      const v4Lineage = lineageOfRow(v4Row);
+      assert.deepEqual([v4Row.engagement_id, v4Lineage.version, v4Lineage.parent_draft_id, v4Lineage.root_report_draft_id], [O.projectId, 4, v3, WR.reports.funder.draftId]);
+      assert.ok((await savedBlocks(v4))[0].text.startsWith(RACE_TEXT));
+      const boardRow = await draftRow(board);
+      assert.deepEqual([boardRow.engagement_id, boardRow.content_type, lineageOfRow(boardRow).reporting_purpose], [O.projectId, "board_update", "board_update"]);
+      // The second Project never lists them; the server refuses them there.
+      const secondList = await O.api("GET", clientInternalDraftsPath(O.organizationId, SECOND_PROJECT));
+      assert.equal(secondList.status, 200, J(secondList.body));
+      assert.deepEqual(secondList.body.data.items, []);
+      for (const draftId of [v4, board]) {
+        const crossProject = await O.api("GET", clientInternalDraftPath(O.organizationId, SECOND_PROJECT, draftId));
+        assert.ok([403, 404].includes(crossProject.status), J(crossProject.body));
+      }
+      // A missing source assessment is refused and writes nothing.
+      const drafts = (await counts(O.organizationId)).drafts;
+      const missing = await adaptViaApi({ engagement_id: O.projectId, purpose: "funder_report", idempotency_key: `adapt-missing-${randomUUID()}` }, randomUUID());
+      assert.ok([403, 404].includes(missing.status), J(missing.body));
+      assert.equal((await counts(O.organizationId)).drafts, drafts, "nothing written for a missing assessment");
+      WR.negatives.missing_assessment = missing.status;
+      WR.race.back_in_project = { version_4: v4, board_report: board, second_project_list: secondList.body.data.items.length };
+    });
+
     await test("J10: the whole journey - assessment reuse, three purpose reports, a revision, reads and downloads - wrote zero evidence, claim, coverage, follow-up, review, release or export decisions", async () => {
       const after = await workingCounts();
       const { drafts: draftsAfter, ...decisionsAfter } = after;
       const { drafts: draftsBefore, ...decisionsBefore } = approvalsBefore;
       assert.deepEqual(decisionsAfter, decisionsBefore, "no approval of any kind was needed or recorded");
-      // The funder report (+ version 2), board, annual, internal planning and the AI-withdrawn funder report.
-      assert.equal(draftsAfter - draftsBefore, 6);
+      // The funder report (+ version 2), board, annual, internal planning and the AI-withdrawn funder report,
+      // plus J11-J13: internal planning, funder report and annual-report content in the UI, versions 3 and 4, and a board report.
+      assert.equal(WR.added.length, 6, J(WR.added));
+      assert.equal(draftsAfter - draftsBefore, 6 + WR.added.length);
       WR.approvals = { before: approvalsBefore, after };
-      if (ARTIFACTS) writeFileSync(join(ARTIFACTS, "working-report-persistence.json"), `${J({ persistence: WR.persistence, negatives: WR.negatives, provider: WR.provider, approvals: WR.approvals, layout: WR.layout }, null, 2)}\n`);
+      if (ARTIFACTS) {
+        writeFileSync(join(ARTIFACTS, "working-report-persistence.json"), `${J({ persistence: WR.persistence, negatives: WR.negatives, provider: WR.provider, approvals: WR.approvals,
+          layout: WR.layout, styles: WR.styles, styled: WR.styled, downloads: WR.downloads, race: WR.race, attribution: WR.attribution, added: WR.added,
+          capabilities: WR.capabilities, reopened: WR.reopened }, null, 2)}\n`);
+      }
       await pageJ.close().catch(() => {});
     });
 

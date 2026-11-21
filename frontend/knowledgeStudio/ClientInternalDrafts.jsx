@@ -131,10 +131,15 @@ export default function ClientInternalDrafts({
   };
 
   const openDraft = async (generatedContentDraftId) => {
+    // The organization and Project this call reads from are the ones it was
+    // created with. A call from an earlier context (a create or revise
+    // response that arrived after the administrator switched organization or
+    // Project) opens nothing and leaves the current view as it is.
+    const requestContext = `${organizationId}:${engagementId || ""}`;
+    if (contextRef.current !== requestContext) return;
     setRevising(false);
     detailSeqRef.current += 1;
     const seq = detailSeqRef.current;
-    const requestContext = contextRef.current;
     setDetail({ status: "loading", draft: null, error: "" });
     const result = await getJson(clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId));
     if (detailSeqRef.current !== seq || contextRef.current !== requestContext) return;
@@ -195,6 +200,15 @@ export default function ClientInternalDrafts({
     // openDraft is recreated each render; the focus id is the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusDraftId, organizationId, engagementId]);
+
+  // A report created or revised here opens (and reloads the list) only while
+  // the administrator is still in the organization and Project it was saved
+  // in; the server has saved it either way.
+  const openSavedReport = (savedInContext) => (newDraftId) => {
+    if (contextRef.current !== savedInContext) return;
+    setLocalRefresh((value) => value + 1);
+    openDraft(newDraftId);
+  };
 
   if (!engagementId) return <div className="text-muted small">Select a Project to see its internal drafts.</div>;
   const claimById = new Map((Array.isArray(claims) ? claims : []).map((claim) => [claim.claimId, claim]));
@@ -282,13 +296,13 @@ export default function ClientInternalDrafts({
           ) : null}
           {canAdaptAssessments && draft.report?.isAssessment && draft.internalReport.available && !draft.historical ? (
             <UseThisAssessment organizationId={organizationId} engagementId={engagementId} draft={draft}
-              onCreated={(newDraftId) => { setLocalRefresh((value) => value + 1); openDraft(newDraftId); }} />
+              onCreated={openSavedReport(contextKey)} />
           ) : null}
           {canReviseReports && draft.revisable && !draft.historical ? (
             revising ? (
               <ReviseReport key={draft.generatedContentDraftId} organizationId={organizationId} engagementId={engagementId} draft={draft}
                 onCancel={() => setRevising(false)}
-                onSaved={(newDraftId) => { setLocalRefresh((value) => value + 1); openDraft(newDraftId); }} />
+                onSaved={openSavedReport(contextKey)} />
             ) : (
               <div className="mb-2">
                 <button type="button" className="btn btn-sm btn-outline-primary" data-client-revise-report={draft.generatedContentDraftId}
