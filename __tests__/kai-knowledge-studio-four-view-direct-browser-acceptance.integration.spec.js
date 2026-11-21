@@ -752,6 +752,19 @@ async function runBrowserAcceptance() {
       assert.equal(styles.btnPrimaryBackground, "rgb(13, 110, 253)", "Bootstrap's .btn-primary applies");
     });
 
+    // 40780768 (owner rule 7, 2026-11-18): calculated results are shown first; the
+    // raw count, its definition form and the recorded definition are an optional
+    // disclosure, closed until requested. It is opened by a real click on its
+    // visible summary (a re-read after a save may close it again).
+    const openRawCount = async (page) => {
+      const summary = "[data-client-raw-count-description] > summary";
+      await page.waitFor(() => page.evaluate(`Boolean(document.querySelector(${JSON.stringify(summary)})?.offsetParent)`), "the optional raw count disclosure");
+      if (!(await page.evaluate(`document.querySelector("[data-client-raw-count-description]").open`))) {
+        await page.click(summary, null, "Raw row count and source details (optional)");
+      }
+    };
+    const waitForRawCountText = (page, needle) => page.waitFor(async () => { await openRawCount(page); return (await page.text()).includes(needle); }, `visible text: ${needle}`);
+
     // Recorded for Journey B (it is the Sources measurement action).
     await test("Journey B: Sources -> a recognizable file -> Count records; the form survives a visit to another view; one write; nothing else processed", { timeout: 240000 }, async () => {
       await openStudio(adminPage, PROJECT_A);
@@ -763,7 +776,7 @@ async function runBrowserAcceptance() {
       assert.ok(!sourcesText.includes("workshop-log-oct.csv"), "Project B's file is not in Project A's Sources");
       const opener = `[data-client-open-source-measurement="${ids.sessionsVersion}"]`;
       await adminPage.click(opener, null, "Count records for the session log");
-      await adminPage.waitForText("Counted records = data records minus blank records = 5");
+      await waitForRawCountText(adminPage, "Counted records = data records minus blank records = 5");
       const mark = adminPage.mark();
       for (const [field, value] of [
         ["countedUnit", "programme session"], ["unitLabel", "programme sessions"],
@@ -783,13 +796,14 @@ async function runBrowserAcceptance() {
       assert.deepEqual(writes(adminPage, mark), [], "switching views writes nothing");
       await adminPage.click('[data-client-source-measurement-field="periodAttested"]', null, "attest the period");
       await adminPage.click("[data-client-source-measurement-submit]", null, "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 source records");
+      await waitForRawCountText(adminPage, "Measurement: 5 source records");
       await adminPage.idle();
       const [measurement] = await query("SELECT evidence_item_id::text, measured_value FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [ids.sessionsVersion]);
       assert.equal(Number(measurement.measured_value), 5);
       ids.countEvidenceId = measurement.evidence_item_id;
+      await openRawCount(adminPage);
       await adminPage.click(`[data-client-source-measurement-propose-claim="${ids.countEvidenceId}"]`, null, "Propose a claim");
-      await adminPage.waitForText("Claim: ");
+      await waitForRawCountText(adminPage, "Claim: ");
       await adminPage.idle();
       const [claim] = await query("SELECT claim_id::text FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG, ids.countEvidenceId]);
       ids.countClaimId = claim.claim_id;
@@ -802,7 +816,7 @@ async function runBrowserAcceptance() {
       await adminPage.tab("Drafts");
       await adminPage.idle();
       await adminPage.tab("Sources");
-      await adminPage.waitForText("Measurement: 5 source records");
+      await waitForRawCountText(adminPage, "Measurement: 5 source records");
       assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [ids.sessionsVersion]))[0].n, 1, "no duplicate measurement");
     });
 

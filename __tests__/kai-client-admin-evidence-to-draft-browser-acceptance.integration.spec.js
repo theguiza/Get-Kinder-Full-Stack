@@ -546,9 +546,10 @@ async function runBrowserAcceptance() {
       if (!projectValue) await adminPage.waitForText("No Project selected");
       await adminPage.selectProject(PROJECT_X);
       await adminPage.idle();
-      // Owner prompt 2026-10-26: with no measured finding the customer is sent to Count records.
+      // Owner prompt 2026-10-26: with no measured finding the customer is sent to
+      // the measurement step (af395fc7, 2026-11-18: View measurements, save a calculated result).
       await adminPage.clickTab("Drafts");
-      await adminPage.waitForText("No measured finding yet.");
+      await adminPage.waitForText("No measured finding saved yet. In Sources > Data Sources, open View measurements and save a calculated result for reports.");
       await adminPage.clickTab("Sources");
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-source-version="${ids.x.sourceVersionId}"]'))`), "the Project's source version listed");
       assert.ok(!(await adminPage.text()).includes(ids.y.statements[0]), "no organization-Y data");
@@ -807,13 +808,14 @@ async function runBrowserAcceptance() {
       await adminPage.clickTab("Drafts");
       await adminPage.idle();
       const summaryId = drafts.find((row) => row.content_type === "evidence_summary").generated_content_draft_id;
-      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-internal-draft="${summaryId}"] button'))`), "the saved draft listed");
-      await adminPage.clickIn(`[data-client-internal-draft="${summaryId}"] button`, "Read draft");
+      // The list item's Open control for exactly this saved draft (stable selector; the label is "Open").
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-internal-draft-open="${summaryId}"]'))`), "the saved draft listed");
+      await adminPage.clickIn(`[data-client-internal-draft-open="${summaryId}"]`, "Open (the saved draft)");
       // Owner decision 2026-10-19: the administrator reads its own persisted
       // draft back, only inside the internal-draft view with its true review
       // state and limitations.
-      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector("[data-client-internal-draft-detail]"))`), "internal draft detail");
-      const detail = await adminPage.evaluate(`(() => { const el = document.querySelector("[data-client-internal-draft-detail]"); return el ? el.innerText : null; })()`);
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-internal-draft-detail="${summaryId}"]'))`), "this draft's detail");
+      const detail = await adminPage.evaluate(`(() => { const el = document.querySelector('[data-client-internal-draft-detail="${summaryId}"]'); return el ? el.innerText : null; })()`);
       assert.ok(detail && detail.includes("Internal draft text for:"), `the persisted draft is read back: ${detail}`);
       for (const text of ["Awaiting Get Kinder review", "Internal use only.", "Working report: KAI has not sent or released it outside your organization.", "Get Kinder has not reviewed this draft."]) {
         assert.ok(detail.includes(text), text);
@@ -960,12 +962,26 @@ async function runBrowserAcceptance() {
     });
 
     // --- D. protected operations ---------------------------------------------
-    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, the GK source review list, funder P2-06 traceability or the GK traceability DTO, follow-up answers, or coverage acceptance", async () => {
+    await test("D: the client_admin's funder working draft is only a draft; the administrator cannot reach the readiness or data-gap generators, GK review decisions, review packets, the GK source review list, funder P2-06 traceability or the GK traceability DTO, follow-up answers, or coverage acceptance", async () => {
+      // Owner directive 2026-11-20 (21af6875): an organization administrator may
+      // create a working report for any audience; writing a funder-oriented draft
+      // is not a release. It is saved as an unreviewed draft, and nothing grants
+      // funder use or releases it (the funder traceability read below stays Get Kinder's).
+      const beforeFunder = await counts(ORG_X);
+      const funder = await adminPage.api("POST", createFunderEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-funder"));
+      assert.equal(funder.status, 201, JSON.stringify(funder.body));
+      assert.deepEqual([funder.body.data.requestedAudience, funder.body.data.draftStatus, funder.body.data.reviewStatus], ["funder", "draft", "needs_gk_review"]);
+      assert.deepEqual(delta(await counts(ORG_X), beforeFunder), { sources: 0, evidence: 0, claims: 0, generation_runs: 1, drafts: 1, evidence_decisions: 0, claim_decisions: 0, promotions: 0, gaps: 0, followups: 0, followup_queue: 0 },
+        "one working draft; no evidence, claim or review decision");
+      const [funderRow] = await query(`SELECT d.requested_audience, d.draft_status, d.review_status, r.engagement_id::text
+         FROM kai.generated_content_drafts d JOIN kai.generation_runs r ON r.organization_id = d.organization_id AND r.generation_run_id = d.generation_run_id
+        WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid`, [ORG_X, funder.body.data.generatedContentDraftId]);
+      assert.deepEqual(funderRow, { requested_audience: "funder", draft_status: "draft", review_status: "needs_gk_review", engagement_id: PROJECT_X });
+      ids.x.funderWorkingDraftId = funder.body.data.generatedContentDraftId;
       const before = await counts(ORG_X);
       const evidenceQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableEvidenceId]))[0];
       const claimQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableClaimId]))[0];
       const protectedRequests = [
-        ["funder evidence summary", "POST", createFunderEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-funder")],
         ["readiness assessment", "POST", createReadinessAssessmentPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-readiness")],
         ["data gap memo", "POST", createDataGapMemoPath(ORG_X), { idempotency_key: "client-admin-gap-memo", engagement_id: PROJECT_X }],
         ["GK review packet", "GET", generatedDraftReviewPacketPath(ORG_X, ids.x.draftIds[0])],
@@ -1094,9 +1110,14 @@ async function runBrowserAcceptance() {
       }
       assert.equal(modelCalls.length, modelCallsBefore, "no generator call for a refused request");
       assert.deepEqual(await counts(ORG_X), before);
-      // The persisted drafts stay internal, unreviewed drafts.
-      const states = await query("SELECT DISTINCT requested_audience, draft_status, review_status FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]);
-      assert.deepEqual(states, [{ requested_audience: "internal", draft_status: "draft", review_status: "needs_gk_review" }]);
+      // The persisted drafts stay unreviewed drafts: the internal drafts and the
+      // administrator's one funder working draft from D (2026-11-20), none reviewed or released.
+      const states = await query("SELECT DISTINCT requested_audience, draft_status, review_status FROM kai.generated_content_drafts WHERE organization_id = $1::uuid ORDER BY requested_audience", [ORG_X]);
+      assert.deepEqual(states, [
+        { requested_audience: "funder", draft_status: "draft", review_status: "needs_gk_review" },
+        { requested_audience: "internal", draft_status: "draft", review_status: "needs_gk_review" },
+      ]);
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid AND requested_audience = 'funder'", [ORG_X]))[0].n, 1, "only D's funder working draft");
       results.e = "PASS";
     });
 

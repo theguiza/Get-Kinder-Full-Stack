@@ -560,11 +560,24 @@ async function runBrowserAcceptance() {
       ids.sourceVersionId = version.source_version_id;
     });
 
+    // 40780768 (owner rule 7, 2026-11-18): calculated results are shown first; the
+    // raw count, its definition form and the recorded definition are an optional
+    // disclosure, closed until requested. The administrator opens it by its visible
+    // summary, as a person would (a re-read after a save may close it again).
+    const openRawCount = async () => {
+      const summary = "[data-client-raw-count-description] > summary";
+      await adminPage.waitFor(() => adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(summary)})?.offsetParent)`), "the optional raw count disclosure");
+      if (!(await adminPage.evaluate(`document.querySelector("[data-client-raw-count-description]").open`))) {
+        await adminPage.clickIn(summary, "Raw row count and source details (optional)");
+      }
+    };
+    const waitForRawCountText = (needle) => adminPage.waitFor(async () => { await openRawCount(); return (await adminPage.text()).includes(needle); }, `text: ${needle}`);
+
     await test("A1: in Data Sources the organization administrator sees the server's counts and calculation and records the definition; the measurement is the independent count", async () => {
       await openDataSources();
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-source-measurement="${ids.sourceVersionId}"]`)), "Count records");
       await adminPage.clickIn(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");
-      await adminPage.waitForText("Counted records = data records minus blank records = 5");
+      await waitForRawCountText("Counted records = data records minus blank records = 5");
       const counts = await textOf(adminPage, "[data-client-source-measurement-counts]");
       assert.match(counts, /Data records after the header row: 6/);
       assert.match(counts, /Blank records \(not counted\): 1/);
@@ -581,8 +594,9 @@ async function runBrowserAcceptance() {
       await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
       const mark = adminPage.mark();
       await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-      await adminPage.waitForText("Measurement: 5 source records");
+      await waitForRawCountText("Measurement: 5 source records");
       await adminPage.idle();
+      await openRawCount();
       const requests = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/record-count-measurement"));
       assert.deepEqual(requests[0] && [requests[0].method, requests[0].status], ["POST", 200], "the measurement write succeeded");
       assert.ok(requests.slice(1).every((entry) => entry.method === "GET" && entry.status === 200), JSON.stringify(requests));
@@ -598,8 +612,9 @@ async function runBrowserAcceptance() {
     });
 
     await test("A2: the administrator proposes the measured claim from the panel; it states the count, records its gaps, and creates no client follow-up", async () => {
+      await openRawCount();
       await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${ids.evidenceItemId}"]`, "Propose a claim");
-      await adminPage.waitForText("Claim: The promoted source has 5 source records");
+      await waitForRawCountText("Claim: The promoted source has 5 source records");
       assert.match(await adminPage.text(), /status: proposed; review: needs_gk_review/);
       const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_X, ids.evidenceItemId]);
       assert.match(claim.statement, /^The promoted source has 5 source records \(record count: .*its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules\.$/);
@@ -620,7 +635,7 @@ async function runBrowserAcceptance() {
       assert.match(conflict.body.blockers[0].required_fix, /upload a new intake version/);
       await adminPage.clickButton("Close");
       await adminPage.clickIn(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records again");
-      await adminPage.waitForText("One record is one programme session");
+      await waitForRawCountText("One record is one programme session");
       assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "no form for a recorded version");
       const [rows] = await query("SELECT count(*)::int AS definitions FROM kai.source_measurement_definitions WHERE organization_id = $1::uuid", [ORG_X]);
       assert.equal(rows.definitions, 1);
@@ -696,7 +711,7 @@ async function runBrowserAcceptance() {
       const inProgress = await queueOf("generated_content_review", ids.draftId);
       const completed = await gkReviewerPage.api("POST", generatedContentReviewCompletePath(ORG_X, ids.draftId, inProgress.review_queue_item_id), { expected_updated_at: new Date(inProgress.updated_at).toISOString() });
       assert.equal(completed.status, 200, JSON.stringify(completed.body));
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
+      await adminPage.clickIn(`[data-client-internal-draft-open="${ids.draftId}"]`, "Open (the saved report)");
       // 8bca1055: the available report shows no release-state block; the
       // server's release state says the review is done and release awaits Get Kinder.
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-report="available"]`)) !== null, "the available internal report");
@@ -742,7 +757,8 @@ async function runBrowserAcceptance() {
     });
 
     await test("E: the organization administrator opens the released report in the UI and receives exactly the released Markdown", async () => {
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
+      await adminPage.clickIn(`[data-client-internal-draft-open="${ids.draftId}"]`, "Open (the saved report)");
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`)) !== null, "this report's detail");
       await adminPage.waitForText("Released for internal use");
       // Owner amendment 2026-10-23: the detail now says who made the release.
       await adminPage.waitForText("Released by Get Kinder");
@@ -803,7 +819,7 @@ async function runBrowserAcceptance() {
       created(revoked, "revoke");
       const afterRevoke = await fetchText(adminPage, clientPath);
       assert.equal(afterRevoke.status, 409, afterRevoke.body);
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
+      await adminPage.clickIn(`[data-client-internal-draft-open="${ids.draftId}"]`, "Open (the saved report)");
       // 8bca1055: the revoked release of an available report is the server's
       // release state; the UI offers no released-report action for it.
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"] [data-client-internal-report="available"]`)) !== null, "the available internal report");

@@ -334,11 +334,15 @@ async function runAssembledAcceptance() {
   const Anthropic = (await import("@anthropic-ai/sdk")).default;
   const messagesPrototype = Object.getPrototypeOf(new Anthropic({ apiKey: "sk-ant-test-unused-dummy-key" }).messages);
   const modelCalls = [];
-  const COMPLIANT_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
-    + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
-    + "the period is attested in that definition and not verified against record dates. "
-    + "1 blank record was excluded and 2 exact-duplicate records were included. "
-    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment are unresolved and carried with the count for internal use only.";
+  // Owner Package 1 (44950111, 2026-11-10): a record count states rows counted;
+  // the organization's unit, period and rules are attributed, never applied.
+  // The earlier reply ("records 5 programme sessions") now fails validation and
+  // is restated by the server, so the compliant reply uses the current terms.
+  const COMPLIANT_TEXT = "5 nonblank data rows were counted in the CSV data records of the cited source version for the organization's attested period 2026-09-01 to 2026-09-30; "
+    + "1 blank row was excluded and 2 exact-duplicate rows stayed in the count. "
+    + "What one row represents was defined by a person at the organization and was not verified by KAI, so this is a row count only, "
+    + "and the period was not checked against dates in the rows. "
+    + "Internal limitations: conflicting source indicators and requirement alignment are not yet resolved and are carried with the count for internal use only.";
   // A boundary test sets modelOverride.text to an unsupported reply for one call.
   const modelOverride = { text: null };
   messagesPrototype.create = async function deterministicCreate(payload) {
@@ -712,17 +716,18 @@ async function runAssembledAcceptance() {
     }
     assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);
     assert.match(shown, /\*\*Project \/ engagement:\*\* `Session Programme 2026`/);
-    assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independent.counted);
-    assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
+    // Owner Package 1 (2026-11-10): the count is stated as rows counted; the unit, period and rules are the organization's, attributed.
+    assert.equal(Number((/\*\*(\d+) nonblank data rows were counted/.exec(shown) || [])[1]), independent.counted);
+    assert.match(shown, /The organization states the reporting period 2026-09-01 to 2026-09-30; it was not checked against dates in the rows\./);
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
-    assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
+    assert.match(shown, /2 (?:counted|data) records in exact-duplicate groups \([^)]*\)\. The record count removes no duplicate: every one of them stays in the count of 5/);
     assert.match(shown, /not checked against dates in the records/);
-    assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*outcome[\s\S]*caused any result/);
-    assert.match(shown, /## Conclusion\n\nOn the available evidence, the organization's promoted source records 5 programme sessions for 2026-09-01 to 2026-09-30\./);
+    assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*one `programme session`/);
+    assert.match(shown, /## Conclusion\n\nOn the available evidence, the promoted source contains 5 nonblank data rows in [^\n]*not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact\./);
     for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
     for (const id of [ids.claimId, ids.evidenceItemId, ids.sourceVersionId]) assert.ok(shown.includes(`\`${id}\``), id);
     assert.ok(shown.includes(COMPLIANT_TEXT), "the validated generated text");
-    assert.match(shown, /no further approval is required for internal use/);
+    assert.match(shown, /no review approval is required to use this report/);
     assert.doesNotMatch(shown, /field_\d/, "never a field-presence claim in place of the measured result");
     assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|programme-sessions-september|kc\d{12}/, "no row values, file names or run tags");
   };
@@ -1131,6 +1136,21 @@ async function runAssembledAcceptance() {
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-source-measurement="${ids.sourceVersionId}"]`)), "Count records");
       let mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");
+      // 40780768 (owner rule 7, 2026-11-18): the calculated result is shown first;
+      // the raw count, its definition form and the recorded definition are an
+      // optional disclosure, closed until requested. The administrator opens it
+      // by its visible summary, as a person would (a re-read after a save may
+      // close it again, so it is reopened where needed).
+      const openRawCount = async () => {
+        const summary = "[data-client-raw-count-description] > summary";
+        await adminPage.waitFor(() => adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(summary)})?.offsetParent)`), "the optional raw count disclosure");
+        if (!(await adminPage.evaluate(`document.querySelector("[data-client-raw-count-description]").open`))) {
+          await adminPage.clickIn(summary, "Raw row count and source details (optional)");
+        }
+      };
+      const calculated = new RegExp(`All nonblank records\\s+${independent.counted}(?!\\d)`);
+      await adminPage.waitFor(async () => calculated.test(await adminPage.text()), "the calculated record count, shown first");
+      await openRawCount();
       await adminPage.waitForText(`Counted records = data records minus blank records = ${independent.counted}`);
       await adminPage.idle();
       const basisReads = adminPage.requestsSince(mark).filter((r) => r.url.includes("/record-count-measurement"));
@@ -1152,7 +1172,10 @@ async function runAssembledAcceptance() {
       await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
       mark = adminPage.mark();
       await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
-      await adminPage.waitForText(`Measurement: ${independent.counted} programme sessions`);
+      // Owner Package 1 (44950111, 2026-11-10): the recorded measurement is a count
+      // of source records; the organization's unit label is shown as its label.
+      const recordedLine = `Measurement: ${independent.counted} source records (your label: programme sessions)`;
+      await adminPage.waitFor(async () => { await openRawCount(); return (await adminPage.text()).includes(recordedLine); }, `text: ${recordedLine}`);
       await adminPage.idle();
       const writes = adminPage.requestsSince(mark).filter((r) => r.method === "POST");
       assert.deepEqual(writes.map((r) => [pathOf(r).endsWith("/record-count-measurement"), r.status]), [[true, 200]]);
@@ -1178,16 +1201,22 @@ async function runAssembledAcceptance() {
       ids.evidenceItemId = measurement.evidence_item_id;
       ids.measuredValue = Number(measurement.measured_value);
 
+      await openRawCount();
       await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${ids.evidenceItemId}"]`, "Propose a claim");
-      await adminPage.waitForText(`Claim: The promoted source records ${independent.counted} programme sessions`);
+      // Owner Package 1 (2026-11-10): the claim asserts only the count of source
+      // records; the organization's unit and attested period are attributed, not applied.
+      const claimLine = `Claim: The promoted source has ${independent.counted} source records`;
+      await adminPage.waitFor(async () => { await openRawCount(); return (await adminPage.text()).includes(claimLine); }, `text: ${claimLine}`);
       const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_X, ids.evidenceItemId]);
-      assert.match(claim.statement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+      assert.equal(claim.statement, `The promoted source has ${independent.counted} source records (record count: one record per CSV data record; `
+        + `${independent.blankRecords} blank record excluded; ${independent.duplicateRecords} in exact-duplicate groups (1 excess copy), not removed). `
+        + "Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30, and its inclusion and exclusion rules.");
       const [gaps] = await query(`SELECT (SELECT count(*) FROM kai.gap_log_items WHERE claim_id = $1::uuid)::int AS gaps,
         (SELECT count(*) FROM kai.client_followup_items WHERE claim_id = $1::uuid)::int AS followups`, [claim.claim_id]);
       assert.ok(gaps.gaps > 0, "measurement-specific gap state recorded at proposal (no manual P2-04 step)");
       assert.equal(gaps.followups, 0, "no unnecessary client follow-up");
       ids.claimId = claim.claim_id;
-      ids.claimValue = Number(/records (\d+) programme sessions/.exec(claim.statement)[1]);
+      ids.claimValue = Number(/^The promoted source has (\d+) source records/.exec(claim.statement)[1]);
       results.d = { measurement: ids.measuredValue, claim: ids.claimValue, followups: 0 };
     });
 
@@ -1292,7 +1321,7 @@ async function runAssembledAcceptance() {
       const facts = await adminPage.api("GET", `${orgPath()}/impact-facts`);
       const fact = facts.body.data.items.find((item) => item.claimId === ids.claimId);
       assert.ok(fact, J(facts.body.data.items));
-      assert.match(fact.statement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+      assert.match(fact.statement, /^The promoted source has 5 source records \(record count: .*\)\. Not applied by KAI: the organization's description of each record as one programme session, its stated period 2026-09-01 to 2026-09-30/);
       assert.deepEqual(fact.limitationDimensionKeys, carried);
       assert.ok(!facts.body.data.items.some((item) => /field_\d/.test(item.statement || "")), "no field-presence claim is offered as an impact fact");
 
@@ -1354,7 +1383,10 @@ async function runAssembledAcceptance() {
           WHERE d.organization_id = $1::uuid`, [ORG_X]);
       assert.deepEqual([draft.draft_status, draft.review_status], ["draft", "needs_gk_review"], "the model's approval/release fields are not authoritative");
       ids.draftId = draft.generated_content_draft_id;
-      ids.generatedValue = Number(/records (\d+) programme sessions/.exec(draft.block_text)[1]);
+      assert.ok(draft.block_text.startsWith(COMPLIANT_TEXT), `the validated reply is saved as written: ${draft.block_text.slice(0, 300)}`);
+      const [validators] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [draft.generated_content_draft_id]);
+      assert.ok(!validators.validator_results.some((result) => result.validator_key === "KAI-GEN-WORDING-FALLBACK-001"), "nothing was restated");
+      ids.generatedValue = Number(/^(\d+) nonblank data rows were counted/.exec(draft.block_text)[1]);
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${ids.draftId}"]`)), "the internal report action");
       assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
       for (const selector of ["[data-client-factual-review-action]", "[data-client-factual-review-approve]", "[data-client-internal-release-action]",
@@ -1391,7 +1423,8 @@ async function runAssembledAcceptance() {
     });
 
     await test("E3: Report 1 - the administrator opens and downloads the complete internal Evidence Summary Markdown in the UI; nothing is approved, reviewed, confirmed or released", async () => {
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
+      await adminPage.clickIn(`[data-client-internal-draft-open="${ids.draftId}"]`, "Open (the saved report)");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`)), "the saved report's detail");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${ids.draftId}"]`)), "the report action");
       const mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-open-internal-report="${ids.draftId}"]`, "Open report");
@@ -1407,7 +1440,7 @@ async function runAssembledAcceptance() {
       assert.deepEqual([fetched.status, fetched.body], [200, shown], "the download is the report shown");
       assert.match(fetched.disposition, /attachment; filename="kai-internal-evidence-summary\.md"/);
       assertCompleteReport(shown, "# Internal Evidence Summary");
-      ids.markdownValue = Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]);
+      ids.markdownValue = Number((/\*\*(\d+) nonblank data rows were counted/.exec(shown) || [])[1]);
       ids.reportMarkdown = { evidenceSummary: shown };
       writeFileSync(join(WORKDIR, "report-1-internal-evidence-summary.md"), shown);
       console.log(`[internal-report:evidence_summary:begin]\n${shown}[internal-report:end]`);
@@ -1479,42 +1512,71 @@ async function runAssembledAcceptance() {
         outcomes[`${actorType} read/approve/release`] = "authorization_denied";
       }
 
-      // Unsupported or fabricated content: VAL-GEN-004 refuses it before anything is persisted.
-      const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
-      for (const [label, text] of [
-        ["fabricated metric", "The promoted source records 12 programme sessions for the reporting period 2026-09-01 to 2026-09-30, reaching 40 participants."],
-        ["causal outcome", COMPLIANT_TEXT.replace("This is a count", "The programme improves literacy because of these sessions. This is a count")],
+      // Unsupported or fabricated content never reaches the saved report. Since
+      // the shared wording fallback (owner rule 3; 21af6875 for every narrative
+      // type), a reply that fails VAL-GEN is not saved: the server restates the
+      // cited finding in its recorded wording and says so, instead of refusing
+      // the whole report.
+      for (const [label, text, forbidden] of [
+        ["fabricated metric", "The promoted source records 12 programme sessions for the reporting period 2026-09-01 to 2026-09-30, reaching 40 participants.", /\b12\b|\b40\b|participants/],
+        ["causal outcome", COMPLIANT_TEXT.replace("What one row represents", "The programme improves literacy because of these sessions. What one row represents"), /because|improves literacy/i],
       ]) {
         modelOverride.text = text;
         try {
-          const refused = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/evidence-summary`,
-            { claim_ids: [ids.claimId], idempotency_key: `refused-${label.replace(/\W+/g, "-")}`, engagement_id: PROJECT_X });
-          assert.equal(refused.status, 422, `${label}: ${JSON.stringify(refused.body)}`);
-          assert.ok(refused.body.blockers.some((b) => b.validator_key === "VAL-GEN-004" && b.blocking_reason === "unsupported_numeric_or_causal_assertion"), J(refused.body.blockers));
-          outcomes[label] = "VAL-GEN-004 422";
+          const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+          const restated = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/evidence-summary`,
+            { claim_ids: [ids.claimId], idempotency_key: `restated-${label.replace(/\W+/g, "-")}`, engagement_id: PROJECT_X });
+          assert.equal(restated.status, 201, `${label}: ${JSON.stringify(restated.body)}`);
+          const draftId = restated.body.data.generatedContentDraftId;
+          const [saved] = await query(`SELECT d.validator_results, string_agg(b.text, '\n' ORDER BY b.ordinal) AS text
+             FROM kai.generated_content_drafts d JOIN kai.generated_content_blocks b ON b.generated_content_draft_id = d.generated_content_draft_id
+            WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid GROUP BY d.validator_results`, [ORG_X, draftId]);
+          assert.doesNotMatch(saved.text, forbidden, `${label}: the refused wording is never saved`);
+          assert.ok(!saved.text.includes(text), label);
+          assert.match(saved.text, /^5 nonblank data rows were counted/, `${label}: the finding is restated in its recorded wording`);
+          assert.ok(saved.validator_results.some((result) => result.validator_key === "KAI-GEN-WORDING-FALLBACK-001"), `${label}: the restatement is recorded`);
+          assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore + 1);
+          const report = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draftId));
+          assert.equal(report.status, 200, report.body.slice(0, 300));
+          assert.doesNotMatch(report.body.split("\n## Generated narrative\n")[1].split("\n## ")[0], forbidden, `${label}: not in the report`);
+          outcomes[label] = "not saved; restated (201)";
         } finally {
           modelOverride.text = null;
         }
       }
-      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore, "nothing persisted");
 
-      // Funder and public disclosure keep their own authority: the customer cannot generate a funder summary or start any GK export step.
+      // Owner directive 2026-11-20: the organization administrator may write a
+      // funder-oriented working draft; that is not a release. Every export /
+      // release step stays Get Kinder's.
       const funder = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/evidence-summary/funder`,
-        { claim_ids: [ids.claimId], idempotency_key: "refused-funder", engagement_id: PROJECT_X });
-      assert.ok([403, 422].includes(funder.status), `funder generation: ${funder.status} ${JSON.stringify(funder.body)}`);
+        { claim_ids: [ids.claimId], idempotency_key: "funder-working-draft", engagement_id: PROJECT_X });
+      assert.equal(funder.status, 201, `funder working draft: ${JSON.stringify(funder.body)}`);
+      assert.deepEqual([funder.body.data.requestedAudience, funder.body.data.draftStatus, funder.body.data.reviewStatus], ["funder", "draft", "needs_gk_review"]);
       const draftPath = `${orgPath()}/generated-content-drafts/${ids.draftId}`;
       for (const audience of ["internal", "funder", "public"]) {
         assert.equal((await adminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: audience })).status, 403, audience);
+        assert.equal((await adminPage.api("POST", `${orgPath()}/generated-content-drafts/${funder.body.data.generatedContentDraftId}/export-review-request`, { requested_export_audience: audience })).status, 403, `funder draft ${audience}`);
       }
-      outcomes.funderGeneration = funder.status;
+      for (const audience of ["funder", "public"]) {
+        assert.equal((await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, audience))).body.data.eligible, false, `${audience} release authority is not granted by drafting`);
+      }
+      outcomes.funderGeneration = `${funder.status} working draft; export review 403`;
 
       // INJECTED STATE (labeled): no application operation supersedes a source version.
+      // 21af6875 (owner directive 2026-11-20): a report whose cited source has
+      // changed is served as the saved version - exactly its saved text and
+      // citations, marked as such - never as a current report or with figures
+      // recomputed from the changed source.
+      const savedBlocks = await query(`SELECT text FROM kai.generated_content_blocks WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid ORDER BY ordinal`, [ORG_X, ids.draftId]);
       await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       try {
         const stale = await fetchText(adminPage, path);
-        assert.equal(stale.status, 409, stale.body);
-        assert.doesNotMatch(stale.body, /programme sessions/);
-        outcomes.stale = stale.status;
+        assert.equal(stale.status, 200, stale.body);
+        assert.match(stale.body, /^# Internal Evidence Summary \(saved version\)\n/);
+        assert.match(stale.body, /A source it cites has changed since, so its figures are as they stood then/);
+        for (const block of savedBlocks) assert.ok(stale.body.includes(block.text.trim()), "the saved text, exactly as saved");
+        assert.doesNotMatch(stale.body, /Ready for internal use|## Key findings/, "not presented as a current report");
+        outcomes.stale = `${stale.status} saved version`;
       } finally {
         await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       }
@@ -1531,13 +1593,20 @@ async function runAssembledAcceptance() {
         const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
         return [traced.body.data.eligible, traced.body.data.blockerCodes];
       };
+      // Owner direction 2026-11-06 (6f56e744, draft first) and 2026-11-13
+      // (a72413e6): a recorded sensitivity category is information shown with
+      // the organization's own internal report, not a withholding reason or a
+      // review requirement for internal use. A use or AI-processing prohibition
+      // (below), a superseded source (above) and failed integrity still withhold it.
       await recordSensitivity({ reviewed_minor_data_status: "present" });
       try {
-        assert.equal((await internalEligibility())[0], false, "a sensitive source is not ordinary");
+        assert.equal((await internalEligibility())[0], true, "a recorded category does not withdraw internal use");
         const sensitive = await fetchText(adminPage, path);
-        assert.equal(sensitive.status, 422, sensitive.body);
-        assert.deepEqual(JSON.parse(sensitive.body).blockers.map((b) => b.blocking_reason), ["minor_information_not_cleared", "cited_claims_not_currently_eligible"]);
-        outcomes.sensitive = sensitive.status;
+        assert.equal(sensitive.status, 200, sensitive.body.slice(0, 400));
+        assert.match(sensitive.body, /\n## Information\n\n- A cited source may contain information about minors\. Take extra care before sharing details outside the organization\.\n/,
+          "the report states the recorded category");
+        assert.match(sensitive.body, /KAI has not sent or released it|this organization's reporting and planning/, "still the organization's working report, not a release");
+        outcomes.sensitive = `${sensitive.status} with the minors information note`;
       } finally {
         await recordSensitivity({ reviewed_minor_data_status: "absent" });
       }
@@ -1589,14 +1658,26 @@ async function runAssembledAcceptance() {
       assert.equal((await claimDecision("approved")).status, 200);
       assert.deepEqual(await internalEligibility(), [true, []]);
       // Get Kinder supersedes the organization's evidence decision; the organization cannot override it.
+      // a72413e6 (owner direction 2026-11-13): an incomplete review
+      // (needs_more_information) is information, not a negative decision, so it
+      // does not withdraw internal use; an explicit negative decision does.
       const gkDecision = await evidenceDecision("needs_more_information", gkReviewerPage);
       assert.equal(gkDecision.status, 200, JSON.stringify(gkDecision.body));
-      assert.equal((await internalEligibility())[0], false);
+      assert.deepEqual(await internalEligibility(), [true, []], "an open question does not withdraw internal use");
       const override = await evidenceDecision("supported", adminPage);
       assert.deepEqual([override.status, override.body.blockers?.map((b) => b.blocking_reason)], [422, ["get_kinder_decision_recorded"]]);
+      const gkNegative = await evidenceDecision("not_supported", gkReviewerPage);
+      assert.equal(gkNegative.status, 200, JSON.stringify(gkNegative.body));
+      const [gkIneligible, gkCodes] = await internalEligibility();
+      assert.equal(gkIneligible, false, "Get Kinder's negative decision makes the claim ineligible");
+      assert.ok(gkCodes.includes("support_strength_unassessed"), gkCodes.join(","));
+      assert.equal((await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId))).status, 422, "the report is withheld");
+      const overrideNegative = await evidenceDecision("supported", adminPage);
+      assert.deepEqual([overrideNegative.status, overrideNegative.body.blockers?.map((b) => b.blocking_reason)], [422, ["get_kinder_decision_recorded"]]);
+      assert.equal((await internalEligibility())[0], false, "the organization cannot override it");
       const view = await reviewNow();
       assert.deepEqual([view.evidence_review.decided_by, view.evidence_review.organization_may_decide], ["get_kinder", false]);
-      outcomes.gkSupersedes = "gk_reviewer superseded the organization's evidence decision; the organization's override was refused";
+      outcomes.gkSupersedes = "gk_reviewer superseded the organization's evidence decision; needs_more_information kept internal use; not_supported withdrew it; both organization overrides were refused";
       results.governance = outcomes;
     });
 
@@ -1610,7 +1691,7 @@ async function runAssembledAcceptance() {
         claimStatement: ids.claimValue,
         generatedContent: ids.generatedValue,
         internalReportMarkdown: ids.markdownValue,
-        secondReportMarkdown: Number((/records \*\*(\d+) programme sessions\*\*/.exec(ids.reportMarkdown.impactNarrative) || [])[1]),
+        secondReportMarkdown: Number((/\*\*(\d+) nonblank data rows were counted/.exec(ids.reportMarkdown.impactNarrative) || [])[1]),
       };
       assert.deepEqual(new Set(Object.values(chain)), new Set([5]), JSON.stringify(chain));
       results.byteToReport = { ...chain, checksum: independent.checksum, profileCounts: ids.profileCounts };

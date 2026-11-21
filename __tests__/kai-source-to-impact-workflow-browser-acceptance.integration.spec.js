@@ -619,8 +619,9 @@ async function runBrowserAcceptance() {
         WHERE d.organization_id = $1::uuid AND d.content_type = 'evidence_summary' AND c.claim_id = $2::uuid
         ORDER BY d.created_at DESC LIMIT 1`, [ORG_X, claimId]);
     await openDataSources(page);
-    await page.waitFor(() => has(page, `[data-client-internal-draft="${summary.id}"] button`), "the saved summary listed");
-    await page.clickIn(`[data-client-internal-draft="${summary.id}"] button`, "Read draft");
+    // The list item's Open control for exactly this saved report (stable selector; the label is "Open").
+    await page.waitFor(() => has(page, `[data-client-internal-draft-open="${summary.id}"]`), "the saved summary listed");
+    await page.clickIn(`[data-client-internal-draft-open="${summary.id}"]`, "Open (the saved summary)");
     await page.waitFor(() => has(page, `[data-client-internal-draft-detail="${summary.id}"]`), "summary read back");
     await page.idle();
   }
