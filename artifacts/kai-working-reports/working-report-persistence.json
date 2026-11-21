@@ -1,0 +1,372 @@
+{
+  "persistence": {
+    "funder": {
+      "draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
+      "content_type": "evidence_summary",
+      "audience": "funder",
+      "lineage": {
+        "version": 1,
+        "relationship": "assessment_adaptation",
+        "engagement_id": "7d000000-0000-4000-8000-000000000004",
+        "guidance_sha256": null,
+        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "withheld_blocks": [],
+        "reporting_purpose": "funder_report",
+        "selected_claim_ids": null,
+        "root_report_draft_id": null,
+        "reused_block_ordinals": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
+        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+      },
+      "block_count": 13,
+      "citations": 8,
+      "content_fingerprint": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
+      "assessment_fingerprint_before": "44e3d356d6d7486282ce24394afc0f9e30331226efb7400fcd234ab5b296b5b7",
+      "assessment_fingerprint_after": "44e3d356d6d7486282ce24394afc0f9e30331226efb7400fcd234ab5b296b5b7"
+    },
+    "revision": {
+      "draft_id": "1b3728c5-cead-4e5f-8e10-7d03fdcb00b7",
+      "lineage": {
+        "version": 2,
+        "relationship": "organization_revision",
+        "engagement_id": "7d000000-0000-4000-8000-000000000004",
+        "parent_draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
+        "revised_by_type": "human",
+        "reporting_purpose": "funder_report",
+        "root_report_draft_id": "9941890c-8dc0-4f98-b616-337c25de5c4a",
+        "parent_content_sha256": "fd0d50c0dcd8853c5bafdd35ad34922bf31decd84e015707ae7ac9d32f719f60",
+        "revised_block_ordinals": [
+          1
+        ],
+        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
+        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+      },
+      "v1_fingerprint_before": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
+      "v1_fingerprint_after": "cc02b3f385fbf11f37278fbd7e8c733b31404b9e560c241f6f674f673e99bcf6",
+      "v2_fingerprint": "4ccaf3392621363b1fe83806195feb3b268835112bbb2631abe0d553cf972de9"
+    },
+    "board": {
+      "draft_id": "4c815302-f192-4238-8123-44ab685642bc",
+      "content_type": "board_update",
+      "audience": "internal",
+      "lineage": {
+        "version": 1,
+        "relationship": "assessment_adaptation",
+        "engagement_id": "7d000000-0000-4000-8000-000000000004",
+        "guidance_sha256": "092059b6c0ba6070c0d5fefad42d56925bdb6e37967f908b44086b23648966bb",
+        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "withheld_blocks": [],
+        "reporting_purpose": "board_update",
+        "selected_claim_ids": null,
+        "root_report_draft_id": null,
+        "reused_block_ordinals": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
+        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+      }
+    },
+    "annual": {
+      "draft_id": "aebaeccc-89d9-4915-95cc-8dc2697ea108",
+      "content_type": "annual_report_section",
+      "audience": "public",
+      "lineage": {
+        "version": 1,
+        "relationship": "assessment_adaptation",
+        "engagement_id": "7d000000-0000-4000-8000-000000000004",
+        "guidance_sha256": null,
+        "parent_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "withheld_blocks": [
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 1,
+            "section_key": "executive_snapshot"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 2,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 3,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 4,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 5,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 7,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 8,
+            "section_key": "evidence_findings"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 11,
+            "section_key": "gaps_opportunities"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 12,
+            "section_key": "gaps_opportunities"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 13,
+            "section_key": "recommended_improvements"
+          },
+          {
+            "reason": "cites_finding_not_selected",
+            "ordinal": 16,
+            "section_key": "next_steps"
+          }
+        ],
+        "reporting_purpose": "annual_report",
+        "selected_claim_ids": [
+          "390da13e-b48a-43fa-a2ea-968c7db01d5d",
+          "4eaa5af3-6b95-46b5-92b3-e0958f615eb9"
+        ],
+        "root_report_draft_id": null,
+        "reused_block_ordinals": [
+          6,
+          9,
+          10,
+          14,
+          15
+        ],
+        "source_assessment_draft_id": "26e189a0-23a6-4c1b-80b2-4db1e4a4b8b6",
+        "source_assessment_content_sha256": "3cad38a784c2e713e3de48bab1046e1a3b4667a62f9444d1af5e1ce0f6474cc1",
+        "source_assessment_generation_run_id": "7c81c161-3c58-43b3-9f14-14a0552694fe"
+      }
+    }
+  },
+  "negatives": {
+    "figure_unit_changed": {
+      "status": 422,
+      "blockers": [
+        [
+          "VAL-GEN-REVISION-001",
+          "revision_figure_context_changed",
+          [
+            3
+          ]
+        ]
+      ]
+    },
+    "unsupported_number": {
+      "status": 422,
+      "blockers": [
+        [
+          "VAL-GEN-004",
+          "unsupported_numeric_or_causal_assertion",
+          [
+            1
+          ]
+        ]
+      ]
+    },
+    "causal_claim": {
+      "status": 422,
+      "blockers": [
+        [
+          "VAL-GEN-004",
+          "unsupported_numeric_or_causal_assertion",
+          [
+            1
+          ]
+        ]
+      ]
+    },
+    "invented_quotation": {
+      "status": 422,
+      "blockers": [
+        [
+          "VAL-GEN-010",
+          "unsupported_quotation",
+          [
+            1
+          ]
+        ]
+      ]
+    },
+    "unchanged": {
+      "status": 422,
+      "blockers": [
+        [
+          "VAL-GEN-REVISION-001",
+          "revision_unchanged",
+          null
+        ]
+      ]
+    },
+    "replay": {
+      "status": 201,
+      "same_draft": true
+    },
+    "conflicting_retry": {
+      "status": 409,
+      "code": "duplicate_conflict"
+    },
+    "unauthenticated": {
+      "adapt": 401,
+      "revise": 401
+    },
+    "adaptation": {
+      "replay": 201,
+      "conflict": 409,
+      "other_organization": 403,
+      "other_project": 403,
+      "contributor": 403,
+      "contributor_revision": 403,
+      "other_organization_revision": 403,
+      "not_assessment": 422
+    },
+    "ai_withdrawn": {
+      "status": 201,
+      "withheld_blocks": [
+        {
+          "reason": "cites_finding_not_currently_usable",
+          "ordinal": 9,
+          "section_key": "impact_stories"
+        },
+        {
+          "reason": "cites_finding_not_currently_usable",
+          "ordinal": 10,
+          "section_key": "impact_stories"
+        }
+      ],
+      "permission_excluded": [
+        {
+          "claimId": "390da13e-b48a-43fa-a2ea-968c7db01d5d",
+          "sourceRole": "primary",
+          "validatorKey": "VAL-KAI-B1A-02-004",
+          "blockingReason": "ai_processing_not_permitted"
+        }
+      ]
+    },
+    "changed_source": {
+      "detail_historical": true,
+      "download": 200,
+      "revise": 422
+    }
+  },
+  "provider": {
+    "funder": {
+      "passages_sent": 16,
+      "sections": [
+        "executive_snapshot",
+        "evidence_findings",
+        "impact_stories",
+        "gaps_opportunities",
+        "recommended_improvements",
+        "next_steps"
+      ],
+      "claims_sent": 8
+    }
+  },
+  "approvals": {
+    "before": {
+      "drafts": 10,
+      "claim_review_decisions": 0,
+      "evidence_review_decisions": 0,
+      "coverage_review_decisions": 0,
+      "human_authority_decisions": 0,
+      "export_candidates": 0,
+      "limitation_snapshots": 0,
+      "manifests": 0,
+      "export_reviews": 0,
+      "draft_reviews_started": 0,
+      "client_followups": 0
+    },
+    "after": {
+      "drafts": 16,
+      "claim_review_decisions": 0,
+      "evidence_review_decisions": 0,
+      "coverage_review_decisions": 0,
+      "human_authority_decisions": 0,
+      "export_candidates": 0,
+      "limitation_snapshots": 0,
+      "manifests": 0,
+      "export_reviews": 0,
+      "draft_reviews_started": 0,
+      "client_followups": 0
+    }
+  },
+  "layout": {
+    "use_assessment_1280": {
+      "found": true,
+      "panelScroll": 890,
+      "panelClient": 890,
+      "innerWidth": 1280,
+      "outside": 0
+    },
+    "use_assessment_390": {
+      "found": true,
+      "panelScroll": 312,
+      "panelClient": 312,
+      "innerWidth": 390,
+      "outside": 0
+    },
+    "revise_editor_1280": {
+      "found": true,
+      "panelScroll": 890,
+      "panelClient": 890,
+      "innerWidth": 1280,
+      "outside": 0
+    },
+    "revise_editor_390": {
+      "found": true,
+      "panelScroll": 312,
+      "panelClient": 312,
+      "innerWidth": 390,
+      "outside": 0
+    }
+  }
+}
